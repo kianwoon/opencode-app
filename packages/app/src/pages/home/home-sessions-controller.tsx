@@ -1,6 +1,7 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useMarked } from "@opencode-ai/ui/context/marked"
 import { useQuery } from "@tanstack/solid-query"
 import { DateTime } from "luxon"
 import { type Accessor, createEffect, createMemo, createRoot, type JSX, startTransition } from "solid-js"
@@ -43,6 +44,7 @@ export function createHomeSessionsController(home: HomeController) {
   const command = useCommand()
   const dialog = useDialog()
   const language = useLanguage()
+  const marked = useMarked()
   const projectDirectories = createMemo(() => {
     const project = home.project.selected()
     if (!project) return home.project.list().flatMap(directories)
@@ -117,7 +119,7 @@ export function createHomeSessionsController(home: HomeController) {
                   (ctx.sync.session.data.message[record.session.id] ?? []).flatMap((message) =>
                     (ctx.sync.session.data.part[message.id] ?? []).flatMap((part) => {
                       if (part.type !== "text" || !part.text) return []
-                      return preloadMarkdown(part.text, part.id)
+                      return preloadMarkdown(part.text, part.id, marked)
                     }),
                   ),
                 ),
