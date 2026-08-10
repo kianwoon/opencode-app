@@ -681,12 +681,14 @@ export default function Page() {
     const mode = reviewMode()
     if (mode === "git" || mode === "branch") return mode
   })
+  const vcsWorkspace = createMemo(() => info()?.workspaceID)
   const vcsKey = createMemo(
     () =>
       [
         "session-vcs",
         params.id,
         sdk().directory,
+        vcsWorkspace() ?? "",
         sync().data.vcs?.branch ?? "",
         sync().data.vcs?.default_branch ?? "",
       ] as const,
@@ -701,7 +703,10 @@ export default function Page() {
       queryFn: mode
         ? () =>
             sdk()
-              .api.vcs.diff({ location: { directory: sdk().directory }, mode: mode === "git" ? "working" : mode })
+              .api.vcs.diff({
+                location: { directory: sdk().directory, workspace: vcsWorkspace() },
+                mode: mode === "git" ? "working" : mode,
+              })
               .then((result) => result.data)
               .catch((error) => {
                 console.debug("[session-review] failed to load vcs diff", { mode, error })
@@ -756,7 +761,7 @@ export default function Page() {
           queryFn: () =>
             sdk()
               .api.vcs.diff({
-                location: { directory: scope },
+                location: { directory: scope, workspace: vcsWorkspace() },
                 mode: mode === "git" ? "working" : mode,
                 context,
               })
