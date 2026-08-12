@@ -346,8 +346,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (typeof document === "undefined") return
       const root = document.documentElement
+      const sans = sansFontFamily(store.appearance?.sans)
       root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono))
-      root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
+      root.style.setProperty("--font-family-sans", sans)
+      // The v2 layout renders message and UI text with --font-family-text, so
+      // keep it in sync with the user-configurable UI font.
+      root.style.setProperty("--font-family-text", sans)
     })
 
     createEffect(() => {

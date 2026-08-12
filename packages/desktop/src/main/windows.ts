@@ -64,6 +64,9 @@ const registry = createWindowRegistry<BrowserWindow>({
 const titlebarHeight = 40
 const maxZoomLevel = 10
 const minZoomLevel = 0.2
+// Each zoom step changes the webview zoom factor by 0.01 (~0.1px on a 14px
+// base font), so font-size adjustments step by roughly 1/10px per press.
+export const ZOOM_STEP = 0.01
 
 export function setRelaunchHandler(handler: () => void) {
   relaunchHandler = handler
@@ -520,12 +523,11 @@ function wireZoom(win: BrowserWindow) {
   win.webContents.setZoomFactor(1)
   win.webContents.on("zoom-changed", (event, zoomDirection) => {
     event.preventDefault()
-    if (pinchZoomEnabled.get(win)) {
-      win.webContents.setZoomFactor(clampZoom(win.webContents.getZoomFactor() + (zoomDirection === "in" ? 0.2 : -0.2)))
-      updateZoom(win)
-      return
-    }
-    if (win.webContents.getZoomFactor() !== 1) win.webContents.setZoomFactor(1)
+    // zoom-changed fires for trackpad pinch and mouse-wheel zoom gestures.
+    // Keyboard Ctrl+= / Cmd+= is routed through the app menu accelerators
+    // (view.zoomIn / view.zoomOut), which step by ZOOM_STEP too. A programmatic
+    // setZoomFactor does not re-emit zoom-changed, so there is no feedback loop.
+    win.webContents.setZoomFactor(clampZoom(win.webContents.getZoomFactor() + (zoomDirection === "in" ? ZOOM_STEP : -ZOOM_STEP)))
     updateZoom(win)
   })
 }

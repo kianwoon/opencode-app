@@ -1105,7 +1105,7 @@ export function MessageTimeline(props: {
         data-timeline-row={input.row()._tag}
         classList={{
           "min-w-0 w-full max-w-full": true,
-          "md:max-w-200 2xl:max-w-[1000px]": props.centered,
+          "md:max-w-300 2xl:max-w-[1400px]": props.centered,
           "md:mx-auto": props.centered,
           "pt-3": previousAssistantPart(),
         }}
@@ -1128,7 +1128,7 @@ export function MessageTimeline(props: {
         )
         return (
           <TimelineRowFrame row={commentStripRow}>
-            <div class="w-full px-4 md:px-5 pb-2">
+            <div class="w-full px-2 md:px-2.5 pb-2">
               <div class="ms-auto max-w-[82%] overflow-x-auto no-scrollbar">
                 <div class="flex w-max min-w-full justify-end gap-2">
                   <Index each={comments()}>
@@ -1179,7 +1179,7 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={userMessageRow}>
             <Show when={message()}>
               {(message) => (
-                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+                <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
                   <div data-slot="session-turn-message-content" aria-live="off">
                     <Message
                       message={message()}
@@ -1199,7 +1199,7 @@ export function MessageTimeline(props: {
         const turnDividerRow = row as Accessor<TimelineRowByTag<"TurnDivider">>
         return (
           <TimelineRowFrame row={turnDividerRow}>
-            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+            <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
               <div data-slot="session-turn-compaction">
                 <MessageDivider
                   label={language.t(
@@ -1215,7 +1215,7 @@ export function MessageTimeline(props: {
         const assistantPartRow = row as Accessor<TimelineRowByTag<"AssistantPart">>
         return (
           <TimelineRowFrame row={assistantPartRow}>
-            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+            <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
               <div
                 data-slot="session-turn-assistant-content"
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
@@ -1230,7 +1230,7 @@ export function MessageTimeline(props: {
         const thinkingRow = row as Accessor<TimelineRowByTag<"Thinking">>
         return (
           <TimelineRowFrame row={thinkingRow}>
-            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+            <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
               <TimelineThinkingRow
                 reasoningHeading={thinkingRow().reasoningHeading}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
@@ -1243,7 +1243,7 @@ export function MessageTimeline(props: {
         const retryRow = row as Accessor<TimelineRowByTag<"Retry">>
         return (
           <TimelineRowFrame row={retryRow}>
-            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+            <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
               <SessionRetry status={sessionStatus()} show={activeMessageID() === retryRow().userMessageID} />
             </div>
           </TimelineRowFrame>
@@ -1253,7 +1253,7 @@ export function MessageTimeline(props: {
         const diffSummaryRow = row as Accessor<TimelineRowByTag<"DiffSummary">>
         return (
           <TimelineRowFrame row={diffSummaryRow}>
-            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+            <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
               <TimelineDiffSummaryRow diffs={diffSummaryRow().diffs} />
             </div>
           </TimelineRowFrame>
@@ -1263,7 +1263,7 @@ export function MessageTimeline(props: {
         const errorRow = row as Accessor<TimelineRowByTag<"Error">>
         return (
           <TimelineRowFrame row={errorRow}>
-            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+            <div data-slot="session-turn-message-container" class="w-full px-2 md:px-2.5">
               <Card variant="error" class="error-card">
                 {errorRow().text}
               </Card>
@@ -1429,7 +1429,7 @@ export function MessageTimeline(props: {
               "pr-3": true,
               "pl-2.5": settings.general.newLayoutDesigns(),
               "pl-2 md:pl-4": !settings.general.newLayoutDesigns(),
-              "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered && !settings.general.newLayoutDesigns(),
+              "md:max-w-300 md:mx-auto 2xl:max-w-[1400px]": props.centered && !settings.general.newLayoutDesigns(),
             }}
           >
             <div class="h-12 w-full flex items-center justify-between gap-2">

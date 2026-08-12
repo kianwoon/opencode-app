@@ -14,10 +14,11 @@ import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePlatform } from "@/context/platform"
 import { ServerConnection, useServer } from "@/context/server"
-import { useTabs } from "@/context/tabs"
+import { useTabs, type SessionTab } from "@/context/tabs"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { useSettingsCommand } from "@/components/settings-dialog"
 import { useCommand } from "@/context/command"
+import { createPromptSession } from "@/context/prompt-state"
 import { displayName, getProjectAvatarSource, sortedRootSessions } from "./helpers"
 import { useSessionTabAvatarState } from "./project-avatar-state"
 import { sessionTitle } from "@/utils/session-title"
@@ -452,10 +453,15 @@ function ProjectSection(
     return global.ensureServerCtx(conn)
   })
   const sync = createMemo(() => ctx()?.sync ?? serverSync())
-  const sessions = createMemo(() => {
-    const [store] = sync().child(props.project.worktree, { bootstrap: false })
-    return sortedRootSessions(store, Date.now())
-  })
+  const childStore = createMemo(() => sync().child(props.project.worktree, { bootstrap: false }))
+  const sessions = createMemo(() => sortedRootSessions(childStore()[0], Date.now()))
+  const sessionTotal = createMemo(() => childStore()[0].sessionTotal)
+  const hasMore = createMemo(() => sessionTotal() > sessions().length)
+  const showAllSessions = async () => {
+    const [store, setStore] = childStore()
+    setStore("limit", Math.max(store.limit, sessionTotal(), sessions().length + 1))
+    await sync().project.loadSessions(props.project.worktree)
+  }
   const serverKey = createMemo(() => {
     const conn = props.currentServer()
     return conn ? ServerConnection.key(conn) : undefined
@@ -565,6 +571,9 @@ function ProjectSection(
                 />
               )}
             </For>
+            <Show when={hasMore()}>
+              <ShowAllSessionsRow onClick={() => void showAllSessions()} label={language.t("sidebar.project.viewAllSessions")} />
+            </Show>
           </Show>
         </div>
       </Show>
@@ -593,6 +602,27 @@ function NewSessionRow(props: { onClick: () => void; label: string }) {
   )
 }
 
+function ShowAllSessionsRow(props: { onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      data-component="sidebar-v2-session-row"
+      data-action="sidebar-v2-show-all-sessions"
+      class={`
+        flex h-7 min-w-0 items-center gap-2 rounded-[6px] bg-transparent px-1.5 text-left
+        text-v2-text-text-muted [font-weight:440] transition-[background-color,color] duration-[120ms] ease-in-out
+        hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base
+      `}
+      onClick={props.onClick}
+    >
+      <span class="shrink-0 flex size-4 items-center justify-center text-v2-icon-icon-muted">
+        <IconV2 name="chevron-down" size="small" />
+      </span>
+      <span class="min-w-0 flex-1 truncate">{props.label}</span>
+    </button>
+  )
+}
+
 function SessionRow(props: {
   session: Session
   project: LocalProject
@@ -600,12 +630,26 @@ function SessionRow(props: {
   onOpen: (event: MouseEvent) => void
 }) {
   const layout = useLayout()
+  const tabs = useTabs()
   const title = createMemo(() => sessionTitle(props.session.title) || props.session.id)
   const avatar = useSessionTabAvatarState(
     () => props.server,
     () => props.session.directory,
     () => props.session.id,
   )
+  // Running sessions are reported by the server's session_working status.
+  const running = avatar.loading
+  // Unsent message: read the session tab's prompt memory. The prompt session is
+  // created lazily when the tab is opened, so this only reflects tabs that have
+  // been opened during this app run (in-memory tab memory). Reading tabs.store
+  // keeps this reactive to tab open/close so the prompt is observed once the
+  // tab exists.
+  const unsent = createMemo(() => {
+    void tabs.store
+    const tab: SessionTab = { type: "session", server: props.server, sessionId: props.session.id }
+    const prompt = tabs.stateValue<ReturnType<typeof createPromptSession>>(tab, "prompt")
+    return prompt?.dirty() ?? false
+  })
   const active = createMemo(() => {
     const route = layout.route()
     return route.type === "session" && route.sessionId === props.session.id
@@ -635,33 +679,60 @@ function SessionRow(props: {
       }}
     >
       <span class="shrink-0 flex size-4 items-center justify-center">
-        <Show when={avatar.loading()} fallback={<SessionStatusDot active={active()} unread={avatar.unread()} />}>
-          <span class="flex size-4 items-center justify-center text-v2-icon-icon-muted">
-            <IconV2 name="status" size="small" />
-          </span>
-        </Show>
+        <SessionStatusIcon running={running()} unsent={unsent()} active={active()} unread={avatar.unread()} />
       </span>
       <span class="min-w-0 flex-1 truncate">{title()}</span>
     </button>
   )
 }
 
-function SessionStatusDot(props: { active: boolean; unread: boolean }) {
+function SessionStatusIcon(props: { running: boolean; unsent: boolean; active: boolean; unread: boolean }) {
+  // Unsent message takes precedence: show an edit icon so the user knows the
+  // composer has text that hasn't been sent.
   return (
-    <span
-      class="flex size-4 items-center justify-center"
-      classList={{
-        "text-v2-icon-icon-muted": !props.active,
-        "text-v2-icon-icon-base": props.active,
-      }}
+    <Show
+      when={!props.unsent}
+      fallback={
+        <span
+          class="flex size-4 items-center justify-center"
+          classList={{
+            "text-v2-icon-icon-muted": !props.active,
+            "text-v2-icon-icon-base": props.active,
+          }}
+        >
+          <IconV2 name="edit" size="small" />
+        </span>
+      }
     >
-      <span
-        class="size-1.5 rounded-full"
-        classList={{
-          "bg-v2-icon-icon-muted": !props.unread && !props.active,
-          "bg-v2-text-text-accent": props.unread || props.active,
-        }}
-      />
-    </span>
+      <Show
+        when={!props.running}
+        fallback={
+          // Running session: bright red blinking dot. Uses the fixed v2 red-600
+          // token (theme-independent) so it stays vivid in both light and dark
+          // mode instead of the theme's danger background (dark red / light pink).
+          // The status-blink animation (fast opacity 0.15 -> 1) makes the dot
+          // visibly blink so the user notices the session is running.
+          <span class="flex size-4 items-center justify-center">
+            <span class="size-1.5 rounded-full bg-[var(--v2-red-600)] animate-status-blink" />
+          </span>
+        }
+      >
+        <span
+          class="flex size-4 items-center justify-center"
+          classList={{
+            "text-v2-icon-icon-muted": !props.active,
+            "text-v2-icon-icon-base": props.active,
+          }}
+        >
+          <span
+            class="size-1.5 rounded-full"
+            classList={{
+              "bg-v2-icon-icon-muted": !props.unread && !props.active,
+              "bg-v2-text-text-accent": props.unread || props.active,
+            }}
+          />
+        </span>
+      </Show>
+    </Show>
   )
 }
