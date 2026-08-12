@@ -895,6 +895,11 @@ export const dict = {
   "sidebar.project.viewAllSessions": "Ver todas las sesiones",
   "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Borrar notificaciones",
+  "sidebar.project.cleanupSessions": "Clean up old sessions",
+  "sidebar.project.cleanupSessions.title": "Clean up old sessions",
+  "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
+  "sidebar.project.cleanupSessions.description": "Old session data will be permanently deleted and cannot be recovered.",
+  "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "No hay proyectos abiertos",
   "sidebar.empty.description": "Abre un proyecto para empezar",
 

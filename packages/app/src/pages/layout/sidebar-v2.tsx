@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createEffect, on, onCleanup, type Accessor } from "solid-js"
+import { For, Show, createMemo, createEffect, createResource, on, onCleanup, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
 import { startTransition } from "solid-js"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
@@ -7,8 +7,10 @@ import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { ProjectAvatar } from "@opencode-ai/ui/v2/project-avatar-v2"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { useGlobal } from "@/context/global"
+import { useGlobal, type ServerCtx } from "@/context/global"
 import { getProjectAvatarVariant, type LocalProject, useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
@@ -32,6 +34,23 @@ const SIDEBAR_PANEL_WIDTH = 264
 // Number of sessions shown in a project before the user expands. Matches the
 // child store's default session limit so the collapsed list is consistent.
 const DEFAULT_SESSION_LIMIT = 5
+// Number of most recent sessions kept when the user cleans up a project.
+const SESSION_CLEANUP_KEEP = 5
+
+// Fetches all root sessions for a project directory, most recent first. Uses a
+// large limit so the cleanup action can delete every session beyond the keep
+// count, not just the ones currently loaded into the sidebar.
+async function listProjectSessions(serverCtx: ServerCtx, directory: string) {
+  const result = await serverCtx.sdk.api.session.list({
+    directory,
+    parentID: null,
+    order: "desc",
+    limit: 10000,
+  })
+  return (result.data ?? []).sort(
+    (a, b) => (b.time?.updated ?? b.time?.created ?? 0) - (a.time?.updated ?? a.time?.created ?? 0),
+  )
+}
 
 function isBackgroundOpen(event: MouseEvent) {
   return shouldOpenSessionInBackground({
@@ -195,6 +214,34 @@ export function NewSidebar() {
     })
   }
 
+  // Deletes all but the most recent SESSION_CLEANUP_KEEP sessions for a
+  // project. Confirms first because this permanently removes session data.
+  const cleanupProjectSessions = (project: LocalProject) => {
+    const conn = currentServer()
+    if (!conn) return
+    const serverCtx = global.ensureServerCtx(conn)
+    const run = ++dialogRun
+    void dialog.show(() => (
+      <DialogCleanupSessions
+        project={project}
+        staleCountAccessor={async () => {
+          const sessions = await listProjectSessions(serverCtx, project.worktree)
+          return Math.max(0, sessions.length - SESSION_CLEANUP_KEEP)
+        }}
+        onConfirm={async () => {
+          if (dialogDead || dialogRun !== run) return
+          const sessions = await listProjectSessions(serverCtx, project.worktree)
+          const stale = sessions.slice(SESSION_CLEANUP_KEEP)
+          const api = serverCtx.sdk.api.session
+          for (const session of stale) {
+            await api.remove({ sessionID: session.id }).catch(() => undefined)
+          }
+          await serverCtx.sync.project.loadSessions(project.worktree)
+        }}
+      />
+    ))
+  }
+
   const actions: SidebarActions = {
     projects,
     currentServer,
@@ -206,6 +253,7 @@ export function NewSidebar() {
     onAddProject: addProject,
     onCloseProject: closeProject,
     onEditProject: editProject,
+    onCleanupSessions: cleanupProjectSessions,
     onNewSession: openProjectNewSession,
   }
 
@@ -249,6 +297,7 @@ type SidebarActions = {
   onAddProject: (conn: ServerConnection.Any) => void
   onCloseProject: (directory: string) => void
   onEditProject: (project: LocalProject) => void
+  onCleanupSessions: (project: LocalProject) => void
   onNewSession: (directory: string) => void
 }
 
@@ -544,6 +593,9 @@ function ProjectSection(
                 <MenuV2.Item onSelect={() => props.onEditProject(props.project)}>
                   {language.t("dialog.project.edit.title")}
                 </MenuV2.Item>
+                <MenuV2.Item onSelect={() => props.onCleanupSessions(props.project)}>
+                  {language.t("sidebar.project.cleanupSessions")}
+                </MenuV2.Item>
                 <MenuV2.Separator />
                 <MenuV2.Item onSelect={() => props.onCloseProject(props.project.worktree)}>
                   {language.t("common.close")}
@@ -765,5 +817,53 @@ function SessionStatusIcon(props: { running: boolean; unsent: boolean; active: b
         </span>
       </Show>
     </Show>
+  )
+}
+
+function DialogCleanupSessions(props: {
+  project: LocalProject
+  staleCountAccessor: () => Promise<number>
+  onConfirm: () => Promise<void>
+}) {
+  const dialog = useDialog()
+  const language = useLanguage()
+  const [state, setState] = createStore({ busy: false })
+  const [staleCount] = createResource(() => props.staleCountAccessor())
+  const count = () => staleCount() ?? 0
+  return (
+    <Dialog fit>
+      <DialogHeader>
+        <DialogTitle>{language.t("sidebar.project.cleanupSessions.title")}</DialogTitle>
+      </DialogHeader>
+      <DialogBody class="flex w-full flex-col gap-4 px-4 pt-4 pb-1">
+        <Show when={!staleCount.loading} fallback={<div class="h-5 w-24 rounded bg-v2-background-bg-layer-01 animate-pulse" />}>
+          <div class="text-v2-text-text-base [font-weight:440]">
+            {language.t("sidebar.project.cleanupSessions.confirm", { count: count() })}
+          </div>
+        </Show>
+        <div class="text-[13px] leading-5 text-v2-text-text-muted [font-weight:440]">
+          {language.t("sidebar.project.cleanupSessions.description")}
+        </div>
+      </DialogBody>
+      <DialogFooter>
+        <ButtonV2 type="button" variant="neutral" disabled={state.busy} onClick={() => dialog.close()}>
+          {language.t("common.cancel")}
+        </ButtonV2>
+        <ButtonV2
+          type="button"
+          variant="danger"
+          disabled={state.busy || staleCount.loading || count() === 0}
+          onClick={() => {
+            setState("busy", true)
+            void props.onConfirm().finally(() => {
+              setState("busy", false)
+              dialog.close()
+            })
+          }}
+        >
+          {language.t("sidebar.project.cleanupSessions.action")}
+        </ButtonV2>
+      </DialogFooter>
+    </Dialog>
   )
 }

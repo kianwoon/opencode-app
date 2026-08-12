@@ -965,6 +965,11 @@ export const dict = {
   "sidebar.project.viewAllSessions": "Переглянути всі сесії",
   "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Очистити сповіщення",
+  "sidebar.project.cleanupSessions": "Clean up old sessions",
+  "sidebar.project.cleanupSessions.title": "Clean up old sessions",
+  "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
+  "sidebar.project.cleanupSessions.description": "Old session data will be permanently deleted and cannot be recovered.",
+  "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Немає відкритих проєктів",
   "sidebar.empty.description": "Відкрийте проєкт, щоб почати",
 
