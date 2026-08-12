@@ -17,9 +17,10 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",
-    "package:mac": "electron-builder --mac --config electron-builder.config.ts",
+    "package:mac": "electron-builder --mac --config electron-builder.config.ts && APP_DIR=dist/mac-arm64/OpenCode.app bun ./scripts/verify-prod.ts",
     "package:win": "electron-builder --win --config electron-builder.config.ts",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts",
+    "verify:mac": "APP_DIR=dist/mac-arm64/OpenCode.app bun ./scripts/verify-prod.ts",
     "native:build": "bun install --cwd native"
   },
   "main": "./out/main/index.js",
