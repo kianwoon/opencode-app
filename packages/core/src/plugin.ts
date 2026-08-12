@@ -24,6 +24,13 @@ export interface Interface {
   readonly add: (id: ID, effect: PluginRuntime["effect"]) => Effect.Effect<void>
   readonly remove: (id: ID) => Effect.Effect<void>
   readonly wait: (id: ID) => Effect.Effect<void>
+  /**
+   * Run all registered plugin message-transform callbacks against the in-flight
+   * V2 session message array, before it is lowered to provider LLM messages.
+   * Plugins mutate the array in place (prune/truncate). Cache-aware plugins
+   * mutate deterministically so the provider KV-cache prefix stays stable.
+   */
+  readonly transformMessages: (messages: unknown[]) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Plugin") {}
@@ -39,6 +46,7 @@ const layer = Layer.effect(
     const waiters = new Map<ID, Set<Deferred.Deferred<void>>>()
     const failures = new Map<ID, Exit.Exit<void, never>>()
     let host: Parameters<PluginRuntime["effect"]>[0]
+    const messages = PluginHost.makeMessagesTransform()
 
     const add = Effect.fn("Plugin.add")(function* (id: ID, effect: PluginRuntime["effect"]) {
       if (loading.has(id)) return yield* Effect.die(`Plugin load cycle detected for ${id}`)
@@ -136,8 +144,9 @@ const layer = Layer.effect(
       add,
       remove,
       wait,
+      transformMessages: messages.invoke,
     })
-    host = yield* PluginHost.make(service)
+    host = yield* PluginHost.make(service, messages)
     return service
   }),
 )

@@ -1,7 +1,7 @@
 export * as PluginHost from "./host"
 
 import type { PluginContext as Interface } from "@opencode-ai/plugin/v2/effect"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Scope } from "effect"
 import { AgentV2 } from "../agent"
 import { AISDK } from "../aisdk"
 import { Catalog } from "../catalog"
@@ -14,10 +14,46 @@ import { ProviderV2 } from "../provider"
 import { Reference } from "../reference"
 import type { DeepMutable } from "../schema"
 import { SkillV2 } from "../skill"
+import { State } from "../state"
 
 const mutable = <T>(value: T) => value as DeepMutable<T>
 
-export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Interface) {
+export interface MessagesTransform {
+  readonly register: (
+    callback: (messages: unknown[]) => void,
+  ) => Effect.Effect<State.Registration, never, Scope.Scope>
+  readonly invoke: (messages: unknown[]) => Effect.Effect<void>
+}
+
+export const makeMessagesTransform = (): MessagesTransform => {
+  const transforms: Array<(messages: unknown[]) => void> = []
+  return {
+    register: (callback) =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.Scope
+        let active = true
+        const dispose = Effect.sync(() => {
+          if (!active) return
+          active = false
+          const i = transforms.indexOf(callback)
+          if (i >= 0) transforms.splice(i, 1)
+        })
+        yield* Scope.addFinalizer(scope, dispose)
+        transforms.push(callback)
+        return { dispose }
+      }),
+    invoke: (messages) =>
+      Effect.sync(() => {
+        for (const transform of transforms) transform(messages)
+      }),
+  }
+}
+
+export const make = Effect.fn("PluginHost.make")(function* (
+  plugin: PluginV2.Interface,
+  messages?: MessagesTransform,
+) {
+  const messagesRegistry = messages ?? makeMessagesTransform()
   const agents = yield* AgentV2.Service
   const aisdk = yield* AISDK.Service
   const catalog = yield* Catalog.Service
@@ -101,8 +137,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
       transform: commands.transform,
     },
     integration: {
-      reload: integration.reload,
-      connection: {
+      reload: integration.reload,      connection: {
         active: (id) => integration.connection.active(Integration.ID.make(id)),
         resolve: (connection) =>
           integration.connection.resolve(
@@ -189,6 +224,10 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
             },
           }),
         ),
+    },
+    messages: {
+      transform: (callback) =>
+        messagesRegistry.register((draft) => callback(draft as never)),
     },
     plugin: {
       add: (input) => plugin.add(PluginV2.ID.make(input.id), input.effect),

@@ -37,6 +37,9 @@ export function host(overrides: Overrides = {}): PluginContext {
         resolve: () => Effect.die("unused integration.connection.resolve"),
       },
     },
+    messages: overrides.messages ?? {
+      transform: () => Effect.die("unused messages.transform"),
+    },
     plugin: overrides.plugin ?? {
       add: () => Effect.die("unused plugin.add"),
       remove: () => Effect.die("unused plugin.remove"),
