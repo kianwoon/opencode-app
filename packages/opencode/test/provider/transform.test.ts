@@ -4546,6 +4546,38 @@ describe("ProviderTransform.variants", () => {
     })
   })
 
+  describe("@ai-sdk/deepseek", () => {
+    test("deepseek-v4 returns a thinking toggle plus effort tiers", () => {
+      const model = createMockModel({
+        id: "deepseek/deepseek-v4-flash",
+        providerID: "deepseek",
+        api: {
+          id: "deepseek-v4-flash",
+          url: "https://api.deepseek.com",
+          npm: "@ai-sdk/deepseek",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["none", "low", "medium", "high", "max"])
+      expect(result.none).toEqual({ thinking: { type: "disabled" } })
+      expect(result.high).toEqual({ thinking: { type: "enabled" }, reasoningEffort: "high" })
+      expect(result.max).toEqual({ thinking: { type: "enabled" }, reasoningEffort: "max" })
+    })
+
+    test("non-v4 deepseek models expose no reasoning variants", () => {
+      const model = createMockModel({
+        id: "deepseek/deepseek-chat",
+        providerID: "deepseek",
+        api: {
+          id: "deepseek-chat",
+          url: "https://api.deepseek.com",
+          npm: "@ai-sdk/deepseek",
+        },
+      })
+      expect(ProviderTransform.variants(model)).toEqual({})
+    })
+  })
+
   describe("@ai-sdk/azure", () => {
     test("o1-mini returns empty object", () => {
       const model = createMockModel({

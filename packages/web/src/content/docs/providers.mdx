@@ -728,6 +728,13 @@ Cloudflare Workers AI lets you run AI models on Cloudflare's global network dire
    /models
    ```
 
+   DeepSeek V4 models support a **thinking toggle** and **reasoning effort** control.
+   On the model picker you can choose a variant like `none` (thinking disabled),
+   `low`, `medium`, `high`, or `max` to control how much the model reasons before
+   answering. This is surfaced through opencode's native `@ai-sdk/deepseek`
+   integration, so `reasoning_content` is streamed and replayed correctly across
+   multi-turn conversations.
+
 ---
 
 ### Deep Infra

@@ -122,6 +122,7 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   "@ai-sdk/deepinfra": () => import("@ai-sdk/deepinfra").then((m) => m.createDeepInfra),
   "@ai-sdk/cerebras": () => import("@ai-sdk/cerebras").then((m) => m.createCerebras),
   "@ai-sdk/cohere": () => import("@ai-sdk/cohere").then((m) => m.createCohere),
+  "@ai-sdk/deepseek": () => import("@ai-sdk/deepseek").then((m) => m.createDeepSeek),
   "@ai-sdk/gateway": () => import("@ai-sdk/gateway").then((m) => m.createGateway),
   "@ai-sdk/togetherai": () => import("@ai-sdk/togetherai").then((m) => m.createTogetherAI),
   "@ai-sdk/perplexity": () => import("@ai-sdk/perplexity").then((m) => m.createPerplexity),
@@ -1218,7 +1219,10 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
     api: {
       id: model.id,
       url: model.provider?.api ?? provider.api ?? "",
-      npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
+      npm:
+        provider.id === "deepseek"
+          ? "@ai-sdk/deepseek"
+          : (model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible"),
     },
     status: model.status ?? "active",
     headers: {},
@@ -1248,7 +1252,12 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
         video: model.modalities?.output?.includes("video") ?? false,
         pdf: model.modalities?.output?.includes("pdf") ?? false,
       },
-      interleaved: typeof model.interleaved === "string" ? { field: model.interleaved } : (model.interleaved ?? false),
+      interleaved:
+        provider.id === "deepseek"
+          ? false
+          : typeof model.interleaved === "string"
+            ? { field: model.interleaved }
+            : (model.interleaved ?? false),
     },
     release_date: model.release_date ?? "",
     variants: {},
@@ -1441,7 +1450,7 @@ const layer = Layer.effect(
               provider.npm ??
               existingModel?.api.npm ??
               modelsDev[providerID]?.npm ??
-              "@ai-sdk/openai-compatible"
+              (providerID === "deepseek" ? "@ai-sdk/deepseek" : "@ai-sdk/openai-compatible")
             const name = iife(() => {
               if (model.name) return model.name
               if (model.id && model.id !== modelID) return modelID
@@ -1482,9 +1491,11 @@ const layer = Layer.effect(
                 interleaved:
                   (typeof model.interleaved === "string" ? { field: model.interleaved } : model.interleaved) ??
                   existingModel?.capabilities.interleaved ??
-                  (!existingModel && apiNpm === "@ai-sdk/openai-compatible" && apiID.includes("deepseek")
-                    ? { field: "reasoning_content" }
-                    : false),
+                  (!existingModel && apiNpm === "@ai-sdk/deepseek"
+                    ? false
+                    : !existingModel && apiNpm === "@ai-sdk/openai-compatible" && apiID.includes("deepseek")
+                      ? { field: "reasoning_content" }
+                      : false),
               },
               cost: {
                 input: model?.cost?.input ?? existingModel?.cost?.input ?? 0,

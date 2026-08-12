@@ -64,6 +64,8 @@ function sdkKey(npm: string): string | undefined {
       return "cerebras"
     case "@ai-sdk/cohere":
       return "cohere"
+    case "@ai-sdk/deepseek":
+      return "deepseek"
     case "@ai-sdk/deepinfra":
       return "deepinfra"
     case "@ai-sdk/groq":
@@ -299,8 +301,13 @@ function normalizeMessages(
     return result
   }
 
-  // Deepseek requires all assistant messages to have reasoning on them
-  if (model.api.id.toLowerCase().includes("deepseek")) {
+  // Deepseek requires all assistant messages to have reasoning on them.
+  // The dedicated @ai-sdk/deepseek provider already injects reasoning_content
+  // on assistant messages, so only apply this for the openai-compatible path.
+  if (
+    model.api.id.toLowerCase().includes("deepseek") &&
+    model.api.npm !== "@ai-sdk/deepseek"
+  ) {
     msgs = msgs.map((msg) => {
       if (msg.role !== "assistant") return msg
       if (Array.isArray(msg.content)) {
@@ -937,6 +944,23 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
         efforts.push("max")
       }
       return Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
+
+    case "@ai-sdk/deepseek":
+      // DeepSeek supports a thinking toggle and per-model reasoning effort. Expose
+      // an explicit on/off toggle for deepseek-v4 (thinking enabled by default) plus
+      // the model's supported effort tiers so developers can control both dimensions.
+      if (model.api.id.toLowerCase().includes("deepseek-v4")) {
+        return {
+          none: { thinking: { type: "disabled" } },
+          ...Object.fromEntries(
+            [...WIDELY_SUPPORTED_EFFORTS, "max"].map((effort) => [
+              effort,
+              { thinking: { type: "enabled" }, reasoningEffort: effort },
+            ]),
+          ),
+        }
+      }
+      return {}
 
     case "@ai-sdk/azure":
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/azure
@@ -1657,9 +1681,19 @@ export function reasoningVariants(model: ModelsDev.Model, target: Provider.Model
   if (options.length === 0) return {}
 
   const effort = options.find((option) => option.type === "effort")
-  if (effort) return effortVariants(target, effort.values)
-
   const toggle = options.some((option) => option.type === "toggle")
+  if (effort) {
+    const efforts = effortVariants(target, effort.values)
+    // When a model exposes both a toggle and an effort scale (e.g. deepseek-v4),
+    // keep the toggle's off state alongside the effort tiers so developers can
+    // fully disable thinking rather than only scaling it.
+    if (toggle && efforts) {
+      const off = reasoningToggle(target)?.["none"]
+      return off ? { none: off, ...efforts } : efforts
+    }
+    return efforts
+  }
+
   const budget = options.find((option) => option.type === "budget_tokens")
   if (!budget) return toggle ? nonEmptyVariants(reasoningToggle(target)) : undefined
 
@@ -1709,6 +1743,11 @@ function reasoningToggle(model: Provider.Model): NonNullable<Provider.Model["var
       high: { enableThinking: true },
     }
   if (model.api.npm === "@ai-sdk/cohere")
+    return {
+      none: { thinking: { type: "disabled" } },
+      high: { thinking: { type: "enabled" } },
+    }
+  if (model.api.npm === "@ai-sdk/deepseek")
     return {
       none: { thinking: { type: "disabled" } },
       high: { thinking: { type: "enabled" } },
@@ -1773,6 +1812,8 @@ function reasoningEffort(model: Provider.Model, effort: string) {
     case "venice-ai-sdk-provider":
     case "ai-gateway-provider":
       return { reasoningEffort: effort }
+    case "@ai-sdk/deepseek":
+      return { thinking: { type: "enabled" }, reasoningEffort: effort }
     case "@ai-sdk/cohere":
     case "@ai-sdk/perplexity":
     case "@ai-sdk/vercel":
