@@ -885,6 +885,7 @@ export const dict = {
     "Kết nối với bất kỳ nhà cung cấp nào để sử dụng các mô hình như Claude, GPT, Gemini, v.v.",
   "sidebar.project.recentSessions": "Phiên gần đây",
   "sidebar.project.viewAllSessions": "Xem tất cả các phiên",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Xóa thông báo",
   "sidebar.empty.title": "Không có dự án nào mở",
   "sidebar.empty.description": "Mở một dự án để bắt đầu",

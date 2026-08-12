@@ -877,6 +877,7 @@ export const dict = {
     "Tengdu hvaða þjónustuaðila sem er til að nota módel, inc. Claude, GPT, Gemini osfrv.",
   "sidebar.project.recentSessions": "Nýlegar setur",
   "sidebar.project.viewAllSessions": "Skoða allar lotur",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Hreinsaðu tilkynningar",
   "sidebar.empty.title": "Engin verkefni opin",
   "sidebar.empty.description": "Opnaðu verkefni til að byrja",

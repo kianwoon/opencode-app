@@ -878,6 +878,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Anslut valfri leverantör för att använda modeller, inkl. Claude, GPT, Gemini etc.",
   "sidebar.project.recentSessions": "Senaste sessioner",
   "sidebar.project.viewAllSessions": "Se alla sessioner",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Rensa aviseringar",
   "sidebar.empty.title": "Inga projekt öppna",
   "sidebar.empty.description": "Öppna ett projekt för att komma igång",

@@ -880,6 +880,7 @@ export const dict = {
     "Միացրեք ցանկացած մատակարարի՝ մոդելներ օգտագործելու համար, inc. Claude, GPT, Gemini և այլն",
   "sidebar.project.recentSessions": "Վերջին նիստերը",
   "sidebar.project.viewAllSessions": "Դիտել բոլոր նիստերը",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Մաքրել ծանուցումները",
   "sidebar.empty.title": "Ոչ մի նախագիծ բաց",
   "sidebar.empty.description": "Բացեք նախագիծ՝ սկսելու համար",

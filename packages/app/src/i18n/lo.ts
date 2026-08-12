@@ -868,6 +868,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "ເຊື່ອມຕໍ່ຜູ້ໃຫ້ບໍລິການໃດນຶ່ງເພື່ອໃຊ້ແບບຈໍາລອງ, inc. Claude, GPT, Gemini ແລະອື່ນໆ.",
   "sidebar.project.recentSessions": "ເຊດຊັນທີ່ຜ່ານມາ",
   "sidebar.project.viewAllSessions": "ເບິ່ງເຊດຊັນທັງໝົດ",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "ລຶບການແຈ້ງເຕືອນ",
   "sidebar.empty.title": "ບໍ່ມີໂຄງການເປີດ",
   "sidebar.empty.description": "ເປີດໂຄງການເພື່ອເລີ່ມຕົ້ນ",

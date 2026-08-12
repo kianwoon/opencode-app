@@ -874,6 +874,7 @@ export const dict = {
     "Set ein og hvønn veitara í samband við at brúka modellir, inc. Claude, GPT, Gemini o.s.fr.",
   "sidebar.project.recentSessions": "Seinastu fundir",
   "sidebar.project.viewAllSessions": "Vís allar setur",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Rudda fráboðanir",
   "sidebar.empty.title": "Ongar verkætlanir lata upp",
   "sidebar.empty.description": "Opna eina verkætlan fyri at koma í gongd",

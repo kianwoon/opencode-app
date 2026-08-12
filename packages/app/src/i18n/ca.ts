@@ -883,6 +883,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Connecteu qualsevol proveïdor per utilitzar models, inc. Claude, GPT, Gemini etc.",
   "sidebar.project.recentSessions": "Sessions recents",
   "sidebar.project.viewAllSessions": "Veure totes les sessions",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Esborra les notificacions",
   "sidebar.empty.title": "No hi ha projectes oberts",
   "sidebar.empty.description": "Obriu un projecte per començar",

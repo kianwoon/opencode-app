@@ -877,6 +877,7 @@ export const dict = {
     "Pripojte ľubovoľného poskytovateľa na používanie modelov, vrátane Claude, GPT, Gemini a ďalších.",
   "sidebar.project.recentSessions": "Nedávne relácie",
   "sidebar.project.viewAllSessions": "Zobraziť všetky relácie",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Vymazať oznámenia",
   "sidebar.empty.title": "Nie sú otvorené žiadne projekty",
   "sidebar.empty.description": "Otvorte projekt pre začiatok",

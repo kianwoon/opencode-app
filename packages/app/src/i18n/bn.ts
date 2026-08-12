@@ -873,6 +873,7 @@ export const dict: Record<string, string> = {
     "মডেল, inc ব্যবহার করতে যেকোনো প্রদানকারীকে সংযুক্ত করুন। Claude, GPT, Gemini ইত্যাদি।",
   "sidebar.project.recentSessions": "সাম্প্রতিক সেশন",
   "sidebar.project.viewAllSessions": "সব সেশন দেখুন",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "বিজ্ঞপ্তিগুলি সাফ করুন",
   "sidebar.empty.title": "কোনো প্রকল্প খোলা নেই",
   "sidebar.empty.description": "শুরু করতে একটি প্রকল্প খুলুন",

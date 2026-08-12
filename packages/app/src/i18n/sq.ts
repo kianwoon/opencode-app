@@ -876,6 +876,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Lidhni çdo ofrues për të përdorur modele, inc. Claude, GPT, Gemini etj.",
   "sidebar.project.recentSessions": "Seancat e fundit",
   "sidebar.project.viewAllSessions": "Shikoni të gjitha seancat",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Pastro njoftimet",
   "sidebar.empty.title": "Asnjë projekt i hapur",
   "sidebar.empty.description": "Hapni një projekt për të filluar",

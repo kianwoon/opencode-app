@@ -857,6 +857,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "ሞዴሎችን ለመጠቀም ማንኛውንም አቅራቢ ያገናኙ፣ Inc. Claude፣ GPT፣ Gemini ወዘተ.",
   "sidebar.project.recentSessions": "የቅርብ ጊዜ ክፍለ ጊዜዎች",
   "sidebar.project.viewAllSessions": "ሁሉንም ክፍለ ጊዜዎች ይመልከቱ",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "ማሳወቂያዎችን አጽዳ",
   "sidebar.empty.title": "ምንም ክፍት ፕሮጀክቶች የሉም",
   "sidebar.empty.description": "ለመጀመር ፕሮጀክት ይክፈቱ",

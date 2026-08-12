@@ -872,6 +872,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "هر ارائه دهنده ای را برای استفاده از مدل ها وصل کنید. Claude، GPT، Gemini و غیره",
   "sidebar.project.recentSessions": "جلسات اخیر",
   "sidebar.project.viewAllSessions": "مشاهده تمام جلسات",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "پرامپت ها را پاک کنید",
   "sidebar.empty.title": "هیچ پروژه ای باز نشده است",
   "sidebar.empty.description": "برای شروع یک پروژه باز کنید",

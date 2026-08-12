@@ -873,6 +873,7 @@ export const dict = {
     "Sambungkan mana-mana penyedia untuk menggunakan model, termasuk Claude, GPT, Gemini dan lain-lain.",
   "sidebar.project.recentSessions": "Sesi terkini",
   "sidebar.project.viewAllSessions": "Lihat semua sesi",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Kosongkan notifikasi",
   "sidebar.empty.title": "Tiada projek dibuka",
   "sidebar.empty.description": "Buka projek untuk bermula",

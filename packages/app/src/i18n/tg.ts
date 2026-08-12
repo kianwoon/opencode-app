@@ -877,6 +877,7 @@ export const dict = {
     "Ҳар як провайдерро барои истифодаи моделҳо пайваст кунед, Inc. Claude, GPT, Gemini ва гайра.",
   "sidebar.project.recentSessions": "Сеансхои охирин",
   "sidebar.project.viewAllSessions": "Ҳама сессияҳоро бинед",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Огоҳиҳоро тоза кунед",
   "sidebar.empty.title": "Ягон лоиҳа кушода нест",
   "sidebar.empty.description": "Барои оғоз кардани лоиҳа лоиҳа кушоед",

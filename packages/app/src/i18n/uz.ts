@@ -881,6 +881,7 @@ export const dict = {
     "Modellardan foydalanish uchun har qanday provayderni ulang, inc. Claude, GPT, Gemini va boshqalar.",
   "sidebar.project.recentSessions": "Oxirgi sessiyalar",
   "sidebar.project.viewAllSessions": "Barcha seanslarni ko'rish",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Bildirishnomalarni tozalash",
   "sidebar.empty.title": "Hech qanday loyiha ochiq emas",
   "sidebar.empty.description": "Boshlash uchun loyihani oching",

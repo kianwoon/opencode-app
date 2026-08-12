@@ -887,6 +887,7 @@ export const dict = {
     "މޮޑެލްތައް ބޭނުން ކުރުމަށް އެއްވެސް ޕްރޮވައިޑަރެއް ގުޅުވާލުން، inc. Claude، GPT، Gemini ފަދަ ކަންކަމެވެ.",
   "sidebar.project.recentSessions": "ފަހުގެ ސެޝަންތަކެވެ",
   "sidebar.project.viewAllSessions": "ހުރިހާ ސެޝަންތަކެއް ބަލާށެވެ",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "ނޮޓިފިކޭޝަންތައް ސާފުކުރުން",
   "sidebar.empty.title": "އެއްވެސް މަޝްރޫއެއް ނުހުޅުވޭ",
   "sidebar.empty.description": "ފަށަން ޕްރޮޖެކްޓެއް ހުޅުވާށެވެ",

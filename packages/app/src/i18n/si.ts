@@ -871,6 +871,7 @@ export const dict: Record<string, string> = {
     "ආකෘති භාවිතා කිරීමට ඕනෑම සැපයුම්කරුවෙකු සම්බන්ධ කරන්න, inc. Claude, GPT, Gemini ආදිය.",
   "sidebar.project.recentSessions": "මෑත සැසි",
   "sidebar.project.viewAllSessions": "සියලුම සැසි බලන්න",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "දැනුම්දීම් හිස් කරන්න",
   "sidebar.empty.title": "ව්‍යාපෘති විවෘත නැත",
   "sidebar.empty.description": "ආරම්භ කිරීමට ව්‍යාපෘතියක් විවෘත කරන්න",

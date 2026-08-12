@@ -883,6 +883,7 @@ export const dict = {
     "မော်ဒယ်များ၊ inc ကိုအသုံးပြုရန် မည်သည့်ပံ့ပိုးသူကိုမဆို ချိတ်ဆက်ပါ။ Claude၊ GPT၊ Gemini စသဖြင့်",
   "sidebar.project.recentSessions": "လတ်တလော စက်ရှင်များ",
   "sidebar.project.viewAllSessions": "ဆက်ရှင်များအားလုံးကို ကြည့်ရှုပါ။",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "အကြောင်းကြားချက်များကို ရှင်းလင်းပါ။",
   "sidebar.empty.title": "မည်သည့်ပရောဂျက်မှ ဖွင့်ထားခြင်းမရှိပါ။",
   "sidebar.empty.description": "စတင်ရန် ပရောဂျက်တစ်ခုကို ဖွင့်ပါ။",

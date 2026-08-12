@@ -883,6 +883,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Claude, GPT, Gemini आदि मॉडल उपयोग करने के लिए किसी भी प्रोवाइडर को कनेक्ट करें।",
   "sidebar.project.recentSessions": "हाल ही में सेशन",
   "sidebar.project.viewAllSessions": "सभी सेशन देखें",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "सूचनाएँ साफ़ करें",
   "sidebar.empty.title": "कोई प्रोजेक्ट खुला नहीं",
   "sidebar.empty.description": "आरंभ करने के लिए एक प्रोजेक्ट खोलें",

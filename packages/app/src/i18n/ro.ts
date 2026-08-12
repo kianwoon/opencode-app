@@ -878,6 +878,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Conectează orice furnizor pentru a folosi modele, inclusiv Claude, GPT, Gemini etc.",
   "sidebar.project.recentSessions": "Sesiuni recente",
   "sidebar.project.viewAllSessions": "Vezi toate sesiunile",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Șterge notificările",
   "sidebar.empty.title": "Niciun proiect deschis",
   "sidebar.empty.description": "Deschide un proiect pentru a începe",

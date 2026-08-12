@@ -877,6 +877,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Поврзете кој било провајдер за да користите модели, вкл. Claude, GPT, Gemini итн.",
   "sidebar.project.recentSessions": "Неодамнешни сесии",
   "sidebar.project.viewAllSessions": "Прикажи ги сите сесии",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Исчистете ги известувањата",
   "sidebar.empty.title": "Нема отворени проекти",
   "sidebar.empty.description": "Отворете проект за да започнете",

@@ -870,6 +870,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "ភ្ជាប់អ្នកផ្តល់សេវាណាមួយដើម្បីប្រើម៉ូដែល, inc ។ Claude, GPT, Gemini ជាដើម។",
   "sidebar.project.recentSessions": "សម័យថ្មីៗ",
   "sidebar.project.viewAllSessions": "មើលសម័យទាំងអស់។",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "ជម្រះការជូនដំណឹង",
   "sidebar.empty.title": "គ្មានគម្រោងបើកទេ។",
   "sidebar.empty.description": "បើកគម្រោងដើម្បីចាប់ផ្តើម",

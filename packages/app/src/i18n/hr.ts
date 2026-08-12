@@ -882,6 +882,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Povežite bilo kojeg pružatelja za korištenje modela, uklj. Claude, GPT, Gemini itd.",
   "sidebar.project.recentSessions": "Nedavne sesije",
   "sidebar.project.viewAllSessions": "Pogledajte sve sesije",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Očistite obavijesti",
   "sidebar.empty.title": "Nema otvorenih projekata",
   "sidebar.empty.description": "Otvorite projekt da biste započeli",

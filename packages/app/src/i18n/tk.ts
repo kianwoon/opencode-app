@@ -874,6 +874,7 @@ export const dict = {
     "Modelleri ulanmak üçin islendik üpjün edijini birikdiriň. Claude, GPT, Gemini we ş.m.",
   "sidebar.project.recentSessions": "Soňky sessiýalar",
   "sidebar.project.viewAllSessions": "Allhli sessiýalary görüň",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Duýduryşlary arassalaň",
   "sidebar.empty.title": "Taslama açylmaýar",
   "sidebar.empty.description": "Başlamak üçin taslama açyň",

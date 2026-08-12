@@ -883,6 +883,7 @@ export const dict = {
     "Claude, GPT, Gemini və s. kimi modellərdən istifadə etmək üçün istənilən provayderi qoşun.",
   "sidebar.project.recentSessions": "Son sessiyalar",
   "sidebar.project.viewAllSessions": "Bütün sessiyalara bax",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Bildirişləri təmizlə",
   "sidebar.empty.title": "Heç bir layihə açılmayıb",
   "sidebar.empty.description": "Başlamaq üçün bir layihə açın",

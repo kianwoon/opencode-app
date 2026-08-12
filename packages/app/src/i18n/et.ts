@@ -869,6 +869,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Mudelite kasutamiseks ühendage mis tahes pakkuja, sh. Claude, GPT, Gemini jne.",
   "sidebar.project.recentSessions": "Viimased istungid",
   "sidebar.project.viewAllSessions": "Vaadake kõiki seansse",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Tühjenda märguanded",
   "sidebar.empty.title": "Avatud projekte pole",
   "sidebar.empty.description": "Alustamiseks avage projekt",

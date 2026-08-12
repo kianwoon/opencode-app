@@ -882,6 +882,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Συνδέστε οποιονδήποτε πάροχο για χρήση μοντέλων, inc. Claude, GPT, Gemini κ.λπ.",
   "sidebar.project.recentSessions": "Πρόσφατες συνεδρίες",
   "sidebar.project.viewAllSessions": "Προβολή όλων των συνεδριών",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Διαγραφή ειδοποιήσεων",
   "sidebar.empty.title": "Δεν υπάρχουν ανοιχτά έργα",
   "sidebar.empty.description": "Ανοίξτε ένα έργο για να ξεκινήσετε",

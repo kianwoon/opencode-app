@@ -879,6 +879,7 @@ export const dict = {
     "Pievienojiet jebkuru nodrošinātāju, lai izmantotu modeļus, t.sk. Claude, GPT, Gemini u.c.",
   "sidebar.project.recentSessions": "Nesenās sesijas",
   "sidebar.project.viewAllSessions": "Skatīt visas sesijas",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Notīrīt paziņojumus",
   "sidebar.empty.title": "Nav atvērts neviens projekts",
   "sidebar.empty.description": "Atveriet projektu, lai sāktu",

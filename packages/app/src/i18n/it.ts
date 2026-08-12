@@ -793,6 +793,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Connetti un provider per usare altri modelli, tra cui Claude, GPT, Gemini e altri.",
   "sidebar.project.recentSessions": "Sessioni recenti",
   "sidebar.project.viewAllSessions": "Visualizza tutte le sessioni",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Cancella notifiche",
   "sidebar.empty.title": "Nessun progetto aperto",
   "sidebar.empty.description": "Apri un progetto per iniziare",

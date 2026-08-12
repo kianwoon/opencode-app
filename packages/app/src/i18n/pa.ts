@@ -881,6 +881,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "Claude، GPT، Gemini وغیرہ ماڈل ورتن لئی کوئی وی پرووائیڈر جوڑو۔",
   "sidebar.project.recentSessions": "حالیہ سیشن",
   "sidebar.project.viewAllSessions": "سارے سیشن ویکھو",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "نوٹیفکیشن صاف کرو",
   "sidebar.empty.title": "کوئی پروجیکٹ نئیں کھلیا",
   "sidebar.empty.description": "شروع کرن لئی کوئی پروجیکٹ کھولو",

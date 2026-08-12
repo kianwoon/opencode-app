@@ -873,6 +873,7 @@ export const dict = {
     "დააკავშირეთ ნებისმიერი პროვაიდერი მოდელების გამოსაყენებლად, inc. Claude, GPT, Gemini და სხვ.",
   "sidebar.project.recentSessions": "ბოლო სესიები",
   "sidebar.project.viewAllSessions": "ყველა სესიის ნახვა",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "შეტყობინებების გასუფთავება",
   "sidebar.empty.title": "პროექტები არ არის გახსნილი",
   "sidebar.empty.description": "გახსენით პროექტი დასაწყებად",

@@ -881,6 +881,7 @@ export const dict = {
     "Csatlakozzon bármely szolgáltatóhoz a modellek használatához, pl. Claude, GPT, Gemini stb.",
   "sidebar.project.recentSessions": "Legutóbbi munkamenetek",
   "sidebar.project.viewAllSessions": "Az összes munkamenet megtekintése",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Értesítések törlése",
   "sidebar.empty.title": "Nincs nyitott projekt",
   "sidebar.empty.description": "A kezdéshez nyisson meg egy projektet",

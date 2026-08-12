@@ -874,6 +874,7 @@ export const dict: Record<string, string> = {
   "sidebar.gettingStarted.line2": "मोडेलहरू, inc प्रयोग गर्न कुनै पनि प्रदायक जडान गर्नुहोस्। Claude, GPT, Gemini आदि।",
   "sidebar.project.recentSessions": "भर्खरका सत्रहरू",
   "sidebar.project.viewAllSessions": "सबै सत्रहरू हेर्नुहोस्",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "सूचनाहरू खाली गर्नुहोस्",
   "sidebar.empty.title": "कुनै पनि आयोजना खुलेका छैनन्",
   "sidebar.empty.description": "सुरु गर्न एउटा परियोजना खोल्नुहोस्",

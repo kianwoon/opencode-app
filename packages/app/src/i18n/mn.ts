@@ -881,6 +881,7 @@ export const dict = {
     "Models, inc ашиглахын тулд дурын үйлчилгээ үзүүлэгчийг холбоно уу. Claude, GPT, Gemini гэх мэт.",
   "sidebar.project.recentSessions": "Сүүлийн хуралдаанууд",
   "sidebar.project.viewAllSessions": "Бүх сешнүүдийг үзэх",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Мэдэгдлийг арилгах",
   "sidebar.empty.title": "Нээлттэй төсөл байхгүй",
   "sidebar.empty.description": "Эхлэхийн тулд төсөл нээнэ үү",

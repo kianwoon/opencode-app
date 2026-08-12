@@ -883,6 +883,7 @@ export const dict = {
     "Maak verbinding met een aanbieder om modellen te gebruiken, waaronder Claude, GPT en Gemini.",
   "sidebar.project.recentSessions": "Recente sessies",
   "sidebar.project.viewAllSessions": "Bekijk alle sessies",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Meldingen wissen",
   "sidebar.empty.title": "Geen projecten geopend",
   "sidebar.empty.description": "Open een project om aan de slag te gaan",

@@ -773,6 +773,7 @@ export const dict = {
     "Yhdistä mikä tahansa palveluntarjoaja käyttääksesi malleja, mm. Claude, GPT, Gemini jne.",
   "sidebar.project.recentSessions": "Viimeaikaiset istunnot",
   "sidebar.project.viewAllSessions": "Näytä kaikki istunnot",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Tyhjennä ilmoitukset",
   "sidebar.empty.title": "Ei avoimia projekteja",
   "sidebar.empty.description": "Aloita avaamalla projekti",

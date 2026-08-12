@@ -29,6 +29,9 @@ import { type Session } from "@opencode-ai/sdk/v2/client"
 
 const SIDEBAR_RAIL_WIDTH = 44
 const SIDEBAR_PANEL_WIDTH = 264
+// Number of sessions shown in a project before the user expands. Matches the
+// child store's default session limit so the collapsed list is consistent.
+const DEFAULT_SESSION_LIMIT = 5
 
 function isBackgroundOpen(event: MouseEvent) {
   return shouldOpenSessionInBackground({
@@ -454,14 +457,18 @@ function ProjectSection(
   })
   const sync = createMemo(() => ctx()?.sync ?? serverSync())
   const childStore = createMemo(() => sync().child(props.project.worktree, { bootstrap: false }))
-  const sessions = createMemo(() => sortedRootSessions(childStore()[0], Date.now()))
+  const allSessions = createMemo(() => sortedRootSessions(childStore()[0], Date.now()))
   const sessionTotal = createMemo(() => childStore()[0].sessionTotal)
-  const hasMore = createMemo(() => sessionTotal() > sessions().length)
+  const [showAll, setShowAll] = createStore({ value: false })
+  const visibleSessions = createMemo(() => (showAll.value ? allSessions() : allSessions().slice(0, DEFAULT_SESSION_LIMIT)))
+  const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
   const showAllSessions = async () => {
     const [store, setStore] = childStore()
-    setStore("limit", Math.max(store.limit, sessionTotal(), sessions().length + 1))
+    setStore("limit", Math.max(store.limit, sessionTotal(), allSessions().length + 1))
     await sync().project.loadSessions(props.project.worktree)
+    setShowAll("value", true)
   }
+  const showFewerSessions = () => setShowAll("value", false)
   const serverKey = createMemo(() => {
     const conn = props.currentServer()
     return conn ? ServerConnection.key(conn) : undefined
@@ -560,8 +567,8 @@ function ProjectSection(
       <Show when={props.expanded}>
         <div class="flex min-w-0 flex-col gap-px pl-4">
           <NewSessionRow onClick={() => props.onNewSession(props.project.worktree)} label={language.t("command.session.new")} />
-          <Show when={sessions().length > 0 && serverKey()}>
-            <For each={sessions()}>
+          <Show when={visibleSessions().length > 0 && serverKey()}>
+            <For each={visibleSessions()}>
               {(session) => (
                 <SessionRow
                   session={session}
@@ -571,8 +578,11 @@ function ProjectSection(
                 />
               )}
             </For>
-            <Show when={hasMore()}>
+            <Show when={!showAll.value && hasMore()}>
               <ShowAllSessionsRow onClick={() => void showAllSessions()} label={language.t("sidebar.project.viewAllSessions")} />
+            </Show>
+            <Show when={showAll.value}>
+              <ShowFewerSessionsRow onClick={showFewerSessions} label={language.t("sidebar.project.showFewerSessions")} />
             </Show>
           </Show>
         </div>
@@ -617,6 +627,27 @@ function ShowAllSessionsRow(props: { onClick: () => void; label: string }) {
     >
       <span class="shrink-0 flex size-4 items-center justify-center text-v2-icon-icon-muted">
         <IconV2 name="chevron-down" size="small" />
+      </span>
+      <span class="min-w-0 flex-1 truncate">{props.label}</span>
+    </button>
+  )
+}
+
+function ShowFewerSessionsRow(props: { onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      data-component="sidebar-v2-session-row"
+      data-action="sidebar-v2-show-fewer-sessions"
+      class={`
+        flex h-7 min-w-0 items-center gap-2 rounded-[6px] bg-transparent px-1.5 text-left
+        text-v2-text-text-muted [font-weight:440] transition-[background-color,color] duration-[120ms] ease-in-out
+        hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base
+      `}
+      onClick={props.onClick}
+    >
+      <span class="shrink-0 flex size-4 items-center justify-center text-v2-icon-icon-muted">
+        <IconV2 name="chevron-down" size="small" style={{ transform: "rotate(180deg)" }} />
       </span>
       <span class="min-w-0 flex-1 truncate">{props.label}</span>
     </button>

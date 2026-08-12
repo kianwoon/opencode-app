@@ -887,6 +887,7 @@ export const dict = {
     "Prijunkite bet kurį teikėją, kad galėtumėte naudoti modelius, įskaitant. Claude, GPT, Gemini ir kt.",
   "sidebar.project.recentSessions": "Naujausi seansai",
   "sidebar.project.viewAllSessions": "Peržiūrėkite visas sesijas",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "Išvalyti pranešimus",
   "sidebar.empty.title": "Jokių atvirų projektų",
   "sidebar.empty.description": "Norėdami pradėti, atidarykite projektą",

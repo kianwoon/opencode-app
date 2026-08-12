@@ -884,6 +884,7 @@ export const dict = {
   "sidebar.gettingStarted.line2": "ماڈلز استعمال کرنے کے لیے کسی بھی فراہم کنندہ کو جوڑیں۔ Claude، GPT، Gemini وغیرہ",
   "sidebar.project.recentSessions": "حالیہ سیشنز",
   "sidebar.project.viewAllSessions": "تمام سیشنز دیکھیں",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "اطلاعات کو صاف کریں۔",
   "sidebar.empty.title": "کوئی پروجیکٹ نہیں کھلا۔",
   "sidebar.empty.description": "شروع کرنے کے لیے ایک پروجیکٹ کھولیں۔",

@@ -888,6 +888,7 @@ export const dict: Record<string, string> = {
     "དཔེ་ཚད་ཚུ་ལག་ལེན་འཐབ་ནི་ལུ་ བྱིན་མི་གང་རུང་ཅིག་མཐུད།, inc. Claude དང་ GPT Gemini སོགས།",
   "sidebar.project.recentSessions": "འཕྲལ་གྱི་ལཱ་ཡུན་ཚུ།",
   "sidebar.project.viewAllSessions": "ལཱ་ཡུན་ཆ་མཉམ་བལྟ།",
+  "sidebar.project.showFewerSessions": "Show fewer",
   "sidebar.project.clearNotifications": "བརྡ་བསྐུལ་ཚུ་གསལ་བཟོ།",
   "sidebar.empty.title": "ལས་འགུལ་ཁ་ཕྱེ་མེད།",
   "sidebar.empty.description": "འགོ་བཙུགས་ནིའི་དོན་ལུ་ལས་འགུལ་ཅིག་ཁ་ཕྱེ།",
