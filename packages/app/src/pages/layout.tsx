@@ -1121,6 +1121,33 @@ export default function LegacyLayout(props: ParentProps) {
     })
   }
 
+  // Compact the opencode server database (VACUUM) to reclaim dead space from
+  // deleted sessions/events. Non-destructive; shows a toast with the reclaimed
+  // size. Desktop-only (requires the IPC handler in the main process).
+  async function vacuumDatabase() {
+    if (!window.api?.vacuumDatabase) return
+    try {
+      showToast({ title: language.t("sidebar.vacuum.started") })
+      const { before, after } = await window.api.vacuumDatabase()
+      if (before === 0) {
+        showToast({ title: language.t("sidebar.vacuum.none") })
+        return
+      }
+      const saved = Math.max(0, before - after)
+      const savedLabel = saved >= 1_073_741_824
+        ? `${(saved / 1_073_741_824).toFixed(1)} GB`
+        : saved >= 1_048_576
+          ? `${(saved / 1_048_576).toFixed(1)} MB`
+          : `${(saved / 1024).toFixed(0)} KB`
+      showToast({
+        title: language.t("sidebar.vacuum.done"),
+        description: language.t("sidebar.vacuum.saved", { saved: savedLabel }),
+      })
+    } catch {
+      showToast({ title: language.t("sidebar.vacuum.error") })
+    }
+  }
+
   function projectRoot(directory: string) {
     const key = pathKey(directory)
     const project = layout.projects
@@ -2248,6 +2275,8 @@ export default function LegacyLayout(props: ParentProps) {
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
+      vacuumLabel={() => language.t("sidebar.vacuum")}
+      onVacuum={vacuumDatabase}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
       renderPanel={() =>

@@ -64,6 +64,7 @@ export type ElectronAPI = {
   storeClear: (name: string) => Promise<void>
   storeKeys: (name: string) => Promise<string[]>
   storeLength: (name: string) => Promise<number>
+  vacuumDatabase: () => Promise<{ before: number; after: number }>
   draftGet: (key: string) => Promise<string | null>
   draftSet: (key: string, value: string) => Promise<void>
   draftDelete: (key: string) => Promise<void>

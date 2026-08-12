@@ -23,6 +23,7 @@ import { useCommand } from "@/context/command"
 import { createPromptSession } from "@/context/prompt-state"
 import { displayName, getProjectAvatarSource, sortedRootSessions } from "./helpers"
 import { useSessionTabAvatarState } from "./project-avatar-state"
+import { showToast } from "@/utils/toast"
 import { sessionTitle } from "@/utils/session-title"
 import { pathKey } from "@/utils/path-key"
 import { useServerSync } from "@/context/server-sync"
@@ -71,6 +72,33 @@ export function NewSidebar() {
   const global = useGlobal()
   const pickDirectory = useDirectoryPicker()
   const openSettings = useSettingsCommand()
+  // Compact the opencode server database (VACUUM) to reclaim dead space from
+  // deleted sessions/events. Non-destructive; shows a toast with the reclaimed
+  // size. Desktop-only (requires the IPC handler in the main process).
+  async function vacuumDatabase() {
+    if (!window.api?.vacuumDatabase) return
+    try {
+      showToast({ title: language.t("sidebar.vacuum.started") })
+      const { before, after } = await window.api.vacuumDatabase()
+      if (before === 0) {
+        showToast({ title: language.t("sidebar.vacuum.none") })
+        return
+      }
+      const saved = Math.max(0, before - after)
+      const savedLabel =
+        saved >= 1_073_741_824
+          ? `${(saved / 1_073_741_824).toFixed(1)} GB`
+          : saved >= 1_048_576
+            ? `${(saved / 1_048_576).toFixed(1)} MB`
+            : `${(saved / 1024).toFixed(0)} KB`
+      showToast({
+        title: language.t("sidebar.vacuum.done"),
+        description: language.t("sidebar.vacuum.saved", { saved: savedLabel }),
+      })
+    } catch {
+      showToast({ title: language.t("sidebar.vacuum.error") })
+    }
+  }
   const serverSync = useServerSync()
   const platform = usePlatform()
   const command = useCommand()
@@ -275,6 +303,7 @@ export function NewSidebar() {
               onOpenProject={openProjectNewSession}
               onAddProject={addProject}
               onOpenSettings={openSettings}
+              onVacuum={vacuumDatabase}
               onOpenHelp={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
             />
           }
@@ -308,6 +337,7 @@ function RailSidebar(props: {
   onOpenProject: (directory: string) => void
   onAddProject: (conn: ServerConnection.Any) => void
   onOpenSettings: () => void
+  onVacuum: () => void
   onOpenHelp: () => void
 }) {
   const language = useLanguage()
@@ -347,6 +377,7 @@ function RailSidebar(props: {
         }}
       />
       <div class="mt-auto flex flex-col items-center gap-1 pb-2">
+        <RailAction icon="outline-reset" label={language.t("sidebar.vacuum")} onClick={props.onVacuum} />
         <RailAction icon="settings-gear" label={language.t("sidebar.settings")} onClick={props.onOpenSettings} />
         <RailAction icon="help" label={language.t("sidebar.help")} onClick={props.onOpenHelp} />
       </div>
@@ -396,6 +427,30 @@ function ExpandedSidebar(props: SidebarActions) {
   const layout = useLayout()
   const language = useLanguage()
   const openSettings = useSettingsCommand()
+  async function vacuumDatabase() {
+    if (!window.api?.vacuumDatabase) return
+    try {
+      showToast({ title: language.t("sidebar.vacuum.started") })
+      const { before, after } = await window.api.vacuumDatabase()
+      if (before === 0) {
+        showToast({ title: language.t("sidebar.vacuum.none") })
+        return
+      }
+      const saved = Math.max(0, before - after)
+      const savedLabel =
+        saved >= 1_073_741_824
+          ? `${(saved / 1_073_741_824).toFixed(1)} GB`
+          : saved >= 1_048_576
+            ? `${(saved / 1_048_576).toFixed(1)} MB`
+            : `${(saved / 1024).toFixed(0)} KB`
+      showToast({
+        title: language.t("sidebar.vacuum.done"),
+        description: language.t("sidebar.vacuum.saved", { saved: savedLabel }),
+      })
+    } catch {
+      showToast({ title: language.t("sidebar.vacuum.error") })
+    }
+  }
 
   const expandedFor = (project: LocalProject) => props.expandedFor(project)
   const toggleExpanded = (worktree: string) => props.onToggleExpanded(worktree)
@@ -461,6 +516,16 @@ function ExpandedSidebar(props: SidebarActions) {
         </ScrollView>
       </div>
       <div class="shrink-0 flex items-center gap-1 px-2 py-1.5 border-t border-v2-border-border-base">
+        <TooltipV2 placement="top" value={language.t("sidebar.vacuum")}>
+          <IconButtonV2
+            type="button"
+            variant="ghost-muted"
+            size="small"
+            icon={<IconV2 name="outline-reset" />}
+            aria-label={language.t("sidebar.vacuum")}
+            onClick={vacuumDatabase}
+          />
+        </TooltipV2>
         <TooltipV2 placement="top" value={language.t("sidebar.settings")}>
           <IconButtonV2
             type="button"
