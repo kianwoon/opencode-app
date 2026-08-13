@@ -96,6 +96,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "ཁྱོད་རའི་ལན་ཚུ་བསྐྱར་ཞིབ་འབད།",
   "ui.messagePart.questions.dismissed": "དྲི་བ་ཚུ་ ཕྱིར་འབུད་འབད་ཡོདཔ།",
   "ui.messagePart.compaction": "ལཱ་ཡུན་བསྡམ་བཞག་ཡོདཔ།",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}}བཀླགས།",
   "ui.messagePart.context.read.other": "{{count}} ལྷག་ཡོད།",
   "ui.messagePart.context.search.one": "{{count}} འཚོལ་ཞིབ།",

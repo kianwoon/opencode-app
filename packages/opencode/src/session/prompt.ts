@@ -7,6 +7,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
+import { validateDag, readySteps, propagateFailure } from "./workflow/dag"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
@@ -444,6 +445,279 @@ const layer = Layer.effect(
         sessionID,
         type: "text",
         text: "Summarize the task tool output above and continue with your task.",
+        synthetic: true,
+      } satisfies SessionV1.TextPart)
+    })
+
+    /**
+     * Run one workflow step as a subagent task, mirroring `handleSubtask`.
+     * Returns the task-tool execute result so the caller can record
+     * completion or propagate failure.
+     */
+    const runWorkflowStep = Effect.fn("SessionPrompt.runWorkflowStep")(function* (input: {
+      step: SessionV1.WorkflowStep
+      model: Provider.Model
+      lastUser: SessionV1.User
+      sessionID: SessionID
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+    }) {
+      const { step, model, lastUser, sessionID, session, msgs } = input
+      const ctx = yield* InstanceState.context
+      const promptOps = yield* ops()
+      const { task: taskTool } = yield* registry.named()
+      const stepModel = step.model ? yield* getModel(step.model.providerID, step.model.modelID, sessionID) : model
+      const assistantMessage: SessionV1.Assistant = yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: lastUser.id,
+        sessionID,
+        mode: step.agent,
+        agent: step.agent,
+        variant: lastUser.model.variant,
+        path: { cwd: ctx.directory, root: ctx.worktree },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: stepModel.id,
+        providerID: stepModel.providerID,
+        time: { created: Date.now() },
+      })
+      let part: SessionV1.ToolPart = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: assistantMessage.id,
+        sessionID: assistantMessage.sessionID,
+        type: "tool",
+        callID: ulid(),
+        tool: TaskTool.id,
+        state: {
+          status: "running",
+          input: {
+            prompt: step.prompt,
+            description: step.description,
+            subagent_type: step.agent,
+            command: step.command,
+          },
+          time: { start: Date.now() },
+        },
+      })
+      const taskArgs = {
+        prompt: step.prompt,
+        description: step.description,
+        subagent_type: step.agent,
+        command: step.command,
+      }
+      yield* plugin.trigger(
+        "tool.execute.before",
+        { tool: TaskTool.id, sessionID, callID: part.id },
+        { args: taskArgs },
+      )
+
+      const stepAgent = yield* agents.get(step.agent)
+      if (!stepAgent) {
+        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+        const error = new NamedError.Unknown({ message: `Agent not found: "${step.agent}".${hint}` })
+        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        throw error
+      }
+
+      let error: Error | undefined
+      const stepAbort = new AbortController()
+      const result = yield* taskTool
+        .execute(taskArgs, {
+          agent: step.agent,
+          messageID: assistantMessage.id,
+          sessionID,
+          abort: stepAbort.signal,
+          callID: part.callID,
+          extra: { bypassAgentCheck: true, promptOps },
+          messages: msgs,
+          metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
+            Effect.gen(function* () {
+              part = yield* sessions.updatePart({
+                ...part,
+                type: "tool",
+                state: { ...part.state, ...val },
+              } satisfies SessionV1.ToolPart)
+            }),
+          ask: (req: any) =>
+            permission
+              .ask({
+                ...req,
+                sessionID,
+                ruleset: Permission.merge(stepAgent.permission, session.permission ?? []),
+              })
+              .pipe(Effect.orDie),
+        })
+        .pipe(
+          Effect.catchCause((cause) => {
+            const defect = Cause.squash(cause)
+            error = defect instanceof Error ? defect : new Error(String(defect))
+            return Effect.logError("workflow step execution failed", {
+              error,
+              agent: step.agent,
+              description: step.description,
+            })
+          }),
+          Effect.onInterrupt(() =>
+            Effect.gen(function* () {
+              stepAbort.abort()
+              assistantMessage.finish = "tool-calls"
+              assistantMessage.time.completed = Date.now()
+              yield* sessions.updateMessage(assistantMessage)
+              if (part.state.status === "running") {
+                yield* sessions.updatePart({
+                  ...part,
+                  state: {
+                    status: "error",
+                    error: "Cancelled",
+                    time: { start: part.state.time.start, end: Date.now() },
+                    metadata: part.state.metadata,
+                    input: part.state.input,
+                  },
+                } satisfies SessionV1.ToolPart)
+              }
+            }),
+          ),
+        )
+
+      const attachments = result?.attachments?.map((attachment) => ({
+        ...attachment,
+        id: PartID.ascending(),
+        sessionID,
+        messageID: assistantMessage.id,
+      }))
+
+      yield* plugin.trigger(
+        "tool.execute.after",
+        { tool: TaskTool.id, sessionID, callID: part.id, args: taskArgs },
+        result,
+      )
+
+      assistantMessage.finish = "tool-calls"
+      assistantMessage.time.completed = Date.now()
+      yield* sessions.updateMessage(assistantMessage)
+
+      if (result && part.state.status === "running") {
+        yield* sessions.updatePart({
+          ...part,
+          state: {
+            status: "completed",
+            input: part.state.input,
+            title: result.title,
+            metadata: result.metadata,
+            output: result.output,
+            attachments,
+            time: { ...part.state.time, end: Date.now() },
+          },
+        } satisfies SessionV1.ToolPart)
+      }
+
+      if (!result) {
+        yield* sessions.updatePart({
+          ...part,
+          state: {
+            status: "error",
+            error: error ? `Workflow step failed: ${error.message}` : "Workflow step failed",
+            time: {
+              start: part.state.status === "running" ? part.state.time.start : Date.now(),
+              end: Date.now(),
+            },
+            metadata: part.state.status === "pending" ? undefined : part.state.metadata,
+            input: part.state.input,
+          },
+        } satisfies SessionV1.ToolPart)
+      }
+
+      if (!result || !result.output) throw new Error(error?.message ?? `Workflow step "${step.id}" produced no output`)
+      return result
+    })
+
+    /**
+     * Execute a workflow (DAG of subagent steps). Validates the graph, then
+     * schedules steps in topological order, running independent steps
+     * concurrently. A failed step marks its transitive dependents skipped.
+     * The final step set / status is rendered as a synthetic text part.
+     */
+    const handleWorkflow = Effect.fn("SessionPrompt.handleWorkflow")(function* (input: {
+      task: SessionV1.WorkflowPart
+      model: Provider.Model
+      lastUser: SessionV1.User
+      sessionID: SessionID
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+    }) {
+      const { task, model, lastUser, sessionID, session, msgs } = input
+
+      const dag = validateDag(task.steps)
+      if ("_tag" in dag) {
+        const message =
+          dag._tag === "cycle"
+            ? `Workflow "${task.title}" has a dependency cycle: ${dag.cycle.join(" -> ")}`
+            : `Workflow "${task.title}" step "${dag.stepId}" references unknown step "${dag.missing}"`
+        const error = new NamedError.Unknown({ message })
+        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        throw error
+      }
+
+      const completed = new Set<string>()
+      const skipped = new Set<string>()
+      const failed = new Set<string>()
+      const statuses: { id: string; status: "completed" | "failed" | "skipped" }[] = []
+
+      while (true) {
+        // A step counts as "done" when it completed or failed; skipped steps
+        // are recorded separately. When every step is done/skipped we stop.
+        const done = new Set([...completed, ...failed])
+        if (dag.steps.every((s) => done.has(s.id) || skipped.has(s.id))) break
+
+        const ready = readySteps(dag.steps, done, skipped)
+        if (ready.length === 0) {
+          const message = `Workflow "${task.title}" cannot make progress (deadlock)`
+          const error = new NamedError.Unknown({ message })
+          yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+          throw error
+        }
+
+        yield* Effect.all(
+          ready.map((step) =>
+            Effect.gen(function* () {
+              try {
+                yield* runWorkflowStep({ step, model, lastUser, sessionID, session, msgs })
+                completed.add(step.id)
+                statuses.push({ id: step.id, status: "completed" })
+              } catch {
+                failed.add(step.id)
+                const newly = propagateFailure(dag, step.id)
+                for (const id of newly) skipped.add(id)
+                statuses.push({ id: step.id, status: "failed" })
+                for (const id of newly) statuses.push({ id, status: "skipped" })
+              }
+            }),
+          ),
+          { concurrency: "unbounded" },
+        )
+      }
+
+      const summary = [
+        `Workflow "${task.title}" finished.`,
+        ...statuses.map((s) => `- ${s.id}: ${s.status}`),
+      ].join("\n")
+      const summaryMsg: SessionV1.User = {
+        id: MessageID.ascending(),
+        sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: lastUser.agent,
+        model: lastUser.model,
+      }
+      yield* sessions.updateMessage(summaryMsg)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: summaryMsg.id,
+        sessionID,
+        type: "text",
+        text: summary,
         synthetic: true,
       } satisfies SessionV1.TextPart)
     })
@@ -989,6 +1263,19 @@ const layer = Layer.effect(
           ]
         }
 
+        if (part.type === "workflow") {
+          // The workflow part carries a DAG of steps; deep-mutate so it fits
+          // the stored Part type (schema DeepMutable semantics).
+          return [
+            {
+              ...part,
+              messageID: info.id,
+              sessionID: input.sessionID,
+              steps: part.steps.map((step) => ({ ...step, dependsOn: [...step.dependsOn] })),
+            },
+          ]
+        }
+
         return [{ ...part, messageID: info.id, sessionID: input.sessionID }]
       })
 
@@ -1143,6 +1430,11 @@ const layer = Layer.effect(
 
           if (task?.type === "subtask") {
             yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+            continue
+          }
+
+          if (task?.type === "workflow") {
+            yield* handleWorkflow({ task, model, lastUser, sessionID, session, msgs })
             continue
           }
 
@@ -1540,6 +1832,7 @@ export const PromptInput = Schema.Struct({
       SessionV1.FilePartInput,
       SessionV1.AgentPartInput,
       SessionV1.SubtaskPartInput,
+      SessionV1.WorkflowPartInput,
     ]).annotate({ discriminator: "type" }),
   ),
 })

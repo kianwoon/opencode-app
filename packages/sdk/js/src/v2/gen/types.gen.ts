@@ -51,6 +51,7 @@ export type Event =
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
+  | EventSessionWarning
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
   | EventFileEdited
@@ -416,6 +417,28 @@ export type SubtaskPart = {
   command?: string
 }
 
+export type WorkflowStep = {
+  id: string
+  prompt: string
+  description: string
+  agent: string
+  dependsOn: Array<string>
+  model?: {
+    providerID: string
+    modelID: string
+  }
+  command?: string
+}
+
+export type WorkflowPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "workflow"
+  title: string
+  steps: Array<WorkflowStep>
+}
+
 export type ReasoningPart = {
   id: string
   sessionID: string
@@ -636,6 +659,7 @@ export type CompactionPart = {
 export type Part =
   | TextPart
   | SubtaskPart
+  | WorkflowPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -1224,6 +1248,22 @@ export type GlobalEvent = {
         properties: {
           sessionID?: string
           error?:
+            | ProviderAuthError
+            | UnknownError
+            | MessageOutputLengthError
+            | MessageAbortedError
+            | StructuredOutputError
+            | ContextOverflowError
+            | ContentFilterError
+            | ApiError
+        }
+      }
+    | {
+        id: string
+        type: "session.warning"
+        properties: {
+          sessionID?: string
+          warning?:
             | ProviderAuthError
             | UnknownError
             | MessageOutputLengthError
@@ -2908,6 +2948,7 @@ export type V2Event =
   | MessagePartDelta
   | SessionDiff
   | SessionError
+  | SessionWarning
   | InstallationUpdated
   | InstallationUpdateAvailable
   | FileEdited
@@ -5374,6 +5415,32 @@ export type SessionError = {
   }
 }
 
+export type SessionWarning = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.warning"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID?: string
+    warning?:
+      | ProviderAuthError
+      | UnknownError
+      | MessageOutputLengthError
+      | MessageAbortedError
+      | StructuredOutputError
+      | ContextOverflowError
+      | ContentFilterError
+      | ApiError
+  }
+}
+
 export type InstallationUpdated = {
   id: string
   metadata?: {
@@ -6688,6 +6755,23 @@ export type EventSessionError = {
   properties: {
     sessionID?: string
     error?:
+      | ProviderAuthError
+      | UnknownError
+      | MessageOutputLengthError
+      | MessageAbortedError
+      | StructuredOutputError
+      | ContextOverflowError
+      | ContentFilterError
+      | ApiError
+  }
+}
+
+export type EventSessionWarning = {
+  id: string
+  type: "session.warning"
+  properties: {
+    sessionID?: string
+    warning?:
       | ProviderAuthError
       | UnknownError
       | MessageOutputLengthError

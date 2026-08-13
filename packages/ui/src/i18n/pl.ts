@@ -96,6 +96,7 @@ export const dict = {
 
   "ui.messagePart.questions.dismissed": "Pytania odrzucone",
   "ui.messagePart.compaction": "Sesja skompaktowana",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "Liczba odczytów: {{count}}",
   "ui.messagePart.context.read.few": "Liczba odczytów: {{count}}",
   "ui.messagePart.context.read.many": "Liczba odczytów: {{count}}",

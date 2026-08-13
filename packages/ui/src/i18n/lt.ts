@@ -96,6 +96,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Peržiūrėkite savo atsakymus",
   "ui.messagePart.questions.dismissed": "Klausimai atmesti",
   "ui.messagePart.compaction": "Seansas suglaudintas",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "Skaityti {{count}}",
   "ui.messagePart.context.read.other": "{{count}} skaito",
   "ui.messagePart.context.read.few": "{{count}} skaitymai",

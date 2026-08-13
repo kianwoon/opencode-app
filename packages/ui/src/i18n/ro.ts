@@ -95,6 +95,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Revizuiește răspunsurile",
   "ui.messagePart.questions.dismissed": "Întrebări respinse",
   "ui.messagePart.compaction": "Sesiune compactată",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} citire",
   "ui.messagePart.context.read.other": "{{count}} citiri",
   "ui.messagePart.context.read.few": "{{count}} citiri",

@@ -94,6 +94,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Ελέγξτε τις απαντήσεις σας",
   "ui.messagePart.questions.dismissed": "Οι ερωτήσεις απορρίφθηκαν",
   "ui.messagePart.compaction": "Σύνοψη συνεδρίας",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} ανάγνωση",
   "ui.messagePart.context.read.other": "{{count}} διαβάζει",
   "ui.messagePart.context.search.one": "{{count}} αναζήτηση",

@@ -104,6 +104,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Перевірте свої відповіді",
   "ui.messagePart.questions.dismissed": "Запитання відхилено",
   "ui.messagePart.compaction": "Сесію стиснуто",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} читання",
   "ui.messagePart.context.read.few": "{{count}} читання",
   "ui.messagePart.context.read.many": "{{count}} читань",

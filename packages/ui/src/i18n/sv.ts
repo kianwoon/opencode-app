@@ -94,6 +94,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Granska dina svar",
   "ui.messagePart.questions.dismissed": "Frågorna har avfärdats",
   "ui.messagePart.compaction": "Sessionen har komprimerats",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} läsning",
   "ui.messagePart.context.read.other": "{{count}} läsningar",
   "ui.messagePart.context.search.one": "{{count}} sökning",

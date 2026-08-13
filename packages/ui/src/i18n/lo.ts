@@ -94,6 +94,7 @@ export const dict = {
   "ui.messagePart.review.title": "ທົບທວນຄືນຄໍາຕອບຂອງເຈົ້າ",
   "ui.messagePart.questions.dismissed": "ປິດຄຳຖາມ",
   "ui.messagePart.compaction": "ເຊດຊັນຖືກບີບອັດລົງ",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} ອ່ານ",
   "ui.messagePart.context.read.other": "{{count}} ອ່ານ",
   "ui.messagePart.context.search.one": "{{count}} ຄົ້ນຫາ",

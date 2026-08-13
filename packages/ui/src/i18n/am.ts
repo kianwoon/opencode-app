@@ -93,6 +93,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "መልሶችዎን ይገምግሙ",
   "ui.messagePart.questions.dismissed": "ጥያቄዎች ውድቅ የተደረጉ",
   "ui.messagePart.compaction": "የክፍለ ጊዜው የታመቀ",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} ማንበብ",
   "ui.messagePart.context.read.other": "{{count}} ያነባል",
   "ui.messagePart.context.search.one": "{{count}} ፍለጋ",

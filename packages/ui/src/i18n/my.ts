@@ -95,6 +95,7 @@ export const dict = {
   "ui.messagePart.review.title": "သင့်အဖြေများကို ပြန်လည်သုံးသပ်ပါ။",
   "ui.messagePart.questions.dismissed": "မေးခွန်းများကို ထုတ်ထားသည်။",
   "ui.messagePart.compaction": "ဆက်ရှင်ကို ကျုံ့လိုက်ပါပြီ။",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} ဖတ်သည်။",
   "ui.messagePart.context.read.other": "{{count}} ဖတ်သည်။",
   "ui.messagePart.context.search.one": "{{count}} ရှာဖွေမှု",
