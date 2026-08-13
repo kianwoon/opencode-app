@@ -14,6 +14,7 @@
   <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
+
 <p align="center">
   <a href="README.md">English</a> |
   <a href="README.zh.md">简体中文</a> |
@@ -40,7 +41,7 @@
 </p>
 
 [![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
-
+ <img width="1375" height="1307" alt="Screenshot 2026-08-13 at 11 24 18 PM" src="https://github.com/user-attachments/assets/b9ba98d2-2c3f-4b7e-9b1d-a61be2a8dff7" />
 ---
 
 ### Installation
