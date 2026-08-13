@@ -236,7 +236,7 @@ function tail(text: string, maxLines: number, maxBytes: number) {
   for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
     const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
     if (bytes + size > maxBytes) {
-      if (out.length === 0) {
+      if (bytes === 0) {
         const buf = Buffer.from(lines[i], "utf-8")
         let start = buf.length - maxBytes
         if (start < 0) start = 0
@@ -292,7 +292,8 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
 
 function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && Shell.ps(shell)) {
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+    const encoded = Buffer.from(command, "utf-16le").toString("base64")
+    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
       cwd,
       env,
       stdin: "ignore",

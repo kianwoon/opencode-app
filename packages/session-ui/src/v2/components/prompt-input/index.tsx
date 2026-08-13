@@ -1,4 +1,4 @@
-import { createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -56,6 +56,19 @@ export function PromptInputV2(props: PromptInputV2Props) {
     if (!editor || !window.getSelection()?.isCollapsed) return
     props.controller.onCursor(promptInputV2Cursor(editor))
   }
+  const syncEditor = (target: HTMLDivElement) => {
+    const cursor = promptInputV2Cursor(target)
+    const prompt = parsePromptInputV2Editor(target)
+    const images = props.controller.parts().filter((part) => part.type === "image")
+    localInput = true
+    props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
+  }
+  // The prompt state stays empty while an IME composition is in flight (input
+  // events are ignored until compositionend), so the placeholder has to watch
+  // the composing text in the editor itself or it renders under it.
+  const [composingText, setComposingText] = createSignal(false)
+  const syncComposingText = (target: HTMLDivElement) =>
+    setComposingText(!!target.textContent?.replace(/[\n\u200B]/g, ""))
   const mode = createMemo(() => state.mode)
   const buttons = createMemo(() => ({
     opacity: mode() === "normal" ? 1 : 0,
@@ -70,7 +83,10 @@ export function PromptInputV2(props: PromptInputV2Props) {
       localInput = false
       return
     }
-    renderPromptInputV2Editor(editor, parts)
+    // Rewriting the editor DOM while an IME composition is active makes Safari
+    // cancel it mid-flight; the compositionend write-back reconciles state.
+    if (props.controller.imeActive()) return
+    renderPromptInputV2Editor(editor, parts, props.controller.cursor())
   })
 
   return (
@@ -163,26 +179,48 @@ export function PromptInputV2(props: PromptInputV2Props) {
             class="relative z-10 block min-h-[60px] max-h-[180px] w-full overflow-y-auto whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none empty:before:content-['\200B'] [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
             classList={{ "font-mono!": state.mode === "shell", "opacity-50": props.disabled }}
             onInput={(event) => {
-              const cursor = promptInputV2Cursor(event.currentTarget)
-              const prompt = parsePromptInputV2Editor(event.currentTarget)
-              const images = props.controller.parts().filter((part) => part.type === "image")
-              localInput = true
-              props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
+              // Safari fires input (insertCompositionText) before compositionstart
+              // and on every composition keystroke; reacting here re-renders
+              // mid-composition and splits it into per-letter micro compositions.
+              // State is reconciled once by the compositionend write-back.
+              if (event.isComposing || props.controller.imeActive()) {
+                syncComposingText(event.currentTarget)
+                return
+              }
+              syncEditor(event.currentTarget)
             }}
             onKeyDown={(event) => {
+              // While composing (and shortly after compositionend) stay inert:
+              // dispatching here re-renders and makes Safari split the
+              // composition, and the confirming Enter must never submit.
+              if (props.controller.imeComposing(event)) return
               if (props.controller.onKeyDown(event)) return
-              if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+              if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
                 if (event.repeat) return
                 props.controller.submit()
               }
             }}
-            onKeyUp={updateCursor}
-            onPointerUp={updateCursor}
+            onCompositionStart={(event) => {
+              props.controller.onCompositionStart()
+              syncComposingText(event.currentTarget)
+            }}
+            onCompositionUpdate={(event) => syncComposingText(event.currentTarget)}
+            onCompositionEnd={(event) => {
+              props.controller.onCompositionEnd()
+              setComposingText(false)
+              syncEditor(event.currentTarget)
+            }}
+            onKeyUp={() => {
+              if (!props.controller.imeActive()) updateCursor()
+            }}
+            onPointerUp={() => {
+              if (!props.controller.imeActive()) updateCursor()
+            }}
             onPaste={props.controller.onPaste}
             onFocus={() => props.controller.dispatch({ type: "focus.editor" })}
           />
-          <Show when={!props.controller.value()}>
+          <Show when={!props.controller.value() && !composingText()}>
             <div
               class="pointer-events-none absolute inset-x-0 top-0 px-4 pt-4 text-[13px] font-[440] leading-5 text-v2-text-text-faint"
               classList={{ "font-mono!": state.mode === "shell" }}
@@ -269,8 +307,9 @@ export function PromptInputV2(props: PromptInputV2Props) {
   )
 }
 
-function renderPromptInputV2Editor(editor: HTMLDivElement, prompt: PromptInputV2Prompt) {
+function renderPromptInputV2Editor(editor: HTMLDivElement, prompt: PromptInputV2Prompt, cursor?: number) {
   const active = document.activeElement === editor
+  const previous = cursor ?? promptInputV2Cursor(editor)
   editor.replaceChildren(
     ...prompt.flatMap<Node>((part) => {
       if (part.type === "image") return []
@@ -290,10 +329,50 @@ function renderPromptInputV2Editor(editor: HTMLDivElement, prompt: PromptInputV2
     }),
   )
   if (!active) return
-  const selection = window.getSelection()
+  setPromptInputV2Cursor(editor, previous)
+}
+
+// Restores the caret at a prompt character offset after the editor DOM is rebuilt.
+// Mentions are uneditable spans that still occupy their text length, so the caret
+// is placed before or after a mention, never inside it.
+function setPromptInputV2Cursor(editor: HTMLDivElement, position: number) {
+  let remaining = position
+  let node = editor.firstChild
+  while (node) {
+    const isText = node.nodeType === Node.TEXT_NODE
+    const isMention =
+      node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).dataset.mention !== undefined
+    const length = isText
+      ? (node.textContent ?? "").replace(/\u200B/g, "").length
+      : isMention
+        ? (node.textContent ?? "").length
+        : 0
+    if (isText && remaining <= length) {
+      const range = document.createRange()
+      range.setStart(node, Math.max(0, remaining))
+      range.collapse(true)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      return
+    }
+    if (isMention && remaining <= length) {
+      const range = document.createRange()
+      if (remaining === 0) range.setStartBefore(node)
+      else range.setStartAfter(node)
+      range.collapse(true)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      return
+    }
+    remaining -= length
+    node = node.nextSibling
+  }
   const range = document.createRange()
   range.selectNodeContents(editor)
   range.collapse(false)
+  const selection = window.getSelection()
   selection?.removeAllRanges()
   selection?.addRange(range)
 }

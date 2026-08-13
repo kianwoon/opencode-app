@@ -49,6 +49,7 @@ import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
+import { createMemoryMonitor, sendRendererMemoryPressure } from "./memory"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -66,6 +67,7 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let appQuitting = false
 
 const pendingDeepLinks: string[] = []
 
@@ -168,7 +170,9 @@ const main = Effect.gen(function* () {
     await killSidecar()
     wslServers.stopAll()
   }
+  let stoppingForQuit = false
   const relaunch = () => {
+    appQuitting = true
     setAppQuitting()
     void stopSidecars().finally(() => {
       app.relaunch()
@@ -191,6 +195,8 @@ const main = Effect.gen(function* () {
   ensureLoopbackNoProxy()
   useEnvProxy()
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
+  const existingJsFlags = app.commandLine.getSwitchValue("js-flags")
+  app.commandLine.appendSwitch("js-flags", existingJsFlags ? `${existingJsFlags} --expose-gc` : "--expose-gc")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
   if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
@@ -221,12 +227,21 @@ const main = Effect.gen(function* () {
     emitDeepLinks([url])
   })
 
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
+    appQuitting = true
     setAppQuitting()
-    void stopSidecars()
+    if (!server && !stoppingForQuit) return
+    event.preventDefault()
+    if (stoppingForQuit) return
+    stoppingForQuit = true
+    void stopSidecars().finally(() => {
+      stoppingForQuit = false
+      app.quit()
+    })
   })
 
   app.on("will-quit", () => {
+    appQuitting = true
     setAppQuitting()
     void stopSidecars()
   })
@@ -245,6 +260,7 @@ const main = Effect.gen(function* () {
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
+      appQuitting = true
       setAppQuitting()
       void stopSidecars().finally(() => app.quit())
     })
@@ -374,16 +390,39 @@ const main = Effect.gen(function* () {
     const url = `http://${hostname}:${port}`
     const password = randomUUID()
 
-    logger.log("spawning sidecar", { url })
-    const { listener, health } = yield* Effect.promise(() =>
+    const spawnSidecar = () =>
       spawnLocalServer(hostname, port, password, {
         userDataPath: app.getPath("userData"),
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
         onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
-      }),
-    )
-    server = listener
+        onGone: (details) => restartSidecarOnOOM(details),
+      }).then((result) => {
+        server = result.listener
+        return result
+      })
+
+    let sidecarAttempts = 0
+    const SIDECAR_MAX_OOM_RESTARTS = 3
+    let restarting: Promise<unknown> | undefined
+    const restartSidecarOnOOM = (details: { reason: string }) => {
+      if (appQuitting) return
+      if (details.reason !== "oom") return
+      if (sidecarAttempts >= SIDECAR_MAX_OOM_RESTARTS) {
+        writeLog("utility", "sidecar oom restart limit reached", { attempts: sidecarAttempts }, "error")
+        return
+      }
+      sidecarAttempts += 1
+      writeLog("utility", "restarting sidecar after oom", { attempt: sidecarAttempts }, "warn")
+      restarting = (restarting ?? Promise.resolve()).finally(() =>
+        spawnSidecar().catch((error) =>
+          writeLog("utility", "sidecar oom restart failed", { error: String(error) }, "error"),
+        ),
+      )
+    }
+
+    logger.log("spawning sidecar", { url })
+    const { health } = yield* Effect.promise(() => spawnSidecar())
     yield* Deferred.succeed(serverReady, {
       url,
       username: "opencode",
@@ -419,6 +458,14 @@ const main = Effect.gen(function* () {
 
   const windows = restoreMainWindows()
   if (windows.length) createMenu(menuDeps)
+
+  const memoryMonitor = createMemoryMonitor({
+    getAppMetrics: () => app.getAppMetrics(),
+    requestSidecarGc: () => server?.gc(),
+    requestRendererGc: () => sendRendererMemoryPressure(BrowserWindow.getAllWindows()),
+  })
+  memoryMonitor.start()
+  app.once("will-quit", () => memoryMonitor.stop())
 })
 
 Effect.runFork(main)
