@@ -188,6 +188,8 @@ export const dict = {
   "command.session.compact.description": "Підсумувати сесію, щоб зменшити розмір контексту",
   "command.session.fork": "Відгалузити від повідомлення",
   "command.session.fork.description": "Створити нову сесію з попереднього повідомлення",
+  "command.session.search": "Шукати повідомлення",
+  "command.session.search.description": "Пошук повідомлень у цій сесії",
   "command.session.share": "Поділитися сесією",
   "command.session.share.description": "Поділитися цією сесією та скопіювати URL у буфер обміну",
   "command.session.unshare": "Припинити поширення сесії",
@@ -433,6 +435,7 @@ export const dict = {
   "mcp.auth.clickToAuthenticate": "Натисніть для автентифікації",
 
   "dialog.fork.empty": "Немає повідомлень для відгалуження",
+  "dialog.search.empty": "Немає відповідних повідомлень",
 
   "dialog.directory.search.placeholder": "Пошук папок",
   "dialog.directory.empty": "Папок не знайдено",

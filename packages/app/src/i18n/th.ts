@@ -186,6 +186,8 @@ export const dict = {
   "command.session.compact.description": "สรุปเซสชันเพื่อลดขนาดบริบท",
   "command.session.fork": "แตกแขนงจากข้อความ",
   "command.session.fork.description": "สร้างเซสชันใหม่จากข้อความก่อนหน้า",
+  "command.session.search": "ค้นหาข้อความ",
+  "command.session.search.description": "ค้นหาข้อความในเซสชันนี้",
   "command.session.share": "แชร์เซสชัน",
   "command.session.share.description": "แชร์เซสชันนี้และคัดลอก URL ไปยังคลิปบอร์ด",
   "command.session.unshare": "ยกเลิกการแชร์เซสชัน",
@@ -429,6 +431,7 @@ export const dict = {
   "mcp.status.disabled": "ปิดใช้งาน",
 
   "dialog.fork.empty": "ไม่มีข้อความให้แตกแขนง",
+  "dialog.search.empty": "ไม่พบข้อความที่ตรงกัน",
 
   "dialog.directory.search.placeholder": "ค้นหาโฟลเดอร์",
   "dialog.directory.empty": "ไม่พบโฟลเดอร์",

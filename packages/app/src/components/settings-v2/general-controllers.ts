@@ -94,20 +94,26 @@ export function createAppearanceSettingsController() {
         value: sansInput(settings.appearance.uiFont()),
         family: sansFontFamily(settings.appearance.uiFont()),
         placeholder: sansDefault,
+        weight: settings.appearance.uiFontWeight(),
       })),
       code: createMemo(() => ({
         value: monoInput(settings.appearance.font()),
         family: monoFontFamily(settings.appearance.font()),
         placeholder: monoDefault,
+        weight: settings.appearance.codeFontWeight(),
       })),
       terminal: createMemo(() => ({
         value: terminalInput(settings.appearance.terminalFont()),
         family: terminalFontFamily(settings.appearance.terminalFont()),
         placeholder: terminalDefault,
+        weight: settings.appearance.terminalFontWeight(),
       })),
       setUI: (value: string) => settings.appearance.setUIFont(value),
       setCode: (value: string) => settings.appearance.setFont(value),
       setTerminal: (value: string) => settings.appearance.setTerminalFont(value),
+      setUIWeight: (value: number) => settings.appearance.setUIFontWeight(value),
+      setCodeWeight: (value: number) => settings.appearance.setCodeFontWeight(value),
+      setTerminalWeight: (value: number) => settings.appearance.setTerminalFontWeight(value),
     },
   }
 }

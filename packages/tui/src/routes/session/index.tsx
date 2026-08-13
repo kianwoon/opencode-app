@@ -51,6 +51,7 @@ import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
+import { DialogSearch } from "./dialog-search"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
@@ -549,6 +550,28 @@ export function Session() {
           <DialogForkFromTimeline
             onMove={(messageID) => {
               if (!messageID) return
+              const child = scroll.getChildren().find((child) => {
+                return child.id === messageID
+              })
+              if (child) scroll.scrollBy(child.y - scroll.y - 1)
+            }}
+            sessionID={route.sessionID}
+          />
+        ))
+      },
+    },
+    {
+      title: "Search messages",
+      value: "session.search",
+      category: "Session",
+      slash: {
+        name: "search",
+        aliases: ["find"],
+      },
+      run: () => {
+        dialog.replace(() => (
+          <DialogSearch
+            onMove={(messageID) => {
               const child = scroll.getChildren().find((child) => {
                 return child.id === messageID
               })

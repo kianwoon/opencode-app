@@ -90,6 +90,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
+      // Drop the cached global config so a subsequent read re-parses the on-disk
+      // config (the cache is TTL-infinity, so it would otherwise never refresh).
+      yield* config.invalidate()
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       return true
     })

@@ -1148,6 +1148,23 @@ export default function LegacyLayout(props: ParentProps) {
     }
   }
 
+  // Reload global + project configs (AGENTS.md, opencode.json, etc.) without
+  // restarting the app. The server invalidates its cached config and disposes
+  // all instances so the next access re-bootstraps each project; the resulting
+  // global.disposed event triggers the app to re-fetch everything.
+  async function reloadConfigs() {
+    try {
+      showToast({ title: language.t("sidebar.reload.started") })
+      await serverSDK().client.global.dispose()
+      showToast({ title: language.t("sidebar.reload.done") })
+    } catch (err) {
+      showToast({
+        title: language.t("sidebar.reload.error"),
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   function projectRoot(directory: string) {
     const key = pathKey(directory)
     const project = layout.projects
@@ -2277,6 +2294,8 @@ export default function LegacyLayout(props: ParentProps) {
       onOpenSettings={openSettings}
       vacuumLabel={() => language.t("sidebar.vacuum")}
       onVacuum={vacuumDatabase}
+      reloadLabel={() => language.t("sidebar.reload")}
+      onReloadConfigs={reloadConfigs}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
       renderPanel={() =>

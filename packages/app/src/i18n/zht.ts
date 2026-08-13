@@ -190,6 +190,8 @@ export const dict = {
   "command.session.compact.description": "摘要工作階段以減少上下文大小",
   "command.session.fork": "從訊息分支",
   "command.session.fork.description": "從先前的訊息建立新工作階段",
+  "command.session.search": "搜尋訊息",
+  "command.session.search.description": "搜尋此工作階段中的訊息",
   "command.session.share": "分享工作階段",
   "command.session.share.description": "分享此工作階段並將連結複製到剪貼簿",
   "command.session.unshare": "取消分享工作階段",
@@ -429,6 +431,7 @@ export const dict = {
   "mcp.status.disabled": "已停用",
 
   "dialog.fork.empty": "沒有可用於分支的訊息",
+  "dialog.search.empty": "沒有相符的訊息",
 
   "dialog.directory.search.placeholder": "搜尋資料夾",
   "dialog.directory.empty": "找不到資料夾",

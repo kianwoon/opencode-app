@@ -27,6 +27,7 @@ import { showToast } from "@/utils/toast"
 import { sessionTitle } from "@/utils/session-title"
 import { pathKey } from "@/utils/path-key"
 import { useServerSync } from "@/context/server-sync"
+import { useServerSDK } from "@/context/server-sdk"
 import { shouldOpenSessionInBackground } from "../home-session-open"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 
@@ -72,6 +73,23 @@ export function NewSidebar() {
   const global = useGlobal()
   const pickDirectory = useDirectoryPicker()
   const openSettings = useSettingsCommand()
+  const serverSDK = useServerSDK()
+  // Reload global + project configs (AGENTS.md, opencode.json, etc.) without
+  // restarting the app. The server invalidates its cached config and disposes
+  // all instances so the next access re-bootstraps each project; the resulting
+  // global.disposed event triggers the app to re-fetch everything.
+  async function reloadConfigs() {
+    try {
+      showToast({ title: language.t("sidebar.reload.started") })
+      await serverSDK().client.global.dispose()
+      showToast({ title: language.t("sidebar.reload.done") })
+    } catch (err) {
+      showToast({
+        title: language.t("sidebar.reload.error"),
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
   // Compact the opencode server database (VACUUM) to reclaim dead space from
   // deleted sessions/events. Non-destructive; shows a toast with the reclaimed
   // size. Desktop-only (requires the IPC handler in the main process).
@@ -304,6 +322,7 @@ export function NewSidebar() {
               onAddProject={addProject}
               onOpenSettings={openSettings}
               onVacuum={vacuumDatabase}
+              onReloadConfigs={reloadConfigs}
               onOpenHelp={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
             />
           }
@@ -338,6 +357,7 @@ function RailSidebar(props: {
   onAddProject: (conn: ServerConnection.Any) => void
   onOpenSettings: () => void
   onVacuum: () => void
+  onReloadConfigs: () => void
   onOpenHelp: () => void
 }) {
   const language = useLanguage()
@@ -377,6 +397,7 @@ function RailSidebar(props: {
         }}
       />
       <div class="mt-auto flex flex-col items-center gap-1 pb-2">
+        <RailAction icon="outline-refresh" label={language.t("sidebar.reload")} onClick={props.onReloadConfigs} />
         <RailAction icon="outline-reset" label={language.t("sidebar.vacuum")} onClick={props.onVacuum} />
         <RailAction icon="settings-gear" label={language.t("sidebar.settings")} onClick={props.onOpenSettings} />
         <RailAction icon="help" label={language.t("sidebar.help")} onClick={props.onOpenHelp} />
@@ -427,6 +448,19 @@ function ExpandedSidebar(props: SidebarActions) {
   const layout = useLayout()
   const language = useLanguage()
   const openSettings = useSettingsCommand()
+  const serverSDK = useServerSDK()
+  async function reloadConfigs() {
+    try {
+      showToast({ title: language.t("sidebar.reload.started") })
+      await serverSDK().client.global.dispose()
+      showToast({ title: language.t("sidebar.reload.done") })
+    } catch (err) {
+      showToast({
+        title: language.t("sidebar.reload.error"),
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
   async function vacuumDatabase() {
     if (!window.api?.vacuumDatabase) return
     try {
@@ -516,6 +550,16 @@ function ExpandedSidebar(props: SidebarActions) {
         </ScrollView>
       </div>
       <div class="shrink-0 flex items-center gap-1 px-2 py-1.5 border-t border-v2-border-border-base">
+        <TooltipV2 placement="top" value={language.t("sidebar.reload")}>
+          <IconButtonV2
+            type="button"
+            variant="ghost-muted"
+            size="small"
+            icon={<IconV2 name="outline-refresh" />}
+            aria-label={language.t("sidebar.reload")}
+            onClick={reloadConfigs}
+          />
+        </TooltipV2>
         <TooltipV2 placement="top" value={language.t("sidebar.vacuum")}>
           <IconButtonV2
             type="button"

@@ -188,6 +188,8 @@ export const dict = {
   "command.session.compact.description": "Ringkas sesi untuk mengurangi ukuran konteks",
   "command.session.fork": "Fork dari pesan",
   "command.session.fork.description": "Buat sesi baru dari pesan sebelumnya",
+  "command.session.search": "Cari pesan",
+  "command.session.search.description": "Cari pesan dalam sesi ini",
   "command.session.share": "Bagikan sesi",
   "command.session.share.description": "Bagikan sesi ini dan salin URL ke papan klip",
   "command.session.unshare": "Hentikan berbagi",
@@ -432,6 +434,7 @@ export const dict = {
   "mcp.auth.clickToAuthenticate": "Klik untuk mengautentikasi",
 
   "dialog.fork.empty": "Tidak ada pesan yang dapat dicabangkan",
+  "dialog.search.empty": "Tidak ada pesan yang cocok",
 
   "dialog.directory.search.placeholder": "Cari folder",
   "dialog.directory.empty": "Folder tidak ditemukan",

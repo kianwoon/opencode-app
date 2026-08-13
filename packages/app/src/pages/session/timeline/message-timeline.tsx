@@ -62,6 +62,7 @@ import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
+import { useCommand } from "@/context/command"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
@@ -266,6 +267,7 @@ export function MessageTimeline(props: {
   const tabs = useTabs()
   const dialog = useDialog()
   const language = useLanguage()
+  const command = useCommand()
   const { params, sessionKey } = useSessionKey()
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
@@ -1533,6 +1535,26 @@ export function MessageTimeline(props: {
                       "gap-3": !settings.general.newLayoutDesigns(),
                     }}
                   >
+                    <Show
+                      when={settings.general.newLayoutDesigns()}
+                      fallback={
+                        <IconButton
+                          icon="magnifying-glass"
+                          variant="ghost"
+                          class="size-6 rounded-md"
+                          aria-label={language.t("command.session.search")}
+                          onClick={() => command.trigger("session.search")}
+                        />
+                      }
+                    >
+                      <IconButtonV2
+                        icon={<IconV2 name="magnifying-glass" />}
+                        variant="ghost-muted"
+                        size="large"
+                        aria-label={language.t("command.session.search")}
+                        onClick={() => command.trigger("session.search")}
+                      />
+                    </Show>
                     <SessionContextUsage
                       placement="bottom"
                       buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}

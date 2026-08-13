@@ -192,6 +192,8 @@ export const dict = {
   "command.session.compact.description": "Bağlam boyutunu azaltmak için oturumu özetle",
   "command.session.fork": "Mesajdan dallandır",
   "command.session.fork.description": "Önceki bir mesajdan yeni oturum oluştur",
+  "command.session.search": "Mesajları ara",
+  "command.session.search.description": "Bu oturumdaki mesajları ara",
   "command.session.share": "Oturumu paylaş",
   "command.session.share.description": "Bu oturumu paylaş ve URL'yi panoya kopyala",
   "command.session.unshare": "Paylaşımı kaldır",
@@ -436,6 +438,7 @@ export const dict = {
   "mcp.status.disabled": "devre dışı",
 
   "dialog.fork.empty": "Dallandırılacak mesaj yok",
+  "dialog.search.empty": "Eşleşen mesaj yok",
 
   "dialog.directory.search.placeholder": "Klasör ara",
   "dialog.directory.empty": "Klasör bulunamadı",

@@ -895,6 +895,7 @@ export default function Page() {
   let content: HTMLDivElement | undefined
   let revealMessage = (_id: string) => {}
   let scrollToEnd = () => {}
+  let scrollToMessageRef = (_message: UserMessage) => {}
   let scrollMark = 0
   let messageMark = 0
 
@@ -1165,6 +1166,11 @@ export default function Page() {
     focusInput,
     review: reviewTab,
     fileBrowser: () => newSessionDesign() && isDesktop() && !!params.id,
+    revealMessage: (id) => {
+      const message = sync().data.message[params.id ?? ""]?.find((m) => m.id === id)
+      if (message && message.role === "user") scrollToMessageRef(message as UserMessage)
+      else revealMessage(id)
+    },
   })
   command.register("session-palette", () => [
     {
@@ -2010,6 +2016,7 @@ export default function Page() {
     scheduleScrollState,
     consumePendingMessage: layout.pendingMessage.consume,
   })
+  scrollToMessageRef = scrollToMessage
 
   createEffect(
     on(

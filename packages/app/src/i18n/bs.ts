@@ -188,6 +188,8 @@ export const dict = {
   "command.session.compact.description": "Sažmi sesiju kako bi se smanjio kontekst",
   "command.session.fork": "Fork iz poruke",
   "command.session.fork.description": "Kreiraj novu sesiju iz prethodne poruke",
+  "command.session.search": "Pretraži poruke",
+  "command.session.search.description": "Pretraži poruke u ovoj sesiji",
   "command.session.share": "Podijeli sesiju",
   "command.session.share.description": "Podijeli ovu sesiju i kopiraj URL u međuspremnik",
   "command.session.unshare": "Ukini dijeljenje sesije",
@@ -432,6 +434,7 @@ export const dict = {
   "mcp.status.disabled": "onemogućeno",
 
   "dialog.fork.empty": "Nema poruka za fork",
+  "dialog.search.empty": "Nema odgovarajućih poruka",
 
   "dialog.directory.search.placeholder": "Pretraži fascikle",
   "dialog.directory.empty": "Nema pronađenih fascikli",

@@ -45,6 +45,9 @@ export interface Settings {
     mono: string
     sans: string
     terminal: string
+    uiFontWeight: number
+    codeFontWeight: number
+    terminalFontWeight: number
   }
   keybinds: Record<string, string>
   permissions: {
@@ -180,6 +183,10 @@ export function terminalFontFamily(font: string | undefined) {
   return stack(font, terminalBase)
 }
 
+export function weight(weight: number | undefined, fallback: number) {
+  return weight ?? fallback
+}
+
 const defaultSettings: Settings = {
   general: {
     autoSave: true,
@@ -201,6 +208,9 @@ const defaultSettings: Settings = {
     mono: "",
     sans: "",
     terminal: "",
+    uiFontWeight: 400,
+    codeFontWeight: 400,
+    terminalFontWeight: 400,
   },
   keybinds: {},
   permissions: {
@@ -352,6 +362,18 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       // The v2 layout renders message and UI text with --font-family-text, so
       // keep it in sync with the user-configurable UI font.
       root.style.setProperty("--font-family-text", sans)
+      root.style.setProperty(
+        "--font-family-sans--font-weight",
+        String(weight(store.appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight)),
+      )
+      root.style.setProperty(
+        "--font-family-mono--font-weight",
+        String(weight(store.appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight)),
+      )
+      root.style.setProperty(
+        "--font-family-terminal--font-weight",
+        String(weight(store.appearance?.terminalFontWeight, defaultSettings.appearance.terminalFontWeight)),
+      )
     })
 
     createEffect(() => {
@@ -478,6 +500,27 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         terminalFont: withFallback(() => store.appearance?.terminal, defaultSettings.appearance.terminal),
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
+        },
+        uiFontWeight: withFallback(
+          () => store.appearance?.uiFontWeight,
+          defaultSettings.appearance.uiFontWeight,
+        ),
+        setUIFontWeight(value: number) {
+          setStore("appearance", "uiFontWeight", value)
+        },
+        codeFontWeight: withFallback(
+          () => store.appearance?.codeFontWeight,
+          defaultSettings.appearance.codeFontWeight,
+        ),
+        setCodeFontWeight(value: number) {
+          setStore("appearance", "codeFontWeight", value)
+        },
+        terminalFontWeight: withFallback(
+          () => store.appearance?.terminalFontWeight,
+          defaultSettings.appearance.terminalFontWeight,
+        ),
+        setTerminalFontWeight(value: number) {
+          setStore("appearance", "terminalFontWeight", value)
         },
       },
       keybinds: {

@@ -87,6 +87,8 @@ export const dict = {
   "command.session.compact.description": "Opsummer sessionen for at reducere kontekststørrelsen",
   "command.session.fork": "Forgren fra besked",
   "command.session.fork.description": "Opret en ny session fra en tidligere besked",
+  "command.session.search": "Søg efter beskeder",
+  "command.session.search.description": "Søg efter beskederne i denne session",
   "command.session.share": "Del session",
   "command.session.share.description": "Del denne session og kopier URL'en til udklipsholderen",
   "command.session.unshare": "Stop deling af session",
@@ -329,6 +331,7 @@ export const dict = {
   "mcp.status.disabled": "deaktiveret",
 
   "dialog.fork.empty": "Ingen beskeder at forgrene fra",
+  "dialog.search.empty": "Ingen matchende beskeder",
 
   "dialog.directory.search.placeholder": "Søg mapper",
   "dialog.directory.empty": "Ingen mapper fundet",

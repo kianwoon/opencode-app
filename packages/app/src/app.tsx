@@ -303,7 +303,7 @@ function BodyDesignClass() {
     document.body.classList.toggle("text-12-regular", !enabled)
     document.body.classList.toggle("font-(family-name:--font-family-text)", enabled)
     document.body.classList.toggle("text-[13px]", enabled)
-    document.body.classList.toggle("font-[440]", enabled)
+    document.body.classList.toggle("font-[var(--font-family-sans--font-weight)]", enabled)
   })
 
   return null

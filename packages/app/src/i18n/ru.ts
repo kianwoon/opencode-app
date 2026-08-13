@@ -187,6 +187,8 @@ export const dict = {
   "command.session.compact.description": "Сократить сессию для уменьшения размера контекста",
   "command.session.fork": "Создать ответвление",
   "command.session.fork.description": "Создать новую сессию из сообщения",
+  "command.session.search": "Поиск сообщений",
+  "command.session.search.description": "Поиск сообщений в этой сессии",
   "command.session.share": "Поделиться сессией",
   "command.session.share.description": "Поделиться сессией и скопировать URL в буфер обмена",
   "command.session.unshare": "Отменить публикацию",
@@ -430,6 +432,7 @@ export const dict = {
   "mcp.status.disabled": "отключено",
 
   "dialog.fork.empty": "Нет сообщений для ответвления",
+  "dialog.search.empty": "Нет подходящих сообщений",
 
   "dialog.directory.search.placeholder": "Поиск папок",
   "dialog.directory.empty": "Папки не найдены",

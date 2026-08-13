@@ -19,6 +19,11 @@
 
 - Always prefer `createStore` over multiple `createSignal` calls
 
+## i18n parity gotcha
+
+- Adding a NEW key to `src/i18n/en.ts` is not enough: `src/i18n/parity.test.ts` fails unless the key also exists in EVERY locale file in `src/i18n/` (~60 files). New user-visible strings (dialogs, commands, placeholders) must be added and translated to all locales, positioned consistently (near the related key) so the parity test passes.
+- The `bun test` suite from `packages/app` currently has PRE-EXISTING failures unrelated to feature work: the i18n parity test (missing `settings.general.row.fontWeight.*` / `sidebar.vacuum.*` keys added to en.ts but not yet translated) and a solid-js SSR `SyntaxError: Export named 'use' not found` in `src/context/comments.test.ts`. Verify whether a failure is caused by your change by checking the specific missing keys / files before chasing it.
+
 ## Localization
 
 - NEVER hardcode user-visible English strings in production code. ALWAYS use an i18n key for visible copy, placeholders, accessible labels, tooltips, menus, dialogs, toasts, empty states, and displayed errors.

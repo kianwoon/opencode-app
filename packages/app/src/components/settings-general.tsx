@@ -43,6 +43,11 @@ type ThemeOption = {
   name: string
 }
 
+type FontWeightOption = {
+  value: string
+  label: string
+}
+
 type ShellOption = {
   path: string
   name: string
@@ -221,6 +226,25 @@ export const SettingsGeneral: Component = () => {
   const mono = () => monoInput(settings.appearance.font())
   const sans = () => sansInput(settings.appearance.uiFont())
   const terminal = () => terminalInput(settings.appearance.terminalFont())
+
+  const fontWeightOptions = createMemo(() => [
+    { value: "300", label: language.t("settings.general.row.fontWeight.light") },
+    { value: "400", label: language.t("settings.general.row.fontWeight.regular") },
+    { value: "500", label: language.t("settings.general.row.fontWeight.medium") },
+    { value: "600", label: language.t("settings.general.row.fontWeight.semibold") },
+    { value: "700", label: language.t("settings.general.row.fontWeight.bold") },
+  ])
+
+  const fontWeightSelectProps = (current: () => number, set: (value: number) => void) => ({
+    options: fontWeightOptions(),
+    current: fontWeightOptions().find((o) => o.value === String(current())) ?? fontWeightOptions()[1],
+    value: (o: FontWeightOption) => o.value,
+    label: (o: FontWeightOption) => o.label,
+    onSelect: (option: FontWeightOption | undefined) => option && set(Number(option.value)),
+    variant: "secondary" as const,
+    size: "small" as const,
+    triggerVariant: "settings" as const,
+  })
 
   const soundSelectProps = (
     enabled: () => boolean,
@@ -506,7 +530,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.uiFont.title")}
           description={language.t("settings.general.row.uiFont.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
             <TextField
               data-action="settings-ui-font"
               label={language.t("settings.general.row.uiFont.title")}
@@ -522,6 +546,13 @@ export const SettingsGeneral: Component = () => {
               class="text-12-regular"
               style={{ "font-family": sansFontFamily(settings.appearance.uiFont()) }}
             />
+            <Select
+              data-action="settings-ui-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.uiFontWeight(),
+                (value) => settings.appearance.setUIFontWeight(value),
+              )}
+            />
           </div>
         </SettingsRow>
 
@@ -529,7 +560,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.font.title")}
           description={language.t("settings.general.row.font.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
             <TextField
               data-action="settings-code-font"
               label={language.t("settings.general.row.font.title")}
@@ -545,6 +576,13 @@ export const SettingsGeneral: Component = () => {
               class="text-12-regular"
               style={{ "font-family": monoFontFamily(settings.appearance.font()) }}
             />
+            <Select
+              data-action="settings-code-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.codeFontWeight(),
+                (value) => settings.appearance.setCodeFontWeight(value),
+              )}
+            />
           </div>
         </SettingsRow>
 
@@ -552,7 +590,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.terminalFont.title")}
           description={language.t("settings.general.row.terminalFont.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
             <TextField
               data-action="settings-terminal-font"
               label={language.t("settings.general.row.terminalFont.title")}
@@ -567,6 +605,13 @@ export const SettingsGeneral: Component = () => {
               autocapitalize="off"
               class="text-12-regular"
               style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont()) }}
+            />
+            <Select
+              data-action="settings-terminal-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.terminalFontWeight(),
+                (value) => settings.appearance.setTerminalFontWeight(value),
+              )}
             />
           </div>
         </SettingsRow>

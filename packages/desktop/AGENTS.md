@@ -12,3 +12,13 @@
 - Translate whole native-menu and dialog phrases in context. Audit recurring concepts for consistency and review every exact-English value; retain it only when it is an intentional product/provider/tool name, URL, code token, keyboard legend, acronym, asset name, or established borrowing.
 - Record the corpora used and flag uncertain or regional terminology in review notes.
 - Also use the relevant language authority or official dictionary for the locale (for example RAE/Fundéu, FranceTerme, Duden, TDK, Kotus/Kielitoimiston sanakirja, Språkrådet/Bokmålsordboka, Rada Języka Polskiego/PWN, the Russian and Arabic language academies, the Ukrainian Orthography, Taiwan MOE dictionaries, or the Royal Society of Thailand). Treat the English dictionary as the semantic source of truth and preserve placeholders, code identifiers, product names, and keyboard labels.
+
+## Packaging a production desktop build
+
+- **`package:mac` does NOT run `prebuild`/`build` automatically.** It packages whatever is already in `out/`. Running it alone silently bundles a stale server with the wrong channel.
+- The channel is baked into the server bundle by `prebuild` (via `OPENCODE_CHANNEL`), which runs `../opencode/script/build-node.ts`. The channel determines the app's database: prod → `opencode.db`, otherwise → `opencode-<channel>.db`.
+- To produce a **correct production copy**, propagate the channel through the whole chain (both steps, in order):
+  1. `OPENCODE_CHANNEL=prod bun run build`  (runs `prebuild` + electron-vite, baking `InstallationChannel = "prod"` into `out/main/chunks/node-*.js`)
+  2. `OPENCODE_CHANNEL=prod bun run package:mac`  (packages `.app`/`.dmg`/`.zip`)
+- **Acceptance gate**: the `verify-prod.ts` step must print `✅ Verified <channel> build: ... embeds channel "<channel>" and uses <db>`. It aborts (exit 1) on any mismatch — a passing verification is required, never skip or ignore it.
+- A dev build and a prod build are visually identical in the UI and file outputs; only `verify-prod.ts` reveals which DB the app connects to. Always confirm the verification output before declaring the build done.

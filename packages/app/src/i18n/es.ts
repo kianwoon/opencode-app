@@ -188,6 +188,8 @@ export const dict = {
   "command.session.compact.description": "Resumir la sesión para reducir el tamaño del contexto",
   "command.session.fork": "Bifurcar desde mensaje",
   "command.session.fork.description": "Crear una nueva sesión desde un mensaje anterior",
+  "command.session.search": "Buscar mensajes",
+  "command.session.search.description": "Buscar los mensajes de esta sesión",
   "command.session.share": "Compartir sesión",
   "command.session.share.description": "Compartir esta sesión y copiar la URL al portapapeles",
   "command.session.unshare": "Dejar de compartir sesión",
@@ -433,6 +435,7 @@ export const dict = {
   "mcp.status.disabled": "deshabilitado",
 
   "dialog.fork.empty": "No hay mensajes desde donde bifurcar",
+  "dialog.search.empty": "No hay mensajes coincidentes",
 
   "dialog.directory.search.placeholder": "Buscar carpetas",
   "dialog.directory.empty": "No se encontraron carpetas",

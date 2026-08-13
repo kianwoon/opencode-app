@@ -159,3 +159,11 @@ const table = sqliteTable("session", {
 - Keep delivery vocabulary explicit. Prompts steer by default and promote at the next safe provider-turn boundary while the current drain requires continuation. An explicit `queue` input remains pending until the Session would otherwise become idle; promote one queued input at that boundary, then reevaluate continuation before promoting another. Promoting any new user input resets the selected agent's provider-turn allowance; a batch of steers resets it once.
 - Keep EventV2 replay owner claims separate from clustered Session execution ownership.
 - Keep the System Context algebra, registry, and built-ins in `src/system-context`; keep Context Source producers with their observed domains, and keep Session History selection plus Context Epoch persistence Session-owned.
+
+## Persisting Non-Obvious Learnings (MANDATORY)
+
+- **After resolving a non-obvious issue that caused rework, failed builds, or wasted effort, immediately record a short note in the relevant package's `AGENTS.md` (or the root `AGENTS.md` if cross-cutting) before moving on.** Do not wait for the user to ask.
+- This applies especially to silent/high-stakes gotchas — e.g. build steps that don't do what their script name implies, environment variables that change runtime behavior invisibly (like `OPENCODE_CHANNEL` controlling which DB the app connects to), and traps that only surface late (like `verify-prod.ts`).
+- Notes should be concise, concrete, and actionable: what the gotcha is, the exact correct command/sequence, and the required acceptance gate to confirm success.
+- Treat a repeated mistake as a strong signal that documentation is missing. If you make the same mistake twice, writing it down is not optional — do it immediately.
+- Future sessions load `AGENTS.md` files automatically, so persisting here is how lessons survive across sessions. Do not rely on memory; write it down.
