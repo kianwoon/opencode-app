@@ -42,7 +42,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   )
 
 const it = testEffect(layer())
-const withWorkflows = testEffect(layer({ experimentalWorkflows: true }))
+const noWorkflows = testEffect(layer({ experimentalWorkflows: false }))
 
 const ref = { providerID: "test", modelID: "test-model" } as const
 
@@ -105,8 +105,8 @@ describe("workflow tool", () => {
     },
   )
 
-  withWorkflows.instance(
-    "workflow tool is registered when OPENCODE_EXPERIMENTAL_WORKFLOWS is on",
+  it.instance(
+    "workflow tool is registered by default",
     () =>
       Effect.gen(function* () {
         const agent = yield* Agent.Service
@@ -124,8 +124,8 @@ describe("workflow tool", () => {
     },
   )
 
-  it.instance(
-    "workflow tool is NOT registered when the flag is off (stable cache prefix)",
+  noWorkflows.instance(
+    "workflow tool is not registered when explicitly disabled",
     () =>
       Effect.gen(function* () {
         const agent = yield* Agent.Service
