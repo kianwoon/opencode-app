@@ -161,6 +161,19 @@ describe("session.system", () => {
     }),
   )
 
+  it.instance("environment output is date-independent (stable cache prefix)", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const env = yield* prompt.environment({ api: { id: "test-model" } } as Provider.Model)
+      const joined = env.join("\n")
+
+      expect(joined).toContain("Working directory:")
+      expect(joined).toContain("Platform:")
+      expect(joined).not.toContain("Today's date")
+      expect(joined).not.toContain(new Date().toDateString())
+    }),
+  )
+
   it.effect("workflow guidance tells the agent to auto-decompose pipeline tasks", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service
