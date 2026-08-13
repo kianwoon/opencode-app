@@ -12,6 +12,7 @@ import { Filesystem } from "@/util/filesystem"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
 import { Agent } from "../../src/agent/agent"
+import { Instruction } from "../../src/session/instruction"
 import { Truncate } from "@/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -31,6 +32,7 @@ const shellLayer = Layer.mergeAll(
       Truncate.node,
       Config.node,
       Agent.node,
+      Instruction.node,
       RuntimeFlags.node,
     ]),
   ),
@@ -1228,5 +1230,38 @@ describe("tool.shell truncation", () => {
         expect(lines[lineCount - 1]).toBe(String(lineCount))
       }),
     ),
+  )
+
+  it.live("attaches nested AGENTS.md guidance when running bash in a package directory", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const fs = yield* FSUtil.Service
+          // Create a nested package directory with its own AGENTS.md, mimicking
+          // packages/<name>/AGENTS.md.
+          const pkg = path.join(tmp, "packages", "desktop")
+          yield* fs.makeDirectory(pkg, { recursive: true })
+          const guide = "# Desktop package notes\n\n- OPENCODE_CHANNEL=prod is required for packaging.\n"
+          yield* fs.writeFileString(path.join(pkg, "AGENTS.md"), guide)
+
+          const bash = yield* initBash()
+          const result = yield* bash.execute(
+            {
+              command: "echo packaged",
+              workdir: path.join("packages", "desktop"),
+            },
+            ctx,
+          )
+          expect(result.metadata.exit).toBe(0)
+          expect(result.output).toContain("packaged")
+          // The nested AGENTS.md must be surfaced as a system-reminder.
+          expect(result.output).toContain("OPENCODE_CHANNEL=prod")
+          expect(result.output).toContain("<system-reminder>")
+          expect((result.metadata as { loaded?: string[] }).loaded).toContain(path.join(pkg, "AGENTS.md"))
+        }),
+      )
+    }),
   )
 })
