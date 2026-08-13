@@ -831,6 +831,7 @@ function SessionRow(props: {
   )
   // Running sessions are reported by the server's session_working status.
   const running = avatar.loading
+  const pending = avatar.pending
   // Unsent message: read the session tab's prompt memory. The prompt session is
   // created lazily when the tab is opened, so this only reflects tabs that have
   // been opened during this app run (in-memory tab memory). Reading tabs.store
@@ -871,14 +872,26 @@ function SessionRow(props: {
       }}
     >
       <span class="shrink-0 flex size-4 items-center justify-center">
-        <SessionStatusIcon running={running()} unsent={unsent()} active={active()} unread={avatar.unread()} />
+        <SessionStatusIcon
+          running={running()}
+          pending={pending()}
+          unsent={unsent()}
+          active={active()}
+          unread={avatar.unread()}
+        />
       </span>
       <span class="min-w-0 flex-1 truncate">{title()}</span>
     </button>
   )
 }
 
-function SessionStatusIcon(props: { running: boolean; unsent: boolean; active: boolean; unread: boolean }) {
+function SessionStatusIcon(props: {
+  running: boolean
+  pending: boolean
+  unsent: boolean
+  active: boolean
+  unread: boolean
+}) {
   // Unsent message takes precedence: show an edit icon so the user knows the
   // composer has text that hasn't been sent.
   return (
@@ -909,21 +922,32 @@ function SessionStatusIcon(props: { running: boolean; unsent: boolean; active: b
           </span>
         }
       >
-        <span
-          class="flex size-4 items-center justify-center"
-          classList={{
-            "text-v2-icon-icon-muted": !props.active,
-            "text-v2-icon-icon-base": props.active,
-          }}
+        <Show
+          when={!props.pending}
+          fallback={
+            // Session is waiting for the user (permission request or question):
+            // blue blinking dot so the user notices it needs their input.
+            <span class="flex size-4 items-center justify-center">
+              <span class="size-1.5 rounded-full bg-[var(--v2-blue-600)] animate-status-blink" />
+            </span>
+          }
         >
           <span
-            class="size-1.5 rounded-full"
+            class="flex size-4 items-center justify-center"
             classList={{
-              "bg-v2-icon-icon-muted": !props.unread && !props.active,
-              "bg-v2-text-text-accent": props.unread || props.active,
+              "text-v2-icon-icon-muted": !props.active,
+              "text-v2-icon-icon-base": props.active,
             }}
-          />
-        </span>
+          >
+            <span
+              class="size-1.5 rounded-full"
+              classList={{
+                "bg-v2-icon-icon-muted": !props.unread && !props.active,
+                "bg-v2-text-text-accent": props.unread || props.active,
+              }}
+            />
+          </span>
+        </Show>
       </Show>
     </Show>
   )
