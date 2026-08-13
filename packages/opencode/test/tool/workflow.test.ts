@@ -20,7 +20,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 
-const layer = () =>
+const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
     LayerNode.group([
       Agent.node,
@@ -38,10 +38,11 @@ const layer = () =>
       RuntimeFlags.node,
       Ripgrep.node,
     ]),
-    [[RuntimeFlags.node, RuntimeFlags.layer({})]],
+    [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
   )
 
 const it = testEffect(layer())
+const withWorkflows = testEffect(layer({ experimentalWorkflows: true }))
 
 const ref = { providerID: "test", modelID: "test-model" } as const
 
@@ -101,6 +102,44 @@ describe("workflow tool", () => {
           build: { mode: "primary" },
         },
       },
+    },
+  )
+
+  withWorkflows.instance(
+    "workflow tool is registered when OPENCODE_EXPERIMENTAL_WORKFLOWS is on",
+    () =>
+      Effect.gen(function* () {
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const registry = yield* ToolRegistry.Service
+        const tools = yield* registry.tools({
+          providerID: "test" as any,
+          modelID: "test-model" as any,
+          agent: build,
+        })
+        expect(tools.some((tool) => tool.id === "workflow")).toBe(true)
+      }),
+    {
+      config: { agent: { build: { mode: "primary" } } },
+    },
+  )
+
+  it.instance(
+    "workflow tool is NOT registered when the flag is off (stable cache prefix)",
+    () =>
+      Effect.gen(function* () {
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const registry = yield* ToolRegistry.Service
+        const tools = yield* registry.tools({
+          providerID: "test" as any,
+          modelID: "test-model" as any,
+          agent: build,
+        })
+        expect(tools.some((tool) => tool.id === "workflow")).toBe(false)
+      }),
+    {
+      config: { agent: { build: { mode: "primary" } } },
     },
   )
 })
