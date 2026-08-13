@@ -48,6 +48,7 @@ export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
+  readonly workflow: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -127,6 +128,24 @@ const layer = Layer.effect(
             "  </server>",
           ]),
           "</mcp_instructions>",
+        ].join("\n")
+      }),
+
+      workflow: Effect.fn("SystemPrompt.workflow")(function* (agent: Agent.Info) {
+        if (Permission.disabled(["workflow"], agent.permission).has("workflow")) return
+        return [
+          "## Workflow guidance",
+          "When a task has multiple distinct phases, dependencies, or steps that could",
+          "run in parallel, DO NOT do them sequentially in one turn. Instead, decompose",
+          "the goal into a workflow using the workflow tool: declare each step as a",
+          "subagent task with its dependsOn, and let the engine run independent steps",
+          "concurrently.",
+          "You decide the steps and their dependencies yourself — the user should not",
+          "need to specify a pipeline. Recognize pipeline-shaped goals automatically:",
+          "build-then-test-then-deploy, lint+test in parallel before release, data",
+          "pipeline stages, multi-repo changes, etc.",
+          "Do not use workflow for simple single-step requests — use regular tools or",
+          "the task tool directly.",
         ].join("\n")
       }),
     })

@@ -158,4 +158,27 @@ describe("session.system", () => {
       )
     }),
   )
+
+  it.effect("workflow guidance tells the agent to auto-decompose pipeline tasks", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const output = yield* prompt.workflow(build)
+
+      expect(output).toBeDefined()
+      expect(output).toContain("Workflow guidance")
+      expect(output).toContain("DO NOT do them sequentially")
+      expect(output).toContain("workflow tool")
+      expect(output).toContain("the user should not\nneed to specify a pipeline")
+    }),
+  )
+
+  it.effect("workflow guidance is omitted when the workflow tool is denied", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const denied = { ...build, permission: Permission.fromConfig({ workflow: "deny" }) }
+      const output = yield* prompt.workflow(denied)
+
+      expect(output).toBeUndefined()
+    }),
+  )
 })
