@@ -256,7 +256,7 @@ const layer = Layer.effect(
             tool.edit,
             tool.write,
             tool.task,
-            tool.workflow,
+            ...(flags.experimentalWorkflows ? [tool.workflow] : []),
             tool.fetch,
             tool.todo,
             tool.search,

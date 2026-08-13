@@ -5,6 +5,7 @@ import type { Agent } from "../../src/agent/agent"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Skill } from "../../src/skill"
 import { Permission } from "../../src/permission"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import type { Provider } from "../../src/provider/provider"
 import { SystemPrompt } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
@@ -45,6 +46,7 @@ const build: Agent.Info = {
 
 const it = testEffect(
   LayerNode.compile(SystemPrompt.node, [
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkflows: true })],
     [
       MCP.node,
       Layer.mock(MCP.Service, {
@@ -177,6 +179,42 @@ describe("session.system", () => {
       const prompt = yield* SystemPrompt.Service
       const denied = { ...build, permission: Permission.fromConfig({ workflow: "deny" }) }
       const output = yield* prompt.workflow(denied)
+
+      expect(output).toBeUndefined()
+    }),
+  )
+})
+
+describe("session.system (workflows disabled)", () => {
+  const disabledIt = testEffect(
+    LayerNode.compile(SystemPrompt.node, [
+      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkflows: false })],
+      [
+        MCP.node,
+        Layer.mock(MCP.Service, {
+          instructions: () => Effect.succeed([]),
+        }),
+      ],
+      [
+        Skill.node,
+        Layer.succeed(
+          Skill.Service,
+          Skill.Service.of({
+            get: () => Effect.succeed(undefined),
+            require: () => Effect.fail(new Skill.NotFoundError({ name: "none", available: [] })),
+            all: () => Effect.succeed([]),
+            dirs: () => Effect.succeed([]),
+            available: () => Effect.succeed([]),
+          }),
+        ),
+      ],
+    ]),
+  )
+
+  disabledIt.effect("workflow guidance is omitted when the feature is disabled", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const output = yield* prompt.workflow(build)
 
       expect(output).toBeUndefined()
     }),

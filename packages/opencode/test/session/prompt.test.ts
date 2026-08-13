@@ -164,7 +164,7 @@ const blockingProcessor = Layer.succeed(
   }),
 )
 
-const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true })
+const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true, experimentalWorkflows: true })
 
 const testLLMServerNode = LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] })
 

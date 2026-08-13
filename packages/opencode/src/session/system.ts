@@ -23,6 +23,7 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("muse")) {
@@ -59,6 +60,7 @@ const layer = Layer.effect(
     const skill = yield* Skill.Service
     const mcp = yield* MCP.Service
     const locations = yield* LocationServiceMap.Service
+    const flags = yield* RuntimeFlags.Service
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
@@ -132,6 +134,7 @@ const layer = Layer.effect(
       }),
 
       workflow: Effect.fn("SystemPrompt.workflow")(function* (agent: Agent.Info) {
+        if (!flags.experimentalWorkflows) return
         if (Permission.disabled(["workflow"], agent.permission).has("workflow")) return
         return [
           "## Workflow guidance",
@@ -161,7 +164,7 @@ const locationServiceMapNode = LayerNode.make({
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Skill.node, MCP.node, locationServiceMapNode],
+  deps: [Skill.node, MCP.node, locationServiceMapNode, RuntimeFlags.node],
 })
 
 export * as SystemPrompt from "./system"
