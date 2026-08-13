@@ -125,20 +125,22 @@ describe("Instruction.resolve", () => {
     ),
   )
 
-  it.live("returns AGENTS.md from subdirectory (not in systemPaths)", () =>
+  it.live("includes nested AGENTS.md in systemPaths and skips resolve", () =>
     withFiles({ "subdir/AGENTS.md": "# Subdir Instructions", "subdir/nested/file.ts": "const x = 1" }, (dir) =>
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
         const system = yield* svc.systemPaths()
-        expect(system.has(path.join(dir, "subdir", "AGENTS.md"))).toBe(false)
+        // Nested AGENTS.md is visible up front so the agent knows the guide
+        // exists before touching the subtree.
+        expect(system.has(path.join(dir, "subdir", "AGENTS.md"))).toBe(true)
 
         const results = yield* svc.resolve(
           [],
           path.join(dir, "subdir", "nested", "file.ts"),
           MessageID.make("msg_message-test-2"),
         )
-        expect(results.length).toBe(1)
-        expect(results[0].filepath).toBe(path.join(dir, "subdir", "AGENTS.md"))
+        // Already in systemPaths → not reattached by resolve.
+        expect(results).toEqual([])
       }),
     ),
   )
@@ -149,7 +151,7 @@ describe("Instruction.resolve", () => {
         const svc = yield* Instruction.Service
         const filepath = path.join(dir, "subdir", "AGENTS.md")
         const system = yield* svc.systemPaths()
-        expect(system.has(filepath)).toBe(false)
+        expect(system.has(filepath)).toBe(true)
 
         const results = yield* svc.resolve([], filepath, MessageID.make("msg_message-test-3"))
         expect(results).toEqual([])
@@ -167,14 +169,15 @@ describe("Instruction.resolve", () => {
         const first = yield* svc.resolve([], filepath, id)
         const second = yield* svc.resolve([], filepath, id)
 
-        expect(first).toHaveLength(1)
-        expect(first[0].filepath).toBe(path.join(dir, "subdir", "AGENTS.md"))
+        // Nested AGENTS.md is already in systemPaths, so resolve attaches
+        // nothing for this message.
+        expect(first).toEqual([])
         expect(second).toEqual([])
       }),
     ),
   )
 
-  it.live("clear allows nearby instructions to be attached again for the same message", () =>
+  it.live("clear keeps resolve empty for nested AGENTS.md already in systemPaths", () =>
     withFiles({ "subdir/AGENTS.md": "# Subdir Instructions", "subdir/nested/file.ts": "const x = 1" }, (dir) =>
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
@@ -185,9 +188,10 @@ describe("Instruction.resolve", () => {
         yield* svc.clear(id)
         const second = yield* svc.resolve([], filepath, id)
 
-        expect(first).toHaveLength(1)
-        expect(second).toHaveLength(1)
-        expect(second[0].filepath).toBe(path.join(dir, "subdir", "AGENTS.md"))
+        // The nested guide is already in systemPaths, so resolve stays empty
+        // before and after clear (clear only resets the claim map).
+        expect(first).toEqual([])
+        expect(second).toEqual([])
       }),
     ),
   )
@@ -244,6 +248,32 @@ describe("Instruction.system", () => {
         provideInstance(projectTmp),
         provideInstruction({ home: globalTmp, config: globalTmp }, { disableClaudeCodePrompt: true }),
       )
+    }),
+  )
+
+  it.live("surfaces nested AGENTS.md files in systemPaths so the model sees package guides", () =>
+    Effect.gen(function* () {
+      const projectTmp = yield* tmpWithFiles({
+        "AGENTS.md": "# Project Instructions",
+        "packages/desktop/AGENTS.md": "# Desktop package notes\n- OPENCODE_CHANNEL=prod required",
+        "packages/app/AGENTS.md": "# App notes\n- i18n parity required",
+        "src/file.ts": "const x = 1",
+      })
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const paths = yield* svc.systemPaths()
+        // The root AGENTS.md plus every nested AGENTS.md under the project.
+        expect(paths.has(path.join(projectTmp, "AGENTS.md"))).toBe(true)
+        expect(paths.has(path.join(projectTmp, "packages", "desktop", "AGENTS.md"))).toBe(true)
+        expect(paths.has(path.join(projectTmp, "packages", "app", "AGENTS.md"))).toBe(true)
+
+        const rules = yield* svc.system()
+        const joined = rules.join("\n")
+        expect(joined).toContain("# Project Instructions")
+        expect(joined).toContain("OPENCODE_CHANNEL=prod required")
+        expect(joined).toContain("i18n parity required")
+      }).pipe(provideInstance(projectTmp), provideInstruction({ home: projectTmp, config: projectTmp }))
     }),
   )
 })
