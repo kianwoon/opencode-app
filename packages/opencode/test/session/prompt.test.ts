@@ -580,6 +580,33 @@ withMcpInstructions.instance(
   15_000,
 )
 
+it.instance(
+  "loop includes workflow auto-decompose guidance in model system context",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.hang
+      yield* user(chat.id, "release the app")
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(llm.wait(1), "timed out waiting for workflow guidance request", "10 seconds")
+
+      const hits = yield* llm.hits
+      const body = JSON.stringify(hits[0]?.body)
+      expect(body).toContain("Workflow guidance")
+      expect(body).toContain("DO NOT do them sequentially")
+      expect(body).toContain("the user should not")
+      yield* Fiber.interrupt(fiber)
+    }),
+  15_000,
+)
+
 it.instance("legacy prompt emits message events without session.next events", () =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
