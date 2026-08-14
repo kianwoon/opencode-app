@@ -3764,6 +3764,102 @@ describe("ProviderTransform.variants", () => {
     expect(result).toEqual({})
   })
 
+  test("glm-5.3 returns native effort variants for openai-compatible providers", () => {
+    const model = createMockModel({
+      id: "zai-coding-plan/glm-5.3",
+      providerID: "zai-coding-plan",
+      api: {
+        id: "glm-5.3",
+        url: "https://api.z.ai/api/coding/paas/v4",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { reasoningEffort: "high" },
+      max: { reasoningEffort: "max" },
+    })
+  })
+
+  test("recognizes GLM-5.3 provider model IDs", () => {
+    for (const id of ["accounts/fireworks/models/glm-5p3", "zai-org-glm-5-3", "umans-glm-5.3"]) {
+      const model = createMockModel({
+        id: `test/${id}`,
+        api: {
+          id,
+          url: "https://api.test.com",
+          npm: "@ai-sdk/openai-compatible",
+        },
+      })
+      expect(ProviderTransform.variants(model)).toEqual({
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      })
+    }
+  })
+
+  test("recognizes GLM-5.3 from the API ID when the configured model ID is an alias", () => {
+    const model = createMockModel({
+      id: "custom/my-glm",
+      api: {
+        id: "accounts/fireworks/models/glm-5p3",
+        url: "https://api.fireworks.ai/inference/v1",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { reasoningEffort: "high" },
+      max: { reasoningEffort: "max" },
+    })
+  })
+
+  test("glm-5.3 returns openrouter effort variants for openrouter", () => {
+    const model = createMockModel({
+      id: "openrouter/z-ai/glm-5.3",
+      providerID: "openrouter",
+      api: {
+        id: "z-ai/glm-5.3",
+        url: "https://openrouter.ai/api/v1",
+        npm: "@openrouter/ai-sdk-provider",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { reasoning: { effort: "high" } },
+      xhigh: { reasoning: { effort: "xhigh" } },
+    })
+  })
+
+  test("glm-5.3 returns effort variants for anthropic-compatible providers", () => {
+    const model = createMockModel({
+      id: "zai-coding-plan/glm-5.3",
+      providerID: "zai-coding-plan",
+      api: {
+        id: "glm-5.3",
+        url: "https://api.z.ai/api/anthropic",
+        npm: "@ai-sdk/anthropic",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { effort: "high" },
+      max: { effort: "max" },
+    })
+  })
+
+  test("glm-5.3 falls back to provider defaults for other packages", () => {
+    const model = createMockModel({
+      id: "test/glm-5.3",
+      api: {
+        id: "glm-5.3",
+        url: "https://api.test.com",
+        npm: "@ai-sdk/amazon-bedrock",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      low: { reasoningConfig: { type: "enabled", maxReasoningEffort: "low" } },
+      medium: { reasoningConfig: { type: "enabled", maxReasoningEffort: "medium" } },
+      high: { reasoningConfig: { type: "enabled", maxReasoningEffort: "high" } },
+    })
+  })
+
   test("glm-5.2 returns native effort variants for openai-compatible providers", () => {
     const model = createMockModel({
       id: "zhipuai/glm-5.2",
