@@ -17,6 +17,12 @@
 - Scheduling is event-driven (per-step fibers, `Effect.raceAll` over `Fiber.await`) with a
   concurrency cap from `experimental.workflow_concurrency` (default 4). Do not reintroduce
   batch-barrier scheduling (`Effect.all` per ready wave) — it delays unrelated dependents.
+- Step fibers must be forked with `Effect.forkChild`, never `Effect.forkIn(scope)`. The
+  instance `scope` is a daemon scope: forking steps there detaches them from the loop
+  fiber, so `prompt.cancel` interrupts the loop but leaves in-flight steps running to
+  completion — burning model turns, mutating the tree, and leaving their tool parts stuck
+  `"running"` forever. As children, steps inherit the loop's interrupt and cascade it into
+  the task tool's own `onInterrupt`, which settles the part and aborts the child session.
 
 ## Database
 

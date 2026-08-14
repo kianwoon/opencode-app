@@ -604,7 +604,14 @@ const layer = Layer.effect(
                   if (!settled.has(step.id)) record(step.id, Exit.fail(new Error("Cancelled")))
                 }),
               ),
-              Effect.forkIn(scope),
+              // Step fibers are children of the workflow/loop fiber, not
+              // daemons in the instance scope. Forking into `scope` detaches
+              // them from cancellation: cancelling the session interrupts the
+              // loop fiber but leaves already-started steps running to
+              // completion, burning turns and mutating the tree. As children,
+              // they inherit the loop's interrupt, which cascades into the
+              // task tool's own onInterrupt (aborting the child session).
+              Effect.forkChild,
             )
             running.set(step.id, fiber)
           }

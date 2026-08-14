@@ -441,6 +441,22 @@ const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
     })
   })
 
+const addWorkflow = (sessionID: SessionID, messageID: MessageID) =>
+  Effect.gen(function* () {
+    const session = yield* Session.Service
+    yield* session.updatePart({
+      id: PartID.ascending(),
+      messageID,
+      sessionID,
+      type: "workflow",
+      title: "ship",
+      steps: [
+        { id: "build", prompt: "build it", description: "build", agent: "general", dependsOn: [] },
+        { id: "test", prompt: "test it", description: "test", agent: "general", dependsOn: ["build"] },
+      ],
+    } satisfies SessionV1.WorkflowPart)
+  })
+
 const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
   const config = yield* Config.Service
   const prompt = yield* SessionPrompt.Service
@@ -1394,6 +1410,53 @@ raceNoLLMServer.instance(
     }),
   { config: cfg },
   3_000,
+)
+
+noLLMServer.instance(
+  "cancel interrupts in-flight workflow steps and does not orphan their tool parts",
+  () =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>()
+      const aborted = yield* Deferred.make<void>()
+      const registry = yield* ToolRegistry.Service
+      const { task } = yield* registry.named()
+      const original = task.execute
+      task.execute = (_args, ctx) =>
+        Effect.callback<never>((_resume) => {
+          ctx.abort.addEventListener("abort", () => succeedVoid(aborted), { once: true })
+          if (ctx.abort.aborted) succeedVoid(aborted)
+          succeedVoid(ready)
+          return Effect.sync(() => succeedVoid(aborted))
+        })
+      yield* Effect.addFinalizer(() => Effect.sync(() => void (task.execute = original)))
+
+      const { prompt, chat } = yield* boot()
+      const msg = yield* user(chat.id, "ship the app")
+      yield* addWorkflow(chat.id, msg.id)
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(Deferred.await(ready), "timed out waiting for workflow step task to start", "10 seconds")
+      yield* prompt.cancel(chat.id)
+
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isSuccess(exit)).toBe(true)
+      yield* awaitWithTimeout(Deferred.await(aborted), "timed out waiting for workflow step task abort", "10 seconds")
+
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      // The in-flight step's tool part must be settled (not left "running").
+      const tool = msgs
+        .flatMap((m) => m.parts)
+        .find((p): p is SessionV1.ToolPart => p.type === "tool" && p.tool === "task")
+      expect(tool?.type).toBe("tool")
+      if (!tool) return
+      expect(tool.state.status).not.toBe("running")
+      const taskMsg = msgs.find((m) => m.info.role === "assistant" && m.info.agent === "general")
+      expect(taskMsg?.info.role).toBe("assistant")
+      if (!taskMsg || taskMsg.info.role !== "assistant") return
+      expect(taskMsg.info.time.completed).toBeDefined()
+    }),
+  { config: cfg },
+  30_000,
 )
 
 noLLMServer.instance(
