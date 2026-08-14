@@ -147,6 +147,11 @@ export const TaskTool = Tool.define(
         ...(next.permission.some((rule) => rule.permission === id)
           ? []
           : [{ permission: id, pattern: "*" as const, action: "deny" as const }]),
+        // Subagents must not nest workflows: their steps would immediately
+        // hit the subagent depth limit below, after burning a model turn.
+        ...(next.permission.some((rule) => rule.permission === "workflow")
+          ? []
+          : [{ permission: "workflow" as const, pattern: "*" as const, action: "deny" as const }]),
         ...(cfg.experimental?.primary_tools?.map((permission) => ({
           permission,
           pattern: "*" as const,

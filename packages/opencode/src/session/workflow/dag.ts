@@ -2,9 +2,9 @@
  * Pure DAG (directed acyclic graph) scheduling logic for workflow steps.
  *
  * No Effect, no session, no I/O — just the graph algorithms a workflow needs:
- * validation, topological ordering, readiness computation for parallel
- * execution, and failure propagation. Keeping this pure makes it trivially
- * unit-testable and lets the loop dispatcher stay thin.
+ * validation, readiness computation for parallel execution, and failure
+ * propagation. Keeping this pure makes it trivially unit-testable and lets the
+ * loop dispatcher stay thin.
  *
  * @module @opencode-ai/opencode/session/workflow/dag
  */
@@ -19,7 +19,7 @@ export interface WorkflowStepInput {
 /** A step type that carries at least the graph fields. */
 type StepLike = { readonly id: string; readonly dependsOn: readonly string[] }
 
-/** Validated graph: every step id is known and referenced ids exist. */
+/** Validated graph: every step id is known, unique, and referenced ids exist. */
 export interface ValidatedDag<S extends StepLike = WorkflowStepInput> {
   readonly steps: readonly S[]
   /** step id → its dependents (reverse edges), for failure propagation. */
@@ -27,16 +27,22 @@ export interface ValidatedDag<S extends StepLike = WorkflowStepInput> {
 }
 
 export type DagError =
-  | { readonly _tag: "cycle"; readonly cycle: readonly string[] }
+  | { readonly _tag: "duplicate-step"; readonly stepId: string }
   | { readonly _tag: "missing-step"; readonly stepId: string; readonly missing: string }
+  | { readonly _tag: "cycle"; readonly cycle: readonly string[] }
 
 /**
- * Validate a step list forms a DAG: all `dependsOn` ids must refer to existing
- * steps and there must be no cycle. Returns the validated graph with reverse
- * edges (dependents) precomputed, or a {@link DagError}.
+ * Validate a step list forms a DAG: ids must be unique, all `dependsOn` ids
+ * must refer to existing steps, and there must be no cycle. Returns the
+ * validated graph with reverse edges (dependents) precomputed, or a
+ * {@link DagError}.
  */
 export function validateDag<S extends StepLike>(steps: readonly S[]): ValidatedDag<S> | DagError {
-  const byId = new Map(steps.map((s) => [s.id, s]))
+  const byId = new Map<string, S>()
+  for (const step of steps) {
+    if (byId.has(step.id)) return { _tag: "duplicate-step", stepId: step.id }
+    byId.set(step.id, step)
+  }
 
   // Every referenced id must exist.
   for (const step of steps) {
@@ -47,7 +53,7 @@ export function validateDag<S extends StepLike>(steps: readonly S[]): ValidatedD
     }
   }
 
-  // Cycle detection via iterative DFS with white/grey/black coloring.
+  // Cycle detection via recursive DFS with white/grey/black coloring.
   const color = new Map<string, "grey" | "black">()
   const stack: string[] = []
   const visit = (id: string): readonly string[] | undefined => {
@@ -60,8 +66,7 @@ export function validateDag<S extends StepLike>(steps: readonly S[]): ValidatedD
     }
     color.set(id, "grey")
     stack.push(id)
-    const step = byId.get(id)!
-    for (const dep of step.dependsOn) {
+    for (const dep of byId.get(id)!.dependsOn) {
       const cycle = visit(dep)
       if (cycle) return cycle
     }
@@ -82,23 +87,8 @@ export function validateDag<S extends StepLike>(steps: readonly S[]): ValidatedD
   return { steps, dependents }
 }
 
-/** Topologically ordered step ids (dependencies first). */
-export function topoSort<S extends StepLike>(dag: ValidatedDag<S>): readonly string[] {
-  const result: string[] = []
-  const visited = new Set<string>()
-  const visit = (id: string) => {
-    if (visited.has(id)) return
-    visited.add(id)
-    const step = dag.steps.find((s) => s.id === id)!
-    for (const dep of step.dependsOn) visit(dep)
-    result.push(id)
-  }
-  for (const step of dag.steps) visit(step.id)
-  return result
-}
-
 /**
- * Steps whose dependencies are all satisfied (in `completed`).
+ * Steps whose dependencies are all satisfied (in `completed` or `skipped`).
  * Returns an empty array when there is work left but nothing is ready
  * (a deadlock — the caller should treat it as an error).
  */
@@ -120,14 +110,12 @@ export function readySteps<S extends StepLike>(
  * full set of newly skipped ids (excluding the failed step itself, which the
  * caller records separately).
  */
-export function propagateFailure(
-  dag: ValidatedDag,
-  failed: string,
-): ReadonlySet<string> {
+export function propagateFailure(dag: ValidatedDag, failed: string): ReadonlySet<string> {
   const skipped = new Set<string>()
   const queue = [...(dag.dependents.get(failed) ?? [])]
-  while (queue.length > 0) {
-    const id = queue.shift()!
+  // Index cursor instead of shift(): shift is O(n) per pop, O(n²) over a run.
+  for (let i = 0; i < queue.length; i++) {
+    const id = queue[i]
     if (skipped.has(id)) continue
     skipped.add(id)
     queue.push(...(dag.dependents.get(id) ?? []))

@@ -1,5 +1,23 @@
 # opencode database guide
 
+## Workflow/DAG engine gotchas
+
+- The `workflow` tool executes inside the session loop's own tool pass. It must admit its
+  `WorkflowPart` with `noReply: true` via `ops.prompt(...)`; calling with a loop would wait
+  on the run it is already inside (`Runner.ensureRunning` joins the current run) and
+  deadlock the session. The next loop iteration dispatches the part from the task queue.
+- `runSubagentTask` (shared by `subtask` parts and workflow steps) must never throw after
+  creating its tool part without settling the part as an error AND completing the assistant
+  message. A settled assistant message after the task part is also the task-consumption
+  boundary in `MessageV2.latest()`; without it the same task part is re-collected and
+  re-dispatched forever.
+- Workflow step outcomes are recorded in scheduler state (`record`), never thrown: failure
+  is a scheduling outcome. Failure reasons (NamedError: read `.data.message`, plain Error:
+  `.message`) go into the synthetic summary so the orchestrating model can react.
+- Scheduling is event-driven (per-step fibers, `Effect.raceAll` over `Fiber.await`) with a
+  concurrency cap from `experimental.workflow_concurrency` (default 4). Do not reintroduce
+  batch-barrier scheduling (`Effect.all` per ready wave) — it delays unrelated dependents.
+
 ## Database
 
 - **Schema**: Drizzle schema lives in `packages/core/src/**/*.sql.ts`.

@@ -5,6 +5,7 @@ import { MessageID } from "../session/schema"
 import { Session } from "@/session/session"
 import { Effect, Schema } from "effect"
 import { SessionPrompt } from "@/session/prompt"
+import { validateDag } from "@/session/workflow/dag"
 
 /**
  * `workflow` — declare and run a multi-step pipeline (DAG) of subagent tasks.
@@ -25,17 +26,20 @@ const StepParams = Schema.Struct({
   prompt: Schema.String.annotate({ description: "What the step's subagent should do" }),
   description: Schema.String.annotate({ description: "Short description of the step" }),
   agent: Schema.String.annotate({ description: "Subagent type to run this step (e.g. build, general)" }),
-  dependsOn: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+  dependsOn: Schema.optional(Schema.Array(Schema.String)).annotate({
     description: "Step ids that must complete before this one runs. Omit for no dependency.",
   }),
 })
 
 const Parameters = Schema.Struct({
   title: Schema.String.annotate({ description: "Name of the workflow" }),
-  steps: Schema.Array(StepParams).annotate({
+  steps: Schema.Array(StepParams).pipe(Schema.check(Schema.isNonEmpty())).annotate({
     description:
       "The pipeline steps. Each step runs as a subagent task; independent steps run in parallel.",
   }),
+}).annotate({
+  description:
+    "Declare a multi-step workflow (DAG) where each step is a subagent task. Steps can depend on other steps via dependsOn. Steps with no unsatisfied dependencies run concurrently. If a step fails, its dependents are skipped. Use this for pipelines that need ordering or parallelism across distinct subagent tasks (build then test+lint then publish).",
 })
 
 const DESCRIPTION_TEXT = [
@@ -45,6 +49,26 @@ const DESCRIPTION_TEXT = [
   "Use this for pipelines that need ordering or parallelism across distinct",
   "subagent tasks (build then test+lint then publish).",
 ].join(" ")
+
+/** Hard cap on step count per workflow; larger fan-outs need explicit config. */
+const MAX_WORKFLOW_STEPS = 64
+
+/** Validate steps at the tool boundary: graph shape and size. */
+function validateSteps(
+  title: string,
+  steps: Array<{ id: string; dependsOn: readonly string[] }>,
+): string | undefined {
+  if (steps.length === 0) return `Workflow "${title}" has no steps`
+  if (steps.length > MAX_WORKFLOW_STEPS)
+    return `Workflow "${title}" has ${steps.length} steps; the maximum is ${MAX_WORKFLOW_STEPS}`
+  const dag = validateDag(steps)
+  if ("_tag" in dag) {
+    if (dag._tag === "cycle") return `Workflow "${title}" has a dependency cycle: ${dag.cycle.join(" -> ")}`
+    if (dag._tag === "duplicate-step") return `Workflow "${title}" has duplicate step id "${dag.stepId}"`
+    return `Workflow "${title}" step "${dag.stepId}" references unknown step "${dag.missing}"`
+  }
+  return undefined
+}
 
 export const WorkflowTool = Tool.define(
   "workflow",
@@ -62,7 +86,6 @@ export const WorkflowTool = Tool.define(
           const ops = ctx.extra?.promptOps as WorkflowPromptOps | undefined
           if (!ops) return yield* Effect.fail(new Error("WorkflowTool requires promptOps in ctx.extra"))
 
-          const current = yield* session.get(ctx.sessionID)
           const steps = params.steps.map((step) => ({
             id: step.id,
             prompt: step.prompt,
@@ -71,10 +94,26 @@ export const WorkflowTool = Tool.define(
             dependsOn: [...(step.dependsOn ?? [])],
           }))
 
+          // Fail fast on invalid graphs: the tool returns a correctable error
+          // to the model instead of poisoning the session with a part the
+          // dispatcher would reject. Agents are validated here too so an
+          // unknown agent never orphans a running part.
+          const invalid = validateSteps(params.title, steps)
+          if (invalid) return yield* Effect.fail(new Error(invalid))
+
+          const current = yield* session.get(ctx.sessionID)
+
+          // noReply: persist the WorkflowPart without entering the loop. The
+          // tool executes inside the loop's own tool pass; calling prompt()
+          // with a loop here would wait on the run we are already inside
+          // (Runner.ensureRunning joins the current run) and deadlock the
+          // session. The current turn finishes, and the next loop iteration
+          // dispatches the part from the task queue.
           yield* ops.prompt({
             messageID: MessageID.ascending(),
             sessionID: ctx.sessionID,
             agent: current.agent ?? ctx.agent,
+            noReply: true,
             parts: [
               {
                 type: "workflow",

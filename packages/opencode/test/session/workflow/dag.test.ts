@@ -3,7 +3,6 @@ import {
   isComplete,
   propagateFailure,
   readySteps,
-  topoSort,
   validateDag,
   type WorkflowStepInput,
 } from "../../../src/session/workflow/dag"
@@ -30,6 +29,15 @@ describe("workflow dag", () => {
     expect(result).toEqual({ _tag: "missing-step", stepId: "a", missing: "nope" })
   })
 
+  test("detects duplicate step ids", () => {
+    const result = validateDag([
+      { id: "a", dependsOn: [] },
+      { id: "a", dependsOn: [] },
+      { id: "b", dependsOn: ["a"] },
+    ])
+    expect(result).toEqual({ _tag: "duplicate-step", stepId: "a" })
+  })
+
   test("detects cycles", () => {
     const result = validateDag([
       { id: "a", dependsOn: ["b"] },
@@ -40,14 +48,9 @@ describe("workflow dag", () => {
     expect(result.cycle.length).toBeGreaterThan(1)
   })
 
-  test("topologically sorts with dependencies first", () => {
-    const dag = validateDag(release)
-    if (!("steps" in dag)) throw new Error("expected valid dag")
-    const order = topoSort(dag)
-    expect(order.indexOf("build")).toBeLessThan(order.indexOf("test"))
-    expect(order.indexOf("build")).toBeLessThan(order.indexOf("lint"))
-    expect(order.indexOf("test")).toBeLessThan(order.indexOf("publish"))
-    expect(order.indexOf("lint")).toBeLessThan(order.indexOf("publish"))
+  test("detects self-dependencies as cycles", () => {
+    const result = validateDag([{ id: "x", dependsOn: ["x"] }])
+    expect("_tag" in result && result._tag === "cycle").toBe(true)
   })
 
   test("readySteps returns only steps whose deps are satisfied", () => {

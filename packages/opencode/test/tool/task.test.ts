@@ -550,6 +550,11 @@ describe("tool.task", () => {
             action: "deny",
           },
           {
+            permission: "workflow",
+            pattern: "*",
+            action: "deny",
+          },
+          {
             permission: "bash",
             pattern: "*",
             action: "deny",

@@ -257,8 +257,17 @@ const unix = process.platform !== "win32" ? it.instance : it.instance.skip
 const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : noLLMServer.instance.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
-// so provider model lookup succeeds inside the loop.
+// so provider model lookup succeeds inside the loop. The explicit top-level
+// `model` pins every agent/session to test/test-model so child subagent
+// sessions cannot inherit a leaked machine-global default provider.
 const cfg = {
+  model: "test/test-model",
+  agent: {
+    build: {
+      mode: "primary" as const,
+      model: "test/test-model",
+    },
+  },
   provider: {
     test: {
       name: "Test",
@@ -578,6 +587,109 @@ withMcpInstructions.instance(
       yield* Fiber.interrupt(fiber)
     }),
   15_000,
+)
+
+it.instance(
+  "workflow tool returns without deadlocking and the loop dispatches its steps",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Workflow e2e",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      // 1. Model calls the workflow tool.
+      yield* llm.tool("workflow", {
+        title: "ship",
+        steps: [
+          { id: "build", prompt: "build it", description: "build", agent: "build" },
+          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+        ],
+      })
+      // 2. Step subagents (task tool child sessions) and the post-workflow
+      //    turn all complete with plain text.
+      yield* llm.text("step done: build")
+      yield* llm.text("step done: test")
+      yield* llm.text("all done")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text", text: "ship the app" }],
+      })
+      expect(result.info.role).toBe("assistant")
+
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const texts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "text")
+
+      // The workflow part was persisted (noReply admission, no deadlock).
+      const workflowPart = msgs.flatMap((m) => m.parts).find((p) => p.type === "workflow")
+      expect(workflowPart).toBeDefined()
+
+      // Both steps ran as task-tool parts and settled completed.
+      const taskParts = msgs.flatMap((m) => m.parts).filter(
+        (part): part is CompletedToolPart =>
+          part.type === "tool" && part.tool === "task" && part.state.status === "completed",
+      )
+      expect(taskParts).toHaveLength(2)
+
+      // The synthetic summary reports declaration-ordered statuses.
+      const summary = texts.find(
+        (p) => p.type === "text" && p.text.includes('Workflow "ship" finished'),
+      )
+      expect(summary?.type === "text" && summary.text).toContain("- build: completed")
+      expect(summary?.type === "text" && summary.text).toContain("- test: completed")
+
+      // The loop continued to a final model turn after the workflow.
+      expect(texts.some((p) => p.type === "text" && p.text === "all done")).toBe(true)
+    }),
+  20_000,
+)
+
+it.instance(
+  "workflow step failure skips dependents and surfaces the reason in the summary",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Workflow fail e2e",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.tool("workflow", {
+        title: "ship",
+        steps: [
+          { id: "build", prompt: "build it", description: "build", agent: "nope" },
+          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+        ],
+      })
+      yield* llm.text("post-workflow turn")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        parts: [{ type: "text", text: "ship the app" }],
+      })
+      expect(result.info.role).toBe("assistant")
+
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const summary = msgs
+        .flatMap((m) => m.parts)
+        .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
+      expect(summary).toBeDefined()
+      const text = summary?.type === "text" ? summary.text : ""
+      expect(text).toContain("- build: failed")
+      expect(text).toContain("- test: skipped")
+      // Failure reason reaches the model so it can react.
+      expect(text).toContain("nope")
+    }),
+  20_000,
 )
 
 it.instance(
