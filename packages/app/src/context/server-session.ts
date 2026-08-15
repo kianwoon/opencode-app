@@ -1019,7 +1019,10 @@ export function createServerSession(
       }
       case "todo.updated": {
         const props = event.properties as { sessionID: string; todos: Todo[] }
-        setData("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
+        // Todo items carry no `id`, so keyed reconcile cannot match entries;
+        // on shrink it leaves null holes (stale "N of M" counts, phantom
+        // rows). Plain assignment replaces the list wholesale.
+        setData("todo", props.sessionID, props.todos)
         return
       }
       case "session.status": {
@@ -1388,7 +1391,8 @@ export function createServerSession(
         const active = generation(sessionID)
         return (options?.retry ?? retry)(() => client.session.todo({ sessionID })).then((result) => {
           if (generations.get(sessionID) !== active) return
-          setData("todo", sessionID, reconcile(result.data ?? [], { key: "id" }))
+          // Unkeyed replacement — todos have no id (see todo.updated handler).
+          setData("todo", sessionID, result.data ?? [])
         })
       })
     },
