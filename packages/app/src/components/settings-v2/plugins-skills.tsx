@@ -1,0 +1,287 @@
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
+import { Tag } from "@opencode-ai/ui/v2/badge-v2"
+import { showToast } from "@/utils/toast"
+import {
+  type Accessor,
+  type Component,
+  For,
+  Show,
+  createMemo,
+  createResource,
+  createSignal,
+} from "solid-js"
+import { createStore } from "solid-js/store"
+import { useLanguage } from "@/context/language"
+import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
+import { useServerSync } from "@/context/server-sync"
+import { retry } from "@opencode-ai/core/util/retry"
+import { SettingsListV2 } from "./parts/list"
+import { SettingsRowV2 } from "./parts/row"
+import "./settings-v2.css"
+
+type SkillItem = {
+  name: string
+  description?: string
+  slash?: boolean
+  location: string
+}
+
+type PluginSpec = string | [string, Record<string, unknown>]
+
+// Plugin specs are npm package names, file:// paths, or [name, options] tuples.
+const pluginName = (spec: PluginSpec) => (typeof spec === "string" ? spec : spec[0])
+
+const pluginEqual = (spec: PluginSpec, name: string) => pluginName(spec) === name
+
+export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | undefined> }> = (props) => {
+  const language = useLanguage()
+  const serverSdk = useServerSDK()
+  const protocol = useServerProtocol()
+  const serverSync = useServerSync()
+
+  // Plugin editing is config-driven and only available on v1 servers; v2 has no
+  // local plugin write API yet.
+  const editable = createMemo(() => protocol() === "v1")
+  const plugins = createMemo(() => (serverSync().data.config.plugin ?? []) as PluginSpec[])
+
+  const [skills] = createResource(
+    () => ({ protocol: protocol(), directory: props.directory() }),
+    async (input) => {
+      if (input.protocol === undefined) return []
+      return retry(async () => {
+        if (input.protocol === "v1") {
+          const result = await serverSdk().client.app.skills({ directory: input.directory })
+          return ((result.data ?? []) as SkillItem[]).map((skill) => ({ ...skill, slash: undefined }))
+        }
+        const result = await serverSdk().api.skill.list({ location: { directory: input.directory } })
+        return (result.data ?? []) as SkillItem[]
+      })
+    },
+  )
+
+  const count = createMemo(() => {
+    const list = skills.latest
+    return list ? list.length : undefined
+  })
+
+  const savePlugins = async (next: PluginSpec[], errorKey: string) => {
+    const before = plugins()
+    serverSync().set("config", "plugin", next)
+    await serverSync()
+      .updateConfig({ plugin: next })
+      .catch((err: unknown) => {
+        serverSync().set("config", "plugin", before)
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t(errorKey), description: message })
+      })
+  }
+
+  const removePlugin = (name: string) => {
+    void savePlugins(plugins().filter((spec) => !pluginEqual(spec, name)), "settings.plugins.plugins.remove.failed")
+  }
+
+  const addPlugin = async (spec: string) => {
+    const name = spec.trim()
+    if (!name) return
+    if (plugins().some((item) => pluginEqual(item, name))) return
+    await savePlugins([...plugins(), name], "settings.plugins.plugins.add.failed")
+  }
+
+  return (
+    <>
+      <div class="settings-v2-tab-header">
+        <h2 class="settings-v2-tab-title">{language.t("settings.plugins.title")}</h2>
+      </div>
+      <div class="settings-v2-tab-body settings-v2-plugins">
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            {language.t("settings.plugins.section.plugins")}
+            <Show when={plugins().length > 0}>
+              <span class="settings-v2-plugins-count">
+                {language.plural("settings.plugins.plugins.count", plugins().length)}
+              </span>
+            </Show>
+          </h3>
+          <SettingsListV2>
+            <Show
+              when={plugins().length > 0}
+              fallback={
+                <div class="settings-v2-plugins-status">
+                  <span>{language.t("settings.plugins.plugins.empty")}</span>
+                </div>
+              }
+            >
+              <For each={plugins()}>
+                {(spec) => {
+                  const name = pluginName(spec)
+                  return (
+                    <SettingsRowV2 title={name} description="">
+                      <Show when={editable()}>
+                        <div data-action="settings-plugin-remove">
+                          <ButtonV2
+                            size="small"
+                            variant="neutral"
+                            onClick={() => removePlugin(name)}
+                            title={language.t("settings.plugins.plugins.remove")}
+                          >
+                            {language.t("settings.plugins.plugins.remove")}
+                          </ButtonV2>
+                        </div>
+                      </Show>
+                    </SettingsRowV2>
+                  )
+                }}
+              </For>
+            </Show>
+            <Show when={editable()}>
+              <PluginAdd onAdd={addPlugin} />
+            </Show>
+          </SettingsListV2>
+          <p class="settings-v2-plugins-hint">{language.t("settings.plugins.plugins.hint")}</p>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            {language.t("settings.plugins.section.skills")}
+            <Show when={count() !== undefined}>
+              <span class="settings-v2-plugins-count">{language.plural("settings.plugins.skills.count", count()!)}</span>
+            </Show>
+          </h3>
+          <Show
+            when={!skills.loading}
+            fallback={
+              <div class="settings-v2-plugins-status">
+                {language.t("common.loading")}
+                {language.t("common.loading.ellipsis")}
+              </div>
+            }
+          >
+            <SkillsList skills={skills.latest ?? []} />
+          </Show>
+          <p class="settings-v2-plugins-hint">{language.t("settings.plugins.skills.hint")}</p>
+        </div>
+      </div>
+    </>
+  )
+}
+
+const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props) => {
+  const language = useLanguage()
+  const [value, setValue] = createSignal("")
+  const [busy, setBusy] = createSignal(false)
+
+  const submit = async () => {
+    const spec = value().trim()
+    if (!spec || busy()) return
+    setBusy(true)
+    try {
+      await props.onAdd(spec)
+      setValue("")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div class="settings-v2-plugins-add" data-action="settings-plugin-add">
+      <TextInputV2
+        type="text"
+        appearance="base"
+        value={value()}
+        onInput={(event) => setValue(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.isComposing) {
+            event.preventDefault()
+            void submit()
+          }
+        }}
+        placeholder={language.t("settings.plugins.plugins.add.placeholder")}
+        aria-label={language.t("settings.plugins.plugins.add.title")}
+        spellcheck={false}
+        autocorrect="off"
+        autocomplete="off"
+        autocapitalize="off"
+      />
+      <ButtonV2 size="small" variant="neutral" disabled={!value().trim() || busy()} onClick={() => void submit()}>
+        {language.t("settings.plugins.plugins.add.title")}
+      </ButtonV2>
+    </div>
+  )
+}
+
+const SkillsList: Component<{ skills: SkillItem[] }> = (props) => {
+  const language = useLanguage()
+  const [filter, setFilter] = createStore({ value: "" })
+
+  const filtered = createMemo(() => {
+    const query = filter.value.trim().toLowerCase()
+    const items = [...props.skills].sort((a, b) => a.name.localeCompare(b.name))
+    if (!query) return items
+    return items.filter(
+      (skill) =>
+        skill.name.toLowerCase().includes(query) || (skill.description ?? "").toLowerCase().includes(query),
+    )
+  })
+
+  return (
+    <Show
+      when={props.skills.length > 0}
+      fallback={
+        <div class="settings-v2-plugins-status">
+          <span>{language.t("settings.plugins.skills.empty")}</span>
+        </div>
+      }
+    >
+      <div class="settings-v2-tab-search settings-v2-plugins-search">
+        <TextInputV2
+          type="search"
+          appearance="base"
+          value={filter.value}
+          onInput={(event) => setFilter("value", event.currentTarget.value)}
+          placeholder={language.t("settings.plugins.skills.search.placeholder")}
+          spellcheck={false}
+          autocorrect="off"
+          autocomplete="off"
+          autocapitalize="off"
+          aria-label={language.t("settings.plugins.skills.search.placeholder")}
+        />
+        <Show when={filter.value}>
+          <IconButtonV2
+            type="button"
+            variant="ghost-muted"
+            size="small"
+            class="settings-v2-tab-search-clear"
+            icon={<IconV2 name="close" size="large" class="text-v2-icon-icon-muted" />}
+            onClick={() => setFilter("value", "")}
+          />
+        </Show>
+      </div>
+      <SettingsListV2>
+        <For each={filtered()}>
+          {(skill) => (
+            <SettingsRowV2
+              title={skill.name}
+              description={
+                <Show when={skill.description} fallback={skill.location}>
+                  {skill.description}
+                </Show>
+              }
+            >
+              <Show when={skill.slash}>
+                <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
+              </Show>
+            </SettingsRowV2>
+          )}
+        </For>
+        <Show when={filtered().length === 0}>
+          <div class="settings-v2-plugins-status">
+            <span>{language.t("palette.empty")}</span>
+          </div>
+        </Show>
+      </SettingsListV2>
+    </Show>
+  )
+}

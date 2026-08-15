@@ -22,6 +22,7 @@
 ## i18n parity gotcha
 
 - Adding a NEW key to `src/i18n/en.ts` is not enough: `src/i18n/parity.test.ts` fails unless the key also exists in EVERY locale file in `src/i18n/` (~60 files). New user-visible strings (dialogs, commands, placeholders) must be added and translated to all locales, positioned consistently (near the related key) so the parity test passes.
+- New plural families must use `.one`/`.other` suffixes in `en.ts` with `{{count}}` in BOTH, and the base key must be registered in the `PluralKey` union in `src/context/language.tsx`. Locales with extra CLDR plural categories (from `desktopNativePluralCategories`, e.g. `ru` needs `.few`/`.many`, `ar` needs `.zero`/`.two`/`.few`/`.many`, `sl` needs `.two`/`.few`) must carry those exact variants, and EVERY variant including duals like `ar`/`sl` `.two` must contain the `{{count}}` placeholder or the placeholder-parity test fails even when key parity passes.
 - The `bun test` suite from `packages/app` currently has PRE-EXISTING failures unrelated to feature work: the i18n parity test (missing `settings.general.row.fontWeight.*` / `sidebar.vacuum.*` keys added to en.ts but not yet translated) and a solid-js SSR `SyntaxError: Export named 'use' not found` in `src/context/comments.test.ts`. Verify whether a failure is caused by your change by checking the specific missing keys / files before chasing it.
 
 ## Localization
