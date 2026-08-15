@@ -11,10 +11,10 @@ import {
 } from "../../../src/session/workflow/dag"
 
 const release: WorkflowStepInput[] = [
-  { id: "build", dependsOn: [] },
-  { id: "test", dependsOn: ["build"] },
-  { id: "lint", dependsOn: ["build"] },
-  { id: "publish", dependsOn: ["test", "lint"] },
+  { id: "build", agent: "build", dependsOn: [] },
+  { id: "test", agent: "build", dependsOn: ["build"] },
+  { id: "lint", agent: "build", dependsOn: ["build"] },
+  { id: "publish", agent: "build", dependsOn: ["test", "lint"] },
 ]
 
 describe("workflow dag", () => {
@@ -61,6 +61,7 @@ describe("workflow dag", () => {
     // recursed; the iterative DFS must handle it (and find no cycle).
     const chain: WorkflowStepInput[] = Array.from({ length: 50_000 }, (_, i) => ({
       id: `s${i}`,
+      agent: "build",
       dependsOn: i === 0 ? [] : [`s${i - 1}`],
     }))
     const result = validateDag(chain)
@@ -69,7 +70,7 @@ describe("workflow dag", () => {
     // The same chain closed into a ring (s0 depends on the tail) is one
     // giant cycle and must be reported, not crash.
     const cyclic: WorkflowStepInput[] = chain.map((step, i) =>
-      i === 0 ? { id: step.id, dependsOn: ["s49999"] } : step,
+      i === 0 ? { id: step.id, agent: step.agent, dependsOn: ["s49999"] } : step,
     )
     const looped = validateDag(cyclic)
     expect("_tag" in looped && looped._tag === "cycle").toBe(true)
@@ -140,6 +141,7 @@ describe("workflow admission (validateWorkflow)", () => {
   test("rejects graphs over the step cap with the count in the message", () => {
     const fanout: WorkflowStepInput[] = Array.from({ length: MAX_WORKFLOW_STEPS + 1 }, (_, i) => ({
       id: `s${i}`,
+      agent: "build",
       dependsOn: [],
     }))
     const result = validateWorkflow(fanout)
@@ -156,15 +158,48 @@ describe("workflow admission (validateWorkflow)", () => {
   test("admits exactly at the cap", () => {
     const fanout: WorkflowStepInput[] = Array.from({ length: MAX_WORKFLOW_STEPS }, (_, i) => ({
       id: `s${i}`,
+      agent: "build",
       dependsOn: [],
     }))
     expect("steps" in validateWorkflow(fanout)).toBe(true)
   })
 
   test("surfaces graph-shape errors through the shared message formatter", () => {
-    const missing = validateWorkflow([{ id: "a", dependsOn: ["nope"] }])
+    const missing = validateWorkflow([{ id: "a", agent: "build", dependsOn: ["nope"] }])
     expect(workflowErrorMessage("t", missing as { _tag: "missing-step"; stepId: string; missing: string })).toContain(
       'references unknown step "nope"',
     )
+  })
+
+  test("rejects steps referencing an unknown agent when agent names are provided", () => {
+    const result = validateWorkflow(
+      [
+        { id: "a", agent: "build", dependsOn: [] },
+        { id: "b", agent: "biuld", dependsOn: ["a"] },
+      ],
+      new Set(["build", "general"]),
+    )
+    expect("_tag" in result && result._tag === "unknown-agent").toBe(true)
+    if ("_tag" in result && result._tag === "unknown-agent") {
+      expect(result.stepId).toBe("b")
+      expect(result.agent).toBe("biuld")
+      expect(workflowErrorMessage("t", result)).toBe('Workflow "t" step "b" references unknown agent "biuld"')
+    }
+  })
+
+  test("admits all agents present in the provided set", () => {
+    const result = validateWorkflow(
+      [
+        { id: "a", agent: "build", dependsOn: [] },
+        { id: "b", agent: "general", dependsOn: ["a"] },
+      ],
+      new Set(["build", "general"]),
+    )
+    expect("steps" in result).toBe(true)
+  })
+
+  test("agent validation is skipped when no agent set is provided", () => {
+    const result = validateWorkflow([{ id: "a", agent: "whoever", dependsOn: [] }])
+    expect("steps" in result).toBe(true)
   })
 })

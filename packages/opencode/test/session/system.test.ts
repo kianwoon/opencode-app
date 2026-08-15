@@ -174,14 +174,16 @@ describe("session.system", () => {
     }),
   )
 
-  it.effect("workflow guidance tells the agent to auto-decompose pipeline tasks", () =>
+  it.effect("workflow guidance tells the agent to plan then orchestrate pipeline tasks", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service
       const output = yield* prompt.workflow(build)
 
       expect(output).toBeDefined()
       expect(output).toContain("Workflow guidance")
-      expect(output).toContain("DO NOT do them sequentially")
+      expect(output).toContain("1. PLAN")
+      expect(output).toContain("2. ORCHESTRATE")
+      expect(output).toContain("3. REACT")
       expect(output).toContain("workflow tool")
       expect(output).toContain("the user should not\nneed to specify a pipeline")
     }),

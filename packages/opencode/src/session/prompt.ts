@@ -556,9 +556,10 @@ const layer = Layer.effect(
       const { task, model, lastUser, sessionID, session, msgs } = input
 
       // Same admission as the workflow tool: the direct API path
-      // (PromptInput with a workflow part) must not bypass graph-shape or
-      // step-count enforcement.
-      const dag = validateWorkflow(task.steps)
+      // (PromptInput with a workflow part) must not bypass graph-shape,
+      // step-count, or agent-name enforcement.
+      const knownAgents = new Set((yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name))
+      const dag = validateWorkflow(task.steps, knownAgents)
       if ("_tag" in dag) {
         const error = new NamedError.Unknown({ message: workflowErrorMessage(task.title, dag) })
         yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })

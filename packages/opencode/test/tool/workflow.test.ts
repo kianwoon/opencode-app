@@ -195,4 +195,60 @@ describe("workflow tool", () => {
       },
     },
   )
+
+  it.instance(
+    "execute rejects an unknown step agent with a correctable error",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const chat = yield* session.create({ title: "wf-agent" })
+
+        const tool = yield* WorkflowTool
+        const def = yield* tool.init()
+
+        let admitted = false
+        const exit = yield* def
+          .execute(
+            {
+              title: "typo",
+              steps: [{ id: "build", prompt: "build it", description: "build", agent: "biuld" }],
+            },
+            {
+              sessionID: chat.id,
+              messageID: MessageID.ascending(),
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: {
+                promptOps: {
+                  prompt: () => {
+                    admitted = true
+                    return Effect.succeed({} as SessionV1.WithParts)
+                  },
+                },
+              },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(Exit.isSuccess(exit)).toBe(false)
+        if (Exit.isFailure(exit)) {
+          const defect = Cause.squash(exit.cause)
+          expect(defect instanceof Error ? defect.message : String(defect)).toContain(
+            'step "build" references unknown agent "biuld"',
+          )
+        }
+        // Nothing was admitted — the model can correct the agent name and retry.
+        expect(admitted).toBe(false)
+      }),
+    {
+      config: {
+        agent: {
+          build: { mode: "primary" },
+        },
+      },
+    },
+  )
 })

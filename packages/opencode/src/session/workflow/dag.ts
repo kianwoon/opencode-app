@@ -14,10 +14,16 @@ export interface WorkflowStepInput {
   readonly id: string
   /** Step ids that must complete before this one may run. */
   readonly dependsOn: readonly string[]
+  /** Agent name that executes the step (used by admission validation). */
+  readonly agent: string
 }
 
 /** A step type that carries at least the graph fields. */
 type StepLike = { readonly id: string; readonly dependsOn: readonly string[] }
+
+/** A step that also names its executing agent (workflow admission needs it). */
+type StepWithAgent = StepLike & { readonly agent: string }
+
 
 /** Validated graph: every step id is known, unique, and referenced ids exist. */
 export interface ValidatedDag<S extends StepLike = WorkflowStepInput> {
@@ -38,19 +44,30 @@ export type WorkflowAdmissionError =
   | DagError
   | { readonly _tag: "empty-steps" }
   | { readonly _tag: "too-many-steps"; readonly count: number; readonly max: number }
+  | { readonly _tag: "unknown-agent"; readonly stepId: string; readonly agent: string }
 
 /**
  * Full admission check shared by every entry point (the model-facing
  * `workflow` tool and the loop dispatcher's direct-part path): graph shape
  * plus the step-count bound. Both callers must enforce the same rules so a
  * direct API `PromptInput` cannot bypass the tool's cap.
+ *
+ * `knownAgents`, when provided, additionally requires every step's agent to
+ * exist (and not be hidden) so a typo'd agent fails fast as a correctable
+ * admission error instead of a mid-run step failure.
  */
-export function validateWorkflow<S extends StepLike>(
+export function validateWorkflow<S extends StepWithAgent>(
   steps: readonly S[],
+  knownAgents?: ReadonlySet<string>,
 ): ValidatedDag<S> | WorkflowAdmissionError {
   if (steps.length === 0) return { _tag: "empty-steps" }
   if (steps.length > MAX_WORKFLOW_STEPS)
     return { _tag: "too-many-steps", count: steps.length, max: MAX_WORKFLOW_STEPS }
+  if (knownAgents) {
+    for (const step of steps) {
+      if (!knownAgents.has(step.agent)) return { _tag: "unknown-agent", stepId: step.id, agent: step.agent }
+    }
+  }
   return validateDag(steps)
 }
 
@@ -67,6 +84,8 @@ export function workflowErrorMessage(title: string, error: WorkflowAdmissionErro
       return `Workflow "${title}" has no steps`
     case "too-many-steps":
       return `Workflow "${title}" has ${error.count} steps; the maximum is ${error.max}`
+    case "unknown-agent":
+      return `Workflow "${title}" step "${error.stepId}" references unknown agent "${error.agent}"`
   }
 }
 

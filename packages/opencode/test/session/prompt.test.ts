@@ -667,17 +667,19 @@ it.instance(
 )
 
 it.instance(
-  "workflow step failure skips dependents and surfaces the reason in the summary",
+  "workflow tool rejects an unknown step agent correctably and the model can retry",
   () =>
     Effect.gen(function* () {
       const { llm } = yield* useServerConfig(providerCfg)
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({
-        title: "Workflow fail e2e",
+        title: "Workflow agent correction e2e",
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
 
+      // 1. Model declares a workflow with a typo'd agent: the tool fails with
+      //    a correctable admission error (no workflow part is admitted).
       yield* llm.tool("workflow", {
         title: "ship",
         steps: [
@@ -685,7 +687,18 @@ it.instance(
           { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
         ],
       })
-      yield* llm.text("post-workflow turn")
+      // 2. Model reads the tool error and retries with the fixed agent.
+      yield* llm.tool("workflow", {
+        title: "ship",
+        steps: [
+          { id: "build", prompt: "build it", description: "build", agent: "build" },
+          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+        ],
+      })
+      // 3. Steps run and the final turn completes.
+      yield* llm.text("step done: build")
+      yield* llm.text("step done: test")
+      yield* llm.text("all done")
 
       const result = yield* prompt.prompt({
         sessionID: chat.id,
@@ -695,15 +708,19 @@ it.instance(
       expect(result.info.role).toBe("assistant")
 
       const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      // The failed attempt never admitted a workflow part: exactly one
+      // workflow part exists (from the corrected retry).
+      const workflowParts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "workflow")
+      expect(workflowParts).toHaveLength(1)
+
+      // And the corrected workflow ran to completion.
       const summary = msgs
         .flatMap((m) => m.parts)
         .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
       expect(summary).toBeDefined()
       const text = summary?.type === "text" ? summary.text : ""
-      expect(text).toContain("- build: failed")
-      expect(text).toContain("- test: skipped")
-      // Failure reason reaches the model so it can react.
-      expect(text).toContain("nope")
+      expect(text).toContain("- build: completed")
+      expect(text).toContain("- test: completed")
     }),
   20_000,
 )
@@ -884,6 +901,86 @@ it.instance(
 )
 
 it.instance(
+  "direct API workflow part with an unknown agent is rejected at dispatch",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Workflow agent e2e" })
+
+      const exit = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          parts: [
+            {
+              type: "workflow",
+              title: "typo",
+              steps: [
+                { id: "build", prompt: "build it", description: "build", agent: "biuld", dependsOn: [] },
+              ],
+            },
+          ],
+        })
+        .pipe(Effect.exit)
+
+      expect(Exit.isSuccess(exit)).toBe(false)
+      if (Exit.isFailure(exit)) {
+        const defect = Cause.squash(exit.cause)
+        const data = defect as { data?: { message?: string } }
+        const message = defect instanceof Error ? (data.data?.message ?? defect.message) : String(defect)
+        expect(message).toContain('step "build" references unknown agent "biuld"')
+      }
+
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const taskParts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "tool" && p.tool === "task")
+      expect(taskParts).toHaveLength(0)
+    }),
+  20_000,
+)
+
+it.instance(
+  "workflow tool admits a valid workflow with plannedBy provenance on the part",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Workflow plannedBy e2e",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.tool("workflow", {
+        title: "ship",
+        steps: [{ id: "build", prompt: "build it", description: "build", agent: "build" }],
+      })
+      yield* llm.text("step done: build")
+      yield* llm.text("all done")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        parts: [{ type: "text", text: "ship the app" }],
+      })
+      expect(result.info.role).toBe("assistant")
+
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const workflowPart = msgs.flatMap((m) => m.parts).find((p) => p.type === "workflow")
+      expect(workflowPart).toBeDefined()
+      if (workflowPart?.type === "workflow") {
+        expect(workflowPart.plannedBy).toBe("build")
+      }
+      // And the workflow still executed end-to-end.
+      const summary = msgs
+        .flatMap((m) => m.parts)
+        .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
+      expect(summary?.type === "text" && summary.text).toContain("- build: completed")
+    }),
+  20_000,
+)
+
+it.instance(
   "loop includes workflow auto-decompose guidance in model system context",
   () =>
     Effect.gen(function* () {
@@ -903,8 +1000,9 @@ it.instance(
       const hits = yield* llm.hits
       const body = JSON.stringify(hits[0]?.body)
       expect(body).toContain("Workflow guidance")
-      expect(body).toContain("DO NOT do them sequentially")
-      expect(body).toContain("the user should not")
+      expect(body).toContain("PLAN")
+      expect(body).toContain("ORCHESTRATE")
+      expect(body).toContain("REACT")
       yield* Fiber.interrupt(fiber)
     }),
   15_000,

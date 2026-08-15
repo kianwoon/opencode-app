@@ -238,6 +238,8 @@ export const WorkflowPart = Schema.Struct({
   type: Schema.Literal("workflow"),
   title: Schema.String,
   steps: Schema.Array(WorkflowStep),
+  /** Marks the workflow as pre-planned (e.g. produced by a planning phase). */
+  plannedBy: optional(Schema.String),
 }).annotate({ identifier: "WorkflowPart" })
 export type WorkflowPart = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowPart>>
 
@@ -493,10 +495,12 @@ export const WorkflowStepInput = Schema.Struct({
 export type WorkflowStepInput = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowStepInput>>
 
 export const WorkflowPartInput = Schema.Struct({
-  id: Schema.optional(PartID),
+  id: optional(PartID),
   type: Schema.Literal("workflow"),
   title: Schema.String,
   steps: Schema.Array(WorkflowStepInput),
+  /** Marks the workflow as pre-planned (e.g. produced by a planning phase). */
+  plannedBy: optional(Schema.String),
 }).annotate({ identifier: "WorkflowPartInput" })
 export type WorkflowPartInput = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowPartInput>>
 

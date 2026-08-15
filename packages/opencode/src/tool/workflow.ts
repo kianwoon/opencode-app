@@ -3,6 +3,7 @@ import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { MessageID } from "../session/schema"
 import { Session } from "@/session/session"
+import { Agent } from "@/agent/agent"
 import { Effect, Schema } from "effect"
 import { SessionPrompt } from "@/session/prompt"
 import { validateWorkflow, workflowErrorMessage } from "@/session/workflow/dag"
@@ -50,9 +51,13 @@ const DESCRIPTION_TEXT = [
   "subagent tasks (build then test+lint then publish).",
 ].join(" ")
 
-/** Validate steps at the tool boundary: shared admission (graph shape + size). */
-function validateSteps(title: string, steps: Array<{ id: string; dependsOn: readonly string[] }>): string | undefined {
-  const dag = validateWorkflow(steps)
+/** Validate steps at the tool boundary: shared admission (graph shape + size + agents). */
+function validateSteps(
+  title: string,
+  steps: Array<{ id: string; agent: string; dependsOn: readonly string[] }>,
+  knownAgents: ReadonlySet<string>,
+): string | undefined {
+  const dag = validateWorkflow(steps, knownAgents)
   if ("_tag" in dag) return workflowErrorMessage(title, dag)
   return undefined
 }
@@ -61,6 +66,7 @@ export const WorkflowTool = Tool.define(
   "workflow",
   Effect.gen(function* () {
     const session = yield* Session.Service
+    const agentSvc = yield* Agent.Service
     return {
       description: DESCRIPTION_TEXT,
       parameters: Parameters,
@@ -83,9 +89,10 @@ export const WorkflowTool = Tool.define(
 
           // Fail fast on invalid graphs: the tool returns a correctable error
           // to the model instead of poisoning the session with a part the
-          // dispatcher would reject. Agents are validated here too so an
-          // unknown agent never orphans a running part.
-          const invalid = validateSteps(params.title, steps)
+          // dispatcher would reject. Agent names are validated here too (and
+          // again at dispatch) so an unknown agent never reaches execution.
+          const knownAgents = new Set((yield* agentSvc.list()).filter((a) => !a.hidden).map((a) => a.name))
+          const invalid = validateSteps(params.title, steps, knownAgents)
           if (invalid) return yield* Effect.fail(new Error(invalid))
 
           const current = yield* session.get(ctx.sessionID)
@@ -106,6 +113,9 @@ export const WorkflowTool = Tool.define(
                 type: "workflow",
                 title: params.title,
                 steps,
+                // Provenance marker: the workflow came from this session's
+                // own planning (as opposed to a direct API caller).
+                plannedBy: ctx.agent,
               } satisfies SessionV1.WorkflowPartInput,
             ],
           })
