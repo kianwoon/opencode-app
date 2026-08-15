@@ -1130,6 +1130,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "Разрешения",
   "settings.permissions.description": "Контролирайте какви инструменти сървърът може да използва по подразбиране.",
   "settings.permissions.section.tools": "Инструменти",

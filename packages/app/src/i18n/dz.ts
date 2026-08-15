@@ -1139,6 +1139,8 @@ export const dict: Record<string, string> = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "གནང་བ་ཚུ།",
   "settings.permissions.description": "སར་བར་གྱིས་སྔོན་སྒྲིག་གིས་ལག་ཆས་ག་ཅི་ལག་ལེན་འཐབ་ཚུགསཔ་ཨིན་ན་ཚད་འཛིན་འབད།",
   "settings.permissions.section.tools": "ཐབས༌ཤེས",

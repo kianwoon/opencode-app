@@ -40,6 +40,16 @@ export class ApiVcsApplyError extends Schema.ErrorClass<ApiVcsApplyError>("VcsAp
   { httpApiStatus: 400 },
 ) {}
 
+export class ApiSkillRemoveError extends Schema.ErrorClass<ApiSkillRemoveError>("SkillRemoveError")(
+  {
+    name: Schema.Literals(["Skill.NotFoundError", "Skill.NotRemovableError"]),
+    data: Schema.Struct({
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const InstancePaths = {
   dispose: "/instance/dispose",
   path: "/path",
@@ -51,6 +61,7 @@ export const InstancePaths = {
   command: "/command",
   agent: "/agent",
   skill: "/skill",
+  skillRemove: "/skill/:name",
   lsp: "/lsp",
   formatter: "/formatter",
 } as const
@@ -164,6 +175,18 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "app.skills",
             summary: "List skills",
             description: "Get a list of all available skills in the OpenCode system.",
+          }),
+        ),
+        HttpApiEndpoint.delete("skillRemove", InstancePaths.skillRemove, {
+          params: { name: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Struct({ name: Schema.String, location: Schema.String }), "Removed skill"),
+          error: ApiSkillRemoveError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.skill.remove",
+            summary: "Remove skill",
+            description: "Delete a file-backed skill by removing its SKILL.md directory.",
           }),
         ),
         HttpApiEndpoint.get("lsp", InstancePaths.lsp, {

@@ -46,9 +46,28 @@ export type Draft = {
   list: () => readonly Source[]
 }
 
+export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("SkillV2.NotFoundError", {
+  name: Schema.String,
+}) {
+  override get message() {
+    return `Skill "${this.name}" not found`
+  }
+}
+
+export class NotRemovableError extends Schema.TaggedErrorClass<NotRemovableError>()("SkillV2.NotRemovableError", {
+  name: Schema.String,
+  location: Schema.String,
+  reason: Schema.String,
+}) {
+  override get message() {
+    return `Skill "${this.name}" at ${this.location} cannot be removed: ${this.reason}`
+  }
+}
+
 export interface Interface extends State.Transformable<Draft> {
   readonly sources: () => Effect.Effect<Source[]>
   readonly list: () => Effect.Effect<Info[]>
+  readonly remove: (name: string) => Effect.Effect<Info, NotFoundError | NotRemovableError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Skill") {}
@@ -118,6 +137,47 @@ const layer = Layer.effect(
       return Array.from(skills.values())
     })
 
+    // Removes a file-backed skill by deleting its SKILL.md directory. Only the
+    // standard `<skill-dir>/SKILL.md` layout is deletable; sources also glob
+    // loose `*.md` files and nested trees where dirname(location) could remove
+    // unrelated sibling content. The whole per-source cache is dropped because
+    // list() does not attribute skills to sources.
+    const remove = Effect.fn("SkillV2.remove")(function* (name: string) {
+      const skills = yield* list()
+      const info = skills.find((skill) => skill.name === name)
+      if (!info) return yield* new NotFoundError({ name })
+      if (info.location.startsWith("/builtin/")) {
+        return yield* new NotRemovableError({
+          name,
+          location: info.location,
+          reason: "built-in skills cannot be removed",
+        })
+      }
+      if (path.basename(info.location) !== "SKILL.md") {
+        return yield* new NotRemovableError({
+          name,
+          location: info.location,
+          reason: "only skills backed by a SKILL.md directory can be removed",
+        })
+      }
+      const dir = path.dirname(info.location)
+      yield* fs
+        .remove(dir, { recursive: true, force: true })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new NotRemovableError({
+                name,
+                location: info.location,
+                reason: error instanceof Error ? error.message : String(error),
+              }),
+          ),
+        )
+      cache.clear()
+      yield* Effect.logInfo("skill removed", { name, dir })
+      return info
+    })
+
     return Service.of({
       transform: state.transform,
       reload: state.reload,
@@ -125,6 +185,7 @@ const layer = Layer.effect(
         return state.get().sources
       }),
       list,
+      remove,
     })
   }),
 )

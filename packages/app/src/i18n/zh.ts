@@ -1088,6 +1088,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} 个技能",
   "settings.plugins.skills.search.placeholder": "搜索技能",
   "settings.plugins.skills.slash": "斜杠命令",
+  "settings.plugins.skills.remove": "移除",
+  "settings.plugins.skills.remove.failed": "移除技能失败",
 
   "settings.permissions.title": "权限",
   "settings.permissions.description": "控制服务器默认可以使用哪些工具。",

@@ -750,6 +750,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "권한",
   "settings.permissions.description": "서버가 기본적으로 사용할 수 있는 도구를 제어합니다.",
   "settings.permissions.section.tools": "도구",

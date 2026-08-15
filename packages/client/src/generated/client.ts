@@ -85,6 +85,8 @@ import type {
   CommandsListOutput,
   SkillsListInput,
   SkillsListOutput,
+  SkillsRemoveInput,
+  SkillsRemoveOutput,
   EventsSubscribeOutput,
   PtysListInput,
   PtysListOutput,
@@ -803,6 +805,18 @@ export function make(options: ClientOptions) {
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      remove: (input: SkillsRemoveInput, requestOptions?: RequestOptions) =>
+        request<SkillsRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/skill/${encodeURIComponent(input.name)}`,
+            query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
             empty: false,
           },
           requestOptions,

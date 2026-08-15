@@ -1109,6 +1109,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "ການອະນຸຍາດ",
   "settings.permissions.description": "ຄວບຄຸມເຄື່ອງມືທີ່ເຊີບເວີໃຊ້ໄດ້ໂດຍຄ່າເລີ່ມຕົ້ນ.",
   "settings.permissions.section.tools": "ເຄື່ອງມື",

@@ -47,7 +47,7 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
   const editable = createMemo(() => protocol() === "v1")
   const plugins = createMemo(() => (serverSync().data.config.plugin ?? []) as PluginSpec[])
 
-  const [skills] = createResource(
+  const [skills, { refetch: refetchSkills }] = createResource(
     () => ({ protocol: protocol(), directory: props.directory() }),
     async (input) => {
       if (input.protocol === undefined) return []
@@ -61,6 +61,20 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
       })
     },
   )
+
+  const removeSkill = async (name: string) => {
+    try {
+      if (protocol() === "v1") {
+        await serverSdk().client.app.skill.remove({ name, directory: props.directory() })
+      } else {
+        await serverSdk().client.v2.skill.remove({ name, location: { directory: props.directory() } })
+      }
+      await refetchSkills()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("settings.plugins.skills.remove.failed"), description: message })
+    }
+  }
 
   const count = createMemo(() => {
     const list = skills.latest
@@ -159,7 +173,7 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
               </div>
             }
           >
-            <SkillsList skills={skills.latest ?? []} />
+            <SkillsList skills={skills.latest ?? []} onRemove={removeSkill} />
           </Show>
           <p class="settings-v2-plugins-hint">{language.t("settings.plugins.skills.hint")}</p>
         </div>
@@ -212,7 +226,7 @@ const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props)
   )
 }
 
-const SkillsList: Component<{ skills: SkillItem[] }> = (props) => {
+const SkillsList: Component<{ skills: SkillItem[]; onRemove: (name: string) => Promise<void> }> = (props) => {
   const language = useLanguage()
   const [filter, setFilter] = createStore({ value: "" })
 
@@ -270,9 +284,23 @@ const SkillsList: Component<{ skills: SkillItem[] }> = (props) => {
                 </Show>
               }
             >
-              <Show when={skill.slash}>
-                <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
-              </Show>
+              <div class="settings-v2-plugins-skill-actions">
+                <Show when={skill.slash}>
+                  <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
+                </Show>
+                <Show when={skill.location !== "<built-in>" && !skill.location.startsWith("/builtin/")}>
+                  <div data-action="settings-skill-remove">
+                    <ButtonV2
+                      size="small"
+                      variant="neutral"
+                      onClick={() => void props.onRemove(skill.name)}
+                      title={language.t("settings.plugins.skills.remove")}
+                    >
+                      {language.t("settings.plugins.skills.remove")}
+                    </ButtonV2>
+                  </div>
+                </Show>
+              </div>
             </SettingsRowV2>
           )}
         </For>

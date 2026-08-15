@@ -1118,6 +1118,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "Heimildir",
   "settings.permissions.description": "Stjórnaðu því hvaða verkfæri þjónninn getur notað sjálfgefið.",
   "settings.permissions.section.tools": "Verkfæri",

@@ -437,6 +437,7 @@ export type WorkflowPart = {
   type: "workflow"
   title: string
   steps: Array<WorkflowStep>
+  plannedBy?: string
 }
 
 export type ReasoningPart = {
@@ -2419,6 +2420,13 @@ export type Agent = {
   steps?: number
 }
 
+export type SkillRemoveError = {
+  name: "Skill.NotFoundError" | "Skill.NotRemovableError"
+  data: {
+    message: string
+  }
+}
+
 export type LspStatus = {
   id: string
   name: string
@@ -2663,6 +2671,7 @@ export type WorkflowPartInput = {
   type: "workflow"
   title: string
   steps: Array<WorkflowStepInput>
+  plannedBy?: string
 }
 
 export type SessionBusyError = {
@@ -2854,6 +2863,23 @@ export type SessionMessagesResponse = {
 export type ProviderNotFoundError = {
   _tag: "ProviderNotFoundError"
   providerID: string
+  message: string
+}
+
+export type SkillRemoved = {
+  name: string
+  location: string
+}
+
+export type SkillNotFoundError = {
+  _tag: "SkillNotFoundError"
+  skill: string
+  message: string
+}
+
+export type SkillNotRemovableError = {
+  _tag: "SkillNotRemovableError"
+  skill: string
   message: string
 }
 
@@ -8486,6 +8512,39 @@ export type AppSkillsResponses = {
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
 
+export type AppSkillRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/{name}"
+}
+
+export type AppSkillRemoveErrors = {
+  /**
+   * SkillRemoveError | InvalidRequestError
+   */
+  400: SkillRemoveError | InvalidRequestError
+}
+
+export type AppSkillRemoveError = AppSkillRemoveErrors[keyof AppSkillRemoveErrors]
+
+export type AppSkillRemoveResponses = {
+  /**
+   * Removed skill
+   */
+  200: {
+    name: string
+    location: string
+  }
+}
+
+export type AppSkillRemoveResponse = AppSkillRemoveResponses[keyof AppSkillRemoveResponses]
+
 export type LspStatusData = {
   body?: never
   path?: never
@@ -13078,6 +13137,49 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2SkillRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/skill/{name}"
+}
+
+export type V2SkillRemoveErrors = {
+  /**
+   * SkillNotRemovableError | InvalidRequestError
+   */
+  400: SkillNotRemovableError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SkillNotFoundError
+   */
+  404: SkillNotFoundError
+}
+
+export type V2SkillRemoveError = V2SkillRemoveErrors[keyof V2SkillRemoveErrors]
+
+export type V2SkillRemoveResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: SkillRemoved
+  }
+}
+
+export type V2SkillRemoveResponse = V2SkillRemoveResponses[keyof V2SkillRemoveResponses]
 
 export type V2EventSubscribeData = {
   body?: never

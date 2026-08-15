@@ -1129,6 +1129,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.plugins.plugins.count.few": "{{count}} dodatka",
   "settings.plugins.skills.count.few": "{{count}} vještine",
   "settings.permissions.title": "Dozvole",

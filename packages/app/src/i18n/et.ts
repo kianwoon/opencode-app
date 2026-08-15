@@ -1112,6 +1112,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "load",
   "settings.permissions.description": "Saate juhtida, milliseid tööriistu server vaikimisi kasutada saab.",
   "settings.permissions.section.tools": "Tööriistad",

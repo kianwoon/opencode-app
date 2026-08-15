@@ -1082,6 +1082,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} 個技能",
   "settings.plugins.skills.search.placeholder": "搜尋技能",
   "settings.plugins.skills.slash": "斜線命令",
+  "settings.plugins.skills.remove": "移除",
+  "settings.plugins.skills.remove.failed": "移除技能失敗",
 
   "settings.permissions.title": "權限",
   "settings.permissions.description": "控制伺服器預設可以使用哪些工具。",

@@ -1095,6 +1095,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
 
   "settings.permissions.title": "สิทธิ์",
   "settings.permissions.description": "ควบคุมเครื่องมือที่เซิร์ฟเวอร์สามารถใช้โดยค่าเริ่มต้น",

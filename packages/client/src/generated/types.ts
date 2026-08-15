@@ -82,6 +82,22 @@ export type PermissionNotFoundError = {
 export const isPermissionNotFoundError = (value: unknown): value is PermissionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PermissionNotFoundError"
 
+export type SkillNotFoundError = {
+  readonly _tag: "SkillNotFoundError"
+  readonly skill: string
+  readonly message: string
+}
+export const isSkillNotFoundError = (value: unknown): value is SkillNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SkillNotFoundError"
+
+export type SkillNotRemovableError = {
+  readonly _tag: "SkillNotRemovableError"
+  readonly skill: string
+  readonly message: string
+}
+export const isSkillNotRemovableError = (value: unknown): value is SkillNotRemovableError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SkillNotRemovableError"
+
 export type PtyNotFoundError = { readonly _tag: "PtyNotFoundError"; readonly ptyID: string; readonly message: string }
 export const isPtyNotFoundError = (value: unknown): value is PtyNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PtyNotFoundError"
@@ -2536,6 +2552,22 @@ export type SkillsListOutput = {
     readonly location: string
     readonly content: string
   }>
+}
+
+export type SkillsRemoveInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type SkillsRemoveOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly name: string; readonly location: string }
 }
 
 export type EventsSubscribeOutput = OpenCodeEventEncoded

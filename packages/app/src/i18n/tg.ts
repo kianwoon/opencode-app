@@ -1125,6 +1125,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.slash": "Slash command",
+  "settings.plugins.skills.remove": "Remove",
+  "settings.plugins.skills.remove.failed": "Failed to remove skill",
   "settings.permissions.title": "Иҷозатҳо",
   "settings.permissions.description": "Назорат кунед, ки кадом асбобҳоро сервер бо нобаёнӣ истифода бурда метавонад.",
   "settings.permissions.section.tools": "Воситаҳо",

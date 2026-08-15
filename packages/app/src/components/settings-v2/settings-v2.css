@@ -778,3 +778,9 @@
 .settings-v2-plugins-search {
   margin-bottom: 12px;
 }
+
+.settings-v2-plugins-skill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

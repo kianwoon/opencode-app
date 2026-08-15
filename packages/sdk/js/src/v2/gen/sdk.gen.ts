@@ -8,6 +8,8 @@ import type {
   AppAgentsResponses,
   AppLogErrors,
   AppLogResponses,
+  AppSkillRemoveErrors,
+  AppSkillRemoveResponses,
   AppSkillsErrors,
   AppSkillsResponses,
   Auth as Auth3,
@@ -385,6 +387,8 @@ import type {
   V2SessionWaitResponses,
   V2SkillListErrors,
   V2SkillListResponses,
+  V2SkillRemoveErrors,
+  V2SkillRemoveResponses,
   VcsApplyErrors,
   VcsApplyResponses,
   VcsDiffErrors,
@@ -508,6 +512,40 @@ export class Auth extends HeyApiClient {
   }
 }
 
+export class Skill extends HeyApiClient {
+  /**
+   * Remove skill
+   *
+   * Delete a file-backed skill by removing its SKILL.md directory.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<AppSkillRemoveResponses, AppSkillRemoveErrors, ThrowOnError>({
+      url: "/skill/{name}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class App extends HeyApiClient {
   /**
    * Write log
@@ -612,6 +650,11 @@ export class App extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _skill?: Skill
+  get skill(): Skill {
+    return (this._skill ??= new Skill({ client: this.client }))
   }
 }
 
@@ -6523,7 +6566,7 @@ export class Command2 extends HeyApiClient {
   }
 }
 
-export class Skill extends HeyApiClient {
+export class Skill2 extends HeyApiClient {
   /**
    * List skills
    *
@@ -6541,6 +6584,39 @@ export class Skill extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
     return (options?.client ?? this.client).get<V2SkillListResponses, V2SkillListErrors, ThrowOnError>({
       url: "/api/skill",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove skill
+   *
+   * Delete a file-backed skill by removing its SKILL.md directory.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<V2SkillRemoveResponses, V2SkillRemoveErrors, ThrowOnError>({
+      url: "/api/skill/{name}",
       ...options,
       ...params,
     })
@@ -7044,9 +7120,9 @@ export class V2 extends HeyApiClient {
     return (this._command ??= new Command2({ client: this.client }))
   }
 
-  private _skill?: Skill
-  get skill(): Skill {
-    return (this._skill ??= new Skill({ client: this.client }))
+  private _skill?: Skill2
+  get skill(): Skill2 {
+    return (this._skill ??= new Skill2({ client: this.client }))
   }
 
   private _event?: Event2

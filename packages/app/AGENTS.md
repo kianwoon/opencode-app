@@ -15,6 +15,12 @@
 - App (from `packages/app`): `bun dev -- --port 4444`
 - Open `http://localhost:4444` to verify UI changes (it targets the backend at `http://localhost:4096`).
 
+## SDK client shape gotcha
+
+- `@opencode-ai/sdk` is a workspace symlink; TypeScript resolves the BUILT `dist/v2` types, so newly generated SDK methods only appear in the app after `bun run build` in `packages/sdk/js`.
+- On `OpencodeClient`, v1 routes hang off `client.app.*` (e.g. `client.app.skill.remove` → `DELETE /skill/:name`) while v2 `/api/*` routes hang off `client.v2.*` (e.g. `client.v2.skill.remove` → `DELETE /api/skill/:name`). A getter directly on `OpencodeClient` is the legacy v1 surface.
+- `@opencode-ai/client` (the promise/effect `api.*` surface in `useServerSDK().api`) is a VENDORED tarball (`file:vendor/opencode-ai-client-*.tgz`); it does NOT gain newly added protocol endpoints until a new tarball is published and the dependency is bumped.
+
 ## SolidJS
 
 - Always prefer `createStore` over multiple `createSignal` calls
