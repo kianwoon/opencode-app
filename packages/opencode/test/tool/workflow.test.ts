@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { testEffect } from "../lib/effect"
 import { WorkflowTool } from "../../src/tool/workflow"
 import { Session } from "@/session/session"
@@ -140,6 +140,59 @@ describe("workflow tool", () => {
       }),
     {
       config: { agent: { build: { mode: "primary" } } },
+    },
+  )
+
+  it.instance(
+    "execute rejects workflows exceeding the step cap with a correctable error",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const chat = yield* session.create({ title: "wf-cap" })
+
+        const tool = yield* WorkflowTool
+        const def = yield* tool.init()
+
+        const steps = Array.from({ length: 65 }, (_, i) => ({
+          id: `s${i}`,
+          prompt: "do it",
+          description: "step",
+          agent: "build",
+          dependsOn: undefined,
+        }))
+
+        const exit = yield* def
+          .execute(
+            { title: "too-big", steps },
+            {
+              sessionID: chat.id,
+              messageID: MessageID.ascending(),
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: { prompt: () => Effect.succeed({} as SessionV1.WithParts) } },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+          .pipe(Effect.exit)
+
+        // The tool fails with the shared admission error (Effect.orDie wraps
+        // it as a defect) instead of admitting an oversized workflow.
+        expect(Exit.isSuccess(exit)).toBe(false)
+        if (Exit.isFailure(exit)) {
+          const defect = Cause.squash(exit.cause)
+          expect(defect instanceof Error ? defect.message : String(defect)).toContain(
+            "has 65 steps; the maximum is 64",
+          )
+        }
+      }),
+    {
+      config: {
+        agent: {
+          build: { mode: "primary" },
+        },
+      },
     },
   )
 })

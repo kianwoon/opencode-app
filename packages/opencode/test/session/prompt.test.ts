@@ -709,6 +709,181 @@ it.instance(
 )
 
 it.instance(
+  "workflow soft-failed step surfaces its real error in the summary, not a generic reason",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Workflow soft fail e2e",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      // Step subagent's model turn fails with a non-retryable HTTP 400: the
+      // task tool defects (soft failure path in runSubagentTask), which must
+      // still carry the propagated failure into the workflow summary.
+      yield* llm.tool("workflow", {
+        title: "ship",
+        steps: [
+          { id: "build", prompt: "build it", description: "build", agent: "build" },
+          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+        ],
+      })
+      yield* llm.error(400, { message: "insufficient_quota_for_this_org" })
+      yield* llm.text("post-workflow turn")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        parts: [{ type: "text", text: "ship the app" }],
+      })
+      expect(result.info.role).toBe("assistant")
+
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const summary = msgs
+        .flatMap((m) => m.parts)
+        .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
+      expect(summary).toBeDefined()
+      const text = summary?.type === "text" ? summary.text : ""
+      expect(text).toContain("- build: failed")
+      // The real provider error reaches the summary — not the old generic
+      // "step produced no output" and not a bare error class name.
+      expect(text).toContain("insufficient_quota_for_this_org")
+      expect(text).not.toContain("step produced no output")
+      expect(text).toContain("- test: skipped")
+    }),
+  20_000,
+)
+
+it.instance(
+  "workflow step parts carry workflow metadata and upstream results are unwrapped and bounded",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Workflow dataflow e2e",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      // build returns a long final text (> 20k chars, under the generic 50KB
+      // tool-output truncation): the downstream step prompt must receive it
+      // clipped by the workflow's own bound and without the <task> envelope.
+      const huge = "B".repeat(25_000)
+      yield* llm.tool("workflow", {
+        title: "ship",
+        steps: [
+          { id: "build", prompt: "build it", description: "build", agent: "build" },
+          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+        ],
+      })
+      yield* llm.text(`step done: build ${huge}`)
+      yield* llm.text("step done: test")
+      yield* llm.text("all done")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        parts: [{ type: "text", text: "ship the app" }],
+      })
+      expect(result.info.role).toBe("assistant")
+
+      // The second (test) step's request contains the clipped payload.
+      const inputs = yield* llm.inputs
+      const testRequest = inputs.find((input) => JSON.stringify(input).includes("test it"))
+      expect(testRequest).toBeDefined()
+      const body = JSON.stringify(testRequest)
+      expect(body).toContain("Results from upstream workflow steps:")
+      expect(body).toContain("truncated")
+      // No double-wrapping: the <task ...> envelope from the task tool is
+      // stripped before injection.
+      expect(body).not.toContain("<task_result>")
+      // And the injected payload is bounded, not the full 60k.
+      expect(body.length).toBeLessThan(60_000)
+
+      // Step task parts carry workflow step metadata for UI/telemetry.
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const stepParts = msgs.flatMap((m) => m.parts).filter(
+        (part) =>
+          part.type === "tool" &&
+          part.tool === "task" &&
+          part.state.status === "completed" &&
+          part.state.metadata?.workflow !== undefined,
+      )
+      expect(stepParts).toHaveLength(2)
+      const buildPart = stepParts.find(
+        (p) => p.type === "tool" && p.state.status === "completed" && p.state.metadata?.workflow?.stepId === "build",
+      )
+      expect(buildPart?.type === "tool" && buildPart.state.status === "completed").toBe(true)
+      if (buildPart?.type === "tool" && buildPart.state.status === "completed") {
+        expect(buildPart.state.metadata?.workflow).toEqual({
+          title: "ship",
+          stepId: "build",
+          dependsOn: [],
+        })
+      }
+      const testPart = stepParts.find(
+        (p) => p.type === "tool" && p.state.status === "completed" && p.state.metadata?.workflow?.stepId === "test",
+      )
+      if (testPart?.type === "tool" && testPart.state.status === "completed") {
+        expect(testPart.state.metadata?.workflow).toEqual({
+          title: "ship",
+          stepId: "test",
+          dependsOn: ["build"],
+        })
+      }
+    }),
+  20_000,
+)
+
+it.instance(
+  "direct API workflow part over the step cap is rejected at dispatch",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Workflow cap e2e" })
+
+      // 65 steps via PromptInput (the direct API path) — the dispatcher must
+      // enforce the same cap as the workflow tool.
+      const steps = Array.from({ length: 65 }, (_, i) => ({
+        id: `s${i}`,
+        prompt: "do it",
+        description: "step",
+        agent: "build",
+        dependsOn: [],
+      }))
+
+      const exit = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          parts: [{ type: "workflow", title: "too-big", steps }],
+        })
+        .pipe(Effect.exit)
+
+      // prompt() maps failures to Image.Error via Effect.catch(Effect.die);
+      // the oversized workflow must not be admitted (defect, not success).
+      expect(Exit.isSuccess(exit)).toBe(false)
+      if (Exit.isFailure(exit)) {
+        const defect = Cause.squash(exit.cause)
+        // NamedError messages live on `.data.message`.
+        const data = defect as { data?: { message?: string } }
+        const message = defect instanceof Error ? (data.data?.message ?? defect.message) : String(defect)
+        expect(message).toContain("has 65 steps; the maximum is 64")
+      }
+
+      // No workflow part was dispatched: no task parts created.
+      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+      const taskParts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "tool" && p.tool === "task")
+      expect(taskParts).toHaveLength(0)
+    }),
+  20_000,
+)
+
+it.instance(
   "loop includes workflow auto-decompose guidance in model system context",
   () =>
     Effect.gen(function* () {

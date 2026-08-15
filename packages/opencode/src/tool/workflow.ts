@@ -5,7 +5,7 @@ import { MessageID } from "../session/schema"
 import { Session } from "@/session/session"
 import { Effect, Schema } from "effect"
 import { SessionPrompt } from "@/session/prompt"
-import { validateDag } from "@/session/workflow/dag"
+import { validateWorkflow, workflowErrorMessage } from "@/session/workflow/dag"
 
 /**
  * `workflow` — declare and run a multi-step pipeline (DAG) of subagent tasks.
@@ -50,23 +50,10 @@ const DESCRIPTION_TEXT = [
   "subagent tasks (build then test+lint then publish).",
 ].join(" ")
 
-/** Hard cap on step count per workflow; larger fan-outs need explicit config. */
-const MAX_WORKFLOW_STEPS = 64
-
-/** Validate steps at the tool boundary: graph shape and size. */
-function validateSteps(
-  title: string,
-  steps: Array<{ id: string; dependsOn: readonly string[] }>,
-): string | undefined {
-  if (steps.length === 0) return `Workflow "${title}" has no steps`
-  if (steps.length > MAX_WORKFLOW_STEPS)
-    return `Workflow "${title}" has ${steps.length} steps; the maximum is ${MAX_WORKFLOW_STEPS}`
-  const dag = validateDag(steps)
-  if ("_tag" in dag) {
-    if (dag._tag === "cycle") return `Workflow "${title}" has a dependency cycle: ${dag.cycle.join(" -> ")}`
-    if (dag._tag === "duplicate-step") return `Workflow "${title}" has duplicate step id "${dag.stepId}"`
-    return `Workflow "${title}" step "${dag.stepId}" references unknown step "${dag.missing}"`
-  }
+/** Validate steps at the tool boundary: shared admission (graph shape + size). */
+function validateSteps(title: string, steps: Array<{ id: string; dependsOn: readonly string[] }>): string | undefined {
+  const dag = validateWorkflow(steps)
+  if ("_tag" in dag) return workflowErrorMessage(title, dag)
   return undefined
 }
 

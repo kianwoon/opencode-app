@@ -31,6 +31,45 @@ export type DagError =
   | { readonly _tag: "missing-step"; readonly stepId: string; readonly missing: string }
   | { readonly _tag: "cycle"; readonly cycle: readonly string[] }
 
+/** Hard cap on steps per workflow; larger fan-outs need explicit config. */
+export const MAX_WORKFLOW_STEPS = 64
+
+export type WorkflowAdmissionError =
+  | DagError
+  | { readonly _tag: "empty-steps" }
+  | { readonly _tag: "too-many-steps"; readonly count: number; readonly max: number }
+
+/**
+ * Full admission check shared by every entry point (the model-facing
+ * `workflow` tool and the loop dispatcher's direct-part path): graph shape
+ * plus the step-count bound. Both callers must enforce the same rules so a
+ * direct API `PromptInput` cannot bypass the tool's cap.
+ */
+export function validateWorkflow<S extends StepLike>(
+  steps: readonly S[],
+): ValidatedDag<S> | WorkflowAdmissionError {
+  if (steps.length === 0) return { _tag: "empty-steps" }
+  if (steps.length > MAX_WORKFLOW_STEPS)
+    return { _tag: "too-many-steps", count: steps.length, max: MAX_WORKFLOW_STEPS }
+  return validateDag(steps)
+}
+
+/** Format an admission error for the model/session error surface. */
+export function workflowErrorMessage(title: string, error: WorkflowAdmissionError): string {
+  switch (error._tag) {
+    case "cycle":
+      return `Workflow "${title}" has a dependency cycle: ${error.cycle.join(" -> ")}`
+    case "duplicate-step":
+      return `Workflow "${title}" has duplicate step id "${error.stepId}"`
+    case "missing-step":
+      return `Workflow "${title}" step "${error.stepId}" references unknown step "${error.missing}"`
+    case "empty-steps":
+      return `Workflow "${title}" has no steps`
+    case "too-many-steps":
+      return `Workflow "${title}" has ${error.count} steps; the maximum is ${error.max}`
+  }
+}
+
 /**
  * Validate a step list forms a DAG: ids must be unique, all `dependsOn` ids
  * must refer to existing steps, and there must be no cycle. Returns the
@@ -53,31 +92,37 @@ export function validateDag<S extends StepLike>(steps: readonly S[]): ValidatedD
     }
   }
 
-  // Cycle detection via recursive DFS with white/grey/black coloring.
+  // Cycle detection via iterative DFS with white/grey/black coloring. The
+  // explicit stack (not recursion) keeps a long dependency chain from
+  // overflowing the call stack. Each frame is [stepId, next dep index]; the
+  // stack always holds the current DFS path for cycle extraction.
   const color = new Map<string, "grey" | "black">()
-  const stack: string[] = []
-  const visit = (id: string): readonly string[] | undefined => {
-    const c = color.get(id)
-    if (c === "black") return undefined
-    if (c === "grey") {
-      // Found a cycle: extract from the stack back to this id.
-      const from = stack.lastIndexOf(id)
-      return [...stack.slice(from), id]
+  for (const root of steps) {
+    if (color.has(root.id)) continue
+    color.set(root.id, "grey")
+    const stack: Array<[string, number]> = [[root.id, 0]]
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!
+      const [id, index] = frame
+      const deps = byId.get(id)!.dependsOn
+      if (index < deps.length) {
+        frame[1] = index + 1
+        const dep = deps[index]!
+        const c = color.get(dep)
+        if (c === "grey") {
+          // Found a cycle: the path from `dep` (bottom-most grey frame) to
+          // the current frame, closed back to `dep`.
+          const from = stack.findIndex(([frameId]) => frameId === dep)
+          return { _tag: "cycle", cycle: [...stack.slice(from).map(([id]) => id), dep] }
+        }
+        if (c === "black") continue
+        color.set(dep, "grey")
+        stack.push([dep, 0])
+        continue
+      }
+      stack.pop()
+      color.set(id, "black")
     }
-    color.set(id, "grey")
-    stack.push(id)
-    for (const dep of byId.get(id)!.dependsOn) {
-      const cycle = visit(dep)
-      if (cycle) return cycle
-    }
-    stack.pop()
-    color.set(id, "black")
-    return undefined
-  }
-
-  for (const step of steps) {
-    const cycle = visit(step.id)
-    if (cycle) return { _tag: "cycle", cycle }
   }
 
   const dependents = new Map<string, string[]>(steps.map((s) => [s.id, []]))
@@ -89,6 +134,10 @@ export function validateDag<S extends StepLike>(steps: readonly S[]): ValidatedD
 
 /**
  * Steps whose dependencies are all satisfied (in `completed` or `skipped`).
+ * The `skipped` check is currently defensive: the scheduler only populates
+ * `skipped` transitively via failure propagation, so a skipped dependency
+ * always implies this step is skipped too. Keep the clause so readiness
+ * stays correct if skipped-ever-becomes an independently-reachable state.
  * Returns an empty array when there is work left but nothing is ready
  * (a deadlock — the caller should treat it as an error).
  */

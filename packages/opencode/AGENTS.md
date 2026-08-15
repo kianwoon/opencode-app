@@ -23,6 +23,20 @@
   completion — burning model turns, mutating the tree, and leaving their tool parts stuck
   `"running"` forever. As children, steps inherit the loop's interrupt and cascade it into
   the task tool's own `onInterrupt`, which settles the part and aborts the child session.
+- Workflow admission (graph shape + `MAX_WORKFLOW_STEPS` cap) lives in
+  `src/session/workflow/dag.ts` (`validateWorkflow`). Both the model-facing tool AND the
+  loop dispatcher must enforce it — the HTTP `PromptPayload` accepts `WorkflowPartInput`
+  directly, so without the dispatch-side check a direct API caller bypasses the tool's cap.
+  Acceptance gate: `test/session/prompt.test.ts` "direct API workflow part over the step
+  cap is rejected at dispatch".
+- `validateDag` cycle detection is iterative (explicit DFS stack) on purpose: a long
+  dependency chain (10k+ steps) would overflow the call stack with recursion. Keep it
+  iterative; the 50k-step deep-chain test in `test/session/workflow/dag.test.ts` is the
+  regression guard.
+- When mocking LLM failures in workflow e2e tests, `llm.fail("...")` stream errors are
+  often consumed by session retry (message patterns like "rate limit" match
+  `RETRYABLE_MESSAGE_PATTERNS` in `src/session/retry.ts`, 2s backoff). Use
+  `llm.error(400, {message})` for non-retryable provider failures.
 
 ## Database
 

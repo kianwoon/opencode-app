@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
+  MAX_WORKFLOW_STEPS,
   isComplete,
   propagateFailure,
   readySteps,
   validateDag,
+  validateWorkflow,
+  workflowErrorMessage,
   type WorkflowStepInput,
 } from "../../../src/session/workflow/dag"
 
@@ -53,6 +56,39 @@ describe("workflow dag", () => {
     expect("_tag" in result && result._tag === "cycle").toBe(true)
   })
 
+  test("cycle detection survives a deep dependency chain without recursion overflow", () => {
+    // 50k-step linear chain would blow the call stack if cycle detection
+    // recursed; the iterative DFS must handle it (and find no cycle).
+    const chain: WorkflowStepInput[] = Array.from({ length: 50_000 }, (_, i) => ({
+      id: `s${i}`,
+      dependsOn: i === 0 ? [] : [`s${i - 1}`],
+    }))
+    const result = validateDag(chain)
+    expect("steps" in result).toBe(true)
+
+    // The same chain closed into a ring (s0 depends on the tail) is one
+    // giant cycle and must be reported, not crash.
+    const cyclic: WorkflowStepInput[] = chain.map((step, i) =>
+      i === 0 ? { id: step.id, dependsOn: ["s49999"] } : step,
+    )
+    const looped = validateDag(cyclic)
+    expect("_tag" in looped && looped._tag === "cycle").toBe(true)
+  })
+
+  test("cycle detection reports longer cycles anywhere in the graph", () => {
+    // a -> b -> c -> b: cycle [b, c, b]
+    const result = validateDag([
+      { id: "a", dependsOn: ["b"] },
+      { id: "b", dependsOn: ["c"] },
+      { id: "c", dependsOn: ["b"] },
+    ])
+    expect("_tag" in result && result._tag === "cycle").toBe(true)
+    if ("_tag" in result && result._tag === "cycle") {
+      expect(result.cycle[0]).toBe(result.cycle[result.cycle.length - 1])
+      expect(result.cycle.length).toBeGreaterThan(1)
+    }
+  })
+
   test("readySteps returns only steps whose deps are satisfied", () => {
     const dag = validateDag(release)
     if (!("steps" in dag)) throw new Error("expected valid dag")
@@ -86,5 +122,49 @@ describe("workflow dag", () => {
     expect(isComplete(release, new Set(["build", "test", "lint", "publish"]), new Set())).toBe(true)
     expect(isComplete(release, new Set(["build"]), new Set())).toBe(false)
     expect(isComplete(release, new Set(), new Set(["build", "test", "lint", "publish"]))).toBe(true)
+  })
+})
+
+describe("workflow admission (validateWorkflow)", () => {
+  test("accepts a well-formed graph within the step cap", () => {
+    const result = validateWorkflow(release)
+    expect("steps" in result).toBe(true)
+  })
+
+  test("rejects empty step lists", () => {
+    const result = validateWorkflow([])
+    expect("_tag" in result && result._tag === "empty-steps").toBe(true)
+    expect(workflowErrorMessage("t", { _tag: "empty-steps" })).toContain('has no steps')
+  })
+
+  test("rejects graphs over the step cap with the count in the message", () => {
+    const fanout: WorkflowStepInput[] = Array.from({ length: MAX_WORKFLOW_STEPS + 1 }, (_, i) => ({
+      id: `s${i}`,
+      dependsOn: [],
+    }))
+    const result = validateWorkflow(fanout)
+    expect("_tag" in result && result._tag === "too-many-steps").toBe(true)
+    if ("_tag" in result && result._tag === "too-many-steps") {
+      expect(result.count).toBe(MAX_WORKFLOW_STEPS + 1)
+      expect(result.max).toBe(MAX_WORKFLOW_STEPS)
+      expect(workflowErrorMessage("t", result)).toBe(
+        `Workflow "t" has ${MAX_WORKFLOW_STEPS + 1} steps; the maximum is ${MAX_WORKFLOW_STEPS}`,
+      )
+    }
+  })
+
+  test("admits exactly at the cap", () => {
+    const fanout: WorkflowStepInput[] = Array.from({ length: MAX_WORKFLOW_STEPS }, (_, i) => ({
+      id: `s${i}`,
+      dependsOn: [],
+    }))
+    expect("steps" in validateWorkflow(fanout)).toBe(true)
+  })
+
+  test("surfaces graph-shape errors through the shared message formatter", () => {
+    const missing = validateWorkflow([{ id: "a", dependsOn: ["nope"] }])
+    expect(workflowErrorMessage("t", missing as { _tag: "missing-step"; stepId: string; missing: string })).toContain(
+      'references unknown step "nope"',
+    )
   })
 })

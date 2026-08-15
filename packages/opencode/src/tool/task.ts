@@ -215,8 +215,13 @@ export const TaskTool = Tool.define(
           agent: next.name,
           parts,
         })
-        if (result.info.role === "assistant" && result.info.error)
-          return yield* Effect.fail(new Error(result.info.error.name))
+        if (result.info.role === "assistant" && result.info.error) {
+          // Carry the provider's message, not just the error class name, so
+          // parent sessions and workflow summaries stay diagnostic. Some
+          // error variants (e.g. OutputLengthError) carry empty data.
+          const err = result.info.error as { name: string; data?: { message?: string } }
+          return yield* Effect.fail(new Error(`${err.name}: ${err.data?.message ?? "no message"}`))
+        }
         return result.parts.findLast((item) => item.type === "text")?.text ?? ""
       })
 
