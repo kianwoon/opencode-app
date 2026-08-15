@@ -95,11 +95,15 @@ test("animates todo lifecycle without replaying it across session tabs", async (
   await expect(dock.locator('[data-state="in_progress"]')).toHaveCount(1)
 
   const completedTodos = activeTodos.map((todo) => ({ ...todo, status: "completed" }))
-  const closing = sampleDock(page, 1_000)
+  // Completed todos stay fully visible for a readability hold before the dock
+  // fades, so the checked state is actually perceivable.
+  const holding = sampleDock(page, 1_000)
   todos[sourceID] = completedTodos
   events.push(todoEvent(sourceID, completedTodos))
-  await expect(dock).toHaveCount(0)
-  expect((await closing).some((sample) => sample.opacity > 0.05 && sample.opacity < 0.95)).toBe(true)
+  await expect(dock.locator('[data-state="completed"]')).toHaveCount(3)
+  const holdSamples = (await holding).filter((sample) => sample.present)
+  expect(holdSamples.some((sample) => sample.opacity > 0.98)).toBe(true)
+  await expect(dock).toHaveCount(0, { timeout: 10_000 })
   todos[sourceID] = []
   events.push(todoEvent(sourceID, []))
 

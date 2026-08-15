@@ -102,12 +102,28 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     return 400
   }
 
+  // How long the completed list stays fully visible before the close animation
+  // starts. Without this hold, the spring begins fading the dock the instant
+  // every todo completes, so the checked state is never readable.
+  const completedHoldMs = () => Math.max(closeMs(), 1600)
+
   const scheduleClose = () => {
     if (timer) window.clearTimeout(timer)
     timer = window.setTimeout(() => {
       setStore({ dock: false, closing: false })
       timer = undefined
     }, closeMs())
+  }
+
+  const scheduleCompletedClose = () => {
+    if (timer) window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      setStore("closing", true)
+      timer = window.setTimeout(() => {
+        setStore({ dock: false, closing: false })
+        timer = undefined
+      }, closeMs())
+    }, completedHoldMs())
   }
 
   // Keep stale turn todos from reopening if the model never clears them.
@@ -169,8 +185,11 @@ export function createSessionComposerController(options?: { closeMs?: number | (
           return
         }
 
-        setStore({ dock: true, opening: false, closing: true })
-        if (!timer) scheduleClose()
+        // All todos completed while the turn is still live: hold the checked
+        // list fully visible first, then close. `closing` drives the fade
+        // spring, so it must not flip true until the hold elapses.
+        setStore({ dock: true, opening: false, closing: false })
+        scheduleCompletedClose()
       },
     ),
   )
