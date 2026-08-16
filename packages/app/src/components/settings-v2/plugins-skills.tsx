@@ -1,3 +1,4 @@
+import { AppIcon } from "@opencode-ai/ui/app-icon"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
@@ -15,8 +16,11 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
+import { fileManagerApp } from "@/utils/file-manager"
 import { retry } from "@opencode-ai/core/util/retry"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
@@ -35,6 +39,19 @@ type PluginSpec = string | [string, Record<string, unknown>]
 const pluginName = (spec: PluginSpec) => (typeof spec === "string" ? spec : spec[0])
 
 const pluginEqual = (spec: PluginSpec, name: string) => pluginName(spec) === name
+
+const builtinSkill = (skill: SkillItem) =>
+  skill.location === "<built-in>" || skill.location.startsWith("/builtin/")
+
+// Local plugin specs are normalized to file:// URLs by the server when the config is loaded.
+const pluginFilePath = (spec: PluginSpec) => {
+  const name = pluginName(spec)
+  if (!name.startsWith("file://")) return undefined
+  return decodeURIComponent(name.slice("file://".length).split("?")[0]!)
+}
+
+// File plugins show their file name as the title; the full path sits right below it.
+const pluginTitle = (spec: PluginSpec) => pluginFilePath(spec)?.split("/").pop() ?? pluginName(spec)
 
 export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | undefined> }> = (props) => {
   const language = useLanguage()
@@ -132,7 +149,14 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
                 {(spec) => {
                   const name = pluginName(spec)
                   return (
-                    <SettingsRowV2 title={name} description="">
+                    <SettingsRowV2
+                      title={pluginTitle(spec)}
+                      description={
+                        <Show when={pluginFilePath(spec)}>
+                          {(path) => <LocationReveal path={path()} action="settings-plugin-reveal" />}
+                        </Show>
+                      }
+                    >
                       <Show when={editable()}>
                         <div data-action="settings-plugin-remove">
                           <ButtonV2
@@ -226,6 +250,42 @@ const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props)
   )
 }
 
+// Shows where a skill or plugin lives on disk. On desktop connected to a local
+// server, clicking reveals the file in the system file manager.
+const LocationReveal: Component<{ path: string; action: string }> = (props) => {
+  const language = useLanguage()
+  const platform = usePlatform()
+  const server = useServer()
+
+  const fileManager = createMemo(() =>
+    fileManagerApp(platform.platform === "desktop" ? (platform.os ?? "unknown") : "unknown"),
+  )
+  const canReveal = createMemo(() => platform.platform === "desktop" && !!platform.revealPath && server.isLocal())
+
+  return (
+    <Show
+      when={canReveal()}
+      fallback={
+        <span class="settings-v2-plugins-location" title={props.path}>
+          {props.path}
+        </span>
+      }
+    >
+      <button
+        type="button"
+        class="settings-v2-plugins-location"
+        data-action={props.action}
+        title={language.t(fileManager().actionLabel)}
+        aria-label={language.t(fileManager().actionLabel)}
+        onClick={() => void platform.revealPath?.(props.path)}
+      >
+        <AppIcon id={fileManager().icon} class="settings-v2-plugins-location-icon" alt="" draggable={false} />
+        <span class="settings-v2-plugins-location-path">{props.path}</span>
+      </button>
+    </Show>
+  )
+}
+
 const SkillsList: Component<{ skills: SkillItem[]; onRemove: (name: string) => Promise<void> }> = (props) => {
   const language = useLanguage()
   const [filter, setFilter] = createStore({ value: "" })
@@ -275,34 +335,42 @@ const SkillsList: Component<{ skills: SkillItem[]; onRemove: (name: string) => P
       </div>
       <SettingsListV2>
         <For each={filtered()}>
-          {(skill) => (
-            <SettingsRowV2
-              title={skill.name}
-              description={
-                <Show when={skill.description} fallback={skill.location}>
-                  {skill.description}
-                </Show>
-              }
-            >
-              <div class="settings-v2-plugins-skill-actions">
-                <Show when={skill.slash}>
-                  <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
-                </Show>
-                <Show when={skill.location !== "<built-in>" && !skill.location.startsWith("/builtin/")}>
-                  <div data-action="settings-skill-remove">
-                    <ButtonV2
-                      size="small"
-                      variant="neutral"
-                      onClick={() => void props.onRemove(skill.name)}
-                      title={language.t("settings.plugins.skills.remove")}
-                    >
-                      {language.t("settings.plugins.skills.remove")}
-                    </ButtonV2>
-                  </div>
-                </Show>
-              </div>
-            </SettingsRowV2>
-          )}
+          {(skill) => {
+            const builtin = builtinSkill(skill)
+            return (
+              <SettingsRowV2
+                title={skill.name}
+                description={
+                  <>
+                    <Show when={builtin ? skill.location : skill.description}>
+                      <div>{builtin ? skill.location : skill.description}</div>
+                    </Show>
+                    <Show when={!builtin}>
+                      <LocationReveal path={skill.location} action="settings-skill-reveal" />
+                    </Show>
+                  </>
+                }
+              >
+                <div class="settings-v2-plugins-skill-actions">
+                  <Show when={skill.slash}>
+                    <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
+                  </Show>
+                  <Show when={!builtin}>
+                    <div data-action="settings-skill-remove">
+                      <ButtonV2
+                        size="small"
+                        variant="neutral"
+                        onClick={() => void props.onRemove(skill.name)}
+                        title={language.t("settings.plugins.skills.remove")}
+                      >
+                        {language.t("settings.plugins.skills.remove")}
+                      </ButtonV2>
+                    </div>
+                  </Show>
+                </div>
+              </SettingsRowV2>
+            )
+          }}
         </For>
         <Show when={filtered().length === 0}>
           <div class="settings-v2-plugins-status">

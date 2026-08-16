@@ -784,3 +784,47 @@
   align-items: center;
   gap: 8px;
 }
+
+.settings-v2-plugins-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--v2-text-text-muted);
+  text-align: left;
+}
+
+span.settings-v2-plugins-location {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.settings-v2-plugins-location {
+  cursor: pointer;
+}
+
+button.settings-v2-plugins-location:hover {
+  color: var(--v2-text-text-accent);
+}
+
+.settings-v2-plugins-location-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+.settings-v2-plugins-location-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
