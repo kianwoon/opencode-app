@@ -1,5 +1,16 @@
 # opencode database guide
 
+## Config reload gotchas
+
+- "Reload configs" (global dispose, SIGUSR2, config-update) drops the TTL-infinity global
+  config cache and disposes every instance; the next instance access re-bootstraps from disk.
+- Bun caches dynamic `import()` by URL, and `file://` URLs with a query string STILL hit that
+  cache — only a bare path + query busts it. `PluginLoader.load` therefore suffixes file
+  plugin entries with `?mtime=<ms>` (via `bustFileEntry`) so edited plugin code re-evaluates
+  across reloads. npm plugin entries keep their stable URL (their versioned install dir
+  already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
+  "re-evaluates edited file plugin code across instance reload".
+
 ## Workflow/DAG engine gotchas
 
 - The `workflow` tool executes inside the session loop's own tool pass. It must admit its

@@ -100,6 +100,54 @@ describe("plugin.loader.shared", () => {
     ),
   )
 
+  it.live("re-evaluates edited file plugin code across instance reload", () =>
+    withTmp(
+      async (dir) => {
+        const file = path.join(dir, "plugin.ts")
+        const mark = path.join(dir, "version.txt")
+        const writePlugin = async (version: string) => {
+          await Bun.write(
+            file,
+            [`await Bun.write(${JSON.stringify(mark)}, ${JSON.stringify(version)})`, "export default async () => ({})", ""].join(
+              "\n",
+            ),
+          )
+        }
+        await writePlugin("v1")
+
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
+        )
+
+        return { file, mark }
+      },
+      (tmp) =>
+        Effect.gen(function* () {
+          const writePlugin = (version: string) =>
+            Bun.write(
+              tmp.extra.file,
+              [
+                `await Bun.write(${JSON.stringify(tmp.extra.mark)}, ${JSON.stringify(version)})`,
+                "export default async () => ({})",
+                "",
+              ].join("\n"),
+            )
+
+          yield* load(tmp.path)
+          expect(yield* Effect.promise(() => fs.readFile(tmp.extra.mark, "utf8"))).toBe("v1")
+
+          // Simulate a config reload: edit the plugin source, dispose the
+          // instance, then bootstrap again. Without mtime cache-busting the
+          // second import returns Bun's cached v1 module.
+          yield* Effect.promise(() => writePlugin("v2"))
+          yield* Effect.promise(() => disposeAllInstances())
+          yield* load(tmp.path)
+          expect(yield* Effect.promise(() => fs.readFile(tmp.extra.mark, "utf8"))).toBe("v2")
+        }),
+    ),
+  )
+
   it.live("deduplicates same function exported as default and named", () =>
     withTmp(
       async (dir) => {
