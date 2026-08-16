@@ -85,7 +85,19 @@ export const Plugin = define({
             if (!entrypoint) return
 
             const mod = yield* Effect.promise(() => import(entrypoint))
-            const value = (yield* Schema.decodeUnknownEffect(PluginModule)(mod)).default
+            const decoded = yield* Schema.decodeUnknownEffect(PluginModule)(mod).pipe(
+              Effect.option,
+            )
+            if (decoded._tag === "None") {
+              // V1-shaped plugin files (default export is a factory function or
+              // a { server()/tui() } object) are handled by the legacy V1
+              // loader; the V2 directory glob picks them up too. They are not
+              // an error on this path — log quietly and skip so the log stream
+              // stays signal-rich.
+              yield* Effect.logDebug("skipped non-V2 plugin module", { package: ref.package })
+              return
+            }
+            const value = decoded.value.default
             const plugin = "effect" in value ? value : PluginPromise.fromPromise(value)
             yield* ctx.plugin.add({
               id: plugin.id,

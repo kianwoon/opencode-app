@@ -282,6 +282,46 @@ describe("ConfigExternalPlugin", () => {
       })
     }),
   )
+
+  it.live("quietly skips V1-shaped plugin files from directory globs", () =>
+    Effect.gen(function* () {
+      const plugins = yield* PluginV2.Service
+      const agents = yield* AgentV2.Service
+      const fs = yield* FSUtil.Service
+      const location = yield* Location.Service
+      const npm = yield* Npm.Service
+      const host = yield* PluginHost.make(plugins)
+
+      // The fixture directory contains BOTH a V1-shaped file (default export
+      // is a factory function) and a V2 plugin. The V1-shaped file is owned
+      // by the legacy V1 loader; this loader must skip it without an error
+      // and still load the V2 sibling. Before the quiet-skip fix, every
+      // V1-shaped file in plugins/ produced a SchemaError log entry per boot.
+      yield* ConfigExternalPlugin.Plugin.effect(host).pipe(
+        Effect.provideService(PluginV2.Service, plugins),
+        Effect.provideService(FSUtil.Service, fs),
+        Effect.provideService(Location.Service, location),
+        Effect.provideService(Npm.Service, npm),
+        Effect.provideService(
+          Config.Service,
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed([
+                new Config.Directory({
+                  type: "directory",
+                  path: AbsolutePath.make(path.join(import.meta.dir, "fixtures")),
+                }),
+              ]),
+          }),
+        ),
+      )
+
+      expect(yield* waitForAgent(agents, "directory")).toMatchObject({
+        description: "Loaded from plugin directory",
+        mode: "subagent",
+      })
+    }),
+  )
 })
 
 const waitForAgent = Effect.fnUntraced(function* (agents: AgentV2.Interface, id: string) {
