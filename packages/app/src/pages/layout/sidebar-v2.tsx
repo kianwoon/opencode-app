@@ -21,7 +21,7 @@ import { useDirectoryPicker } from "@/components/directory-picker"
 import { useSettingsCommand } from "@/components/settings-dialog"
 import { useCommand } from "@/context/command"
 import { createPromptSession } from "@/context/prompt-state"
-import { displayName, getProjectAvatarSource, sortedRootSessions } from "./helpers"
+import { displayName, displayNamesFor, getProjectAvatarSource, sortedRootSessions } from "./helpers"
 import { useSessionTabAvatarState } from "./project-avatar-state"
 import { showToast } from "@/utils/toast"
 import { sessionTitle } from "@/utils/session-title"
@@ -405,12 +405,14 @@ function RailSidebar(props: {
       (total, directory) => total + (state()?.project.unseenCount(directory) ?? 0),
       0,
     )
+  const names = createMemo(() => displayNamesFor(props.projects()))
   return (
     <div class="flex h-full flex-col items-center gap-1 overflow-y-auto no-scrollbar py-2">
       <For each={props.projects()}>
         {(project) => (
           <RailProjectIcon
             project={project}
+            name={names().get(project.worktree) ?? displayName(project)}
             active={pathKey(props.activeDirectory() ?? "") === pathKey(project.worktree)}
             onOpen={() => props.onOpenProject(project.worktree)}
             unseen={unseenFor(project)}
@@ -450,20 +452,20 @@ function RailAction(props: { icon: string; label: string; onClick: () => void })
   )
 }
 
-function RailProjectIcon(props: { project: LocalProject; active: boolean; unseen: number; onOpen: () => void }) {
+function RailProjectIcon(props: { project: LocalProject; name: string; active: boolean; unseen: number; onOpen: () => void }) {
   return (
-    <TooltipV2 placement="right" value={displayName(props.project)}>
+    <TooltipV2 placement="right" value={props.name}>
       <button
         type="button"
         data-component="sidebar-v2-project-rail"
         class="flex size-8 shrink-0 items-center justify-center rounded-[6px] transition-colors hover:bg-v2-background-bg-layer-01"
         classList={{ "bg-v2-background-bg-layer-02": props.active }}
-        aria-label={displayName(props.project)}
+        aria-label={props.name}
         aria-current={props.active ? "page" : undefined}
         onClick={props.onOpen}
       >
         <ProjectAvatar
-          fallback={displayName(props.project)}
+          fallback={props.name}
           src={getProjectAvatarSource(props.project.id, props.project.icon)}
           variant={getProjectAvatarVariant(props.project.icon?.color)}
           unread={props.unseen > 0}
@@ -517,6 +519,7 @@ function ExpandedSidebar(props: SidebarActions) {
 
   const expandedFor = (project: LocalProject) => props.expandedFor(project)
   const toggleExpanded = (worktree: string) => props.onToggleExpanded(worktree)
+  const names = createMemo(() => displayNamesFor(props.projects()))
 
   return (
     <div class="flex h-full min-h-0 min-w-0 flex-col">
@@ -568,6 +571,7 @@ function ExpandedSidebar(props: SidebarActions) {
                 {(project) => (
                   <ProjectSection
                     project={project}
+                    name={names().get(project.worktree) ?? displayName(project)}
                     expanded={expandedFor(project)}
                     onToggle={() => toggleExpanded(project.worktree)}
                     {...props}
@@ -628,6 +632,7 @@ function ExpandedSidebar(props: SidebarActions) {
 function ProjectSection(
   props: SidebarActions & {
     project: LocalProject
+    name: string
     expanded: boolean
     onToggle: () => void
   },
@@ -698,14 +703,12 @@ function ProjectSection(
             />
           </span>
           <ProjectAvatar
-            fallback={displayName(props.project)}
+            fallback={props.name}
             src={getProjectAvatarSource(props.project.id, props.project.icon)}
             variant={getProjectAvatarVariant(props.project.icon?.color)}
             unread={unseen() > 0}
           />
-          <span class="min-w-0 flex-1 truncate text-v2-text-text-base [font-weight:530]">
-            {displayName(props.project)}
-          </span>
+          <span class="min-w-0 flex-1 truncate text-v2-text-text-base [font-weight:530]">{props.name}</span>
         </button>
         <div class="hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 group-hover/project:opacity-100">
           <MenuV2

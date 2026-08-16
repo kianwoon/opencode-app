@@ -1,4 +1,4 @@
-import { getFilename } from "@opencode-ai/core/util/path"
+import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
 import type { ServerConnection } from "@/context/server"
@@ -48,6 +48,28 @@ export const childSessionOnPath = (sessions: Session[] | undefined, rootID: stri
 
 export const displayName = (project: { name?: string; worktree: string }) =>
   project.name || getFilename(project.worktree) || project.worktree
+
+// Two distinct projects can share a folder name (e.g. ~/.config/opencode and
+// ~/Downloads/opencode); qualify duplicates with their parent folder so the
+// sidebar never renders two visually identical entries.
+export function uniqueDisplayNames(projects: Array<{ name?: string; worktree: string }>) {
+  const base = new Map<string, number>()
+  for (const project of projects) {
+    const name = displayName(project)
+    base.set(name, (base.get(name) ?? 0) + 1)
+  }
+  return projects.map((project) => {
+    const name = displayName(project)
+    if ((base.get(name) ?? 0) < 2) return name
+    const parent = getFilename(getDirectory(project.worktree))
+    return parent ? `${name} · ${parent}` : project.worktree
+  })
+}
+
+export const displayNamesFor = (projects: Array<{ name?: string; worktree: string }>) => {
+  const names = uniqueDisplayNames(projects)
+  return new Map(projects.map((project, index) => [project.worktree, names[index]]))
+}
 
 export function toggleHomeProjectSelection(
   current: HomeProjectSelection | undefined,
