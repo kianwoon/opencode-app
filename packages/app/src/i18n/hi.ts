@@ -895,6 +895,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "कोई प्रोजेक्ट खुला नहीं",
   "sidebar.empty.description": "आरंभ करने के लिए एक प्रोजेक्ट खोलें",
+  "sidebar.drop.title": "प्रोजेक्ट जोड़ने के लिए फ़ोल्डर यहाँ छोड़ें",
+  "sidebar.drop.foldersOnly": "प्रोजेक्ट के रूप में केवल फ़ोल्डर ही जोड़े जा सकते हैं",
+
   "debugBar.ariaLabel": "विकास प्रदर्शन निदान",
   "debugBar.na": "एन/ए",
   "debugBar.nav.label": "NAV",

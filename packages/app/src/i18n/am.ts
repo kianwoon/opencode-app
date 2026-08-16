@@ -869,6 +869,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "ምንም ክፍት ፕሮጀክቶች የሉም",
   "sidebar.empty.description": "ለመጀመር ፕሮጀክት ይክፈቱ",
+  "sidebar.drop.title": "ፕሮጀክት ለመጨመር አቃፊን ወደ ይህ ጎን አስቀምጡ",
+  "sidebar.drop.foldersOnly": "እንደ ፕሮጀክት የሚጨመረው አቃፊ ብቻ ነው",
+
   "debugBar.ariaLabel": "የልማት አፈጻጸም ምርመራዎች",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

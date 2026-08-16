@@ -885,6 +885,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "პროექტები არ არის გახსნილი",
   "sidebar.empty.description": "გახსენით პროექტი დასაწყებად",
+  "sidebar.drop.title": "პროექტის დასამატებლად გადმოათავსეთ საქაღალდე აქ",
+  "sidebar.drop.foldersOnly": "პროექტად შეიძლება დაემატოს მხოლოდ საქაღალდე",
+
   "debugBar.ariaLabel": "განვითარების შესრულების დიაგნოსტიკა",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

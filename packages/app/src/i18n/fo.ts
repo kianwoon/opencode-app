@@ -886,6 +886,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Ongar verkætlanir lata upp",
   "sidebar.empty.description": "Opna eina verkætlan fyri at koma í gongd",
+  "sidebar.drop.title": "Legg eina móppu her fyri at leggja eina verkætlan til",
+  "sidebar.drop.foldersOnly": "Berre möppur kunnu leggjast til sum verkætlanir",
+
   "debugBar.ariaLabel": "Menningar avriksdiagnostikk",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

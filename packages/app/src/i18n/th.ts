@@ -887,6 +887,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "ไม่มีโปรเจกต์ที่เปิดอยู่",
   "sidebar.empty.description": "เปิดโปรเจกต์เพื่อเริ่มต้น",
+  "sidebar.drop.title": "เพิ่มโปรเจกต์โดยลากโฟลเดอร์มาวางที่นี่",
+  "sidebar.drop.foldersOnly": "เพิ่มเป็นโปรเจกต์ได้เฉพาะโฟลเดอร์เท่านั้น",
 
   "app.name.desktop": "OpenCode Desktop",
 

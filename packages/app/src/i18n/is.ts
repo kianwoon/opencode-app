@@ -889,6 +889,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Engin verkefni opin",
   "sidebar.empty.description": "Opnaðu verkefni til að byrja",
+  "sidebar.drop.title": "Slepptu möppu hér til að bæta við verkefni",
+  "sidebar.drop.foldersOnly": "Aðeins möppur er hægt að bæta við sem verkefnum",
+
   "debugBar.ariaLabel": "Þróunarárangursgreiningar",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

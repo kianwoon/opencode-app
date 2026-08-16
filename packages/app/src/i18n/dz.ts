@@ -900,6 +900,9 @@ export const dict: Record<string, string> = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "ལས་འགུལ་ཁ་ཕྱེ་མེད།",
   "sidebar.empty.description": "འགོ་བཙུགས་ནིའི་དོན་ལུ་ལས་འགུལ་ཅིག་ཁ་ཕྱེ།",
+  "sidebar.drop.title": "ལས་འགུལ་ཁ་སྐོང་རྐྱབས་ནིའི་དོན་ལུ་སྣོད་འཛིན་འདི་གནས་འདི་ལུ་གཡོགས།",
+  "sidebar.drop.foldersOnly": "ལས་འགུལ་བཟུམ་སྦྱར་བཏུབ་མིན་ སྣོད་འཛིན་རྐྱངམ་ཅིག་ཨིན།",
+
   "debugBar.ariaLabel": "གོང་འཕེལ་གྱི་ལས་དོན་བརྟག་དཔྱད།",
   "debugBar.na": "ན/ཨེ།",
   "debugBar.nav.label": "NAV",

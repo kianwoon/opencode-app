@@ -886,6 +886,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Taslama açylmaýar",
   "sidebar.empty.description": "Başlamak üçin taslama açyň",
+  "sidebar.drop.title": "Taslama goşmak üçin papkany şu ýere gaýdyň",
+  "sidebar.drop.foldersOnly": "Taslama hökmünde diňe papkalar goşulup bilner",
+
   "debugBar.ariaLabel": "Ösüş öndürijiligini anyklaýyş",
   "debugBar.na": "n / a",
   "debugBar.nav.label": "NAV",

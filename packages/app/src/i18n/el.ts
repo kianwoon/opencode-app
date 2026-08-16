@@ -894,6 +894,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Δεν υπάρχουν ανοιχτά έργα",
   "sidebar.empty.description": "Ανοίξτε ένα έργο για να ξεκινήσετε",
+  "sidebar.drop.title": "Σύρετε έναν φάκελο εδώ για να προσθέσετε ένα έργο",
+  "sidebar.drop.foldersOnly": "Μόνο φάκελοι μπορούν να προστεθούν ως έργα",
+
   "debugBar.ariaLabel": "Διαγνωστικά απόδοσης ανάπτυξης",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

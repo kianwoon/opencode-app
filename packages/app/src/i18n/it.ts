@@ -805,6 +805,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nessun progetto aperto",
   "sidebar.empty.description": "Apri un progetto per iniziare",
+  "sidebar.drop.title": "Trascina qui una cartella per aggiungere un progetto",
+  "sidebar.drop.foldersOnly": "Come progetti è possibile aggiungere solo cartelle",
+
   "debugBar.ariaLabel": "Diagnostica delle prestazioni di sviluppo",
   "debugBar.na": "n/d",
   "debugBar.nav.label": "NAV",

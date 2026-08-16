@@ -890,6 +890,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Niciun proiect deschis",
   "sidebar.empty.description": "Deschide un proiect pentru a începe",
+  "sidebar.drop.title": "Trageți un folder aici pentru a adăuga un proiect",
+  "sidebar.drop.foldersOnly": "Ca proiecte pot fi adăugate doar foldere",
+
   "debugBar.ariaLabel": "Diagnosticare performanță dezvoltare",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

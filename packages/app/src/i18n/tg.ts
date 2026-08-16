@@ -889,6 +889,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Ягон лоиҳа кушода нест",
   "sidebar.empty.description": "Барои оғоз кардани лоиҳа лоиҳа кушоед",
+  "sidebar.drop.title": "Лоиҳа илова кардан барои папкаро ба ин ҷо партоед",
+  "sidebar.drop.foldersOnly": "Ҳамчун лоиҳа танҳо папкаҳоро илова кардан мумкин аст",
+
   "debugBar.ariaLabel": "Ташхиси самаранокии рушд",
   "debugBar.na": "не",
   "debugBar.nav.label": "NAV",

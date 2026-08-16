@@ -905,6 +905,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Açık proje yok",
   "sidebar.empty.description": "Başlamak için bir proje açın",
+  "sidebar.drop.title": "Proje eklemek için bir klasörü buraya bırakın",
+  "sidebar.drop.foldersOnly": "Proje olarak yalnızca klasörler eklenebilir",
 
   "app.name.desktop": "OpenCode Masaüstü",
 

@@ -886,6 +886,9 @@ export const dict: Record<string, string> = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "कुनै पनि आयोजना खुलेका छैनन्",
   "sidebar.empty.description": "सुरु गर्न एउटा परियोजना खोल्नुहोस्",
+  "sidebar.drop.title": "परियोजना थप्न फोल्डर यहाँ छोड्नुहोस्",
+  "sidebar.drop.foldersOnly": "परियोजनाको रूपमा फोल्डरहरू मात्र थप्न सकिन्छ",
+
   "debugBar.ariaLabel": "विकास प्रदर्शन निदान",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

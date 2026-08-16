@@ -893,6 +893,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nincs nyitott projekt",
   "sidebar.empty.description": "A kezdéshez nyisson meg egy projektet",
+  "sidebar.drop.title": "Húzzon ide egy mappát egy projekt hozzáadásához",
+  "sidebar.drop.foldersOnly": "Csak mappák adhatók hozzá projektként",
+
   "debugBar.ariaLabel": "Fejlesztési teljesítmény diagnosztika",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

@@ -895,6 +895,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Heç bir layihə açılmayıb",
   "sidebar.empty.description": "Başlamaq üçün bir layihə açın",
+  "sidebar.drop.title": "Layihə əlavə etmək üçün qovluğu buraya salın",
+  "sidebar.drop.foldersOnly": "Yalnız qovluqlar layihə kimi əlavə edilə bilər",
+
   "debugBar.ariaLabel": "Tərtibatçı performans diaqnostikası",
   "debugBar.na": "yox",
   "debugBar.nav.label": "NAV",

@@ -889,6 +889,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nie sú otvorené žiadne projekty",
   "sidebar.empty.description": "Otvorte projekt pre začiatok",
+  "sidebar.drop.title": "Pridajte projekt presunutím priečinka sem",
+  "sidebar.drop.foldersOnly": "Ako projekty možno pridať iba priečinky",
+
   "debugBar.ariaLabel": "Diagnostika výkonu vývoja",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

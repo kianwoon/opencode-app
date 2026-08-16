@@ -880,6 +880,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "ບໍ່ມີໂຄງການເປີດ",
   "sidebar.empty.description": "ເປີດໂຄງການເພື່ອເລີ່ມຕົ້ນ",
+  "sidebar.drop.title": "ເພື່ອເພີ່ມໂຄງການ ໃຫ້ລາກໂຟນເດີມາວາງຢູ່ນີ້",
+  "sidebar.drop.foldersOnly": "ເພີ່ມເປັນໂຄງການໄດ້ພຽງແຕ່ໂຟນເດີເທົ່ານັ້ນ",
+
   "debugBar.ariaLabel": "ການວິນິດໄສປະສິດທິພາບການພັດທະນາ",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

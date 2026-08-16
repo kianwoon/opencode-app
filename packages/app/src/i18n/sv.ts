@@ -890,6 +890,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Inga projekt öppna",
   "sidebar.empty.description": "Öppna ett projekt för att komma igång",
+  "sidebar.drop.title": "Dra en mapp hit för att lägga till ett projekt",
+  "sidebar.drop.foldersOnly": "Endast mappar kan läggas till som projekt",
+
   "debugBar.ariaLabel": "Utvecklingsprestandadiagnostik",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

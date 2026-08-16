@@ -883,6 +883,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "没有打开的项目",
   "sidebar.empty.description": "打开一个项目以开始使用",
+  "sidebar.drop.title": "拖放文件夹到此处以添加项目",
+  "sidebar.drop.foldersOnly": "只能将文件夹添加为项目",
 
   "app.name.desktop": "OpenCode Desktop",
 

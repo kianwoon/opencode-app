@@ -1260,6 +1260,8 @@ export const dict = {
 
   "sidebar.empty.title": "Ingen åpne prosjekter",
   "sidebar.empty.description": "Åpne et prosjekt for å komme i gang",
+  "sidebar.drop.title": "Dra en mappe hit for å legge til et prosjekt",
+  "sidebar.drop.foldersOnly": "Bare mapper kan legges til som prosjekter",
 
   "settings.general.section.advanced": "Avansert",
   "settings.general.row.shell.title": "Terminalskall",

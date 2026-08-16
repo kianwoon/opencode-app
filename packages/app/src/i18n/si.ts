@@ -883,6 +883,9 @@ export const dict: Record<string, string> = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "ව්‍යාපෘති විවෘත නැත",
   "sidebar.empty.description": "ආරම්භ කිරීමට ව්‍යාපෘතියක් විවෘත කරන්න",
+  "sidebar.drop.title": "ව්යාපෘතියක් එකතු කිරීමට ෆෝල්ඩරයක් මෙහි ඇද දමන්න",
+  "sidebar.drop.foldersOnly": "ව්යාපෘති ලෙස එකතු කළ හැක්කේ ෆෝල්ඩර පමණි",
+
   "debugBar.ariaLabel": "සංවර්ධන කාර්ය සාධන රෝග විනිශ්චය",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

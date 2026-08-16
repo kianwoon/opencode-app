@@ -899,6 +899,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Jokių atvirų projektų",
   "sidebar.empty.description": "Norėdami pradėti, atidarykite projektą",
+  "sidebar.drop.title": "Vilkite aplanką čia, kad pridėtumėte projektą",
+  "sidebar.drop.foldersOnly": "Kaip projektus galima pridėti tik aplankus",
+
   "debugBar.ariaLabel": "Vystymosi veiklos diagnostika",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

@@ -894,6 +894,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nema otvorenih projekata",
   "sidebar.empty.description": "Otvorite projekt da biste započeli",
+  "sidebar.drop.title": "Pustite mapu ovdje da dodate projekt",
+  "sidebar.drop.foldersOnly": "Kao projekti mogu se dodati samo mape",
+
   "debugBar.ariaLabel": "Dijagnostika izvedbe razvoja",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

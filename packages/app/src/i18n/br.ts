@@ -839,6 +839,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nenhum projeto aberto",
   "sidebar.empty.description": "Abra um projeto para começar",
+  "sidebar.drop.title": "Arraste uma pasta aqui para adicionar um projeto",
+  "sidebar.drop.foldersOnly": "Somente pastas podem ser adicionadas como projetos",
+
   "app.name.desktop": "OpenCode Desktop",
   "settings.section.desktop": "Desktop",
   "settings.section.server": "Servidor",

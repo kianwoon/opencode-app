@@ -893,6 +893,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Hech qanday loyiha ochiq emas",
   "sidebar.empty.description": "Boshlash uchun loyihani oching",
+  "sidebar.drop.title": "Loyiha qo'shish uchun jildni shu yerga tashlang",
+  "sidebar.drop.foldersOnly": "Loyiha sifatida faqat jildlar qo'shilishi mumkin",
+
   "debugBar.ariaLabel": "Rivojlanish samaradorligi diagnostikasi",
   "debugBar.na": "yo'q",
   "debugBar.nav.label": "NAV",

@@ -900,6 +900,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nema otvorenih projekata",
   "sidebar.empty.description": "Otvori projekat za početak",
+  "sidebar.drop.title": "Prevucite fasciklu ovdje da dodate projekat",
+  "sidebar.drop.foldersOnly": "Kao projekti mogu se dodati samo fascikle",
 
   "app.name.desktop": "OpenCode Desktop",
 

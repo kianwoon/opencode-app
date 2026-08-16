@@ -881,6 +881,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Avatud projekte pole",
   "sidebar.empty.description": "Alustamiseks avage projekt",
+  "sidebar.drop.title": "Lohistage kaust siia, et lisada projekt",
+  "sidebar.drop.foldersOnly": "Projektidena saab lisada ainult kaustu",
+
   "debugBar.ariaLabel": "Arendustegevuse diagnostika",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

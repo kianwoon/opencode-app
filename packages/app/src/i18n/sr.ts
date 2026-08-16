@@ -889,6 +889,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Нема отворених пројеката",
   "sidebar.empty.description": "Отворите пројекат да бисте започели",
+  "sidebar.drop.title": "Превуците фасциклу овде да додате пројекат",
+  "sidebar.drop.foldersOnly": "Као пројекте могу се додати само фасцикле",
+
   "debugBar.ariaLabel": "Дијагностика перформанси развоја",
   "debugBar.na": "н/а",
   "debugBar.nav.label": "NAV",

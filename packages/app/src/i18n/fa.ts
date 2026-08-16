@@ -884,6 +884,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "هیچ پروژه ای باز نشده است",
   "sidebar.empty.description": "برای شروع یک پروژه باز کنید",
+  "sidebar.drop.title": "برای افزودن پروژه، یک پوشه را اینجا رها کنید",
+  "sidebar.drop.foldersOnly": "فقط پوشه‌ها را می‌توان به‌عنوان پروژه افزود",
+
   "debugBar.ariaLabel": "تشخیص عملکرد توسعه",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

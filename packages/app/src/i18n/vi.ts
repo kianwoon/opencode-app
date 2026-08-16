@@ -897,6 +897,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Không có dự án nào mở",
   "sidebar.empty.description": "Mở một dự án để bắt đầu",
+  "sidebar.drop.title": "Kéo một thư mục vào đây để thêm dự án",
+  "sidebar.drop.foldersOnly": "Chỉ có thể thêm thư mục dưới dạng dự án",
+
   "debugBar.ariaLabel": "Chẩn đoán hiệu suất phát triển",
   "debugBar.na": "không có",
   "debugBar.nav.label": "NAV",

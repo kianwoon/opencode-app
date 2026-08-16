@@ -891,6 +891,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nav atvērts neviens projekts",
   "sidebar.empty.description": "Atveriet projektu, lai sāktu",
+  "sidebar.drop.title": "Velciet mapi šeit, lai pievienotu projektu",
+  "sidebar.drop.foldersOnly": "Kā projektus var pievienot tikai mapes",
+
   "debugBar.ariaLabel": "Izstrādes veiktspējas diagnostika",
   "debugBar.na": "nav",
   "debugBar.nav.label": "NAV",

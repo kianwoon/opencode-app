@@ -888,6 +888,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Asnjë projekt i hapur",
   "sidebar.empty.description": "Hapni një projekt për të filluar",
+  "sidebar.drop.title": "Rrëzojeni dosjen këtu për të shtuar një projekt",
+  "sidebar.drop.foldersOnly": "Si projekte mund të shtohen vetëm dosje",
+
   "debugBar.ariaLabel": "Diagnostifikimi i performancës së zhvillimit",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

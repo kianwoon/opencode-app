@@ -1047,6 +1047,8 @@ export const dict = {
 
   "sidebar.empty.title": "열린 프로젝트 없음",
   "sidebar.empty.description": "프로젝트를 열어 시작하세요",
+  "sidebar.drop.title": "폴더를 여기에 놓아 프로젝트를 추가",
+  "sidebar.drop.foldersOnly": "폴더만 프로젝트로 추가할 수 있습니다",
 
   "settings.general.section.advanced": "고급",
   "settings.general.row.shell.title": "터미널 셸",

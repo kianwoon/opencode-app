@@ -785,6 +785,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Ei avoimia projekteja",
   "sidebar.empty.description": "Aloita avaamalla projekti",
+  "sidebar.drop.title": "Lisää projekti vetämällä kansio tähän",
+  "sidebar.drop.foldersOnly": "Projekteiksi voi lisätä vain kansioita",
+
   "debugBar.ariaLabel": "Kehityksen suorituskyvyn diagnostiikka",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

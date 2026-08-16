@@ -882,6 +882,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "គ្មានគម្រោងបើកទេ។",
   "sidebar.empty.description": "បើកគម្រោងដើម្បីចាប់ផ្តើម",
+  "sidebar.drop.title": "ដើម្បីបន្ថែមគម្រោង សូមទម្លាក់ថតមួយមកទីនេះ",
+  "sidebar.drop.foldersOnly": "អាចបន្ថែមជាគម្រោងបានតែថតប៉ុណ្ណោះ",
+
   "debugBar.ariaLabel": "ការវិនិច្ឆ័យដំណើរការអភិវឌ្ឍន៍",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

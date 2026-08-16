@@ -895,6 +895,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "No hi ha projectes oberts",
   "sidebar.empty.description": "Obriu un projecte per començar",
+  "sidebar.drop.title": "Arrossegueu una carpeta aquí per afegir un projecte",
+  "sidebar.drop.foldersOnly": "Només es poden afegir carpetes com a projectes",
+
   "debugBar.ariaLabel": "Diagnòstic de rendiment del desenvolupament",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

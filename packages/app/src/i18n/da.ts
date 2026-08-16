@@ -777,6 +777,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Ingen åbne projekter",
   "sidebar.empty.description": "Åbn et projekt for at komme i gang",
+  "sidebar.drop.title": "Træk en mappe herhen for at tilføje et projekt",
+  "sidebar.drop.foldersOnly": "Kun mapper kan tilføjes som projekter",
 
   "app.name.desktop": "OpenCode Desktop",
   "settings.section.desktop": "Desktop",

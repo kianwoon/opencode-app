@@ -880,6 +880,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "未開啟任何專案",
   "sidebar.empty.description": "開啟專案以開始使用",
+  "sidebar.drop.title": "拖放資料夾到這裡以新增專案",
+  "sidebar.drop.foldersOnly": "只能將資料夾新增為專案",
 
   "app.name.desktop": "OpenCode Desktop",
   "settings.section.desktop": "桌面",

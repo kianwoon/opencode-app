@@ -962,6 +962,8 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Tidak ada proyek terbuka",
   "sidebar.empty.description": "Buka proyek untuk memulai",
+  "sidebar.drop.title": "Tarik folder ke sini untuk menambahkan proyek",
+  "sidebar.drop.foldersOnly": "Hanya folder yang dapat ditambahkan sebagai proyek",
 
   "debugBar.ariaLabel": "Diagnostik kinerja pengembangan",
   "debugBar.na": "n/a",

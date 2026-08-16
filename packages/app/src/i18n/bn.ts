@@ -885,6 +885,9 @@ export const dict: Record<string, string> = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "কোনো প্রকল্প খোলা নেই",
   "sidebar.empty.description": "শুরু করতে একটি প্রকল্প খুলুন",
+  "sidebar.drop.title": "প্রকল্প যোগ করতে এখানে ফোল্ডার ফেলে দিন",
+  "sidebar.drop.foldersOnly": "শুধুমাত্র ফোল্ডারই প্রকল্প হিসেবে যোগ করা যায়",
+
   "debugBar.ariaLabel": "উন্নয়ন কর্মক্ষমতা ডায়গনিস্টিক",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "এনএভি",

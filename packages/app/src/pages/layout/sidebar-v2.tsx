@@ -30,6 +30,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { shouldOpenSessionInBackground } from "../home-session-open"
 import { type Session } from "@opencode-ai/sdk/v2/client"
+import { makeFolderDrop } from "@/utils/folder-drop"
 
 const SIDEBAR_RAIL_WIDTH = 44
 const SIDEBAR_PANEL_WIDTH = 264
@@ -244,6 +245,21 @@ export function NewSidebar() {
     })
   }
 
+  // Dropping folders from the OS onto the sidebar adds them as projects, the
+  // same outcome as the add-project picker. Path resolution requires the
+  // desktop platform's getPathForFile; on plain web the drop is a no-op.
+  const folderDrop = makeFolderDrop({
+    getPathForFile: platform.getPathForFile,
+    onAddProjects: (directories) => {
+      const conn = currentServer()
+      if (!conn) return
+      const serverCtx = global.ensureServerCtx(conn)
+      for (const directory of directories) serverCtx.projects.open(directory)
+      if (directories[0]) serverCtx.projects.touch(directories[0])
+    },
+    onNotFolders: () => showToast({ variant: "error", title: language.t("sidebar.drop.foldersOnly") }),
+  })
+
   const closeProject = (directory: string) => {
     const conn = currentServer()
     if (!conn) return
@@ -309,7 +325,20 @@ export function NewSidebar() {
       data-component="sidebar-v2"
       class="relative flex h-full min-h-0 min-w-0 flex-col shrink-0 bg-v2-background-bg-deep"
       style={{ width: `${width()}px` }}
+      onDragEnter={folderDrop.dragEnter}
+      onDragOver={folderDrop.dragOver}
+      onDragLeave={folderDrop.dragLeave}
+      onDrop={folderDrop.drop}
     >
+      <Show when={folderDrop.active()}>
+        <div
+          class="pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 rounded-[10px] border-2 border-dashed border-v2-border-border-base bg-v2-background-bg-deep/95 p-4 text-center"
+          data-component="sidebar-folder-drop-overlay"
+        >
+          <IconV2 name="folder-add-left" size="large" />
+          <div class="text-[13px] [font-weight:530] text-v2-text-text-base">{language.t("sidebar.drop.title")}</div>
+        </div>
+      </Show>
       <div class="flex-1 min-h-0 min-w-0 overflow-hidden">
         <Show
           when={expanded()}

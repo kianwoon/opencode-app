@@ -893,6 +893,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Нээлттэй төсөл байхгүй",
   "sidebar.empty.description": "Эхлэхийн тулд төсөл нээнэ үү",
+  "sidebar.drop.title": "Төсөл нэмэхийн тулд фолдерыг энд буулгана уу",
+  "sidebar.drop.foldersOnly": "Төсөл болгон зөвхөн фолдер нэмж болно",
+
   "debugBar.ariaLabel": "Хөгжлийн гүйцэтгэлийн оношлогоо",
   "debugBar.na": "үгүй",
   "debugBar.nav.label": "NAV",

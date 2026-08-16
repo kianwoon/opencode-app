@@ -899,6 +899,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "އެއްވެސް މަޝްރޫއެއް ނުހުޅުވޭ",
   "sidebar.empty.description": "ފަށަން ޕްރޮޖެކްޓެއް ހުޅުވާށެވެ",
+  "sidebar.drop.title": "ޕްރޮޖެކްޓެއް އިތުރުކުރުމަށް ފޯލްޑަރެއް މިތަނަށް ދޫކުރައްވާ",
+  "sidebar.drop.foldersOnly": "ޕްރޮޖެކްޓެއްގެ ގޮތުގައި އިތުރުކުރެވޭނީ ފޯލްޑަރުން ވަންނަން",
+
   "debugBar.ariaLabel": "ޑިވެލޮޕްމަންޓް ޕާފޯމަންސް ޑައިގްނޯސްޓިކްސް",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV އެވެ",

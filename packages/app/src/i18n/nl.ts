@@ -895,6 +895,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Geen projecten geopend",
   "sidebar.empty.description": "Open een project om aan de slag te gaan",
+  "sidebar.drop.title": "Sleep een map hierheen om een project toe te voegen",
+  "sidebar.drop.foldersOnly": "Alleen mappen kunnen als project worden toegevoegd",
+
   "debugBar.ariaLabel": "Diagnostiek voor ontwikkelprestaties",
   "debugBar.na": "n.v.t.",
   "debugBar.nav.label": "NAV",

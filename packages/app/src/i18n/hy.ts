@@ -892,6 +892,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Ոչ մի նախագիծ բաց",
   "sidebar.empty.description": "Բացեք նախագիծ՝ սկսելու համար",
+  "sidebar.drop.title": "Նախագիծ ավելացնելու համար թողեք թղթապանակը այստեղ",
+  "sidebar.drop.foldersOnly": "Որպես նախագիծ կարող է ավելացվել միայն թղթապանակ",
+
   "debugBar.ariaLabel": "Զարգացման կատարողականի ախտորոշում",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",

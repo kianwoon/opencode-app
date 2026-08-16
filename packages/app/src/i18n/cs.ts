@@ -891,6 +891,9 @@ export const dict = {
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nejsou otevřeny žádné projekty",
   "sidebar.empty.description": "Chcete-li začít, otevřete projekt",
+  "sidebar.drop.title": "Přidejte projekt přetažením složky sem",
+  "sidebar.drop.foldersOnly": "Jako projekty lze přidat pouze složky",
+
   "debugBar.ariaLabel": "Diagnostika vývoje výkonnosti",
   "debugBar.na": "n/a",
   "debugBar.nav.label": "NAV",
