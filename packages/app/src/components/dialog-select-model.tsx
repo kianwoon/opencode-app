@@ -474,7 +474,7 @@ function ModelSelectorPopoverV2View(props: {
                 <For each={groups()}>
                   {(group) => (
                     <MenuV2.Group>
-                      <MenuV2.GroupLabel class="gap-2 px-3">
+                      <MenuV2.GroupLabel class="gap-1.5">
                         <ProviderIcon
                           id={group.items[0].provider.id}
                           class="size-3 shrink-0 text-v2-icon-icon-muted"
@@ -522,6 +522,8 @@ function ModelSelectorPopoverV2View(props: {
                                   data-model-remove
                                   class="invisible flex size-5 shrink-0 items-center justify-center rounded-sm text-v2-icon-icon-muted transition-opacity hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base group-hover:visible"
                                   aria-label={language.t("provider.custom.models.remove")}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onPointerUp={(event) => event.stopPropagation()}
                                   onClick={(event) => {
                                     event.stopPropagation()
                                     props.remove(item)
