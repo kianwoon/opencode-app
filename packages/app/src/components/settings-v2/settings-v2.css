@@ -395,11 +395,17 @@
   align-items: center;
   gap: 4px;
   height: 28px;
+  flex: 1;
+  min-width: 0;
   padding: 4px 8px 4px 4px;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--v2-text-text-base);
+}
+
+.settings-v2-models-group-toggle {
+  margin-inline: 4px 8px;
 }
 
 .settings-v2-models-group-trigger:focus-visible {
