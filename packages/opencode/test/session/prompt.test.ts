@@ -730,6 +730,56 @@ it.instance("auto title keeps the title when follow-ups stay on the same topic",
   }),
 )
 
+it.instance("auto title rejects a re-title that collapses to the latest message", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create()
+
+    // First prompt: the background title request is scripted to "First Topic".
+    yield* llm.pushMatch(titleMatch, reply().text("First Topic").stop())
+    yield* llm.push(reply().text("main one").stop())
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "first message" }],
+    })
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const info = yield* sessions.get(chat.id)
+        return info.title === "First Topic" ? (true as const) : undefined
+      }),
+      "first title was not generated",
+    )
+
+    // The title model collapses to the latest message (title-cased). The
+    // deterministic backstop must reject that and keep "First Topic". Wait for
+    // the second title request to have been issued, then assert the title never
+    // became the collapsed one.
+    yield* llm.pushMatch(titleMatch, reply().text("Check The Build Again").stop())
+    yield* llm.push(reply().text("main two").stop())
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "check the build again" }],
+    })
+    yield* llm.wait(4)
+    // The title request has been issued and answered; if the backstop is broken
+    // the collapsed title lands within a short window. Poll fail-fast: any
+    // "Check The Build Again" is a regression, "First Topic" throughout is a pass.
+    yield* Effect.gen(function* () {
+      for (let i = 0; i < 20; i++) {
+        const info = yield* sessions.get(chat.id)
+        if (info.title === "Check The Build Again")
+          throw new Error("title collapsed to the latest message: " + info.title)
+        yield* Effect.sleep(100)
+      }
+    })
+    expect((yield* sessions.get(chat.id)).title).toBe("First Topic")
+  }),
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>

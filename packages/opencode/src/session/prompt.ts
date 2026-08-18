@@ -300,6 +300,16 @@ const layer = Layer.effect(
       }
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
       if (t === input.session.title) return
+
+      // Deterministic backstop for re-titling: a new title that is essentially
+      // the latest user message itself (title-cased or trimmed) is a collapse,
+      // not a topic shift. Keep the current title instead of trusting the model.
+      if (!Session.isDefaultTitle(input.session.title)) {
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9fff]/g, "")
+        const titleNorm = norm(t)
+        const msgNorm = norm(latestText)
+        if (titleNorm.length > 0 && msgNorm.includes(titleNorm) && titleNorm.length >= 0.85 * msgNorm.length) return
+      }
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
