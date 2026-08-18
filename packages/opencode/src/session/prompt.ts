@@ -228,6 +228,15 @@ const layer = Layer.effect(
       if (lastUser.info.role !== "user") return
       const anchor = lastUser.info
 
+      // A short follow-up ("verify again", "ok", "continue") is not a new topic;
+      // re-titling from it would collapse the title to the fragment. Keep the
+      // existing title unless the latest message is long enough to carry a topic.
+      const latestText = lastUser.parts
+        .filter((p): p is SessionV1.TextPart => p.type === "text")
+        .map((p) => p.text.trim())
+        .join(" ")
+      if (!Session.isDefaultTitle(input.session.title) && latestText.length < 20) return
+
       const subtasks = lastUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
       const onlySubtasks = subtasks.length > 0 && lastUser.parts.every((p) => p.type === "subtask")
 
@@ -259,7 +268,10 @@ const layer = Layer.effect(
                   ? ""
                   : `The current title is "${input.session.title}". `) +
                 "Keep it concise (a few words) and have it capture what the session is about. " +
-                "Update it to reflect the most recent exchange if the topic has shifted; keep it if the topic is unchanged.\n",
+                "If the most recent user message is a short follow-up (e.g. \"verify again\", \"continue\", " +
+                "\"try again\") it is NOT a new topic: keep the current title unless the earlier messages in " +
+                "this window clearly point to a different topic. Update the title only when the latest " +
+                "substantive message shows the session has moved to a new topic.\n",
             },
             ...msgs,
           ],

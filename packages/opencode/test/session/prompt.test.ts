@@ -657,6 +657,42 @@ it.instance("auto title re-titles an auto-titled session to its latest topic", (
   }),
 )
 
+it.instance("auto title ignores short follow-ups that do not shift the topic", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create()
+
+    // First prompt: the background title request is scripted to "First Topic".
+    yield* llm.pushMatch(titleMatch, reply().text("First Topic").stop())
+    yield* llm.push(reply().text("main one").stop())
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "first message" }],
+    })
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const info = yield* sessions.get(chat.id)
+        return info.title === "First Topic" ? (true as const) : undefined
+      }),
+      "first title was not generated",
+    )
+
+    // A short follow-up is not a new topic: no title request is issued and the
+    // title is left as-is (3 total LLM calls: main, title, main).
+    yield* llm.push(reply().text("main two").stop())
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "verify again" }],
+    })
+    expect(yield* llm.calls).toBe(3)
+    expect((yield* sessions.get(chat.id)).title).toBe("First Topic")
+  }),
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>
