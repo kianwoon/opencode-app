@@ -3,6 +3,13 @@
 - Prioritise, in this order: stability, simplicity, performance.
 - Before changing session or timeline code, record a production benchmark baseline and compare it after the change.
 
+## Model Visibility Semantics
+
+- `visible()` in `src/context/models.tsx` is the single source of truth for both the Settings → Models switches and the session model dropdown.
+- A provider is "manually curated" once `store.user` holds ANY explicit visibility entry (show or hide) for it — selecting a model also writes `show`. Untouched models of a curated provider are hidden; only explicit `show` entries appear.
+- Providers with no explicit entries keep smart defaults (recent "latest" releases, plus models without a valid release date — which is why uncurated OpenRouter shows many models).
+- Do not add a second visibility path for the dropdown; change `visible()` so settings switches and the dropdown can never disagree.
+
 ## Debugging
 
 - NEVER try to restart the app, or the server process, EVER.

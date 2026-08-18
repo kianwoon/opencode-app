@@ -87,6 +87,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
 
     const latestSet = createMemo(() => new Set(latest().map((x) => modelKey(x))))
 
+    const manualProviders = createMemo(() => new Set(store.user.map((x) => x.providerID)))
+
     const visibility = createMemo(() => {
       const map = new Map<string, Visibility>()
       for (const item of store.user) map.set(`${item.providerID}:${item.modelID}`, item.visibility)
@@ -117,6 +119,9 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       const state = visibility().get(key)
       if (state === "hide") return false
       if (state === "show") return true
+      // A provider with any explicit visibility choice is manually curated:
+      // untouched models stay hidden so only explicitly enabled ones show.
+      if (manualProviders().has(model.providerID)) return false
       if (latestSet().has(key)) return true
       const date = release().get(key)
       if (!date?.isValid) return true
