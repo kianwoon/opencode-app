@@ -71,6 +71,12 @@
 - **Schema**: Drizzle schema lives in `packages/core/src/**/*.sql.ts`.
 - **Migrations**: database migrations live in `packages/core` and are applied by core.
 
+## Unsupported attachment fallback
+
+- `unsupportedParts` in `src/provider/transform.ts` handles media the selected model cannot accept (e.g. pasted screenshots on text-only models). It must NOT discard the bytes: write them to `<tmpdir>/opencode/<sha256-prefix><ext>` (content-hash naming keeps repeated provider turns idempotent) and replace the part with a text note carrying the absolute path so the model can inspect the file with a suitable tool.
+- The write stays synchronous (`writeFileSync`) on purpose: `ProviderTransform.message()` is called from the sync `nativeRuntime.stream()` path and the AI SDK `transformParams` middleware — do not make it async without redesigning those call sites.
+- If the write fails, fall back to the old `ERROR: Cannot read ...` text; never fail the provider call over tmp cleanup. Acceptance guard: `test/provider/transform.test.ts` "saves unsupported image bytes to a temp file and references the path".
+
 ## Development server
 
 - Running `bun dev` from `packages/opencode` starts the live interactive TUI. Do not run it as a blocking foreground command when you need to inspect the result.

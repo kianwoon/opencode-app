@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { existsSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { Effect } from "effect"
 import { ProviderTransform } from "@/provider/transform"
 import { LLMRequestPrep } from "@/session/llm/request"
@@ -5834,5 +5837,105 @@ describe("ProviderTransform.options - kimi family adaptive thinking", () => {
     }
     const result = ProviderTransform.options({ model, sessionID: "s1", providerOptions: {} })
     expect(result.thinking).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.message - unsupported attachment fallback", () => {
+  const createModel = (input: { image: boolean; pdf: boolean }) =>
+    ({
+      id: "test/non-vision",
+      providerID: "test",
+      api: {
+        id: "non-vision",
+        url: "https://api.test.example",
+        npm: "@ai-sdk/openai-compatible",
+      },
+      name: "Non Vision",
+      capabilities: {
+        temperature: true,
+        reasoning: false,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: input.image, video: false, pdf: input.pdf },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+      limit: { context: 128000, output: 8192 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  const savedPath = (text: string) => {
+    const match = text.match(/saved to (\S+)\./)
+    expect(match).toBeDefined()
+    return match![1]
+  }
+
+  test("saves unsupported image bytes to a temp file and references the path", () => {
+    const bytes = Buffer.from("hello-image")
+    const msgs = [
+      {
+        role: "user" as const,
+        content: [{ type: "image" as const, image: `data:image/png;base64,${bytes.toString("base64")}` }],
+      },
+    ]
+    const result = ProviderTransform.message(msgs, createModel({ image: false, pdf: false }), {})
+    const part = (result[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    expect(part.text).toContain("does not support image input")
+
+    const file = savedPath(part.text)
+    expect(file.startsWith(path.join(tmpdir(), "opencode"))).toBeTrue()
+    expect(existsSync(file)).toBeTrue()
+    expect(readFileSync(file).toString()).toBe("hello-image")
+    rmSync(file, { force: true })
+  })
+
+  test("re-lowering the same attachment overwrites the same hashed path", () => {
+    const bytes = Buffer.from("stable-bytes")
+    const msgs = [
+      {
+        role: "user" as const,
+        content: [{ type: "image" as const, image: `data:image/png;base64,${bytes.toString("base64")}` }],
+      },
+    ]
+    const model = createModel({ image: false, pdf: false })
+    const first = ProviderTransform.message(msgs, model, {})
+    const second = ProviderTransform.message(msgs, model, {})
+    expect(savedPath((first[0].content as any[])[0].text)).toBe(savedPath((second[0].content as any[])[0].text))
+    rmSync(savedPath((first[0].content as any[])[0].text), { force: true })
+  })
+
+  test("saves unsupported PDF file parts with the pdf extension", () => {
+    const bytes = Buffer.from("%PDF-1.7 fake")
+    const msgs = [
+      {
+        role: "user" as const,
+        content: [
+          {
+            type: "file" as const,
+            data: bytes.toString("base64"),
+            mediaType: "application/pdf",
+            filename: "spec.pdf",
+          },
+        ],
+      },
+    ]
+    const result = ProviderTransform.message(msgs, createModel({ image: true, pdf: false }), {})
+    const part = (result[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    const file = savedPath(part.text)
+    expect(file.endsWith(".pdf")).toBeTrue()
+    expect(part.text).toContain('"spec.pdf"')
+    rmSync(file, { force: true })
+  })
+
+  test("passes image parts through unchanged for vision models", () => {
+    const image = "data:image/png;base64,aGVsbG8="
+    const msgs = [{ role: "user" as const, content: [{ type: "image" as const, image }] }]
+    const result = ProviderTransform.message(msgs, createModel({ image: true, pdf: true }), {})
+    expect((result[0].content as any[])[0]).toEqual({ type: "image", image })
   })
 })

@@ -1275,6 +1275,18 @@ export function Prompt(props: PromptProps) {
         draft.extmarkToPartIndex.set(extmarkId, partIndex)
       }),
     )
+    // Non-blocking heads-up: on send, the server saves unsupported media to a
+    // temp file path for the model to inspect instead of passing it through.
+    const current = local.model.current()
+    const capabilities = current
+      ? sync.data.provider.find((item) => item.id === current.providerID)?.models[current.modelID]?.capabilities
+      : undefined
+    if (capabilities && !capabilities.input.image && !pdf) {
+      toast.show({
+        message: "Current model can't view images. When sent, it is saved to a temp file path instead.",
+        variant: "info",
+      })
+    }
     return
   }
 

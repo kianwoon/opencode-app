@@ -144,7 +144,8 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
   // of media in tool results; e.g. Bedrock supports images but not PDFs there.
   //
   // Only apply this workaround if the model actually supports that media input -
-  // otherwise unsupportedParts() will turn it into a user-visible error.
+  // otherwise unsupportedParts() saves the media to a temp file and replaces it
+  // with a path note the model can act on.
   const supportsMediaInToolResult = (attachment: { mime: string }) => {
     if (model.api.npm === "@ai-sdk/anthropic") return true
     if (model.api.npm === "@ai-sdk/openai") return true

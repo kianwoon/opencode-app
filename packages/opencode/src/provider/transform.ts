@@ -1,4 +1,8 @@
 import type { ModelMessage, ToolResultPart } from "ai"
+import { createHash } from "node:crypto"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
@@ -412,6 +416,63 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage
   return msgs
 }
 
+const MIME_EXTENSIONS: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "application/pdf": ".pdf",
+  "audio/mpeg": ".mp3",
+  "audio/mp4": ".m4a",
+  "audio/wav": ".wav",
+  "video/mp4": ".mp4",
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function attachmentBytes(part: { type: "file" | "image"; image?: unknown; data?: unknown }): Buffer | undefined {
+  const raw = part.type === "image" ? part.image : part.data
+  if (typeof raw === "string") {
+    if (/^https?:\/\//.test(raw)) return undefined
+    const base64 = raw.startsWith("data:") ? raw.slice(raw.indexOf(",") + 1) : raw
+    if (!base64) return undefined
+    const bytes = Buffer.from(base64, "base64")
+    return bytes.length > 0 ? bytes : undefined
+  }
+  if (raw instanceof Uint8Array) return Buffer.from(raw)
+  return undefined
+}
+
+function writeUnsupportedAttachment(input: {
+  part: { type: "file" | "image"; image?: unknown; data?: unknown }
+  mime: string
+  filename?: string
+}) {
+  const bytes = attachmentBytes(input.part)
+  if (!bytes) return undefined
+  try {
+    const dir = path.join(tmpdir(), "opencode")
+    mkdirSync(dir, { recursive: true })
+    // Content-hash naming keeps repeated provider turns idempotent: the same
+    // attachment re-lowered from history overwrites the same path instead of
+    // accumulating duplicates.
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16)
+    const ext =
+      MIME_EXTENSIONS[input.mime] ??
+      (input.filename?.includes(".") ? input.filename.slice(input.filename.lastIndexOf(".")) : undefined) ??
+      ".bin"
+    const file = path.join(dir, hash + ext)
+    writeFileSync(file, bytes)
+    return { path: file, bytes: bytes.length }
+  } catch {
+    return undefined
+  }
+}
+
 function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
   return msgs.map((msg) => {
     if (msg.role !== "user" || !Array.isArray(msg.content)) return msg
@@ -439,7 +500,19 @@ function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMes
       if (!modality) return part
       if (model.capabilities.input[modality]) return part
 
-      const name = filename ? `"${filename}"` : modality
+      // Bytes are not discarded: write them to a deterministic content-hashed
+      // path under <tmpdir>/opencode so the model can still act on the file
+      // (read tool, vision-capable MCP tool) even though this provider turn
+      // cannot accept the modality. Writes stay synchronous because this
+      // transform runs inside a synchronous lowering pipeline.
+      const saved = writeUnsupportedAttachment({ part, mime, filename })
+      const name = filename ? `"${filename}"` : `${modality} attachment`
+      if (saved) {
+        return {
+          type: "text" as const,
+          text: `Attachment ${name} (${mime}, ${formatBytes(saved.bytes)}) saved to ${saved.path}. The current model does not support ${modality} input — inspect the file at that path with a suitable tool if its content matters.`,
+        }
+      }
       return {
         type: "text" as const,
         text: `ERROR: Cannot read ${name} (this model does not support ${modality} input). Inform the user.`,
