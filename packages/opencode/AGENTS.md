@@ -1,5 +1,22 @@
 # opencode database guide
 
+## Session auto-title gotchas
+
+- `SessionPrompt.ensureTitle` (src/session/prompt.ts) is forked on the FIRST iteration of every
+  prompt loop while the session title is still the default (`Session.isDefaultTitle`). It derives
+  the title from the first real user message, NOT just the session's first prompt — a failed
+  title-model call (provider down, empty/thinking-only output) retries on the next prompt instead
+  of leaving the session permanently "New session - ...".
+- Title failures are logged (`failed to generate title` / `title model returned no usable text`),
+  never thrown: the stream pipeline converts failures to warnings and the fork keeps
+  `Effect.ignore` as a safety net. Do NOT reintroduce `Effect.orDie` there — combined with the
+  fork's `Effect.ignore` it swallowed every failure silently (that is why broken self-hosted
+  providers used to leave sessions untitled with zero log evidence).
+- To script title requests in e2e tests, use `pushMatch(titleMatch, ...)` from
+  test/lib/llm-server.ts; unmatched title requests are auto-answered with "E2E Title" and never
+  consume plain queued items. Acceptance guard: test/session/prompt.test.ts
+  "auto title retries on a later prompt after the first title generation fails".
+
 ## Config reload gotchas
 
 - "Reload configs" (global dispose, SIGUSR2, config-update) drops the TTL-infinity global

@@ -52,7 +52,7 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Format } from "../../src/format"
 import { TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
-import { reply, TestLLMServer } from "../lib/llm-server"
+import { httpError, reply, TestLLMServer, titleMatch } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -576,6 +576,41 @@ it.instance("loop calls LLM and returns assistant message", () =>
     const parts = result.parts.filter((p) => p.type === "text")
     expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("auto title retries on a later prompt after the first title generation fails", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create()
+
+    // First prompt: the background title request fails with a non-retryable error.
+    yield* llm.pushMatch(titleMatch, httpError(400, { message: "no title" }))
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "hello" }],
+    })
+    // title request + main request both hit the server
+    yield* llm.wait(2)
+    const failed = yield* sessions.get(chat.id)
+    expect(Session.isDefaultTitle(failed.title)).toBe(true)
+
+    // Second prompt: the title request is retried and auto-answered by the test server.
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "more" }],
+    })
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const info = yield* sessions.get(chat.id)
+        return info.title === "E2E Title" ? (true as const) : undefined
+      }),
+      "session title was not regenerated",
+    )
   }),
 )
 

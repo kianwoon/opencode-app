@@ -206,11 +206,13 @@ const layer = Layer.effect(
       if (input.session.parentID) return
       if (!Session.isDefaultTitle(input.session.title)) return
 
+      // Retried on the first loop iteration of every prompt while the title is
+      // still the default, so a transient title-model failure at the first
+      // exchange does not leave the session permanently untitled.
       const real = (m: SessionV1.WithParts) =>
         m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
       const idx = input.history.findIndex(real)
       if (idx === -1) return
-      if (input.history.filter(real).length !== 1) return
 
       const context = input.history.slice(0, idx + 1)
       const firstUser = context[idx]
@@ -245,14 +247,22 @@ const layer = Layer.effect(
           Stream.filter(LLMEvent.is.textDelta),
           Stream.map((e) => e.text),
           Stream.mkString,
-          Effect.orDie,
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to generate title", {
+              "session.id": input.session.id,
+              error: Cause.squash(cause),
+            }).pipe(Effect.as("")),
+          ),
         )
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
         .split("\n")
         .map((line) => line.trim())
         .find((line) => line.length > 0)
-      if (!cleaned) return
+      if (!cleaned) {
+        yield* Effect.logWarning("title model returned no usable text", { "session.id": input.session.id })
+        return
+      }
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
