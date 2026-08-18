@@ -215,15 +215,14 @@ const layer = Layer.effect(
       // default title in autoTitled.
       if (!Session.isDefaultTitle(input.session.title) && !autoTitled.has(input.session.id)) return
 
-      // The title tracks the latest exchange, not just the first message, so a
-      // session stays named after what it is about now. A bounded window ending
-      // at the newest user message keeps the title-model call cheap on every
-      // prompt while still reflecting the current topic.
+      // The title tracks the session's topic. The first title is generated from
+      // the opening exchange; later prompts re-evaluate it, but the title only
+      // changes when the conversation has clearly moved to a different topic.
       const real = (m: SessionV1.WithParts) =>
         m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const last = input.history.map((m, i) => (real(m) ? i : -1)).filter((i) => i !== -1).at(-1)
+      const indexes = input.history.map((m, i) => (real(m) ? i : -1)).filter((i) => i !== -1)
+      const last = indexes.at(-1)
       if (last === undefined) return
-      const context = input.history.slice(Math.max(0, last - 5), last + 1)
       const lastUser = input.history[last]
       if (lastUser.info.role !== "user") return
       const anchor = lastUser.info
@@ -236,6 +235,10 @@ const layer = Layer.effect(
         .map((p) => p.text.trim())
         .join(" ")
       if (!Session.isDefaultTitle(input.session.title) && latestText.length < 20) return
+
+      // First title sees the opening exchange; re-title decisions only need the
+      // most recent context plus the current title as the anchor.
+      const context = input.history.slice(Session.isDefaultTitle(input.session.title) ? 0 : Math.max(0, last - 5), last + 1)
 
       const subtasks = lastUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
       const onlySubtasks = subtasks.length > 0 && lastUser.parts.every((p) => p.type === "subtask")
@@ -265,13 +268,12 @@ const layer = Layer.effect(
               content:
                 "Generate a title for this conversation. " +
                 (Session.isDefaultTitle(input.session.title)
-                  ? ""
-                  : `The current title is "${input.session.title}". `) +
-                "Keep it concise (a few words) and have it capture what the session is about. " +
-                "If the most recent user message is a short follow-up (e.g. \"verify again\", \"continue\", " +
-                "\"try again\") it is NOT a new topic: keep the current title unless the earlier messages in " +
-                "this window clearly point to a different topic. Update the title only when the latest " +
-                "substantive message shows the session has moved to a new topic.\n",
+                  ? "The title must capture the session's main topic, not just the last message.\n"
+                  : `The current title is "${input.session.title}". Decide whether the session's topic has changed. ` +
+                    "If the recent messages are still about that topic — even if the user asked a new question, " +
+                    "gave a new command, or followed up within it — output the current title EXACTLY as-is. " +
+                    "Only output a new title when the conversation has clearly moved to a different topic. " +
+                    "Never use the user's latest message (or a title-cased version of it) as the title.\n"),
             },
             ...msgs,
           ],
