@@ -241,15 +241,7 @@ const layer = Layer.effect(
           model: mdl,
           sessionID: input.session.id,
           retries: 2,
-          messages: [
-            {
-              role: "user",
-              content:
-                "Generate a title for this conversation. The title must capture the " +
-                "session's main topic or goal, not just the latest message.\n",
-            },
-            ...msgs,
-          ],
+          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
         })
         .pipe(
           Stream.filter(LLMEvent.is.textDelta),
@@ -272,7 +264,6 @@ const layer = Layer.effect(
         return
       }
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
-      if (t === input.session.title) return
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
