@@ -110,7 +110,7 @@ type PlatformBase = {
   /** Check if an editor app exists (desktop only) */
   checkAppExists?(appName: string): Promise<boolean>
 
-  /** Read image from clipboard (desktop only) */
+  /** Read image from clipboard (native desktop IPC, or the async clipboard API on web) */
   readClipboardImage?(): Promise<File | null>
 
   /** Export collected diagnostic logs (desktop only) */

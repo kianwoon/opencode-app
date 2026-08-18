@@ -19,6 +19,7 @@ import { tint, useTheme } from "../../context/theme"
 import { EmptyBorder, SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { useClipboard } from "../../context/clipboard"
+import { missingImageClipboardTool } from "../../clipboard"
 import { Spinner } from "../spinner"
 import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
@@ -368,10 +369,9 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Paste",
+        title: "Paste from clipboard",
         name: "prompt.paste",
         category: "Prompt",
-        hidden: true,
         run: async (ctx: CommandContext<Renderable, KeyEvent>) => {
           ctx.event.preventDefault()
           ctx.event.stopPropagation()
@@ -386,6 +386,15 @@ export function Prompt(props: PromptProps) {
           }
           if (content?.mime === "text/plain") {
             await pasteInputText(content.data)
+            return
+          }
+          // Image-only clipboards are unreadable on Linux without wl-clipboard
+          // or xclip; surface the missing dependency instead of failing silently.
+          if (await missingImageClipboardTool()) {
+            toast.show({
+              message: "To paste images, install wl-clipboard (Wayland) or xclip (X11)",
+              variant: "info",
+            })
           }
         },
       },

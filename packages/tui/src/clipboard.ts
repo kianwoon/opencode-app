@@ -27,6 +27,18 @@ function writeOsc52(text: string) {
   process.stdout.write(process.env.TMUX ? sequence + passthrough : process.env.STY ? passthrough : sequence)
 }
 
+// Detects Linux setups where an image-only clipboard is unreadable because no
+// image-capable clipboard tool exists. WSL is excluded: PowerShell covers it.
+export function imageToolMissing(os: NodeJS.Platform, wsl: boolean, has: (name: string) => boolean) {
+  return os === "linux" && !wsl && !has("wl-paste") && !has("xclip")
+}
+
+export async function missingImageClipboardTool() {
+  if (platform() !== "linux") return false
+  const { which } = await import("@opencode-ai/core/util/which")
+  return imageToolMissing(platform(), release().includes("WSL"), (name) => Boolean(which(name)))
+}
+
 export async function read() {
   if (platform() === "darwin") {
     const file = path.join(tmpdir(), "opencode-clipboard.png")

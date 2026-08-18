@@ -10,6 +10,11 @@
 - Providers with no explicit entries keep smart defaults (recent "latest" releases, plus models without a valid release date — which is why uncurated OpenRouter shows many models).
 - Do not add a second visibility path for the dropdown; change `visible()` so settings switches and the dropdown can never disagree.
 
+## Paste Screenshot Gotchas
+
+- macOS surfaces copied images as `image/tiff` in `ClipboardEvent.clipboardData.items`; `ACCEPTED_IMAGE_TYPES` intentionally excludes TIFF (no provider accepts it on the wire). Never add `image/tiff` to the accepted set — convert to PNG instead.
+- Conversion happens via `platform.readClipboardImage()` (Electron IPC `clipboard.readImage().toPNG()` on desktop, `navigator.clipboard.read()` on web, defined in `src/entry.tsx`). In both `src/components/prompt-input/attachments.ts` and `@opencode-ai/session-ui` v2 attachments, the paste handler must retry through `readClipboardImage` when `clipboardData` files are REJECTED — an early `return` after `addAttachments(files)` makes the native fallback unreachable and reintroduces the "paste screenshot does nothing" bug. Acceptance guard: `attachments.test.ts` "retries rejected clipboard images through the native PNG reader".
+
 ## Debugging
 
 - NEVER try to restart the app, or the server process, EVER.
