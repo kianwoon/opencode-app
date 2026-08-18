@@ -1058,6 +1058,12 @@ export const dict = {
   "settings.providers.tag.config": "配置",
   "settings.providers.tag.custom": "自定义",
   "settings.providers.tag.other": "其他",
+  "settings.providers.section.routing": "模型路由",
+  "settings.providers.routing.title": "路由策略",
+  "settings.providers.routing.description": "OpenRouter 如何为每个请求选择后端提供商。",
+  "settings.providers.routing.price": "最低价格",
+  "settings.providers.routing.throughput": "最高吞吐量",
+  "settings.providers.routing.latency": "最低延迟",
 
   "settings.models.title": "模型",
   "settings.models.description": "可在此处配置模型设置。",
