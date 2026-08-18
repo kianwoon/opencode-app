@@ -197,11 +197,6 @@ const layer = Layer.effect(
       return parts
     })
 
-    // Sessions whose title we generated from a default title. Only these are
-    // re-titled as the conversation evolves; a title the user set by hand is
-    // left alone.
-    const autoTitled = new Set<SessionID>()
-
     const title = Effect.fn("SessionPrompt.ensureTitle")(function* (input: {
       session: Session.Info
       history: SessionV1.WithParts[]
@@ -209,39 +204,23 @@ const layer = Layer.effect(
       modelID: ModelV2.ID
     }) {
       if (input.session.parentID) return
+      if (!Session.isDefaultTitle(input.session.title)) return
 
-      // Only (re)title sessions we titled ourselves: a title the user set by
-      // hand is never overwritten. We track the sessions we titled from a
-      // default title in autoTitled.
-      if (!Session.isDefaultTitle(input.session.title) && !autoTitled.has(input.session.id)) return
-
-      // The title tracks the session's topic. The first title is generated from
-      // the opening exchange; later prompts re-evaluate it, but the title only
-      // changes when the conversation has clearly moved to a different topic.
+      // Retried on the first loop iteration of every prompt while the title is
+      // still the default, so a transient title-model failure at the first
+      // exchange does not leave the session permanently untitled.
       const real = (m: SessionV1.WithParts) =>
         m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const indexes = input.history.map((m, i) => (real(m) ? i : -1)).filter((i) => i !== -1)
-      const last = indexes.at(-1)
-      if (last === undefined) return
-      const lastUser = input.history[last]
-      if (lastUser.info.role !== "user") return
-      const anchor = lastUser.info
+      const idx = input.history.findIndex(real)
+      if (idx === -1) return
 
-      // A short follow-up ("verify again", "ok", "continue") is not a new topic;
-      // re-titling from it would collapse the title to the fragment. Keep the
-      // existing title unless the latest message is long enough to carry a topic.
-      const latestText = lastUser.parts
-        .filter((p): p is SessionV1.TextPart => p.type === "text")
-        .map((p) => p.text.trim())
-        .join(" ")
-      if (!Session.isDefaultTitle(input.session.title) && latestText.length < 20) return
+      const context = input.history.slice(0, idx + 1)
+      const firstUser = context[idx]
+      if (!firstUser || firstUser.info.role !== "user") return
+      const firstInfo = firstUser.info
 
-      // First title sees the opening exchange; re-title decisions only need the
-      // most recent context plus the current title as the anchor.
-      const context = input.history.slice(Session.isDefaultTitle(input.session.title) ? 0 : Math.max(0, last - 5), last + 1)
-
-      const subtasks = lastUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
-      const onlySubtasks = subtasks.length > 0 && lastUser.parts.every((p) => p.type === "subtask")
+      const subtasks = firstUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
+      const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
 
       const ag = yield* agents.get("title")
       if (!ag) return
@@ -255,7 +234,7 @@ const layer = Layer.effect(
       const text = yield* llm
         .stream({
           agent: ag,
-          user: anchor,
+          user: firstInfo,
           system: [],
           small: true,
           tools: {},
@@ -266,14 +245,8 @@ const layer = Layer.effect(
             {
               role: "user",
               content:
-                "Generate a title for this conversation. " +
-                (Session.isDefaultTitle(input.session.title)
-                  ? "The title must capture the session's main topic, not just the last message.\n"
-                  : `The current title is "${input.session.title}". Decide whether the session's topic has changed. ` +
-                    "If the recent messages are still about that topic — even if the user asked a new question, " +
-                    "gave a new command, or followed up within it — output the current title EXACTLY as-is. " +
-                    "Only output a new title when the conversation has clearly moved to a different topic. " +
-                    "Never use the user's latest message (or a title-cased version of it) as the title.\n"),
+                "Generate a title for this conversation. The title must capture the " +
+                "session's main topic or goal, not just the latest message.\n",
             },
             ...msgs,
           ],
@@ -300,20 +273,9 @@ const layer = Layer.effect(
       }
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
       if (t === input.session.title) return
-
-      // Deterministic backstop for re-titling: a new title that is essentially
-      // the latest user message itself (title-cased or trimmed) is a collapse,
-      // not a topic shift. Keep the current title instead of trusting the model.
-      if (!Session.isDefaultTitle(input.session.title)) {
-        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9fff]/g, "")
-        const titleNorm = norm(t)
-        const msgNorm = norm(latestText)
-        if (titleNorm.length > 0 && msgNorm.includes(titleNorm) && titleNorm.length >= 0.85 * msgNorm.length) return
-      }
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
-      autoTitled.add(input.session.id)
     })
 
     /**

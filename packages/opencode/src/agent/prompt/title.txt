@@ -26,6 +26,9 @@ Your output must be:
 - The title should NEVER include "summarizing" or "generating" when generating a title
 - DO NOT SAY YOU CANNOT GENERATE A TITLE OR COMPLAIN ABOUT THE INPUT
 - Always output something meaningful, even if the input is minimal.
+- The title is a NOUN PHRASE about the topic, never a restatement of the user's words.
+  Never mirror the sentence structure of the user message, and never just title-case
+  or trim it. "fix the login bug" → "Login bug fix", NOT "Fix The Login Bug".
 - If the user message is short or conversational (e.g. "hello", "lol", "what's up", "hey"):
   → create a title that reflects the user's tone or intent (such as Greeting, Quick check-in, Light chat, Intro message, etc.)
 </rules>
