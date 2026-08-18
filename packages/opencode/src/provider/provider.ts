@@ -1685,6 +1685,9 @@ const layer = Layer.effect(
       try {
         const provider = s.providers[model.providerID]
         const options = { ...provider.options }
+        // routing is a request-time providerOptions concern (read by
+        // ProviderTransform.options), not an SDK constructor setting.
+        delete options["routing"]
 
         if (
           model.providerID === "google-vertex" &&

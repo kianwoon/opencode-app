@@ -302,6 +302,68 @@ describe("ProviderTransform.options - setCacheKey", () => {
   })
 })
 
+describe("ProviderTransform.options - openrouter routing", () => {
+  const sessionID = "test-session-123"
+
+  const model = {
+    id: "meta-llama/llama-3.3-70b-instruct",
+    providerID: "openrouter",
+    api: {
+      id: "meta-llama/llama-3.3-70b-instruct",
+      url: "https://openrouter.ai/api/v1",
+      npm: "@openrouter/ai-sdk-provider",
+    },
+    name: "Llama 3.3 70B Instruct",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+  } as unknown as Parameters<typeof ProviderTransform.options>[0]["model"]
+
+  test("injects the provider-level routing sort", () => {
+    for (const sort of ["price", "throughput", "latency"] as const) {
+      const result = ProviderTransform.options({
+        model,
+        sessionID,
+        providerOptions: { routing: { sort } },
+      })
+      expect(result.provider).toEqual({ sort })
+    }
+  })
+
+  test("omits routing when the provider has no routing preference", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.provider).toBeUndefined()
+  })
+
+  test("rejects an invalid routing sort value", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { sort: "cheapest-gpu" } },
+    })
+    expect(result.provider).toBeUndefined()
+  })
+
+  test("does not apply openrouter routing to other providers", () => {
+    const result = ProviderTransform.options({
+      model: { ...model, providerID: ProviderV2.ID.make("custom"), api: { ...model.api, npm: "@ai-sdk/openai-compatible" } },
+      sessionID,
+      providerOptions: { routing: { sort: "throughput" } },
+    })
+    expect(result.provider).toBeUndefined()
+  })
+})
+
 describe("ProviderTransform.options - zai/zhipuai thinking", () => {
   const sessionID = "test-session-123"
 
