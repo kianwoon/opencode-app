@@ -614,6 +614,49 @@ it.instance("auto title retries on a later prompt after the first title generati
   }),
 )
 
+it.instance("auto title re-titles an auto-titled session to its latest topic", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create()
+
+    // First prompt: the background title request is scripted to "First Topic".
+    yield* llm.pushMatch(titleMatch, reply().text("First Topic").stop())
+    yield* llm.push(reply().text("main one").stop())
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "first message" }],
+    })
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const info = yield* sessions.get(chat.id)
+        return info.title === "First Topic" ? (true as const) : undefined
+      }),
+      "first title was not generated",
+    )
+
+    // Second prompt: the session was auto-titled, so the title request is
+    // re-run and scripted to a new topic; the title must follow the latest
+    // exchange rather than stay pinned to the first message.
+    yield* llm.pushMatch(titleMatch, reply().text("Second Topic").stop())
+    yield* llm.push(reply().text("main two").stop())
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      parts: [{ type: "text", text: "second message about something else" }],
+    })
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const info = yield* sessions.get(chat.id)
+        return info.title === "Second Topic" ? (true as const) : undefined
+      }),
+      "title was not re-generated for the latest topic",
+    )
+  }),
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>

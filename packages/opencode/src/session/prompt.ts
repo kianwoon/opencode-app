@@ -197,6 +197,11 @@ const layer = Layer.effect(
       return parts
     })
 
+    // Sessions whose title we generated from a default title. Only these are
+    // re-titled as the conversation evolves; a title the user set by hand is
+    // left alone.
+    const autoTitled = new Set<SessionID>()
+
     const title = Effect.fn("SessionPrompt.ensureTitle")(function* (input: {
       session: Session.Info
       history: SessionV1.WithParts[]
@@ -204,23 +209,27 @@ const layer = Layer.effect(
       modelID: ModelV2.ID
     }) {
       if (input.session.parentID) return
-      if (!Session.isDefaultTitle(input.session.title)) return
 
-      // Retried on the first loop iteration of every prompt while the title is
-      // still the default, so a transient title-model failure at the first
-      // exchange does not leave the session permanently untitled.
+      // Only (re)title sessions we titled ourselves: a title the user set by
+      // hand is never overwritten. We track the sessions we titled from a
+      // default title in autoTitled.
+      if (!Session.isDefaultTitle(input.session.title) && !autoTitled.has(input.session.id)) return
+
+      // The title tracks the latest exchange, not just the first message, so a
+      // session stays named after what it is about now. A bounded window ending
+      // at the newest user message keeps the title-model call cheap on every
+      // prompt while still reflecting the current topic.
       const real = (m: SessionV1.WithParts) =>
         m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const idx = input.history.findIndex(real)
-      if (idx === -1) return
+      const last = input.history.map((m, i) => (real(m) ? i : -1)).filter((i) => i !== -1).at(-1)
+      if (last === undefined) return
+      const context = input.history.slice(Math.max(0, last - 5), last + 1)
+      const lastUser = input.history[last]
+      if (lastUser.info.role !== "user") return
+      const anchor = lastUser.info
 
-      const context = input.history.slice(0, idx + 1)
-      const firstUser = context[idx]
-      if (!firstUser || firstUser.info.role !== "user") return
-      const firstInfo = firstUser.info
-
-      const subtasks = firstUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
-      const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
+      const subtasks = lastUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
+      const onlySubtasks = subtasks.length > 0 && lastUser.parts.every((p) => p.type === "subtask")
 
       const ag = yield* agents.get("title")
       if (!ag) return
@@ -234,14 +243,26 @@ const layer = Layer.effect(
       const text = yield* llm
         .stream({
           agent: ag,
-          user: firstInfo,
+          user: anchor,
           system: [],
           small: true,
           tools: {},
           model: mdl,
           sessionID: input.session.id,
           retries: 2,
-          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
+          messages: [
+            {
+              role: "user",
+              content:
+                "Generate a title for this conversation. " +
+                (Session.isDefaultTitle(input.session.title)
+                  ? ""
+                  : `The current title is "${input.session.title}". `) +
+                "Keep it concise (a few words) and have it capture what the session is about. " +
+                "Update it to reflect the most recent exchange if the topic has shifted; keep it if the topic is unchanged.\n",
+            },
+            ...msgs,
+          ],
         })
         .pipe(
           Stream.filter(LLMEvent.is.textDelta),
@@ -264,9 +285,11 @@ const layer = Layer.effect(
         return
       }
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
+      if (t === input.session.title) return
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
+      autoTitled.add(input.session.id)
     })
 
     /**
