@@ -153,10 +153,15 @@ export namespace PluginLoader {
   async function bustFileEntry(entry: string): Promise<string> {
     if (!entry.startsWith("file:")) return entry
     const { fileURLToPath } = await import("url")
+    const { stat } = await import("node:fs/promises")
     const file = fileURLToPath(entry)
-    const stat = await Bun.file(file).stat().catch(() => undefined)
-    if (!stat) return entry
-    return `${file}?mtime=${Math.floor(stat.mtimeMs)}`
+    // Use node:fs/promises (not Bun.file) so this works in the desktop app's
+    // Node sidecar, where the global `Bun` is undefined. A Bun-only stat here
+    // made every file-based plugin fail to load in the app with
+    // "ReferenceError: Bun is undefined" (surfaced only as a TUI toast, never a log).
+    const stats = await stat(file).catch(() => undefined)
+    if (!stats) return entry
+    return `${file}?mtime=${Math.floor(stats.mtimeMs)}`
   }
 
   // Run one candidate through the full pipeline: resolve, optionally surface a missing entry,

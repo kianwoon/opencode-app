@@ -25,10 +25,24 @@
   cache — only a bare path + query busts it. `PluginLoader.load` therefore suffixes file
   plugin entries with `?mtime=<ms>` (via `bustFileEntry`) so edited plugin code re-evaluates
   across reloads. npm plugin entries keep their stable URL (their versioned install dir
-  already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
-  "re-evaluates edited file plugin code across instance reload".
+   already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
+   "re-evaluates edited file plugin code across instance reload".
 
-## Workflow/DAG engine gotchas
+ ## Plugin loader must be Node-compatible (desktop sidecar)
+
+ - The desktop app runs its server as a **Node.js sidecar**
+   (`utilityProcess.fork` of `sidecar.js`), NOT on Bun. The CLI runs on Bun.
+   Any plugin-loading path that touches a Bun-only global (`Bun.file`, `Bun.$`, …)
+   crashes the sidecar with `ReferenceError: Bun is undefined`.
+ - `PluginLoader.bustFileEntry` used `Bun.file(file).stat()` — so in the app **every
+   file-based plugin silently failed to load** while the CLI loaded them fine. The
+   failure is published as a **session error event (TUI toast), never a log line**,
+   so `opencode.log` showed nothing and the regression stayed hidden.
+ - Rule: plugin load/resolve paths must use `node:fs/promises` (or other Node APIs),
+   never `Bun.*`. Acceptance guard: `bun test test/plugin/loader-shared.test.ts` +
+   a manual sidecar smoke test (the CLI alone cannot catch this — it runs on Bun).
+
+ ## Workflow/DAG engine gotchas
 
 - The `workflow` tool executes inside the session loop's own tool pass. It must admit its
   `WorkflowPart` with `noReply: true` via `ops.prompt(...)`; calling with a loop would wait
