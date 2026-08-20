@@ -16,9 +16,12 @@ export const todoState = (input: {
   live: boolean
 }): "hide" | "clear" | "open" | "close" => {
   if (input.count === 0) return "hide"
+  // Completed lists persist as durable history: hide the dock without wiping
+  // them, so re-entering or new busy turns show the finished list via the
+  // graceful close path instead of re-opening it every message.
+  if (input.done) return input.live ? "close" : "hide"
   if (!input.live) return "clear"
-  if (!input.done) return "open"
-  return "close"
+  return "open"
 }
 
 export const todoDockAtBoundary = (state: ReturnType<typeof todoState>) => state === "open"
