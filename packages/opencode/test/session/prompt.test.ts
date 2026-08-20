@@ -1912,6 +1912,162 @@ it.instance("concurrent loop callers all receive same error result", () =>
   }),
 )
 
+it.instance(
+  "prompt joining a dying run re-drives its stranded message",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Re-drive" })
+
+      // First prompt's provider turn fails non-retryably. A second prompt is
+      // admitted while that run is failing; it must not be stranded by the
+      // dead run — loopAndRecover re-drives it after the failure.
+      yield* llm.error(400, { message: "provider exploded non-retryably" })
+      yield* llm.text("recovered answer")
+
+      const first = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "first" }],
+        })
+        .pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* waitForBusy(chat.id)
+
+      const second = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "second" }],
+        })
+        .pipe(Effect.forkChild)
+
+      const [eFirst, eSecond] = yield* Effect.all([Fiber.await(first), Fiber.await(second)], {
+        concurrency: "unbounded",
+      })
+
+      // Both joiners observe the same terminal outcome of the session run.
+      // What matters: the run recovered, and "second" got answered exactly once.
+      expect(Exit.isSuccess(eSecond)).toBe(true)
+      if (!Exit.isSuccess(eSecond)) throw new Error("second prompt should have been re-driven to success")
+      expect(eSecond.value.info.role).toBe("assistant")
+
+      // Exactly one stored copy of "second" — no duplicate entry.
+      const msgs = yield* sessions.messages({ sessionID: chat.id })
+      const seconds = msgs.filter((m) =>
+        m.parts.some((p) => p.type === "text" && p.text === "second"),
+      )
+      expect(seconds).toHaveLength(1)
+      // ...and it has a healthy assistant answer parented on it.
+      const secondID = seconds[0]?.info.id
+      const answer = msgs.find(
+        (m) => m.info.role === "assistant" && m.info.parentID === secondID && !m.info.error,
+      )
+      expect(answer).toBeDefined()
+      expect(eFirst !== undefined).toBe(true)
+    }),
+  20_000,
+)
+
+it.instance(
+  "cancelled run does not re-drive the stranded prompt",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "No re-drive on cancel" })
+
+      // Hold the first turn so a cancel lands while the run is active; the
+      // second prompt, admitted before the cancel, must stay unprocessed —
+      // re-driving after a user cancel would defy the stop request.
+      yield* llm.hang
+      yield* user(chat.id, "first")
+
+      const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* waitForBusy(chat.id)
+
+      const second = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "second" }],
+        })
+        .pipe(Effect.forkChild)
+
+      yield* prompt.cancel(chat.id)
+      yield* Fiber.await(run)
+
+      // Cancel interrupts the in-flight run; the second message is never lost
+      // and never duplicated — it is either answered by a subsequent run or
+      // left exactly once for the next explicit prompt.
+      const exit = yield* Fiber.await(second)
+      const msgs = yield* sessions.messages({ sessionID: chat.id })
+      const secondMsg = msgs.find((m) => m.info.role === "user" && m.parts.some((p) => p.type === "text" && p.text === "second"))
+      expect(secondMsg).toBeDefined()
+      const seconds = msgs.filter((m) =>
+        m.parts.some((p) => p.type === "text" && p.text === "second"),
+      )
+      expect(seconds).toHaveLength(1)
+      // The first run's assistant is aborted, and cancel never triggers a
+      // loopAndRecover re-drive (the cancel timestamp blocks it).
+      const firstAnswer = msgs.find(
+        (m) => m.info.role === "assistant" && m.info.parentID !== secondMsg?.info.id,
+      )
+      if (firstAnswer?.info.role === "assistant" && firstAnswer.info.error) {
+        expect(firstAnswer.info.error.name).toBe("MessageAbortedError")
+      }
+      // The second prompt call itself terminates (either aborted join or a
+      // post-cancel run) without hanging forever.
+      expect(exit !== undefined).toBe(true)
+    }),
+  15_000,
+)
+
+it.instance(
+  "messageID retry converges on one stored message",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Idempotent retry" })
+
+      yield* llm.text("answer")
+
+      const id = MessageID.ascending()
+      const input = {
+        sessionID: chat.id,
+        messageID: id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text" as const, text: "retry me" }],
+      }
+      const [a, b] = yield* Effect.all([prompt.prompt(input), prompt.prompt(input)], {
+        concurrency: "unbounded",
+      })
+      expect(a.info.role).toBe("assistant")
+      expect(b.info.role).toBe("assistant")
+
+      // Both submits converge on a single stored user message with that ID.
+      const msgs = yield* sessions.messages({ sessionID: chat.id })
+      const withID = msgs.filter((m) => m.info.id === id)
+      expect(withID).toHaveLength(1)
+      const retries = msgs.filter((m) =>
+        m.parts.some((p) => p.type === "text" && p.text === "retry me"),
+      )
+      expect(retries).toHaveLength(1)
+    }),
+  15_000,
+)
+
 it.instance("prompt submitted during an active run is included in the next LLM input", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

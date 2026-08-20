@@ -15,6 +15,7 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { useLocal } from "../../context/local"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { Identifier } from "@opencode-ai/core/id/id"
 import { tint, useTheme } from "../../context/theme"
 import { EmptyBorder, SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
@@ -1091,6 +1092,7 @@ export function Prompt(props: PromptProps) {
 
       void sdk.client.session.command({
         sessionID,
+        messageID: Identifier.ascending("message"),
         command: command.slice(1),
         arguments: args,
         agent: agent.name,
@@ -1100,11 +1102,16 @@ export function Prompt(props: PromptProps) {
       })
     } else {
       move.startSubmit()
+      // Stable per-submit message ID: the server upserts by message ID, so an
+      // accidental double-submit or transport-level retry of the same logical
+      // message converges on one stored entry instead of duplicating it.
+      const messageID = Identifier.ascending("message")
       sdk.client.session
         .prompt(
           {
             sessionID,
             ...selectedModel,
+            messageID,
             agent: agent.name,
             model: selectedModel,
             variant,
@@ -1119,13 +1126,17 @@ export function Prompt(props: PromptProps) {
           },
           { throwOnError: true },
         )
-        .catch((error) => {
-          toast.show({
-            title: "Failed to send prompt",
-            message: errorMessage(error),
-            variant: "error",
+          .catch((error) => {
+            // The server persists the message before running it, and the run
+            // may still fail after a re-drive attempt. The message is already
+            // in the timeline — say so instead of implying the send dropped it,
+            // which pushes users into resubmitting and duplicating the entry.
+            toast.show({
+              title: "Message saved, but the run failed",
+              message: errorMessage(error),
+              variant: "error",
+            })
           })
-        })
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({

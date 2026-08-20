@@ -1351,7 +1351,50 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
+      return yield* loopAndRecover(input.sessionID, message.info.id)
+    })
+
+    // `loop()` joins whatever run is already active for the session. When that
+    // run dies (abort, provider failure) or exits at its final boundary in the
+    // window between our persist and its last message read, the just-admitted
+    // user message is stranded: stored, visible, but never answered. Re-drive
+    // it once here instead of returning the dead run's outcome to the client —
+    // the "failed to send" error is what pushes users into resending the same
+    // text and producing duplicate timeline entries.
+    //
+    // A cancel issued while (or after) our message was admitted is deliberately
+    // NOT re-driven: the user asked for the session to stop, so the stranded
+    // message stays queued for the next explicit prompt.
+    const loopAndRecover = Effect.fn("SessionPrompt.loopAndRecover")(function* (
+      sessionID: SessionID,
+      messageID: MessageID,
+    ) {
+      const admitted = Date.now()
+      const attempt = yield* loop({ sessionID }).pipe(Effect.exit)
+
+      const answeredAfterAdmit = sessions.findMessage(
+        sessionID,
+        (m) =>
+          m.info.role === "assistant" &&
+          m.info.parentID === messageID &&
+          m.info.time.created >= admitted,
+      )
+      const [answered, cancelledAt] = yield* Effect.all([answeredAfterAdmit, state.lastCancelledAt(sessionID)]).pipe(
+        Effect.orDie,
+      )
+      // Stranded only when our message never got a turn at all — no assistant
+      // reply (success OR error) parented on it, and no cancel overlapping the
+      // admission window. A turn that ran and errored is handled: the error is
+      // recorded, visible, and retrying it here would shadow provider failures
+      // (e.g. a non-retryable 400) with an automatic extra attempt.
+      const stranded = Option.isNone(answered) && (cancelledAt === 0 || cancelledAt < admitted)
+      if (!stranded) {
+        if (Exit.isSuccess(attempt)) return attempt.value
+        return yield* attempt
+      }
+
+      yield* Effect.logWarning("re-driving stranded prompt", { "session.id": sessionID, messageID })
+      return yield* loop({ sessionID })
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
