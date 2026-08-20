@@ -2134,6 +2134,62 @@ it.instance("prompt submitted during an active run is included in the next LLM i
   }),
 )
 
+it.instance(
+  "open todo list is re-injected as a system-reminder and stops once complete",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const todos = yield* Todo.Service
+      const chat = yield* sessions.create({ title: "Todo reminder" })
+
+      // Open list: first item in progress.
+      yield* todos.update({
+        sessionID: chat.id,
+        todos: [
+          { content: "investigate the bug", status: "in_progress", priority: "medium" },
+          { content: "write the fix", status: "pending", priority: "medium" },
+        ],
+      })
+
+      yield* llm.text("answer one")
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text", text: "start work" }],
+      })
+      let inputs = yield* llm.inputs
+      let last = JSON.stringify(inputs.at(-1))
+      expect(last).toContain("<system-reminder>")
+      expect(last).toContain("<todo-list>")
+      expect(last).toContain("investigate the bug (in progress)")
+      expect(last).toContain("write the fix")
+      expect(last).toContain("todowrite")
+
+      // Completed list: no reminder on the next prompt.
+      yield* todos.update({
+        sessionID: chat.id,
+        todos: [
+          { content: "investigate the bug", status: "completed", priority: "medium" },
+          { content: "write the fix", status: "completed", priority: "medium" },
+        ],
+      })
+      yield* llm.text("answer two")
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text", text: "continue" }],
+      })
+      inputs = yield* llm.inputs
+      last = JSON.stringify(inputs.at(-1))
+      expect(last).not.toContain("<todo-list>")
+    }),
+  15_000,
+)
+
 it.instance("assertNotBusy fails with BusyError when loop running", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
