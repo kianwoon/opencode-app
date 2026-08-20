@@ -153,20 +153,27 @@ export function createSessionComposerController(options?: { closeMs?: number | (
           live: active,
         })
 
-        if (next === "open") celebrated = false
-
         if (!previous || previous[0] !== id) {
           if (timer) window.clearTimeout(timer)
           timer = undefined
           // Entering a session with an already-complete list: keep the dock
-          // hidden and skip the completed-close ceremony.
-          celebrated = next === "close"
+          // hidden and skip the completed-close ceremony. Any done list at the
+          // boundary counts as celebrated — including "hide" (done + idle),
+          // which previously left the flag unarmed and fired a stale ceremony
+          // on the first busy turn after every page load.
+          celebrated = complete
           setStore({ sessionID: id, dock: todoDockAtBoundary(next), closing: false, opening: false })
           if (next === "clear") clear()
           return
         }
 
+        if (next === "open") celebrated = false
+
         if (next === "hide") {
+          // A list that is already complete while idle never re-celebrates:
+          // hide arms the flag (completion landed outside a live turn) instead
+          // of leaving it disarmed for the next busy transition.
+          if (complete) celebrated = true
           if (timer) window.clearTimeout(timer)
           timer = undefined
           setStore({ dock: false, closing: false, opening: false })
