@@ -1,5 +1,19 @@
 # opencode database guide
 
+## Idle-GC hook (Bun) — remove when Bun ships oven-sh/bun#36638
+
+- `SessionStatus` (src/session/status.ts) schedules one non-blocking `Bun.gc(false)` via a
+  5s debounce when the LAST busy session goes idle; any busy transition cancels the timer.
+  This mimics Bun's upstream idle-GC work (oven-sh/bun#36638, open at time of writing) that
+  halved Claude Code's p99 CPU — Bun's stock GC fires on allocation/timer thresholds and
+  lands mid-turn.
+- Bun-only by runtime check (`typeof Bun === "undefined"`); the Node desktop sidecar is
+  unaffected (V8 GC is already mutator-aware).
+- When Bun releases an idle-driven GC controller, delete the `onIdle` closure from the
+  `InstanceState.make` body in status.ts, bump `packageManager` in the root package.json,
+  and rebuild the compiled binary (script/build.ts). Acceptance guard:
+  test/session/status-gc.test.ts.
+
 ## Session auto-title gotchas
 
 - `SessionPrompt.ensureTitle` (src/session/prompt.ts) is forked on the FIRST iteration of every
