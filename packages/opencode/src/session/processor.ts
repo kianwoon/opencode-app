@@ -29,6 +29,31 @@ import { Usage, type LLMEvent } from "@opencode-ai/llm"
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
 
+// One INFO line per provider turn: how much of the prompt was served from the
+// provider's prefix cache. This is the primary observable for implicit-cache
+// regressions (stale per-connection snapshots, eviction, admission changes)
+// that otherwise only surface as inflated input-token billing or TTFT spikes.
+function logCacheHitRatio(
+  sessionID: SessionID,
+  messageID: string,
+  model: Provider.Model,
+  tokens: { input: number; cache: { read: number; write: number } },
+) {
+  const promptTokens = tokens.input + tokens.cache.read + tokens.cache.write
+  if (promptTokens < 2000) return
+  const ratio = tokens.cache.read / promptTokens
+  const fields = {
+    "session.id": sessionID,
+    messageID,
+    "model.id": `${model.providerID}/${model.id}`,
+    "tokens.input": tokens.input,
+    "tokens.cache_read": tokens.cache.read,
+    "tokens.prompt": promptTokens,
+    "cache.hit_ratio": Number(ratio.toFixed(3)),
+  }
+  Effect.runFork(ratio < 0.5 ? Effect.logWarning("cache hit ratio low", fields) : Effect.logInfo("cache hit ratio", fields))
+}
+
 export interface Handle {
   readonly message: SessionV1.Assistant
   readonly updateToolCall: (
@@ -443,6 +468,7 @@ const layer = Layer.effect(
             ctx.assistantMessage.finish = value.reason
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
+            logCacheHitRatio(ctx.sessionID, ctx.assistantMessage.id, ctx.model, usage.tokens)
             if (value.reason === "length") {
               yield* Effect.logWarning("output token limit reached", {
                 "session.id": ctx.sessionID,

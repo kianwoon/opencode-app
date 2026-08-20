@@ -91,6 +91,66 @@ function timeoutController(ms: number) {
   }
 }
 
+// Hosts whose implicit prefix cache serves reads per-connection (the cache a
+// connection reads is frozen when the connection is established). Reusing a
+// pooled keep-alive socket makes later requests read a stale snapshot and
+// re-bill the grown prefix as uncached input.
+const FRESH_CONNECTION_HOSTS = [".z.ai", ".bigmodel.cn"]
+
+export function needsFreshConnections(baseURL: string | undefined) {
+  if (!baseURL) return false
+  try {
+    const host = new URL(baseURL).hostname
+    return FRESH_CONNECTION_HOSTS.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))
+  } catch {
+    return false
+  }
+}
+
+// `fetch`-compatible wrapper that performs each request over a brand-new
+// connection via `node:http(s)` with a single-use agent. `Connection: close`
+// alone does not stop Bun's fetch pool from reusing sockets, and undici keeps
+// its own pool in the Node sidecar, so the pool has to be bypassed entirely.
+// Node-compat only: works on both Bun (CLI) and plain Node (desktop sidecar).
+export async function fetchFreshConnection(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url)
+  const body = init.body === undefined ? undefined : await new Request(url.href, init as RequestInit).text()
+  const headers: Record<string, string> = {}
+  new Headers(init.headers).forEach((value, key) => {
+    headers[key] = value
+  })
+  if (body !== undefined && !("content-length" in headers)) headers["content-length"] = String(Buffer.byteLength(body))
+
+  const transport = url.protocol === "http:" ? await import("node:http") : await import("node:https")
+  const { Readable } = await import("node:stream")
+  const res = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+    const req = transport.request(
+      {
+        host: url.hostname,
+        port: url.port || (url.protocol === "http:" ? 80 : 443),
+        path: url.pathname + url.search,
+        method: init.method ?? "GET",
+        headers,
+        agent: new transport.Agent({ keepAlive: false }),
+        signal: init.signal ?? undefined,
+      },
+      (incoming) => {
+        // The request signal only covers dispatch; propagate mid-stream
+        // aborts to the response socket so cancelled generations tear down.
+        init.signal?.addEventListener("abort", () => incoming.destroy(), { once: true })
+        resolve(incoming)
+      },
+    )
+    req.on("error", reject)
+    if (body !== undefined) req.write(body)
+    req.end()
+  })
+  return new Response(Readable.toWeb(res) as unknown as ReadableStream, {
+    status: res.statusCode ?? 200,
+    headers: res.headers as Record<string, string>,
+  })
+}
+
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
   if (!project) return
   if (location !== "eu" && location !== "us") return
@@ -1754,6 +1814,16 @@ const layer = Layer.effect(
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
 
+        // Some providers (observed: z.ai GLM) serve implicit-prefix-cache reads
+        // per connection: a pooled keep-alive socket reads a cache snapshot
+        // frozen at connection establishment, so a long-lived socket parked in
+        // the HTTP pool re-bills the whole conversation as uncached input
+        // whenever the server reuses it turns later. Routing these hosts
+        // through a fresh TLS connection per request keeps every read on the
+        // provider's current cache state. The handshake overhead (~100-300ms)
+        // is negligible next to re-prefilling a 100k+ token prefix.
+        const freshConnection = needsFreshConnections(baseURL)
+
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
@@ -1771,11 +1841,14 @@ const layer = Layer.effect(
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
-          const res = await fetchFn(input, {
-            ...opts,
-            // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-            timeout: false,
-          }).finally(() => headerTimeoutCtl?.clear())
+          const res = await (freshConnection
+            ? fetchFreshConnection(input, opts as RequestInit)
+            : fetchFn(input, {
+                ...opts,
+                // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
+                timeout: false,
+              })
+          ).finally(() => headerTimeoutCtl?.clear())
 
           if (!chunkAbortCtl) return res
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
