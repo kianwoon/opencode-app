@@ -97,6 +97,10 @@ export function createSessionComposerController(options?: { closeMs?: number | (
 
   let timer: number | undefined
   let raf: number | undefined
+  // The completed-close ceremony (hold the checked list, then fade) is for a
+  // list that JUST finished. A list that was already complete when the turn
+  // started must not re-pop the dock on every subsequent busy transition.
+  let celebrated = false
 
   const closeMs = () => {
     const value = options?.closeMs
@@ -149,9 +153,14 @@ export function createSessionComposerController(options?: { closeMs?: number | (
           live: active,
         })
 
+        if (next === "open") celebrated = false
+
         if (!previous || previous[0] !== id) {
           if (timer) window.clearTimeout(timer)
           timer = undefined
+          // Entering a session with an already-complete list: keep the dock
+          // hidden and skip the completed-close ceremony.
+          celebrated = next === "close"
           setStore({ sessionID: id, dock: todoDockAtBoundary(next), closing: false, opening: false })
           if (next === "clear") clear()
           return
@@ -190,7 +199,15 @@ export function createSessionComposerController(options?: { closeMs?: number | (
 
         // All todos completed while the turn is still live: hold the checked
         // list fully visible first, then close. `closing` drives the fade
-        // spring, so it must not flip true until the hold elapses.
+        // spring, so it must not flip true until the hold elapses. One-shot:
+        // a list that was already complete when the turn began stays hidden.
+        if (celebrated) {
+          if (timer) window.clearTimeout(timer)
+          timer = undefined
+          setStore({ dock: false, closing: false, opening: false })
+          return
+        }
+        celebrated = true
         setStore({ dock: true, opening: false, closing: false })
         scheduleCompletedClose()
       },
