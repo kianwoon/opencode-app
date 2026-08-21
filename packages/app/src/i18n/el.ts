@@ -964,6 +964,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Προσαρμογή της γραμματοσειράς που χρησιμοποιείται στο τερματικό",
   "settings.general.row.uiFont.title": "Γραμματοσειρά UI",
   "settings.general.row.uiFont.description": "Προσαρμογή της γραμματοσειράς που χρησιμοποιείται σε όλη τη διεπαφή",
+  "settings.general.row.fontWeight.thin": "Λεπτό",
+  "settings.general.row.fontWeight.extraLight": "Πολύ ανοιχτό",
+  "settings.general.row.fontWeight.light": "Ανοιχτό",
+  "settings.general.row.fontWeight.regular": "Κανονικό",
+  "settings.general.row.fontWeight.medium": "Μεσαίο",
+  "settings.general.row.fontWeight.semibold": "Ημι-έντονο",
+  "settings.general.row.fontWeight.bold": "Έντονο",
   "settings.general.row.followup.title": "Συμπεριφορά παρακολούθησης",
   "settings.general.row.followup.description":
     "Επιλέξτε εάν οι επακόλουθες προτροπές κατευθύνονται αμέσως ή περιμένετε σε μια ουρά",

@@ -942,6 +942,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Настройте шрифт, используемый в терминале",
   "settings.general.row.uiFont.title": "Шрифт интерфейса",
   "settings.general.row.uiFont.description": "Настройте шрифт, используемый во всём интерфейсе",
+  "settings.general.row.fontWeight.thin": "Тонкий",
+  "settings.general.row.fontWeight.extraLight": "Сверхсветлый",
+  "settings.general.row.fontWeight.light": "Светлый",
+  "settings.general.row.fontWeight.regular": "Обычный",
+  "settings.general.row.fontWeight.medium": "Средний",
+  "settings.general.row.fontWeight.semibold": "Полужирный",
+  "settings.general.row.fontWeight.bold": "Жирный",
   "settings.general.row.followup.title": "Поведение уточняющих вопросов",
   "settings.general.row.followup.description":
     "Выберите, отправлять ли уточняющие вопросы сразу или помещать их в очередь",

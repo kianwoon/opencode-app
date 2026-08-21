@@ -970,6 +970,13 @@ export const dict: Record<string, string> = {
   "settings.general.row.terminalFont.description": "ཊར་མི་ནཱལ་ནང་ལག་ལེན་འཐབ་ཡོད་པའི་ཡིག་གཟུགས་སྲོལ་སྒྲིག་འབད།",
   "settings.general.row.uiFont.title": "ཡུ་ཨའི་ཡིག་གཟུགས།",
   "settings.general.row.uiFont.description": "ངོས་འདྲ་བ་ཆ་མཉམ་ལུ་ལག་ལེན་འཐབ་ཡོད་པའི་ཡིག་གཟུགས་སྲོལ་སྒྲིག་འབད།",
+  "settings.general.row.fontWeight.thin": "སླ་པོ།",
+  "settings.general.row.fontWeight.extraLight": "ཧ་ཅང་ ཡང་བ།",
+  "settings.general.row.fontWeight.light": "ཡང་བ།",
+  "settings.general.row.fontWeight.regular": "རྒྱུན་ལྡན།",
+  "settings.general.row.fontWeight.medium": "འབྲིང་ཚད།",
+  "settings.general.row.fontWeight.semibold": "ཕྱེད་ཚད་ སྦོམ་པོ།",
+  "settings.general.row.fontWeight.bold": "སྦོམ་པོ།",
   "settings.general.row.followup.title": "རྗེས་སུ་འབྲངས་པའི་སྤྱོད་ལམ།",
   "settings.general.row.followup.description":
     "རྗེས་འཇུག་འབོད་བརྡ་ཚུ་ དེ་འཕྲོ་ལས་ སྒུལ་ནི་ཨིན་ན་ ཡང་ན་ གྱལ་ནང་བསྒུག་སྡོད་ནི་ཨིན་ན་ གདམ་ཁ་རྐྱབས།",

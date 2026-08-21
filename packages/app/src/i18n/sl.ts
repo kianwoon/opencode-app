@@ -957,6 +957,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Prilagodite pisavo, uporabljeno v terminalu",
   "settings.general.row.uiFont.title": "Pisava uporabniškega vmesnika",
   "settings.general.row.uiFont.description": "Prilagodite pisavo, ki se uporablja v celotnem vmesniku",
+  "settings.general.row.fontWeight.thin": "Tanek",
+  "settings.general.row.fontWeight.extraLight": "Ekstra svetel",
+  "settings.general.row.fontWeight.light": "Svetel",
+  "settings.general.row.fontWeight.regular": "Običajen",
+  "settings.general.row.fontWeight.medium": "Srednji",
+  "settings.general.row.fontWeight.semibold": "Polkrepak",
+  "settings.general.row.fontWeight.bold": "Krepak",
   "settings.general.row.followup.title": "Nadaljnje vedenje",
   "settings.general.row.followup.description":
     "Izberite, ali se nadaljnji pozivi usmerjajo takoj ali čakajo v čakalni vrsti",

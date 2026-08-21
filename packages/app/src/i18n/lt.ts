@@ -967,6 +967,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Tinkinkite terminale naudojamą šriftą",
   "settings.general.row.uiFont.title": "UI šriftas",
   "settings.general.row.uiFont.description": "Tinkinkite visoje sąsajoje naudojamą šriftą",
+  "settings.general.row.fontWeight.thin": "Plonas",
+  "settings.general.row.fontWeight.extraLight": "Ypač šviesus",
+  "settings.general.row.fontWeight.light": "Šviesus",
+  "settings.general.row.fontWeight.regular": "Įprastas",
+  "settings.general.row.fontWeight.medium": "Vidutinis",
+  "settings.general.row.fontWeight.semibold": "Pusiau paryškintas",
+  "settings.general.row.fontWeight.bold": "Paryškintas",
   "settings.general.row.followup.title": "Tolesnis elgesys",
   "settings.general.row.followup.description":
     "Pasirinkite, ar tolesni raginimai bus nukreipti nedelsiant, ar laukti eilėje",

@@ -963,6 +963,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "ٹرمینل میں استعمال ہونے والے فونٹ کو حسب ضرورت بنائیں",
   "settings.general.row.uiFont.title": "UI فونٹ",
   "settings.general.row.uiFont.description": "پورے انٹرفیس میں استعمال ہونے والے فونٹ کو حسب ضرورت بنائیں",
+  "settings.general.row.fontWeight.thin": "پتلا",
+  "settings.general.row.fontWeight.extraLight": "انتہائی ہلکا",
+  "settings.general.row.fontWeight.light": "ہلکا",
+  "settings.general.row.fontWeight.regular": "معمول",
+  "settings.general.row.fontWeight.medium": "درمیانہ",
+  "settings.general.row.fontWeight.semibold": "نیم بولڈ",
+  "settings.general.row.fontWeight.bold": "بولڈ",
   "settings.general.row.followup.title": "فالو اپ کا طرز عمل",
   "settings.general.row.followup.description":
     "منتخب کریں کہ آیا فالو اپ فوری طور پر آگے بڑھتا ہے یا قطار میں انتظار کرتا ہے۔",

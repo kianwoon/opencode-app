@@ -957,6 +957,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Приспособете го фонтот што се користи во терминалот",
   "settings.general.row.uiFont.title": "UI фонт",
   "settings.general.row.uiFont.description": "Прилагодете го фонтот што се користи низ интерфејсот",
+  "settings.general.row.fontWeight.thin": "Тенок",
+  "settings.general.row.fontWeight.extraLight": "Екстра светло",
+  "settings.general.row.fontWeight.light": "Светло",
+  "settings.general.row.fontWeight.regular": "Обичен",
+  "settings.general.row.fontWeight.medium": "Среден",
+  "settings.general.row.fontWeight.semibold": "Полузадебелен",
+  "settings.general.row.fontWeight.bold": "Задебелен",
   "settings.general.row.followup.title": "Последователно однесување",
   "settings.general.row.followup.description":
     "Изберете дали следењето ќе ве поттикне да се управува веднаш или да чекате во редица",

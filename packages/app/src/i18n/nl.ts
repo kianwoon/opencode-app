@@ -963,6 +963,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Pas het lettertype aan dat in de terminal wordt gebruikt",
   "settings.general.row.uiFont.title": "UI-lettertype",
   "settings.general.row.uiFont.description": "Pas het lettertype aan dat in de hele interface wordt gebruikt",
+  "settings.general.row.fontWeight.thin": "Dun",
+  "settings.general.row.fontWeight.extraLight": "Extra licht",
+  "settings.general.row.fontWeight.light": "Licht",
+  "settings.general.row.fontWeight.regular": "Normaal",
+  "settings.general.row.fontWeight.medium": "Medium",
+  "settings.general.row.fontWeight.semibold": "Semi-vet",
+  "settings.general.row.fontWeight.bold": "Vet",
   "settings.general.row.followup.title": "Vervolggedrag",
   "settings.general.row.followup.description":
     "Kies of vervolgprompts de sessie direct bijsturen of in een wachtrij wachten",

@@ -954,6 +954,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Terminalda ulanylýan şrifti düzüň",
   "settings.general.row.uiFont.title": "UI şrift",
   "settings.general.row.uiFont.description": "Interfeýsiň hemme ýerinde ulanylýan şrifti düzüň",
+  "settings.general.row.fontWeight.thin": "Inçe",
+  "settings.general.row.fontWeight.extraLight": "Aýratyn açyk",
+  "settings.general.row.fontWeight.light": "Açyk",
+  "settings.general.row.fontWeight.regular": "Adaty",
+  "settings.general.row.fontWeight.medium": "Orta",
+  "settings.general.row.fontWeight.semibold": "Ýarym galyň",
+  "settings.general.row.fontWeight.bold": "Galyň",
   "settings.general.row.followup.title": "Gözegçilik",
   "settings.general.row.followup.description":
     "Gözegçiligiň haýal etmän dolandyrjakdygyny ýa-da nobata garaşýandygyny saýlaň",

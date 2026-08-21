@@ -962,6 +962,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Personalitzeu el tipus de lletra utilitzat al terminal",
   "settings.general.row.uiFont.title": "Tipus de lletra de la interfície",
   "settings.general.row.uiFont.description": "Personalitzeu el tipus de lletra utilitzat a tota la interfície",
+  "settings.general.row.fontWeight.thin": "Prim",
+  "settings.general.row.fontWeight.extraLight": "Extra clar",
+  "settings.general.row.fontWeight.light": "Clar",
+  "settings.general.row.fontWeight.regular": "Normal",
+  "settings.general.row.fontWeight.medium": "Mitjà",
+  "settings.general.row.fontWeight.semibold": "Semi-negreta",
+  "settings.general.row.fontWeight.bold": "Negreta",
   "settings.general.row.followup.title": "Comportament de seguiment",
   "settings.general.row.followup.description":
     "Trieu si les indicacions de seguiment es dirigeixen immediatament o esperen en una cua",

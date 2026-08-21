@@ -768,6 +768,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Die im Terminal verwendete Schriftart anpassen",
   "settings.general.row.uiFont.title": "UI-Schriftart",
   "settings.general.row.uiFont.description": "Die in der gesamten Benutzeroberfläche verwendete Schriftart anpassen",
+  "settings.general.row.fontWeight.thin": "Dünn",
+  "settings.general.row.fontWeight.extraLight": "Extra leicht",
+  "settings.general.row.fontWeight.light": "Leicht",
+  "settings.general.row.fontWeight.regular": "Normal",
+  "settings.general.row.fontWeight.medium": "Mittel",
+  "settings.general.row.fontWeight.semibold": "Halbfett",
+  "settings.general.row.fontWeight.bold": "Fett",
   "settings.general.row.followup.title": "Verhalten bei Folgeeingaben",
   "settings.general.row.followup.description":
     "Wählen Sie, ob Folgeeingaben die laufende Sitzung sofort steuern oder in einer Warteschlange warten",

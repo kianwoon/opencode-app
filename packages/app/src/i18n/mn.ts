@@ -961,6 +961,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Терминалд ашигласан фонтыг тохируулна уу",
   "settings.general.row.uiFont.title": "UI фонт",
   "settings.general.row.uiFont.description": "Интерфэйс даяар ашигласан фонтыг тохируулна уу",
+  "settings.general.row.fontWeight.thin": "Нимгэн",
+  "settings.general.row.fontWeight.extraLight": "Маш хөнгөн",
+  "settings.general.row.fontWeight.light": "Хөнгөн",
+  "settings.general.row.fontWeight.regular": "Энгийн",
+  "settings.general.row.fontWeight.medium": "Дунд",
+  "settings.general.row.fontWeight.semibold": "Хагас тод",
+  "settings.general.row.fontWeight.bold": "Тод",
   "settings.general.row.followup.title": "Дагаж мөрдөх зан үйл",
   "settings.general.row.followup.description":
     "Дагах сануулгууд шууд чиглүүлэх үү эсвэл дараалалд хүлээх үү гэдгийг сонгоно уу",

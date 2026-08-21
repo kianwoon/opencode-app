@@ -964,6 +964,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Tùy chỉnh phông chữ được sử dụng trong terminal",
   "settings.general.row.uiFont.title": "Phông chữ giao diện",
   "settings.general.row.uiFont.description": "Tùy chỉnh phông chữ dùng trong toàn bộ giao diện",
+  "settings.general.row.fontWeight.thin": "Mảnh",
+  "settings.general.row.fontWeight.extraLight": "Cực nhạt",
+  "settings.general.row.fontWeight.light": "Nhạt",
+  "settings.general.row.fontWeight.regular": "Thường",
+  "settings.general.row.fontWeight.medium": "Trung bình",
+  "settings.general.row.fontWeight.semibold": "Bán đậm",
+  "settings.general.row.fontWeight.bold": "Đậm",
   "settings.general.row.followup.title": "Cách xử lý lời nhắc tiếp theo",
   "settings.general.row.followup.description":
     "Chọn để lời nhắc tiếp theo điều hướng phiên ngay lập tức hoặc chờ trong hàng đợi",

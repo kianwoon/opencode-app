@@ -228,6 +228,8 @@ export const SettingsGeneral: Component = () => {
   const terminal = () => terminalInput(settings.appearance.terminalFont())
 
   const fontWeightOptions = createMemo(() => [
+    { value: "100", label: language.t("settings.general.row.fontWeight.thin") },
+    { value: "200", label: language.t("settings.general.row.fontWeight.extraLight") },
     { value: "300", label: language.t("settings.general.row.fontWeight.light") },
     { value: "400", label: language.t("settings.general.row.fontWeight.regular") },
     { value: "500", label: language.t("settings.general.row.fontWeight.medium") },

@@ -961,6 +961,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "टर्मिनल में प्रयुक्त फ़ॉन्ट को अनुकूलित करें",
   "settings.general.row.uiFont.title": "UI फ़ॉन्ट",
   "settings.general.row.uiFont.description": "पूरे इंटरफ़ेस में उपयोग किए गए फ़ॉन्ट को कस्टमाइज़ करें",
+  "settings.general.row.fontWeight.thin": "पतला",
+  "settings.general.row.fontWeight.extraLight": "अतिरिक्त हल्का",
+  "settings.general.row.fontWeight.light": "हल्का",
+  "settings.general.row.fontWeight.regular": "नियमित",
+  "settings.general.row.fontWeight.medium": "मध्यम",
+  "settings.general.row.fontWeight.semibold": "अर्ध-बोल्ड",
+  "settings.general.row.fontWeight.bold": "बोल्ड",
   "settings.general.row.followup.title": "अनुवर्ती व्यवहार",
   "settings.general.row.followup.description":
     "चुनें कि क्या अनुवर्ती प्रॉम्प्ट तुरंत आगे बढ़ेगा या कतार में प्रतीक्षा करेगा",

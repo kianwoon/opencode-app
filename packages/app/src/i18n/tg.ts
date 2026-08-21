@@ -958,6 +958,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Ҳарферо, ки дар терминал истифода мешавад, танзим кунед",
   "settings.general.row.uiFont.title": "Шрифти UI",
   "settings.general.row.uiFont.description": "Ҳарферо, ки дар тамоми интерфейс истифода мешавад, танзим кунед",
+  "settings.general.row.fontWeight.thin": "Нозук",
+  "settings.general.row.fontWeight.extraLight": "Бениҳоят равшан",
+  "settings.general.row.fontWeight.light": "Равшан",
+  "settings.general.row.fontWeight.regular": "Оддӣ",
+  "settings.general.row.fontWeight.medium": "Миёна",
+  "settings.general.row.fontWeight.semibold": "Нимғафс",
+  "settings.general.row.fontWeight.bold": "Ғафс",
   "settings.general.row.followup.title": "Рафтори пайгирӣ",
   "settings.general.row.followup.description":
     "Интихоб кунед, ки паёмҳои пайгирӣ фавран идора мешаванд ё дар навбат интизор мешаванд",

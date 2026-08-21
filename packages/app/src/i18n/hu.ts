@@ -962,6 +962,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Testreszabhatja a terminálban használt betűtípust",
   "settings.general.row.uiFont.title": "UI betűtípus",
   "settings.general.row.uiFont.description": "Testreszabhatja a felületen használt betűtípust",
+  "settings.general.row.fontWeight.thin": "Vékony",
+  "settings.general.row.fontWeight.extraLight": "Extra világos",
+  "settings.general.row.fontWeight.light": "Világos",
+  "settings.general.row.fontWeight.regular": "Normál",
+  "settings.general.row.fontWeight.medium": "Közepes",
+  "settings.general.row.fontWeight.semibold": "Szemibold",
+  "settings.general.row.fontWeight.bold": "Félkövér",
   "settings.general.row.followup.title": "Nyomon követési viselkedés",
   "settings.general.row.followup.description":
     "Válassza ki, hogy a nyomon követési felszólítások azonnal irányítsák, vagy várakozzanak a sorban",

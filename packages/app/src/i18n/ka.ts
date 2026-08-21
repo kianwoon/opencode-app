@@ -952,6 +952,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "მორგეთ ტერმინალში გამოყენებული შრიფტი",
   "settings.general.row.uiFont.title": "UI ფონტი",
   "settings.general.row.uiFont.description": "დააყენეთ ინტერფეისში გამოყენებული შრიფტის მორგება",
+  "settings.general.row.fontWeight.thin": "თხელი",
+  "settings.general.row.fontWeight.extraLight": "ექსტრა ღია",
+  "settings.general.row.fontWeight.light": "ღია",
+  "settings.general.row.fontWeight.regular": "ჩვეულებრივი",
+  "settings.general.row.fontWeight.medium": "საშუალო",
+  "settings.general.row.fontWeight.semibold": "ნახევრად მსხვილი",
+  "settings.general.row.fontWeight.bold": "მსხვილი",
   "settings.general.row.followup.title": "შემდეგი ქცევა",
   "settings.general.row.followup.description":
     "აირჩიეთ, შემდგომი დაკვირვების მოთხოვნა მყისიერად იხელმძღვანელეთ თუ დაელოდეთ რიგში",

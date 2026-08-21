@@ -944,6 +944,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Personaliza la fuente utilizada en el terminal",
   "settings.general.row.uiFont.title": "Fuente de la interfaz",
   "settings.general.row.uiFont.description": "Personaliza la fuente usada en toda la interfaz",
+  "settings.general.row.fontWeight.thin": "Fina",
+  "settings.general.row.fontWeight.extraLight": "Extra ligera",
+  "settings.general.row.fontWeight.light": "Ligera",
+  "settings.general.row.fontWeight.regular": "Normal",
+  "settings.general.row.fontWeight.medium": "Mediana",
+  "settings.general.row.fontWeight.semibold": "Semi-negrita",
+  "settings.general.row.fontWeight.bold": "Negrita",
   "settings.general.row.followup.title": "Comportamiento de seguimiento",
   "settings.general.row.followup.description":
     "Elige si los prompts de seguimiento se dirigen inmediatamente o esperan en una cola",

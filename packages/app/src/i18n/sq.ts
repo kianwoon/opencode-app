@@ -957,6 +957,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Personalizojeni fontin e përdorur në terminal",
   "settings.general.row.uiFont.title": "Fonti UI",
   "settings.general.row.uiFont.description": "Personalizoni fontin e përdorur në të gjithë ndërfaqen",
+  "settings.general.row.fontWeight.thin": "I hollë",
+  "settings.general.row.fontWeight.extraLight": "Extra i çelët",
+  "settings.general.row.fontWeight.light": "I çelët",
+  "settings.general.row.fontWeight.regular": "I rregullt",
+  "settings.general.row.fontWeight.medium": "I mesëm",
+  "settings.general.row.fontWeight.semibold": "Gjysmë i trashë",
+  "settings.general.row.fontWeight.bold": "I trashë",
   "settings.general.row.followup.title": "Sjellja pasuese",
   "settings.general.row.followup.description":
     "Zgjidhni nëse kërkesat e ndjekjes drejtohen menjëherë ose prisni në një radhë",

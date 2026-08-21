@@ -961,6 +961,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Terminalda ishlatiladigan shriftni sozlang",
   "settings.general.row.uiFont.title": "UI shrifti",
   "settings.general.row.uiFont.description": "Interfeys davomida ishlatiladigan shriftni moslashtiring",
+  "settings.general.row.fontWeight.thin": "Yupqa",
+  "settings.general.row.fontWeight.extraLight": "O'ta ochiq",
+  "settings.general.row.fontWeight.light": "Ochiq",
+  "settings.general.row.fontWeight.regular": "Oddiy",
+  "settings.general.row.fontWeight.medium": "O'rtacha",
+  "settings.general.row.fontWeight.semibold": "Yarim qalin",
+  "settings.general.row.fontWeight.bold": "Qalin",
   "settings.general.row.followup.title": "Kuzatuv xatti-harakati",
   "settings.general.row.followup.description":
     "Kuzatuv soʻrovlari darhol boshqarilishini yoki navbatda kutishini tanlang",

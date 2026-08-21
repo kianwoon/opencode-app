@@ -952,6 +952,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Sesuaikan fon yang digunakan dalam terminal",
   "settings.general.row.uiFont.title": "Fon Antara Muka",
   "settings.general.row.uiFont.description": "Sesuaikan fon yang digunakan di seluruh antara muka",
+  "settings.general.row.fontWeight.thin": "Nipis",
+  "settings.general.row.fontWeight.extraLight": "Sangat cerah",
+  "settings.general.row.fontWeight.light": "Cerah",
+  "settings.general.row.fontWeight.regular": "Biasa",
+  "settings.general.row.fontWeight.medium": "Sederhana",
+  "settings.general.row.fontWeight.semibold": "Separa tebal",
+  "settings.general.row.fontWeight.bold": "Tebal",
   "settings.general.row.followup.title": "Tingkah laku susulan",
   "settings.general.row.followup.description":
     "Pilih sama ada arahan susulan dilaksanakan serta-merta atau menunggu dalam barisan",

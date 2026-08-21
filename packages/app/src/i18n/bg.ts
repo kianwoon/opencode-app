@@ -959,6 +959,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Персонализирайте шрифта, използван в терминала",
   "settings.general.row.uiFont.title": "UI шрифт",
   "settings.general.row.uiFont.description": "Персонализирайте шрифта, използван в целия интерфейс",
+  "settings.general.row.fontWeight.thin": "Тънък",
+  "settings.general.row.fontWeight.extraLight": "Изключително светъл",
+  "settings.general.row.fontWeight.light": "Светъл",
+  "settings.general.row.fontWeight.regular": "Обикновен",
+  "settings.general.row.fontWeight.medium": "Среден",
+  "settings.general.row.fontWeight.semibold": "Полуплътен",
+  "settings.general.row.fontWeight.bold": "Получер",
   "settings.general.row.followup.title": "Последващо поведение",
   "settings.general.row.followup.description":
     "Изберете дали последващите подкани да се управляват незабавно или да чакат на опашка",

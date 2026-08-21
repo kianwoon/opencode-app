@@ -949,6 +949,13 @@ export const dict: Record<string, string> = {
   "settings.general.row.terminalFont.description": "ටර්මිනලයේ භාවිතා කරන අකුරු අභිරුචිකරණය කරන්න",
   "settings.general.row.uiFont.title": "UI අකුරු",
   "settings.general.row.uiFont.description": "අතුරු මුහුණත පුරා භාවිතා කරන අකුරු අභිරුචිකරණය කරන්න",
+  "settings.general.row.fontWeight.thin": "සිහින්",
+  "settings.general.row.fontWeight.extraLight": "අතිරේක සැහැල්ලු",
+  "settings.general.row.fontWeight.light": "සැහැල්ලු",
+  "settings.general.row.fontWeight.regular": "සාමාන්‍ය",
+  "settings.general.row.fontWeight.medium": "මධ්‍යම",
+  "settings.general.row.fontWeight.semibold": "අර්ධ තද",
+  "settings.general.row.fontWeight.bold": "තද",
   "settings.general.row.followup.title": "පසු විපරම් හැසිරීම",
   "settings.general.row.followup.description":
     "පසු විපරම් ප්‍රේරක ක්ෂණිකව ගමන් කරනවාද නැතිනම් පෝලිමක රැඳී සිටිනවාද යන්න තෝරන්න",

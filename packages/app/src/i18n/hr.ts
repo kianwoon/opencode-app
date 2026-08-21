@@ -962,6 +962,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Prilagodite font koji se koristi u terminalu",
   "settings.general.row.uiFont.title": "UI font",
   "settings.general.row.uiFont.description": "Prilagodite font koji se koristi u cijelom sučelju",
+  "settings.general.row.fontWeight.thin": "Tanko",
+  "settings.general.row.fontWeight.extraLight": "Ekstra svijetlo",
+  "settings.general.row.fontWeight.light": "Svijetlo",
+  "settings.general.row.fontWeight.regular": "Obično",
+  "settings.general.row.fontWeight.medium": "Srednje",
+  "settings.general.row.fontWeight.semibold": "Polupodebljano",
+  "settings.general.row.fontWeight.bold": "Podebljano",
   "settings.general.row.followup.title": "Praćenje ponašanja",
   "settings.general.row.followup.description":
     "Odaberite hoće li se naknadni upiti usmjeravati odmah ili čekati u redu",

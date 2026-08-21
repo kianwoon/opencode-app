@@ -966,6 +966,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "terminal တွင်အသုံးပြုသောဖောင့်ကို စိတ်ကြိုက်ပြင်ဆင်ပါ။",
   "settings.general.row.uiFont.title": "UI ဖောင့်",
   "settings.general.row.uiFont.description": "အင်တာဖေ့စ်တစ်လျှောက်သုံးဖောင့်ကို စိတ်ကြိုက်ပြင်ဆင်ပါ။",
+  "settings.general.row.fontWeight.thin": "ပါးပါး",
+  "settings.general.row.fontWeight.extraLight": "အလွန်ပေါ့ပါး",
+  "settings.general.row.fontWeight.light": "ပေါ့ပါး",
+  "settings.general.row.fontWeight.regular": "ပုံမှန်",
+  "settings.general.row.fontWeight.medium": "အလယ်အလတ်",
+  "settings.general.row.fontWeight.semibold": "တစ်ဝက်ထူ",
+  "settings.general.row.fontWeight.bold": "ထူ",
   "settings.general.row.followup.title": "နောက်ဆက်တွဲအပြုအမူ",
   "settings.general.row.followup.description":
     "နောက်ဆက်တွဲအချက်မှာ ချက်ချင်းပဲ့ကိုင်သလား သို့မဟုတ် တန်းစီစောင့်ဆိုင်းခြင်းရှိမရှိကို ရွေးပါ။",

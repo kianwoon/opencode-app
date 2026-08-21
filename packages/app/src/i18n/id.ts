@@ -1032,6 +1032,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Sesuaikan font yang digunakan di terminal",
   "settings.general.row.uiFont.title": "Font UI",
   "settings.general.row.uiFont.description": "Sesuaikan font yang digunakan di seluruh antarmuka",
+  "settings.general.row.fontWeight.thin": "Tipikal",
+  "settings.general.row.fontWeight.extraLight": "Ekstra tipis",
+  "settings.general.row.fontWeight.light": "Tipis",
+  "settings.general.row.fontWeight.regular": "Normal",
+  "settings.general.row.fontWeight.medium": "Sedang",
+  "settings.general.row.fontWeight.semibold": "Setengah tebal",
+  "settings.general.row.fontWeight.bold": "Tebal",
   "settings.general.row.followup.title": "Perilaku lanjutan",
   "settings.general.row.followup.description":
     "Pilih apakah prompt lanjutan segera mengarahkan atau menunggu dalam antrean",

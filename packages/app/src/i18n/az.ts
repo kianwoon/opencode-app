@@ -963,6 +963,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Terminalda istifadə olunan şrifti fərdiləşdirin",
   "settings.general.row.uiFont.title": "İnterfeys şrifti",
   "settings.general.row.uiFont.description": "Bütün interfeysdə istifadə olunan şrifti fərdiləşdirin",
+  "settings.general.row.fontWeight.thin": "İncə",
+  "settings.general.row.fontWeight.extraLight": "Çox açıq",
+  "settings.general.row.fontWeight.light": "Açıq",
+  "settings.general.row.fontWeight.regular": "Adi",
+  "settings.general.row.fontWeight.medium": "Orta",
+  "settings.general.row.fontWeight.semibold": "Yarı qalın",
+  "settings.general.row.fontWeight.bold": "Qalın",
   "settings.general.row.followup.title": "Sonrakı sorğuların davranışı",
   "settings.general.row.followup.description":
     "Sonrakı sorğuların dərhal yönləndirilməsini və ya növbədə gözləməsini seçin",

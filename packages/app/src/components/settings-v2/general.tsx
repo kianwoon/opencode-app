@@ -29,6 +29,8 @@ import "./settings-v2.css"
 
 const schemeOptions: ("system" | "light" | "dark")[] = ["system", "light", "dark"]
 const fontWeightOptions = [
+  { value: "100", label: "settings.general.row.fontWeight.thin" },
+  { value: "200", label: "settings.general.row.fontWeight.extraLight" },
   { value: "300", label: "settings.general.row.fontWeight.light" },
   { value: "400", label: "settings.general.row.fontWeight.regular" },
   { value: "500", label: "settings.general.row.fontWeight.medium" },

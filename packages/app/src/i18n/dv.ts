@@ -968,6 +968,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "ޓާމިނަލްގައި ބޭނުންކުރާ ފޮންޓް ކަސްޓަމައިޒް ކުރުން",
   "settings.general.row.uiFont.title": "UI ފޮންޓް",
   "settings.general.row.uiFont.description": "މުޅި އިންޓަރފޭސްގައި ބޭނުންކުރާ ފޮންޓް ކަސްޓަމައިޒް ކުރުން",
+  "settings.general.row.fontWeight.thin": "ތެޅި",
+  "settings.general.row.fontWeight.extraLight": "އިތުރު ލުއި",
+  "settings.general.row.fontWeight.light": "ލުއި",
+  "settings.general.row.fontWeight.regular": "އާދައިގެ",
+  "settings.general.row.fontWeight.medium": "މެދު",
+  "settings.general.row.fontWeight.semibold": "ނިސްބަތް ބޯ",
+  "settings.general.row.fontWeight.bold": "ބޯ",
   "settings.general.row.followup.title": "ފޮލޯއަޕް ސުލޫކު",
   "settings.general.row.followup.description":
     "ފޮލޯއަޕް ޕްރޮމްޕްޓްސް ވަގުތުން ސްޓިއަރ ކުރުން ނުވަތަ ކިއުއެއްގައި މަޑުކުރުންތޯ ހޮވާށެވެ",

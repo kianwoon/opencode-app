@@ -957,6 +957,13 @@ export const dict = {
   "settings.general.row.terminalFont.description": "Personalizează fontul folosit în terminal",
   "settings.general.row.uiFont.title": "Font interfață",
   "settings.general.row.uiFont.description": "Personalizează fontul folosit în toată interfața",
+  "settings.general.row.fontWeight.thin": "Subțire",
+  "settings.general.row.fontWeight.extraLight": "Extra light",
+  "settings.general.row.fontWeight.light": "Light",
+  "settings.general.row.fontWeight.regular": "Normal",
+  "settings.general.row.fontWeight.medium": "Mediu",
+  "settings.general.row.fontWeight.semibold": "Semi-îngroșat",
+  "settings.general.row.fontWeight.bold": "Îngroșat",
   "settings.general.row.followup.title": "Comportament follow-up",
   "settings.general.row.followup.description":
     "Alege dacă solicitările follow-up se execută imediat sau așteaptă în coadă",
