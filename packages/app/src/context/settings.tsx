@@ -48,6 +48,12 @@ export interface Settings {
     uiFontWeight: number
     codeFontWeight: number
     terminalFontWeight: number
+    uiFontColorLight: string
+    uiFontColorDark: string
+    codeFontColorLight: string
+    codeFontColorDark: string
+    terminalFontColorLight: string
+    terminalFontColorDark: string
   }
   keybinds: Record<string, string>
   permissions: {
@@ -187,6 +193,24 @@ export function weight(weight: number | undefined, fallback: number) {
   return weight ?? fallback
 }
 
+export function color(color: string | undefined) {
+  const value = color?.trim()
+  return value ? value : ""
+}
+
+// Builds a CSS value for a font color override, resolved per color scheme.
+// When both values are empty we return the empty string so consumers fall back
+// to the themed text color instead of overriding it. When only one scheme has
+// a value, that color applies to both schemes (the settings UI pairs the two
+// fields so users normally set both).
+export function fontColor(light: string | undefined, dark: string | undefined) {
+  const lightValue = color(light)
+  const darkValue = color(dark)
+  if (!lightValue && !darkValue) return ""
+  if (lightValue && darkValue) return `light-dark(${lightValue}, ${darkValue})`
+  return lightValue || darkValue
+}
+
 const defaultSettings: Settings = {
   general: {
     autoSave: true,
@@ -211,6 +235,12 @@ const defaultSettings: Settings = {
     uiFontWeight: 400,
     codeFontWeight: 400,
     terminalFontWeight: 400,
+    uiFontColorLight: "",
+    uiFontColorDark: "",
+    codeFontColorLight: "",
+    codeFontColorDark: "",
+    terminalFontColorLight: "",
+    terminalFontColorDark: "",
   },
   keybinds: {},
   permissions: {
@@ -374,6 +404,33 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         "--font-family-terminal--font-weight",
         String(weight(store.appearance?.terminalFontWeight, defaultSettings.appearance.terminalFontWeight)),
       )
+      // Font colors are resolved by the browser per color scheme via light-dark(),
+      // falling back to the themed text color when the user leaves a value empty.
+      root.style.setProperty(
+        "--font-family-sans--color",
+        fontColor(store.appearance?.uiFontColorLight, store.appearance?.uiFontColorDark),
+      )
+      root.style.setProperty(
+        "--font-family-mono--color",
+        fontColor(store.appearance?.codeFontColorLight, store.appearance?.codeFontColorDark),
+      )
+      root.style.setProperty(
+        "--font-family-terminal--color",
+        fontColor(store.appearance?.terminalFontColorLight, store.appearance?.terminalFontColorDark),
+      )
+      // The UI font color overrides the primary text color of the app so the
+      // user-chosen color shows up everywhere themed text is rendered. Setting
+      // the property to an empty string restores the theme default.
+      const uiFontColor = fontColor(store.appearance?.uiFontColorLight, store.appearance?.uiFontColorDark)
+      if (uiFontColor) {
+        root.style.setProperty("--v2-text-text-base", uiFontColor)
+        root.style.setProperty("--text-strong", uiFontColor)
+        root.style.setProperty("--text-base", uiFontColor)
+      } else {
+        root.style.removeProperty("--v2-text-text-base")
+        root.style.removeProperty("--text-strong")
+        root.style.removeProperty("--text-base")
+      }
     })
 
     createEffect(() => {
@@ -521,6 +578,48 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setTerminalFontWeight(value: number) {
           setStore("appearance", "terminalFontWeight", value)
+        },
+        uiFontColorLight: withFallback(
+          () => store.appearance?.uiFontColorLight,
+          defaultSettings.appearance.uiFontColorLight,
+        ),
+        setUIFontColorLight(value: string) {
+          setStore("appearance", "uiFontColorLight", color(value))
+        },
+        uiFontColorDark: withFallback(
+          () => store.appearance?.uiFontColorDark,
+          defaultSettings.appearance.uiFontColorDark,
+        ),
+        setUIFontColorDark(value: string) {
+          setStore("appearance", "uiFontColorDark", color(value))
+        },
+        codeFontColorLight: withFallback(
+          () => store.appearance?.codeFontColorLight,
+          defaultSettings.appearance.codeFontColorLight,
+        ),
+        setCodeFontColorLight(value: string) {
+          setStore("appearance", "codeFontColorLight", color(value))
+        },
+        codeFontColorDark: withFallback(
+          () => store.appearance?.codeFontColorDark,
+          defaultSettings.appearance.codeFontColorDark,
+        ),
+        setCodeFontColorDark(value: string) {
+          setStore("appearance", "codeFontColorDark", color(value))
+        },
+        terminalFontColorLight: withFallback(
+          () => store.appearance?.terminalFontColorLight,
+          defaultSettings.appearance.terminalFontColorLight,
+        ),
+        setTerminalFontColorLight(value: string) {
+          setStore("appearance", "terminalFontColorLight", color(value))
+        },
+        terminalFontColorDark: withFallback(
+          () => store.appearance?.terminalFontColorDark,
+          defaultSettings.appearance.terminalFontColorDark,
+        ),
+        setTerminalFontColorDark(value: string) {
+          setStore("appearance", "terminalFontColorDark", color(value))
         },
       },
       keybinds: {

@@ -930,6 +930,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "中等",
   "settings.general.row.fontWeight.semibold": "半粗",
   "settings.general.row.fontWeight.bold": "粗",
+  "settings.general.row.fontColor.help": "颜色: 浅色 / 深色",
   "settings.general.row.followup.title": "后续消息行为",
   "settings.general.row.followup.description": "选择后续提示是立即引导当前会话还是排队等待",
   "settings.general.row.followup.option.queue": "排队",

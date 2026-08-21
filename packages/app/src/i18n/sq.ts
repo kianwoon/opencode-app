@@ -964,6 +964,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "I mesëm",
   "settings.general.row.fontWeight.semibold": "Gjysmë i trashë",
   "settings.general.row.fontWeight.bold": "I trashë",
+  "settings.general.row.fontColor.help": "Ngjyra: e çelët / e errët",
   "settings.general.row.followup.title": "Sjellja pasuese",
   "settings.general.row.followup.description":
     "Zgjidhni nëse kërkesat e ndjekjes drejtohen menjëherë ose prisni në një radhë",

@@ -964,6 +964,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Mediu",
   "settings.general.row.fontWeight.semibold": "Semi-îngroșat",
   "settings.general.row.fontWeight.bold": "Îngroșat",
+  "settings.general.row.fontColor.help": "Culoare: deschisă / închisă",
   "settings.general.row.followup.title": "Comportament follow-up",
   "settings.general.row.followup.description":
     "Alege dacă solicitările follow-up se execută imediat sau așteaptă în coadă",

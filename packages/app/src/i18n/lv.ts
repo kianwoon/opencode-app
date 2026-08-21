@@ -966,6 +966,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Vidējs",
   "settings.general.row.fontWeight.semibold": "Pus treknrakstā",
   "settings.general.row.fontWeight.bold": "Treknrakstā",
+  "settings.general.row.fontColor.help": "Krāsa: gaiša / tumša",
   "settings.general.row.followup.title": "Turpmākā darbība",
   "settings.general.row.followup.description": "Izvēlieties, vai turpmākie uzvedumi tiek izpildīti uzreiz vai rindā",
   "settings.general.row.followup.option.queue": "Rinda",

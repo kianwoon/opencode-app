@@ -959,6 +959,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Miðal",
   "settings.general.row.fontWeight.semibold": "Hálvfeitur",
   "settings.general.row.fontWeight.bold": "Feitur",
+  "settings.general.row.fontColor.help": "Litur: ljósur / myrkur",
   "settings.general.row.followup.title": "Eftirfylgjandi atferð",
   "settings.general.row.followup.description": "Vel um eftirfylgjandi boðini stýra beinanvegin ella bíða í bíðirøð",
   "settings.general.row.followup.option.queue": "Bíðirøð",

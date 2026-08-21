@@ -925,6 +925,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "中等",
   "settings.general.row.fontWeight.semibold": "半粗",
   "settings.general.row.fontWeight.bold": "粗",
+  "settings.general.row.fontColor.help": "顏色: 淺色 / 深色",
   "settings.general.row.followup.title": "後續追問行為",
   "settings.general.row.followup.description": "選擇後續追問提示是立即引導還是進入佇列等待",
   "settings.general.row.followup.option.queue": "佇列",

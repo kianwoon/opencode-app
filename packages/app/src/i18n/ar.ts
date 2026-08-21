@@ -880,6 +880,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "متوسط",
   "settings.general.row.fontWeight.semibold": "شبه عريض",
   "settings.general.row.fontWeight.bold": "عريض",
+  "settings.general.row.fontColor.help": "اللون: فاتح / داكن",
   "settings.general.row.followup.title": "سلوك المتابعة",
   "settings.general.row.followup.description": "اختر ما إذا كانت طلبات المتابعة توجه فورًا أو تنتظر في قائمة انتظار",
   "settings.general.row.followup.option.queue": "قائمة انتظار",

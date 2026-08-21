@@ -977,6 +977,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.fontWeight.medium": "འབྲིང་ཚད།",
   "settings.general.row.fontWeight.semibold": "ཕྱེད་ཚད་ སྦོམ་པོ།",
   "settings.general.row.fontWeight.bold": "སྦོམ་པོ།",
+  "settings.general.row.fontColor.help": "ཚོས་གཞི།: གསལ་པོ། / ནག་པོ།",
   "settings.general.row.followup.title": "རྗེས་སུ་འབྲངས་པའི་སྤྱོད་ལམ།",
   "settings.general.row.followup.description":
     "རྗེས་འཇུག་འབོད་བརྡ་ཚུ་ དེ་འཕྲོ་ལས་ སྒུལ་ནི་ཨིན་ན་ ཡང་ན་ གྱལ་ནང་བསྒུག་སྡོད་ནི་ཨིན་ན་ གདམ་ཁ་རྐྱབས།",

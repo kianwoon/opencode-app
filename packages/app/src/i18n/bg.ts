@@ -966,6 +966,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Среден",
   "settings.general.row.fontWeight.semibold": "Полуплътен",
   "settings.general.row.fontWeight.bold": "Получер",
+  "settings.general.row.fontColor.help": "Цвят: светъл / тъмен",
   "settings.general.row.followup.title": "Последващо поведение",
   "settings.general.row.followup.description":
     "Изберете дали последващите подкани да се управляват незабавно или да чакат на опашка",

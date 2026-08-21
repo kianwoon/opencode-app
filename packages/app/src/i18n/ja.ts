@@ -868,6 +868,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "ミディアム",
   "settings.general.row.fontWeight.semibold": "セミボールド",
   "settings.general.row.fontWeight.bold": "ボールド",
+  "settings.general.row.fontColor.help": "色: ライト / ダーク",
   "settings.general.row.followup.title": "フォローアップの動作",
   "settings.general.row.followup.description":
     "フォローアッププロンプトを即座に実行するか、キューで待機させるかを選択します",

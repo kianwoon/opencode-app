@@ -964,6 +964,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Среден",
   "settings.general.row.fontWeight.semibold": "Полузадебелен",
   "settings.general.row.fontWeight.bold": "Задебелен",
+  "settings.general.row.fontColor.help": "Боја: светла / темна",
   "settings.general.row.followup.title": "Последователно однесување",
   "settings.general.row.followup.description":
     "Изберете дали следењето ќе ве поттикне да се управува веднаш или да чекате во редица",

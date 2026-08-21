@@ -949,6 +949,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Средний",
   "settings.general.row.fontWeight.semibold": "Полужирный",
   "settings.general.row.fontWeight.bold": "Жирный",
+  "settings.general.row.fontColor.help": "Цвет: светлый / тёмный",
   "settings.general.row.followup.title": "Поведение уточняющих вопросов",
   "settings.general.row.followup.description":
     "Выберите, отправлять ли уточняющие вопросы сразу или помещать их в очередь",

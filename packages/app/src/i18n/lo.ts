@@ -954,6 +954,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "ກາງ",
   "settings.general.row.fontWeight.semibold": "ເຄິ່ງໜາ",
   "settings.general.row.fontWeight.bold": "ໜາ",
+  "settings.general.row.fontColor.help": "ສີ: ສະຫວ່າງ / ມືດ",
   "settings.general.row.followup.title": "ພຶດຕິກໍາການຕິດຕາມ",
   "settings.general.row.followup.description": "ເລືອກວ່າການຕິດຕາມການກະຕຸ້ນເຕືອນທັນທີຫຼືລໍຖ້າຢູ່ໃນຄິວ",
   "settings.general.row.followup.option.queue": "ຄິວ",

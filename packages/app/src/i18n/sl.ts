@@ -964,6 +964,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Srednji",
   "settings.general.row.fontWeight.semibold": "Polkrepak",
   "settings.general.row.fontWeight.bold": "Krepak",
+  "settings.general.row.fontColor.help": "Barva: svetla / temna",
   "settings.general.row.followup.title": "Nadaljnje vedenje",
   "settings.general.row.followup.description":
     "Izberite, ali se nadaljnji pozivi usmerjajo takoj ali čakajo v čakalni vrsti",

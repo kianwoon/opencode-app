@@ -775,6 +775,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Mittel",
   "settings.general.row.fontWeight.semibold": "Halbfett",
   "settings.general.row.fontWeight.bold": "Fett",
+  "settings.general.row.fontColor.help": "Farbe: hell / dunkel",
   "settings.general.row.followup.title": "Verhalten bei Folgeeingaben",
   "settings.general.row.followup.description":
     "Wählen Sie, ob Folgeeingaben die laufende Sitzung sofort steuern oder in einer Warteschlange warten",

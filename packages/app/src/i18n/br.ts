@@ -883,6 +883,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Etre",
   "settings.general.row.fontWeight.semibold": "Hanter-dev",
   "settings.general.row.fontWeight.bold": "Dev",
+  "settings.general.row.fontColor.help": "Liv: sklaer / teñval",
   "settings.general.row.followup.title": "Comportamento de acompanhamento",
   "settings.general.row.followup.description":
     "Escolha se os prompts de acompanhamento orientam imediatamente ou esperam na fila",

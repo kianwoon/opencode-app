@@ -880,6 +880,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Medio",
   "settings.general.row.fontWeight.semibold": "Semi-bold",
   "settings.general.row.fontWeight.bold": "Grassetto",
+  "settings.general.row.fontColor.help": "Colore: chiaro / scuro",
   "settings.general.row.followup.title": "Gestione dei prompt successivi",
   "settings.general.row.followup.description": "Scegli se i prompt successivi intervengono subito o attendono in coda",
   "settings.general.row.followup.option.queue": "Coda",

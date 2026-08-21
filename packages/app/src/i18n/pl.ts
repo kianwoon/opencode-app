@@ -885,6 +885,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Średni",
   "settings.general.row.fontWeight.semibold": "Półgruby",
   "settings.general.row.fontWeight.bold": "Pogrubiony",
+  "settings.general.row.fontColor.help": "Kolor: jasny / ciemny",
   "settings.general.row.followup.title": "Zachowanie kontynuacji",
   "settings.general.row.followup.description": "Wybierz, czy kontynuacja ma być natychmiastowa, czy czekać w kolejce",
   "settings.general.row.followup.option.queue": "Kolejka",

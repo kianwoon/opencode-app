@@ -956,6 +956,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Keskmine",
   "settings.general.row.fontWeight.semibold": "Poolpaks",
   "settings.general.row.fontWeight.bold": "Paks",
+  "settings.general.row.fontColor.help": "Värv: hele / tume",
   "settings.general.row.followup.title": "Järelkäitumine",
   "settings.general.row.followup.description": "Valige, kas järelviibad juhivad kohe või oodake järjekorras",
   "settings.general.row.followup.option.queue": "Järjekord",

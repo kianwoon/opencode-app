@@ -975,6 +975,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "މެދު",
   "settings.general.row.fontWeight.semibold": "ނިސްބަތް ބޯ",
   "settings.general.row.fontWeight.bold": "ބޯ",
+  "settings.general.row.fontColor.help": "ކުލަ: އަލި / އަނދިރި",
   "settings.general.row.followup.title": "ފޮލޯއަޕް ސުލޫކު",
   "settings.general.row.followup.description":
     "ފޮލޯއަޕް ޕްރޮމްޕްޓްސް ވަގުތުން ސްޓިއަރ ކުރުން ނުވަތަ ކިއުއެއްގައި މަޑުކުރުންތޯ ހޮވާށެވެ",

@@ -971,6 +971,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Trung bình",
   "settings.general.row.fontWeight.semibold": "Bán đậm",
   "settings.general.row.fontWeight.bold": "Đậm",
+  "settings.general.row.fontColor.help": "Màu: sáng / tối",
   "settings.general.row.followup.title": "Cách xử lý lời nhắc tiếp theo",
   "settings.general.row.followup.description":
     "Chọn để lời nhắc tiếp theo điều hướng phiên ngay lập tức hoặc chờ trong hàng đợi",

@@ -968,6 +968,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Дунд",
   "settings.general.row.fontWeight.semibold": "Хагас тод",
   "settings.general.row.fontWeight.bold": "Тод",
+  "settings.general.row.fontColor.help": "Өнгө: цайвар / бараан",
   "settings.general.row.followup.title": "Дагаж мөрдөх зан үйл",
   "settings.general.row.followup.description":
     "Дагах сануулгууд шууд чиглүүлэх үү эсвэл дараалалд хүлээх үү гэдгийг сонгоно уу",

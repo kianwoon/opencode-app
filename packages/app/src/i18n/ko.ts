@@ -620,6 +620,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "미디엄",
   "settings.general.row.fontWeight.semibold": "세미볼드",
   "settings.general.row.fontWeight.bold": "볼드",
+  "settings.general.row.fontColor.help": "색상: 라이트 / 다크",
   "settings.general.row.followup.title": "후속 조치 동작",
   "settings.general.row.followup.description": "후속 프롬프트를 즉시 실행할지 대기열에 넣을지 선택하세요",
   "settings.general.row.followup.option.queue": "대기열",

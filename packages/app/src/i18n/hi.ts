@@ -968,6 +968,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "मध्यम",
   "settings.general.row.fontWeight.semibold": "अर्ध-बोल्ड",
   "settings.general.row.fontWeight.bold": "बोल्ड",
+  "settings.general.row.fontColor.help": "रंग: हल्का / गहरा",
   "settings.general.row.followup.title": "अनुवर्ती व्यवहार",
   "settings.general.row.followup.description":
     "चुनें कि क्या अनुवर्ती प्रॉम्प्ट तुरंत आगे बढ़ेगा या कतार में प्रतीक्षा करेगा",

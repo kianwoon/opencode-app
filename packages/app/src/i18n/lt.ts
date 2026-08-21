@@ -974,6 +974,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Vidutinis",
   "settings.general.row.fontWeight.semibold": "Pusiau paryškintas",
   "settings.general.row.fontWeight.bold": "Paryškintas",
+  "settings.general.row.fontColor.help": "Spalva: šviesi / tamsi",
   "settings.general.row.followup.title": "Tolesnis elgesys",
   "settings.general.row.followup.description":
     "Pasirinkite, ar tolesni raginimai bus nukreipti nedelsiant, ar laukti eilėje",

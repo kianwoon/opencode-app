@@ -961,6 +961,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Orta",
   "settings.general.row.fontWeight.semibold": "Ýarym galyň",
   "settings.general.row.fontWeight.bold": "Galyň",
+  "settings.general.row.fontColor.help": "Reňk: açyk / goýy",
   "settings.general.row.followup.title": "Gözegçilik",
   "settings.general.row.followup.description":
     "Gözegçiligiň haýal etmän dolandyrjakdygyny ýa-da nobata garaşýandygyny saýlaň",

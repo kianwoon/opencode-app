@@ -888,6 +888,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Medium",
   "settings.general.row.fontWeight.semibold": "Semi-bold",
   "settings.general.row.fontWeight.bold": "Gras",
+  "settings.general.row.fontColor.help": "Couleur : claire / foncée",
   "settings.general.row.followup.title": "Comportement des messages de suivi",
   "settings.general.row.followup.description":
     "Choisissez si les messages de suivi orientent immédiatement l'agent ou sont placés dans une file d'attente",

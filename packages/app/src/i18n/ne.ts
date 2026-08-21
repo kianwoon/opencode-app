@@ -960,6 +960,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.fontWeight.medium": "मध्यम",
   "settings.general.row.fontWeight.semibold": "अर्ध-बोल्ड",
   "settings.general.row.fontWeight.bold": "बोल्ड",
+  "settings.general.row.fontColor.help": "रंग: हल्का / गाढा",
   "settings.general.row.followup.title": "अनुगमन व्यवहार",
   "settings.general.row.followup.description": "छनोट गर्नुहोस् कि फलो-अपले तुरुन्तै स्टेयर गर्ने वा लाममा पर्खनुहोस्",
   "settings.general.row.followup.option.queue": "लाम",

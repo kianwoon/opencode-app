@@ -968,6 +968,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "O'rtacha",
   "settings.general.row.fontWeight.semibold": "Yarim qalin",
   "settings.general.row.fontWeight.bold": "Qalin",
+  "settings.general.row.fontColor.help": "Rang: ochiq / qorong'i",
   "settings.general.row.followup.title": "Kuzatuv xatti-harakati",
   "settings.general.row.followup.description":
     "Kuzatuv soʻrovlari darhol boshqarilishini yoki navbatda kutishini tanlang",

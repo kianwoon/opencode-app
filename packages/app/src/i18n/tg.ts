@@ -965,6 +965,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Миёна",
   "settings.general.row.fontWeight.semibold": "Нимғафс",
   "settings.general.row.fontWeight.bold": "Ғафс",
+  "settings.general.row.fontColor.help": "Ранг: равшан / торик",
   "settings.general.row.followup.title": "Рафтори пайгирӣ",
   "settings.general.row.followup.description":
     "Интихоб кунед, ки паёмҳои пайгирӣ фавран идора мешаванд ё дар навбат интизор мешаванд",

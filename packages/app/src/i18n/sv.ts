@@ -965,6 +965,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Medium",
   "settings.general.row.fontWeight.semibold": "Halvfet",
   "settings.general.row.fontWeight.bold": "Fet",
+  "settings.general.row.fontColor.help": "Färg: ljus / mörk",
   "settings.general.row.followup.title": "Uppföljningsbeteende",
   "settings.general.row.followup.description": "Välj om uppföljningsmeddelanden ska styra direkt eller vänta i kö",
   "settings.general.row.followup.option.queue": "Kö",

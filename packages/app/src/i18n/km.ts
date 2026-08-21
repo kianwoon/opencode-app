@@ -957,6 +957,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "មធ្យម",
   "settings.general.row.fontWeight.semibold": "ពាក់កណ្ដាលដិត",
   "settings.general.row.fontWeight.bold": "ដិត",
+  "settings.general.row.fontColor.help": "ពណ៌: ភ្លឺ / ងងឹត",
   "settings.general.row.followup.title": "ឥរិយាបថតាមដាន",
   "settings.general.row.followup.description": "ជ្រើសរើសថាតើការតាមដានជំរុញភ្លាមៗ ឬរង់ចាំជាជួរ",
   "settings.general.row.followup.option.queue": "ជួរ",

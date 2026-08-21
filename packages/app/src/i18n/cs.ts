@@ -966,6 +966,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Střední",
   "settings.general.row.fontWeight.semibold": "Polotučné",
   "settings.general.row.fontWeight.bold": "Tučné",
+  "settings.general.row.fontColor.help": "Barva: světlá / tmavá",
   "settings.general.row.followup.title": "Následné chování",
   "settings.general.row.followup.description": "Zvolte, zda se mají následné výzvy řídit okamžitě nebo čekat ve frontě",
   "settings.general.row.followup.option.queue": "Fronta",

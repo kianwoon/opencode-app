@@ -1039,6 +1039,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Sedang",
   "settings.general.row.fontWeight.semibold": "Setengah tebal",
   "settings.general.row.fontWeight.bold": "Tebal",
+  "settings.general.row.fontColor.help": "Warna: terang / gelap",
   "settings.general.row.followup.title": "Perilaku lanjutan",
   "settings.general.row.followup.description":
     "Pilih apakah prompt lanjutan segera mengarahkan atau menunggu dalam antrean",

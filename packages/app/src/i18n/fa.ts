@@ -957,6 +957,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "متوسط",
   "settings.general.row.fontWeight.semibold": "نیمه ضخیم",
   "settings.general.row.fontWeight.bold": "ضخیم",
+  "settings.general.row.fontColor.help": "رنگ: روشن / تیره",
   "settings.general.row.followup.title": "رفتار پیگیری",
   "settings.general.row.followup.description":
     "انتخاب کنید که آیا درخواست پیگیری فوراً هدایت می شود یا در یک صف منتظر می ماند",

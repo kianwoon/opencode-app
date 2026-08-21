@@ -953,6 +953,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Orta",
   "settings.general.row.fontWeight.semibold": "Yarı kalın",
   "settings.general.row.fontWeight.bold": "Kalın",
+  "settings.general.row.fontColor.help": "Renk: açık / koyu",
   "settings.general.row.followup.title": "Takip davranışı",
   "settings.general.row.followup.description":
     "Takip istemlerinin hemen yönlendirilmesini mi yoksa sırada beklemesini mi istediğinizi seçin",

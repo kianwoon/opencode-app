@@ -966,6 +966,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "ਮੱਧਮ",
   "settings.general.row.fontWeight.semibold": "ਅੱਧਾ-ਬੋਲਡ",
   "settings.general.row.fontWeight.bold": "ਬੋਲਡ",
+  "settings.general.row.fontColor.help": "ਰੰਗ: ਚਮਕਦਾਰ / ਗੂੜ੍ਹਾ",
   "settings.general.row.followup.title": "فالو اپ رویہ",
   "settings.general.row.followup.description": "چنو کہ فالو اپ اشارے فوری طور تے چلدے نیں یا قطار چ انتظار کردے نیں",
   "settings.general.row.followup.option.queue": "قطار",

@@ -971,6 +971,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Μεσαίο",
   "settings.general.row.fontWeight.semibold": "Ημι-έντονο",
   "settings.general.row.fontWeight.bold": "Έντονο",
+  "settings.general.row.fontColor.help": "Χρώμα: ανοιχτό / σκούρο",
   "settings.general.row.followup.title": "Συμπεριφορά παρακολούθησης",
   "settings.general.row.followup.description":
     "Επιλέξτε εάν οι επακόλουθες προτροπές κατευθύνονται αμέσως ή περιμένετε σε μια ουρά",

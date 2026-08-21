@@ -956,6 +956,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.fontWeight.medium": "මධ්‍යම",
   "settings.general.row.fontWeight.semibold": "අර්ධ තද",
   "settings.general.row.fontWeight.bold": "තද",
+  "settings.general.row.fontColor.help": "වර්ණය: ආලෝකය / අඳුරු",
   "settings.general.row.followup.title": "පසු විපරම් හැසිරීම",
   "settings.general.row.followup.description":
     "පසු විපරම් ප්‍රේරක ක්ෂණිකව ගමන් කරනවාද නැතිනම් පෝලිමක රැඳී සිටිනවාද යන්න තෝරන්න",

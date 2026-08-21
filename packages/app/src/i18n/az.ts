@@ -970,6 +970,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Orta",
   "settings.general.row.fontWeight.semibold": "Yarı qalın",
   "settings.general.row.fontWeight.bold": "Qalın",
+  "settings.general.row.fontColor.help": "Rəng: açıq / qaranlıq",
   "settings.general.row.followup.title": "Sonrakı sorğuların davranışı",
   "settings.general.row.followup.description":
     "Sonrakı sorğuların dərhal yönləndirilməsini və ya növbədə gözləməsini seçin",

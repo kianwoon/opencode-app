@@ -959,6 +959,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Sederhana",
   "settings.general.row.fontWeight.semibold": "Separa tebal",
   "settings.general.row.fontWeight.bold": "Tebal",
+  "settings.general.row.fontColor.help": "Warna: cerah / gelap",
   "settings.general.row.followup.title": "Tingkah laku susulan",
   "settings.general.row.followup.description":
     "Pilih sama ada arahan susulan dilaksanakan serta-merta atau menunggu dalam barisan",

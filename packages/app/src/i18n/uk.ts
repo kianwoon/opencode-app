@@ -1054,6 +1054,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Середній",
   "settings.general.row.fontWeight.semibold": "Напівжирний",
   "settings.general.row.fontWeight.bold": "Жирний",
+  "settings.general.row.fontColor.help": "Колір: світлий / темний",
   "settings.general.row.followup.title": "Поведінка продовження",
   "settings.general.row.followup.description": "Виберіть, чи продовження виконується негайно, чи чекає в черзі",
   "settings.general.row.followup.option.queue": "Черга",

@@ -860,6 +860,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Keskivahva",
   "settings.general.row.fontWeight.semibold": "Puolilihava",
   "settings.general.row.fontWeight.bold": "Lihava",
+  "settings.general.row.fontColor.help": "Väri: vaalea / tumma",
   "settings.general.row.followup.title": "Jatkokehotteiden toiminta",
   "settings.general.row.followup.description": "Valitse, ohjaavatko jatkokehotteet heti vai odottavatko ne jonossa",
   "settings.general.row.followup.option.queue": "Jonota",

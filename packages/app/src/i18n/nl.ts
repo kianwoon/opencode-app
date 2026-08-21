@@ -970,6 +970,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Medium",
   "settings.general.row.fontWeight.semibold": "Semi-vet",
   "settings.general.row.fontWeight.bold": "Vet",
+  "settings.general.row.fontColor.help": "Kleur: licht / donker",
   "settings.general.row.followup.title": "Vervolggedrag",
   "settings.general.row.followup.description":
     "Kies of vervolgprompts de sessie direct bijsturen of in een wachtrij wachten",

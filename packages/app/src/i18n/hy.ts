@@ -967,6 +967,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Միջին",
   "settings.general.row.fontWeight.semibold": "Կիսաթավ",
   "settings.general.row.fontWeight.bold": "Թավ",
+  "settings.general.row.fontColor.help": "Գույն: բաց / մուգ",
   "settings.general.row.followup.title": "Հետագա պահվածք",
   "settings.general.row.followup.description": "Ընտրեք՝ հետևելու հուշումներն անմիջապես կուղղվեն, թե սպասեք հերթում",
   "settings.general.row.followup.option.queue": "Հերթ",

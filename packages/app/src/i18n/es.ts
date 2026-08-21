@@ -951,6 +951,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Mediana",
   "settings.general.row.fontWeight.semibold": "Semi-negrita",
   "settings.general.row.fontWeight.bold": "Negrita",
+  "settings.general.row.fontColor.help": "Color: claro / oscuro",
   "settings.general.row.followup.title": "Comportamiento de seguimiento",
   "settings.general.row.followup.description":
     "Elige si los prompts de seguimiento se dirigen inmediatamente o esperan en una cola",

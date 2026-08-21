@@ -934,6 +934,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "ปานกลาง",
   "settings.general.row.fontWeight.semibold": "กึ่งหนา",
   "settings.general.row.fontWeight.bold": "หนา",
+  "settings.general.row.fontColor.help": "สี: สว่าง / มืด",
   "settings.general.row.followup.title": "พฤติกรรมการติดตามผล",
   "settings.general.row.followup.description": "เลือกว่าจะให้พรอมต์ติดตามผลทำงานทันทีหรือรอในคิว",
   "settings.general.row.followup.option.queue": "คิว",

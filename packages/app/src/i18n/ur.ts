@@ -970,6 +970,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "درمیانہ",
   "settings.general.row.fontWeight.semibold": "نیم بولڈ",
   "settings.general.row.fontWeight.bold": "بولڈ",
+  "settings.general.row.fontColor.help": "رنگ: روشن / تاریک",
   "settings.general.row.followup.title": "فالو اپ کا طرز عمل",
   "settings.general.row.followup.description":
     "منتخب کریں کہ آیا فالو اپ فوری طور پر آگے بڑھتا ہے یا قطار میں انتظار کرتا ہے۔",

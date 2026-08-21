@@ -969,6 +969,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Közepes",
   "settings.general.row.fontWeight.semibold": "Szemibold",
   "settings.general.row.fontWeight.bold": "Félkövér",
+  "settings.general.row.fontColor.help": "Szín: világos / sötét",
   "settings.general.row.followup.title": "Nyomon követési viselkedés",
   "settings.general.row.followup.description":
     "Válassza ki, hogy a nyomon követési felszólítások azonnal irányítsák, vagy várakozzanak a sorban",

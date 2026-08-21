@@ -963,6 +963,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Средњи",
   "settings.general.row.fontWeight.semibold": "Полуподебљан",
   "settings.general.row.fontWeight.bold": "Подебљан",
+  "settings.general.row.fontColor.help": "Боја: светла / тамна",
   "settings.general.row.followup.title": "Праћење понашања",
   "settings.general.row.followup.description": "Одаберите да ли ће се пратећи упити усмеравати одмах или чекати у реду",
   "settings.general.row.followup.option.queue": "Ред",

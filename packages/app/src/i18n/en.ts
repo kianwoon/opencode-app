@@ -951,6 +951,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Medium",
   "settings.general.row.fontWeight.semibold": "Semi-bold",
   "settings.general.row.fontWeight.bold": "Bold",
+  "settings.general.row.fontColor.help": "Color: light / dark",
   "settings.general.row.followup.title": "Follow-up behavior",
   "settings.general.row.followup.description": "Choose whether follow-up prompts steer immediately or wait in a queue",
   "settings.general.row.followup.option.queue": "Queue",

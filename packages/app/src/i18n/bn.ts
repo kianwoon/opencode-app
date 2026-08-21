@@ -958,6 +958,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.fontWeight.medium": "মাঝারি",
   "settings.general.row.fontWeight.semibold": "আধা-বোল্ড",
   "settings.general.row.fontWeight.bold": "বোল্ড",
+  "settings.general.row.fontColor.help": "রঙ: হালকা / অন্ধকার",
   "settings.general.row.followup.title": "ফলো-আপ আচরণ",
   "settings.general.row.followup.description": "ফলো-আপ প্রম্পট অবিলম্বে বাছা বা একটি সারিতে অপেক্ষা করুন চয়ন করুন",
   "settings.general.row.followup.option.queue": "সারি",

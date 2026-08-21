@@ -824,6 +824,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Medium",
   "settings.general.row.fontWeight.semibold": "Halvfed",
   "settings.general.row.fontWeight.bold": "Fed",
+  "settings.general.row.fontColor.help": "Farve: lys / mørk",
   "settings.general.row.followup.title": "Opfølgningsadfærd",
   "settings.general.row.followup.description": "Vælg om opfølgende forespørgsler skal styre straks eller vente i kø",
   "settings.general.row.followup.option.queue": "Kø",

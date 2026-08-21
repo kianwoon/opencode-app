@@ -941,6 +941,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "መካከለኛ",
   "settings.general.row.fontWeight.semibold": "ከፊል ደፋር",
   "settings.general.row.fontWeight.bold": "ደፋር",
+  "settings.general.row.fontColor.help": "Color: light / dark",
   "settings.general.row.followup.title": "መከታተያ ባህሪ",
   "settings.general.row.followup.description": "ክትትል የሚጠይቅ ከሆነ ወዲያውኑ ይመራ እንደሆነ ይምረጡ ወይም በሰልፍ ይጠብቁ",
   "settings.general.row.followup.option.queue": "ወረፋ",

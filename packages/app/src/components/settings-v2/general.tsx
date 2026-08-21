@@ -45,6 +45,8 @@ const fontSettings = {
     font: "ui",
     input: "setUI",
     weight: "setUIWeight",
+    colorLight: "setUIColorLight",
+    colorDark: "setUIColorDark",
   },
   code: {
     action: "settings-code-font",
@@ -53,6 +55,8 @@ const fontSettings = {
     font: "code",
     input: "setCode",
     weight: "setCodeWeight",
+    colorLight: "setCodeColorLight",
+    colorDark: "setCodeColorDark",
   },
   terminal: {
     action: "settings-terminal-font",
@@ -61,6 +65,8 @@ const fontSettings = {
     font: "terminal",
     input: "setTerminal",
     weight: "setTerminalWeight",
+    colorLight: "setTerminalColorLight",
+    colorDark: "setTerminalColorDark",
   },
 } as const
 const soundSettings = {
@@ -224,8 +230,42 @@ const FontSetting: Component<{
           label={(option) => language.t(option.label)}
           onSelect={(option) => option && props.fonts[config().weight](Number(option.value))}
         />
+        <FontColorSetting fonts={props.fonts} config={config()} />
       </div>
     </SettingsRowV2>
+  )
+}
+
+const FontColorSetting: Component<{
+  fonts: AppearanceSettingsController["fonts"]
+  config: (typeof fontSettings)[keyof typeof fontSettings]
+}> = (props) => {
+  const language = useLanguage()
+  const current = () => props.fonts[props.config.font]()
+  return (
+    <div class="flex items-center gap-2" data-action={`${props.config.action}-color`}>
+      <label class="flex items-center gap-1.5 text-[12px] text-v2-text-text-muted">
+        <span aria-hidden="true">☀</span>
+        <input
+          type="color"
+          value={current().colorLight || "#000000"}
+          onInput={(event) => props.fonts[props.config.colorLight](event.currentTarget.value)}
+          class="size-5 cursor-pointer appearance-none rounded border border-v2-border-border-base bg-transparent p-0"
+        />
+      </label>
+      <label class="flex items-center gap-1.5 text-[12px] text-v2-text-text-muted">
+        <span aria-hidden="true">☾</span>
+        <input
+          type="color"
+          value={current().colorDark || "#000000"}
+          onInput={(event) => props.fonts[props.config.colorDark](event.currentTarget.value)}
+          class="size-5 cursor-pointer appearance-none rounded border border-v2-border-border-base bg-transparent p-0"
+        />
+      </label>
+      <span class="ml-auto text-[12px] text-v2-text-text-faint">
+        {language.t("settings.general.row.fontColor.help")}
+      </span>
+    </div>
   )
 }
 

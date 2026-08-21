@@ -48,6 +48,40 @@ type FontWeightOption = {
   label: string
 }
 
+type FontColorControlsProps = {
+  colorLight: string
+  colorDark: string
+  setColorLight: (value: string) => void
+  setColorDark: (value: string) => void
+}
+
+const FontColorControls: Component<FontColorControlsProps> = (props) => {
+  const language = useLanguage()
+  return (
+    <div class="flex items-center gap-2" data-action="settings-font-color">
+      <label class="flex items-center gap-1.5 text-12-regular text-text-muted">
+        <span aria-hidden="true">☀</span>
+        <input
+          type="color"
+          value={props.colorLight || "#000000"}
+          onChange={(event) => props.setColorLight(event.currentTarget.value)}
+          class="h-5 w-5 cursor-pointer appearance-none rounded border border-border-base bg-transparent p-0"
+        />
+      </label>
+      <label class="flex items-center gap-1.5 text-12-regular text-text-muted">
+        <span aria-hidden="true">☾</span>
+        <input
+          type="color"
+          value={props.colorDark || "#000000"}
+          onChange={(event) => props.setColorDark(event.currentTarget.value)}
+          class="h-5 w-5 cursor-pointer appearance-none rounded border border-border-base bg-transparent p-0"
+        />
+      </label>
+      <span class="ml-auto text-12-regular text-text-faint">{language.t("settings.general.row.fontColor.help")}</span>
+    </div>
+  )
+}
+
 type ShellOption = {
   path: string
   name: string
@@ -555,6 +589,12 @@ export const SettingsGeneral: Component = () => {
                 (value) => settings.appearance.setUIFontWeight(value),
               )}
             />
+            <FontColorControls
+              colorLight={settings.appearance.uiFontColorLight()}
+              colorDark={settings.appearance.uiFontColorDark()}
+              setColorLight={settings.appearance.setUIFontColorLight}
+              setColorDark={settings.appearance.setUIFontColorDark}
+            />
           </div>
         </SettingsRow>
 
@@ -585,6 +625,12 @@ export const SettingsGeneral: Component = () => {
                 (value) => settings.appearance.setCodeFontWeight(value),
               )}
             />
+            <FontColorControls
+              colorLight={settings.appearance.codeFontColorLight()}
+              colorDark={settings.appearance.codeFontColorDark()}
+              setColorLight={settings.appearance.setCodeFontColorLight}
+              setColorDark={settings.appearance.setCodeFontColorDark}
+            />
           </div>
         </SettingsRow>
 
@@ -614,6 +660,12 @@ export const SettingsGeneral: Component = () => {
                 () => settings.appearance.terminalFontWeight(),
                 (value) => settings.appearance.setTerminalFontWeight(value),
               )}
+            />
+            <FontColorControls
+              colorLight={settings.appearance.terminalFontColorLight()}
+              colorDark={settings.appearance.terminalFontColorDark()}
+              setColorLight={settings.appearance.setTerminalFontColorLight}
+              setColorDark={settings.appearance.setTerminalFontColorDark}
             />
           </div>
         </SettingsRow>

@@ -34,6 +34,7 @@ html,
   font-weight: var(--font-family-sans--font-weight, 400); /* 4 */
   font-feature-settings: var(--font-family-sans--font-feature-settings, normal); /* 5 */
   font-variation-settings: var(--font-family-sans--font-variation-settings, normal); /* 6 */
+  color: var(--font-family-sans--color, inherit); /* 4 */
   -webkit-tap-highlight-color: transparent; /* 7 */
 }
 
@@ -122,6 +123,7 @@ pre {
   font-weight: var(--font-family-mono--font-weight, 400); /* 1 */
   font-feature-settings: var(--font-family-mono--font-feature-settings, normal); /* 2 */
   font-variation-settings: var(--font-family-mono--font-variation-settings, normal); /* 3 */
+  color: var(--font-family-mono--color, inherit); /* 4 */
   font-size: 1em; /* 4 */
 }
 

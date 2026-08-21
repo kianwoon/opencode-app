@@ -947,6 +947,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Srednje",
   "settings.general.row.fontWeight.semibold": "Polupodebljano",
   "settings.general.row.fontWeight.bold": "Podebljano",
+  "settings.general.row.fontColor.help": "Boja: svijetlo / tamno",
   "settings.general.row.followup.title": "Ponašanje nadovezivanja",
   "settings.general.row.followup.description": "Odaberi da li upiti nadovezivanja usmjeravaju odmah ili čekaju u redu",
   "settings.general.row.followup.option.queue": "Red čekanja",

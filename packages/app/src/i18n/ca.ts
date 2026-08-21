@@ -969,6 +969,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "Mitjà",
   "settings.general.row.fontWeight.semibold": "Semi-negreta",
   "settings.general.row.fontWeight.bold": "Negreta",
+  "settings.general.row.fontColor.help": "Color: clar / fosc",
   "settings.general.row.followup.title": "Comportament de seguiment",
   "settings.general.row.followup.description":
     "Trieu si les indicacions de seguiment es dirigeixen immediatament o esperen en una cua",

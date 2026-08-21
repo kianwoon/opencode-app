@@ -959,6 +959,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "საშუალო",
   "settings.general.row.fontWeight.semibold": "ნახევრად მსხვილი",
   "settings.general.row.fontWeight.bold": "მსხვილი",
+  "settings.general.row.fontColor.help": "ფერი: ღია / მუქი",
   "settings.general.row.followup.title": "შემდეგი ქცევა",
   "settings.general.row.followup.description":
     "აირჩიეთ, შემდგომი დაკვირვების მოთხოვნა მყისიერად იხელმძღვანელეთ თუ დაელოდეთ რიგში",

@@ -973,6 +973,7 @@ export const dict = {
   "settings.general.row.fontWeight.medium": "အလယ်အလတ်",
   "settings.general.row.fontWeight.semibold": "တစ်ဝက်ထူ",
   "settings.general.row.fontWeight.bold": "ထူ",
+  "settings.general.row.fontColor.help": "အရောင်: အလင်း / အမှောင်",
   "settings.general.row.followup.title": "နောက်ဆက်တွဲအပြုအမူ",
   "settings.general.row.followup.description":
     "နောက်ဆက်တွဲအချက်မှာ ချက်ချင်းပဲ့ကိုင်သလား သို့မဟုတ် တန်းစီစောင့်ဆိုင်းခြင်းရှိမရှိကို ရွေးပါ။",
