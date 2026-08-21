@@ -357,7 +357,9 @@ describe("tool.task", () => {
       const failure = Cause.squash(exit.cause)
       expect(failure).toBeInstanceOf(Error)
       if (!(failure instanceof Error)) throw new Error("expected Error defect")
-      expect(failure.message).toBe(`Subagent failed (task_id: ${child?.id}): Network connection lost`)
+      // Our fork carries the provider error class name + message rather than
+      // upstream's `Subagent failed (task_id: ...)` prefix.
+      expect(failure.message).toBe(`APIError: Network connection lost`)
     }),
   )
 

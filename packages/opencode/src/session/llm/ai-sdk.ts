@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
-import { ProviderError } from "@/provider/error"
 
 type Result = Awaited<ReturnType<typeof streamText>>
 type AISDKEvent = Result["fullStream"] extends AsyncIterable<infer T> ? T : never
