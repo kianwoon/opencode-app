@@ -159,10 +159,38 @@ function family(font: string) {
   return `"${font.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
 }
 
-function stack(font: string | undefined, base: string) {
+// macOS installs many per-weight fonts (IBM Plex, SF Mono, etc.) as separate
+// families: "IBM Plex Mono Light" is its own family and `font-weight: 300` on
+// "IBM Plex Mono" does NOT select it. To honor the weight control for those
+// fonts we prepend weight-qualified family names to the stack; the browser
+// matches the first one that exists and otherwise falls back to the base
+// family with the requested `font-weight` (variable fonts still work).
+const WEIGHT_FAMILY_SUFFIXES: Record<number, string[]> = {
+  100: ["Thin", "UltraLight"],
+  200: ["ExtraLight", "Extra Light"],
+  300: ["Light"],
+  400: ["Regular", "Book"],
+  500: ["Medium"],
+  600: ["SemiBold", "Semi-Bold", "DemiBold", "Semibold"],
+  700: ["Bold"],
+  800: ["ExtraBold", "Extra Bold", "Heavy"],
+  900: ["Black", "Heavy"],
+}
+
+export function weightFamilyNames(font: string, weightValue: number) {
+  const base = font.trim()
+  if (!base) return []
+  const suffixes = WEIGHT_FAMILY_SUFFIXES[weightValue]
+  if (!suffixes || weightValue === 400) return []
+  return suffixes.map((suffix) => `${base} ${suffix}`)
+}
+
+function stack(font: string | undefined, base: string, weightValue?: number) {
   const value = font?.trim() ?? ""
   if (!value) return base
-  return `${family(value)}, ${base}`
+  const weighted = weightFamilyNames(value, weightValue ?? 400)
+  if (!weighted.length) return `${family(value)}, ${base}`
+  return `${weighted.map(family).join(", ")}, ${family(value)}, ${base}`
 }
 
 export function monoInput(font: string | undefined) {
@@ -173,20 +201,20 @@ export function sansInput(font: string | undefined) {
   return input(font)
 }
 
-export function monoFontFamily(font: string | undefined) {
-  return stack(font, monoBase)
+export function monoFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, monoBase, weightValue)
 }
 
-export function sansFontFamily(font: string | undefined) {
-  return stack(font, sansBase)
+export function sansFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, sansBase, weightValue)
 }
 
 export function terminalInput(font: string | undefined) {
   return input(font)
 }
 
-export function terminalFontFamily(font: string | undefined) {
-  return stack(font, terminalBase)
+export function terminalFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, terminalBase, weightValue)
 }
 
 export function weight(weight: number | undefined, fallback: number) {
@@ -386,24 +414,21 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (typeof document === "undefined") return
       const root = document.documentElement
-      const sans = sansFontFamily(store.appearance?.sans)
-      root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono))
+      const uiWeight = weight(store.appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight)
+      const codeWeight = weight(store.appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight)
+      const terminalWeight = weight(
+        store.appearance?.terminalFontWeight,
+        defaultSettings.appearance.terminalFontWeight,
+      )
+      const sans = sansFontFamily(store.appearance?.sans, uiWeight)
+      root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono, codeWeight))
       root.style.setProperty("--font-family-sans", sans)
       // The v2 layout renders message and UI text with --font-family-text, so
       // keep it in sync with the user-configurable UI font.
       root.style.setProperty("--font-family-text", sans)
-      root.style.setProperty(
-        "--font-family-sans--font-weight",
-        String(weight(store.appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight)),
-      )
-      root.style.setProperty(
-        "--font-family-mono--font-weight",
-        String(weight(store.appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight)),
-      )
-      root.style.setProperty(
-        "--font-family-terminal--font-weight",
-        String(weight(store.appearance?.terminalFontWeight, defaultSettings.appearance.terminalFontWeight)),
-      )
+      root.style.setProperty("--font-family-sans--font-weight", String(uiWeight))
+      root.style.setProperty("--font-family-mono--font-weight", String(codeWeight))
+      root.style.setProperty("--font-family-terminal--font-weight", String(terminalWeight))
       // Font colors are resolved by the browser per color scheme via light-dark(),
       // falling back to the themed text color when the user leaves a value empty.
       root.style.setProperty(

@@ -580,7 +580,7 @@ export const SettingsGeneral: Component = () => {
               autocomplete="off"
               autocapitalize="off"
               class="text-12-regular"
-              style={{ "font-family": sansFontFamily(settings.appearance.uiFont()) }}
+              style={{ "font-family": sansFontFamily(settings.appearance.uiFont(), settings.appearance.uiFontWeight()) }}
             />
             <Select
               data-action="settings-ui-font-weight"
@@ -616,7 +616,7 @@ export const SettingsGeneral: Component = () => {
               autocomplete="off"
               autocapitalize="off"
               class="text-12-regular"
-              style={{ "font-family": monoFontFamily(settings.appearance.font()) }}
+              style={{ "font-family": monoFontFamily(settings.appearance.font(), settings.appearance.codeFontWeight()) }}
             />
             <Select
               data-action="settings-code-font-weight"
@@ -652,7 +652,7 @@ export const SettingsGeneral: Component = () => {
               autocomplete="off"
               autocapitalize="off"
               class="text-12-regular"
-              style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont()) }}
+              style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont(), settings.appearance.terminalFontWeight()) }}
             />
             <Select
               data-action="settings-terminal-font-weight"

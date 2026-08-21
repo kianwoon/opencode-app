@@ -92,7 +92,7 @@ export function createAppearanceSettingsController() {
     fonts: {
       ui: createMemo(() => ({
         value: sansInput(settings.appearance.uiFont()),
-        family: sansFontFamily(settings.appearance.uiFont()),
+        family: sansFontFamily(settings.appearance.uiFont(), settings.appearance.uiFontWeight()),
         placeholder: sansDefault,
         weight: settings.appearance.uiFontWeight(),
         colorLight: settings.appearance.uiFontColorLight(),
@@ -100,7 +100,7 @@ export function createAppearanceSettingsController() {
       })),
       code: createMemo(() => ({
         value: monoInput(settings.appearance.font()),
-        family: monoFontFamily(settings.appearance.font()),
+        family: monoFontFamily(settings.appearance.font(), settings.appearance.codeFontWeight()),
         placeholder: monoDefault,
         weight: settings.appearance.codeFontWeight(),
         colorLight: settings.appearance.codeFontColorLight(),
@@ -108,7 +108,7 @@ export function createAppearanceSettingsController() {
       })),
       terminal: createMemo(() => ({
         value: terminalInput(settings.appearance.terminalFont()),
-        family: terminalFontFamily(settings.appearance.terminalFont()),
+        family: terminalFontFamily(settings.appearance.terminalFont(), settings.appearance.terminalFontWeight()),
         placeholder: terminalDefault,
         weight: settings.appearance.terminalFontWeight(),
         colorLight: settings.appearance.terminalFontColorLight(),
