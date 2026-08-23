@@ -14,7 +14,6 @@ import {
   SubtaskPart,
   User,
   WithParts,
-  WorkflowPart,
 } from "@opencode-ai/core/v1/session"
 
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -144,8 +143,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
   // of media in tool results; e.g. Bedrock supports images but not PDFs there.
   //
   // Only apply this workaround if the model actually supports that media input -
-  // otherwise unsupportedParts() saves the media to a temp file and replaces it
-  // with a path note the model can act on.
+  // otherwise unsupportedParts() will turn it into a user-visible error.
   const supportsMediaInToolResult = (attachment: { mime: string }) => {
     if (model.api.npm === "@ai-sdk/anthropic") return true
     if (model.api.npm === "@ai-sdk/openai") return true
@@ -559,8 +557,6 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
           index > compactionIndex &&
           msg.info.role === "assistant" &&
           msg.info.summary &&
-          msg.info.finish &&
-          !msg.info.error &&
           msg.info.parentID === compaction.info.id,
       )
     : -1
@@ -596,10 +592,7 @@ export function latest(msgs: WithParts[]) {
   const tasks = msgs.flatMap((m) =>
     finished && !isAfter(m.info, finished)
       ? []
-      : m.parts.filter(
-          (p): p is CompactionPart | SubtaskPart | WorkflowPart =>
-            p.type === "compaction" || p.type === "subtask" || p.type === "workflow",
-        ),
+      : m.parts.filter((p): p is CompactionPart | SubtaskPart => p.type === "compaction" || p.type === "subtask"),
   )
   return { user, assistant, finished, tasks }
 }

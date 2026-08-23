@@ -1,7 +1,6 @@
 import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue } from "@opencode-ai/llm"
 import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
-import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
 import { ProviderError } from "@/provider/error"
 
@@ -90,9 +89,6 @@ export function toLLMEvents(
       if (event.rawFinishReason === "network_error")
         return Effect.fail(new ProviderError.ResponseStreamError("Provider finish_reason: network_error"))
       return Effect.sync(() => {
-        if (event.finishReason === "other" && event.rawFinishReason === undefined) {
-          throw new ProviderError.ResponseStreamError("Provider stream ended without a finish reason")
-        }
         const original = providerMetadata(event.providerMetadata)
         const metadata =
           state.copilotTotalNanoAiu === undefined

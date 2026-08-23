@@ -23,7 +23,6 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
-import { RuntimeFlags } from "@/effect/runtime-flags"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("muse")) {
@@ -53,7 +52,6 @@ export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
-  readonly workflow: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -64,7 +62,6 @@ const layer = Layer.effect(
     const skill = yield* Skill.Service
     const mcp = yield* MCP.Service
     const locations = yield* LocationServiceMap.Service
-    const flags = yield* RuntimeFlags.Service
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
@@ -81,6 +78,7 @@ const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
+            `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
           references.length === 0
@@ -135,32 +133,6 @@ const layer = Layer.effect(
           "</mcp_instructions>",
         ].join("\n")
       }),
-
-      workflow: Effect.fn("SystemPrompt.workflow")(function* (agent: Agent.Info) {
-        if (!flags.experimentalWorkflows) return
-        if (Permission.disabled(["workflow"], agent.permission).has("workflow")) return
-        return [
-          "## Workflow guidance",
-          "Assess EVERY user request before acting: does it decompose into multiple",
-          "distinct phases, dependencies, or steps that could run in parallel?",
-          "If YES — plan first, then orchestrate:",
-          "1. PLAN: identify the distinct steps, their agent types, and their",
-          "   dependency edges. For multi-file or multi-phase work, briefly lay out",
-          "   the plan (steps + dependencies) before executing anything.",
-          "2. ORCHESTRATE: declare the plan as one workflow tool call. Each step is",
-          "   a subagent task with its dependsOn; the engine runs independent steps",
-          "   concurrently, skips dependents of failed steps, and reports per-step",
-          "   statuses (with failure reasons) back to you in the summary.",
-          "3. REACT: read the workflow summary. If steps failed, decide whether to",
-          "   re-plan a corrective workflow or handle the fallout yourself.",
-          "You decide the steps and their dependencies yourself — the user should not",
-          "need to specify a pipeline. Recognize pipeline-shaped goals automatically:",
-          "build-then-test-then-deploy, lint+test in parallel before release, data",
-          "pipeline stages, multi-repo changes, etc.",
-          "If NO — the request is simple, single-step, or sequential by nature: do not",
-          "use the workflow tool, use regular tools or the task tool directly.",
-        ].join("\n")
-      }),
     })
   }),
 )
@@ -174,7 +146,7 @@ const locationServiceMapNode = LayerNode.make({
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Skill.node, MCP.node, locationServiceMapNode, RuntimeFlags.node],
+  deps: [Skill.node, MCP.node, locationServiceMapNode],
 })
 
 export * as SystemPrompt from "./system"

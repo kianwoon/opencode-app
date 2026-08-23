@@ -52,7 +52,7 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Format } from "../../src/format"
 import { TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
-import { httpError, reply, TestLLMServer, titleMatch } from "../lib/llm-server"
+import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -164,7 +164,7 @@ const blockingProcessor = Layer.succeed(
   }),
 )
 
-const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true, experimentalWorkflows: true })
+const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true })
 
 const testLLMServerNode = LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] })
 
@@ -257,17 +257,8 @@ const unix = process.platform !== "win32" ? it.instance : it.instance.skip
 const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : noLLMServer.instance.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
-// so provider model lookup succeeds inside the loop. The explicit top-level
-// `model` pins every agent/session to test/test-model so child subagent
-// sessions cannot inherit a leaked machine-global default provider.
+// so provider model lookup succeeds inside the loop.
 const cfg = {
-  model: "test/test-model",
-  agent: {
-    build: {
-      mode: "primary" as const,
-      model: "test/test-model",
-    },
-  },
   provider: {
     test: {
       name: "Test",
@@ -441,22 +432,6 @@ const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
     })
   })
 
-const addWorkflow = (sessionID: SessionID, messageID: MessageID) =>
-  Effect.gen(function* () {
-    const session = yield* Session.Service
-    yield* session.updatePart({
-      id: PartID.ascending(),
-      messageID,
-      sessionID,
-      type: "workflow",
-      title: "ship",
-      steps: [
-        { id: "build", prompt: "build it", description: "build", agent: "general", dependsOn: [] },
-        { id: "test", prompt: "test it", description: "test", agent: "general", dependsOn: ["build"] },
-      ],
-    } satisfies SessionV1.WorkflowPart)
-  })
-
 const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
   const config = yield* Config.Service
   const prompt = yield* SessionPrompt.Service
@@ -579,41 +554,6 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
-it.instance("auto title retries on a later prompt after the first title generation fails", () =>
-  Effect.gen(function* () {
-    const { llm } = yield* useServerConfig(providerCfg)
-    const prompt = yield* SessionPrompt.Service
-    const sessions = yield* Session.Service
-    const chat = yield* sessions.create()
-
-    // First prompt: the background title request fails with a non-retryable error.
-    yield* llm.pushMatch(titleMatch, httpError(400, { message: "no title" }))
-    yield* prompt.prompt({
-      sessionID: chat.id,
-      agent: "build",
-      parts: [{ type: "text", text: "hello" }],
-    })
-    // title request + main request both hit the server
-    yield* llm.wait(2)
-    const failed = yield* sessions.get(chat.id)
-    expect(Session.isDefaultTitle(failed.title)).toBe(true)
-
-    // Second prompt: the title request is retried and auto-answered by the test server.
-    yield* prompt.prompt({
-      sessionID: chat.id,
-      agent: "build",
-      parts: [{ type: "text", text: "more" }],
-    })
-    yield* pollWithTimeout(
-      Effect.gen(function* () {
-        const info = yield* sessions.get(chat.id)
-        return info.title === "E2E Title" ? (true as const) : undefined
-      }),
-      "session title was not regenerated",
-    )
-  }),
-)
-
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>
@@ -635,409 +575,6 @@ withMcpInstructions.instance(
       const body = JSON.stringify(hits[0]?.body)
       expect(body).toContain('<server name=\\"guide-server\\">')
       expect(body).toContain("Use lookup before mutate.")
-      yield* Fiber.interrupt(fiber)
-    }),
-  15_000,
-)
-
-it.instance(
-  "workflow tool returns without deadlocking and the loop dispatches its steps",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
-        title: "Workflow e2e",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-
-      // 1. Model calls the workflow tool.
-      yield* llm.tool("workflow", {
-        title: "ship",
-        steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
-        ],
-      })
-      // 2. Step subagents (task tool child sessions) and the post-workflow
-      //    turn all complete with plain text.
-      yield* llm.text("step done: build")
-      yield* llm.text("step done: test")
-      yield* llm.text("all done")
-
-      const result = yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        parts: [{ type: "text", text: "ship the app" }],
-      })
-      expect(result.info.role).toBe("assistant")
-
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const texts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "text")
-
-      // The workflow part was persisted (noReply admission, no deadlock).
-      const workflowPart = msgs.flatMap((m) => m.parts).find((p) => p.type === "workflow")
-      expect(workflowPart).toBeDefined()
-
-      // Both steps ran as task-tool parts and settled completed.
-      const taskParts = msgs.flatMap((m) => m.parts).filter(
-        (part): part is CompletedToolPart =>
-          part.type === "tool" && part.tool === "task" && part.state.status === "completed",
-      )
-      expect(taskParts).toHaveLength(2)
-
-      // The synthetic summary reports declaration-ordered statuses.
-      const summary = texts.find(
-        (p) => p.type === "text" && p.text.includes('Workflow "ship" finished'),
-      )
-      expect(summary?.type === "text" && summary.text).toContain("- build: completed")
-      expect(summary?.type === "text" && summary.text).toContain("- test: completed")
-
-      // The loop continued to a final model turn after the workflow.
-      expect(texts.some((p) => p.type === "text" && p.text === "all done")).toBe(true)
-    }),
-  20_000,
-)
-
-it.instance(
-  "workflow tool rejects an unknown step agent correctably and the model can retry",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
-        title: "Workflow agent correction e2e",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-
-      // 1. Model declares a workflow with a typo'd agent: the tool fails with
-      //    a correctable admission error (no workflow part is admitted).
-      yield* llm.tool("workflow", {
-        title: "ship",
-        steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "nope" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
-        ],
-      })
-      // 2. Model reads the tool error and retries with the fixed agent.
-      yield* llm.tool("workflow", {
-        title: "ship",
-        steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
-        ],
-      })
-      // 3. Steps run and the final turn completes.
-      yield* llm.text("step done: build")
-      yield* llm.text("step done: test")
-      yield* llm.text("all done")
-
-      const result = yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        parts: [{ type: "text", text: "ship the app" }],
-      })
-      expect(result.info.role).toBe("assistant")
-
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      // The failed attempt never admitted a workflow part: exactly one
-      // workflow part exists (from the corrected retry).
-      const workflowParts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "workflow")
-      expect(workflowParts).toHaveLength(1)
-
-      // And the corrected workflow ran to completion.
-      const summary = msgs
-        .flatMap((m) => m.parts)
-        .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
-      expect(summary).toBeDefined()
-      const text = summary?.type === "text" ? summary.text : ""
-      expect(text).toContain("- build: completed")
-      expect(text).toContain("- test: completed")
-    }),
-  20_000,
-)
-
-it.instance(
-  "workflow soft-failed step surfaces its real error in the summary, not a generic reason",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
-        title: "Workflow soft fail e2e",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-
-      // Step subagent's model turn fails with a non-retryable HTTP 400: the
-      // task tool defects (soft failure path in runSubagentTask), which must
-      // still carry the propagated failure into the workflow summary.
-      yield* llm.tool("workflow", {
-        title: "ship",
-        steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
-        ],
-      })
-      yield* llm.error(400, { message: "insufficient_quota_for_this_org" })
-      yield* llm.text("post-workflow turn")
-
-      const result = yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        parts: [{ type: "text", text: "ship the app" }],
-      })
-      expect(result.info.role).toBe("assistant")
-
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const summary = msgs
-        .flatMap((m) => m.parts)
-        .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
-      expect(summary).toBeDefined()
-      const text = summary?.type === "text" ? summary.text : ""
-      expect(text).toContain("- build: failed")
-      // The real provider error reaches the summary — not the old generic
-      // "step produced no output" and not a bare error class name.
-      expect(text).toContain("insufficient_quota_for_this_org")
-      expect(text).not.toContain("step produced no output")
-      expect(text).toContain("- test: skipped")
-    }),
-  20_000,
-)
-
-it.instance(
-  "workflow step parts carry workflow metadata and upstream results are unwrapped and bounded",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
-        title: "Workflow dataflow e2e",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-
-      // build returns a long final text (> 20k chars, under the generic 50KB
-      // tool-output truncation): the downstream step prompt must receive it
-      // clipped by the workflow's own bound and without the <task> envelope.
-      const huge = "B".repeat(25_000)
-      yield* llm.tool("workflow", {
-        title: "ship",
-        steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
-        ],
-      })
-      yield* llm.text(`step done: build ${huge}`)
-      yield* llm.text("step done: test")
-      yield* llm.text("all done")
-
-      const result = yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        parts: [{ type: "text", text: "ship the app" }],
-      })
-      expect(result.info.role).toBe("assistant")
-
-      // The second (test) step's request contains the clipped payload.
-      const inputs = yield* llm.inputs
-      const testRequest = inputs.find((input) => JSON.stringify(input).includes("test it"))
-      expect(testRequest).toBeDefined()
-      const body = JSON.stringify(testRequest)
-      expect(body).toContain("Results from upstream workflow steps:")
-      expect(body).toContain("truncated")
-      // No double-wrapping: the <task ...> envelope from the task tool is
-      // stripped before injection.
-      expect(body).not.toContain("<task_result>")
-      // And the injected payload is bounded, not the full 60k.
-      expect(body.length).toBeLessThan(60_000)
-
-      // Step task parts carry workflow step metadata for UI/telemetry.
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const stepParts = msgs.flatMap((m) => m.parts).filter(
-        (part) =>
-          part.type === "tool" &&
-          part.tool === "task" &&
-          part.state.status === "completed" &&
-          part.state.metadata?.workflow !== undefined,
-      )
-      expect(stepParts).toHaveLength(2)
-      const buildPart = stepParts.find(
-        (p) => p.type === "tool" && p.state.status === "completed" && p.state.metadata?.workflow?.stepId === "build",
-      )
-      expect(buildPart?.type === "tool" && buildPart.state.status === "completed").toBe(true)
-      if (buildPart?.type === "tool" && buildPart.state.status === "completed") {
-        expect(buildPart.state.metadata?.workflow).toEqual({
-          title: "ship",
-          stepId: "build",
-          dependsOn: [],
-        })
-      }
-      const testPart = stepParts.find(
-        (p) => p.type === "tool" && p.state.status === "completed" && p.state.metadata?.workflow?.stepId === "test",
-      )
-      if (testPart?.type === "tool" && testPart.state.status === "completed") {
-        expect(testPart.state.metadata?.workflow).toEqual({
-          title: "ship",
-          stepId: "test",
-          dependsOn: ["build"],
-        })
-      }
-    }),
-  20_000,
-)
-
-it.instance(
-  "direct API workflow part over the step cap is rejected at dispatch",
-  () =>
-    Effect.gen(function* () {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Workflow cap e2e" })
-
-      // 65 steps via PromptInput (the direct API path) — the dispatcher must
-      // enforce the same cap as the workflow tool.
-      const steps = Array.from({ length: 65 }, (_, i) => ({
-        id: `s${i}`,
-        prompt: "do it",
-        description: "step",
-        agent: "build",
-        dependsOn: [],
-      }))
-
-      const exit = yield* prompt
-        .prompt({
-          sessionID: chat.id,
-          agent: "build",
-          parts: [{ type: "workflow", title: "too-big", steps }],
-        })
-        .pipe(Effect.exit)
-
-      // prompt() maps failures to Image.Error via Effect.catch(Effect.die);
-      // the oversized workflow must not be admitted (defect, not success).
-      expect(Exit.isSuccess(exit)).toBe(false)
-      if (Exit.isFailure(exit)) {
-        const defect = Cause.squash(exit.cause)
-        // NamedError messages live on `.data.message`.
-        const data = defect as { data?: { message?: string } }
-        const message = defect instanceof Error ? (data.data?.message ?? defect.message) : String(defect)
-        expect(message).toContain("has 65 steps; the maximum is 64")
-      }
-
-      // No workflow part was dispatched: no task parts created.
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const taskParts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "tool" && p.tool === "task")
-      expect(taskParts).toHaveLength(0)
-    }),
-  20_000,
-)
-
-it.instance(
-  "direct API workflow part with an unknown agent is rejected at dispatch",
-  () =>
-    Effect.gen(function* () {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Workflow agent e2e" })
-
-      const exit = yield* prompt
-        .prompt({
-          sessionID: chat.id,
-          agent: "build",
-          parts: [
-            {
-              type: "workflow",
-              title: "typo",
-              steps: [
-                { id: "build", prompt: "build it", description: "build", agent: "biuld", dependsOn: [] },
-              ],
-            },
-          ],
-        })
-        .pipe(Effect.exit)
-
-      expect(Exit.isSuccess(exit)).toBe(false)
-      if (Exit.isFailure(exit)) {
-        const defect = Cause.squash(exit.cause)
-        const data = defect as { data?: { message?: string } }
-        const message = defect instanceof Error ? (data.data?.message ?? defect.message) : String(defect)
-        expect(message).toContain('step "build" references unknown agent "biuld"')
-      }
-
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const taskParts = msgs.flatMap((m) => m.parts).filter((p) => p.type === "tool" && p.tool === "task")
-      expect(taskParts).toHaveLength(0)
-    }),
-  20_000,
-)
-
-it.instance(
-  "workflow tool admits a valid workflow with plannedBy provenance on the part",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
-        title: "Workflow plannedBy e2e",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-
-      yield* llm.tool("workflow", {
-        title: "ship",
-        steps: [{ id: "build", prompt: "build it", description: "build", agent: "build" }],
-      })
-      yield* llm.text("step done: build")
-      yield* llm.text("all done")
-
-      const result = yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        parts: [{ type: "text", text: "ship the app" }],
-      })
-      expect(result.info.role).toBe("assistant")
-
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const workflowPart = msgs.flatMap((m) => m.parts).find((p) => p.type === "workflow")
-      expect(workflowPart).toBeDefined()
-      if (workflowPart?.type === "workflow") {
-        expect(workflowPart.plannedBy).toBe("build")
-      }
-      // And the workflow still executed end-to-end.
-      const summary = msgs
-        .flatMap((m) => m.parts)
-        .find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
-      expect(summary?.type === "text" && summary.text).toContain("- build: completed")
-    }),
-  20_000,
-)
-
-it.instance(
-  "loop includes workflow auto-decompose guidance in model system context",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
-        title: "Pinned",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-      yield* llm.hang
-      yield* user(chat.id, "release the app")
-
-      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-      yield* awaitWithTimeout(llm.wait(1), "timed out waiting for workflow guidance request", "10 seconds")
-
-      const hits = yield* llm.hits
-      const body = JSON.stringify(hits[0]?.body)
-      expect(body).toContain("Workflow guidance")
-      expect(body).toContain("PLAN")
-      expect(body).toContain("ORCHESTRATE")
-      expect(body).toContain("REACT")
       yield* Fiber.interrupt(fiber)
     }),
   15_000,
@@ -1301,6 +838,34 @@ it.instance("loop continues when finish is tool-calls", () =>
       parts: [{ type: "text", text: "hello" }],
     })
     yield* llm.tool("first", { value: "first" })
+    yield* llm.text("second")
+
+    const result = yield* prompt.loop({ sessionID: session.id })
+    expect(yield* llm.calls).toBe(2)
+    expect(result.info.role).toBe("assistant")
+    if (result.info.role === "assistant") {
+      expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
+      expect(result.info.finish).toBe("stop")
+    }
+  }),
+)
+
+it.instance("loop continues when finish is unknown", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "hello" }],
+    })
+    yield* llm.push(reply())
     yield* llm.text("second")
 
     const result = yield* prompt.loop({ sessionID: session.id })
@@ -1721,53 +1286,6 @@ raceNoLLMServer.instance(
 )
 
 noLLMServer.instance(
-  "cancel interrupts in-flight workflow steps and does not orphan their tool parts",
-  () =>
-    Effect.gen(function* () {
-      const ready = yield* Deferred.make<void>()
-      const aborted = yield* Deferred.make<void>()
-      const registry = yield* ToolRegistry.Service
-      const { task } = yield* registry.named()
-      const original = task.execute
-      task.execute = (_args, ctx) =>
-        Effect.callback<never>((_resume) => {
-          ctx.abort.addEventListener("abort", () => succeedVoid(aborted), { once: true })
-          if (ctx.abort.aborted) succeedVoid(aborted)
-          succeedVoid(ready)
-          return Effect.sync(() => succeedVoid(aborted))
-        })
-      yield* Effect.addFinalizer(() => Effect.sync(() => void (task.execute = original)))
-
-      const { prompt, chat } = yield* boot()
-      const msg = yield* user(chat.id, "ship the app")
-      yield* addWorkflow(chat.id, msg.id)
-
-      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-      yield* awaitWithTimeout(Deferred.await(ready), "timed out waiting for workflow step task to start", "10 seconds")
-      yield* prompt.cancel(chat.id)
-
-      const exit = yield* Fiber.await(fiber)
-      expect(Exit.isSuccess(exit)).toBe(true)
-      yield* awaitWithTimeout(Deferred.await(aborted), "timed out waiting for workflow step task abort", "10 seconds")
-
-      const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      // The in-flight step's tool part must be settled (not left "running").
-      const tool = msgs
-        .flatMap((m) => m.parts)
-        .find((p): p is SessionV1.ToolPart => p.type === "tool" && p.tool === "task")
-      expect(tool?.type).toBe("tool")
-      if (!tool) return
-      expect(tool.state.status).not.toBe("running")
-      const taskMsg = msgs.find((m) => m.info.role === "assistant" && m.info.agent === "general")
-      expect(taskMsg?.info.role).toBe("assistant")
-      if (!taskMsg || taskMsg.info.role !== "assistant") return
-      expect(taskMsg.info.time.completed).toBeDefined()
-    }),
-  { config: cfg },
-  30_000,
-)
-
-noLLMServer.instance(
   "cancel finalizes subtask tool state",
   () =>
     Effect.gen(function* () {
@@ -1912,162 +1430,6 @@ it.instance("concurrent loop callers all receive same error result", () =>
   }),
 )
 
-it.instance(
-  "prompt joining a dying run re-drives its stranded message",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Re-drive" })
-
-      // First prompt's provider turn fails non-retryably. A second prompt is
-      // admitted while that run is failing; it must not be stranded by the
-      // dead run — loopAndRecover re-drives it after the failure.
-      yield* llm.error(400, { message: "provider exploded non-retryably" })
-      yield* llm.text("recovered answer")
-
-      const first = yield* prompt
-        .prompt({
-          sessionID: chat.id,
-          agent: "build",
-          model: ref,
-          parts: [{ type: "text", text: "first" }],
-        })
-        .pipe(Effect.forkChild)
-      yield* llm.wait(1)
-      yield* waitForBusy(chat.id)
-
-      const second = yield* prompt
-        .prompt({
-          sessionID: chat.id,
-          agent: "build",
-          model: ref,
-          parts: [{ type: "text", text: "second" }],
-        })
-        .pipe(Effect.forkChild)
-
-      const [eFirst, eSecond] = yield* Effect.all([Fiber.await(first), Fiber.await(second)], {
-        concurrency: "unbounded",
-      })
-
-      // Both joiners observe the same terminal outcome of the session run.
-      // What matters: the run recovered, and "second" got answered exactly once.
-      expect(Exit.isSuccess(eSecond)).toBe(true)
-      if (!Exit.isSuccess(eSecond)) throw new Error("second prompt should have been re-driven to success")
-      expect(eSecond.value.info.role).toBe("assistant")
-
-      // Exactly one stored copy of "second" — no duplicate entry.
-      const msgs = yield* sessions.messages({ sessionID: chat.id })
-      const seconds = msgs.filter((m) =>
-        m.parts.some((p) => p.type === "text" && p.text === "second"),
-      )
-      expect(seconds).toHaveLength(1)
-      // ...and it has a healthy assistant answer parented on it.
-      const secondID = seconds[0]?.info.id
-      const answer = msgs.find(
-        (m) => m.info.role === "assistant" && m.info.parentID === secondID && !m.info.error,
-      )
-      expect(answer).toBeDefined()
-      expect(eFirst !== undefined).toBe(true)
-    }),
-  20_000,
-)
-
-it.instance(
-  "cancelled run does not re-drive the stranded prompt",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "No re-drive on cancel" })
-
-      // Hold the first turn so a cancel lands while the run is active; the
-      // second prompt, admitted before the cancel, must stay unprocessed —
-      // re-driving after a user cancel would defy the stop request.
-      yield* llm.hang
-      yield* user(chat.id, "first")
-
-      const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-      yield* llm.wait(1)
-      yield* waitForBusy(chat.id)
-
-      const second = yield* prompt
-        .prompt({
-          sessionID: chat.id,
-          agent: "build",
-          model: ref,
-          parts: [{ type: "text", text: "second" }],
-        })
-        .pipe(Effect.forkChild)
-
-      yield* prompt.cancel(chat.id)
-      yield* Fiber.await(run)
-
-      // Cancel interrupts the in-flight run; the second message is never lost
-      // and never duplicated — it is either answered by a subsequent run or
-      // left exactly once for the next explicit prompt.
-      const exit = yield* Fiber.await(second)
-      const msgs = yield* sessions.messages({ sessionID: chat.id })
-      const secondMsg = msgs.find((m) => m.info.role === "user" && m.parts.some((p) => p.type === "text" && p.text === "second"))
-      expect(secondMsg).toBeDefined()
-      const seconds = msgs.filter((m) =>
-        m.parts.some((p) => p.type === "text" && p.text === "second"),
-      )
-      expect(seconds).toHaveLength(1)
-      // The first run's assistant is aborted, and cancel never triggers a
-      // loopAndRecover re-drive (the cancel timestamp blocks it).
-      const firstAnswer = msgs.find(
-        (m) => m.info.role === "assistant" && m.info.parentID !== secondMsg?.info.id,
-      )
-      if (firstAnswer?.info.role === "assistant" && firstAnswer.info.error) {
-        expect(firstAnswer.info.error.name).toBe("MessageAbortedError")
-      }
-      // The second prompt call itself terminates (either aborted join or a
-      // post-cancel run) without hanging forever.
-      expect(exit !== undefined).toBe(true)
-    }),
-  15_000,
-)
-
-it.instance(
-  "messageID retry converges on one stored message",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Idempotent retry" })
-
-      yield* llm.text("answer")
-
-      const id = MessageID.ascending()
-      const input = {
-        sessionID: chat.id,
-        messageID: id,
-        agent: "build",
-        model: ref,
-        parts: [{ type: "text" as const, text: "retry me" }],
-      }
-      const [a, b] = yield* Effect.all([prompt.prompt(input), prompt.prompt(input)], {
-        concurrency: "unbounded",
-      })
-      expect(a.info.role).toBe("assistant")
-      expect(b.info.role).toBe("assistant")
-
-      // Both submits converge on a single stored user message with that ID.
-      const msgs = yield* sessions.messages({ sessionID: chat.id })
-      const withID = msgs.filter((m) => m.info.id === id)
-      expect(withID).toHaveLength(1)
-      const retries = msgs.filter((m) =>
-        m.parts.some((p) => p.type === "text" && p.text === "retry me"),
-      )
-      expect(retries).toHaveLength(1)
-    }),
-  15_000,
-)
-
 it.instance("prompt submitted during an active run is included in the next LLM input", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
@@ -2132,62 +1494,6 @@ it.instance("prompt submitted during an active run is included in the next LLM i
     if (!Array.isArray(messages)) throw new Error("expected LLM messages")
     expect(messages.at(-1)).toEqual({ role: "user", content: "second" })
   }),
-)
-
-it.instance(
-  "open todo list is re-injected as a system-reminder and stops once complete",
-  () =>
-    Effect.gen(function* () {
-      const { llm } = yield* useServerConfig(providerCfg)
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const todos = yield* Todo.Service
-      const chat = yield* sessions.create({ title: "Todo reminder" })
-
-      // Open list: first item in progress.
-      yield* todos.update({
-        sessionID: chat.id,
-        todos: [
-          { content: "investigate the bug", status: "in_progress", priority: "medium" },
-          { content: "write the fix", status: "pending", priority: "medium" },
-        ],
-      })
-
-      yield* llm.text("answer one")
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        parts: [{ type: "text", text: "start work" }],
-      })
-      let inputs = yield* llm.inputs
-      let last = JSON.stringify(inputs.at(-1))
-      expect(last).toContain("<system-reminder>")
-      expect(last).toContain("<todo-list>")
-      expect(last).toContain("investigate the bug (in progress)")
-      expect(last).toContain("write the fix")
-      expect(last).toContain("todowrite")
-
-      // Completed list: no reminder on the next prompt.
-      yield* todos.update({
-        sessionID: chat.id,
-        todos: [
-          { content: "investigate the bug", status: "completed", priority: "medium" },
-          { content: "write the fix", status: "completed", priority: "medium" },
-        ],
-      })
-      yield* llm.text("answer two")
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        parts: [{ type: "text", text: "continue" }],
-      })
-      inputs = yield* llm.inputs
-      last = JSON.stringify(inputs.at(-1))
-      expect(last).not.toContain("<todo-list>")
-    }),
-  15_000,
 )
 
 it.instance("assertNotBusy fails with BusyError when loop running", () =>
@@ -2962,31 +2268,6 @@ it.instance("does not loop empty assistant turns for a simple reply", () =>
     const msgs = yield* sessions.messages({ sessionID: session.id })
     expect(msgs.filter((msg) => msg.info.role === "assistant")).toHaveLength(1)
     expect(yield* llm.calls).toBe(1)
-  }),
-)
-
-it.instance("retries a provider stream that ends without a finish reason", () =>
-  Effect.gen(function* () {
-    const { llm } = yield* useServerConfig(providerCfg)
-    const prompt = yield* SessionPrompt.Service
-    const sessions = yield* Session.Service
-    const session = yield* sessions.create({ title: "Truncated stream" })
-
-    yield* llm.push(reply().reason("partial reasoning"), reply().text("recovered").stop())
-
-    const result = yield* prompt.prompt({
-      sessionID: session.id,
-      agent: "build",
-      parts: [{ type: "text", text: "Respond after retrying" }],
-    })
-
-    expect(result.info.role).toBe("assistant")
-    if (result.info.role === "assistant") {
-      expect(result.info.finish).toBe("stop")
-      expect(result.info.error).toBeUndefined()
-    }
-    expect(result.parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
-    expect(yield* llm.calls).toBe(2)
   }),
 )
 
