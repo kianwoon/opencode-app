@@ -15,6 +15,12 @@
 - macOS surfaces copied images as `image/tiff` in `ClipboardEvent.clipboardData.items`; `ACCEPTED_IMAGE_TYPES` intentionally excludes TIFF (no provider accepts it on the wire). Never add `image/tiff` to the accepted set — convert to PNG instead.
 - Conversion happens via `platform.readClipboardImage()` (Electron IPC `clipboard.readImage().toPNG()` on desktop, `navigator.clipboard.read()` on web, defined in `src/entry.tsx`). In both `src/components/prompt-input/attachments.ts` and `@opencode-ai/session-ui` v2 attachments, the paste handler must retry through `readClipboardImage` when `clipboardData` files are REJECTED — an early `return` after `addAttachments(files)` makes the native fallback unreachable and reintroduces the "paste screenshot does nothing" bug. Acceptance guard: `attachments.test.ts` "retries rejected clipboard images through the native PNG reader".
 
+## Font Setting Gotchas
+
+- Composite utility classes like `.text-14-regular` set `font-family` themselves and appear LATER in the compiled CSS than Tailwind arbitrary classes, so a class-based font override on the same element loses the cascade. When applying a user-configurable font to an element that uses composite utilities (legacy composer editor/placeholder), pass the font through inline `style` — inline styles beat every cascade rule. This mirrors how `terminal.tsx` feeds `terminalFontFamily(...)` into xterm options. Acceptance guard: live CDP check that `getComputedStyle(composer).fontFamily` reflects the configured Message Font.
+- Every appearance setting needs BOTH an emitter and a consumer. Emitting `--font-family-message--weight/--color` without any CSS reading them makes the controls silently do nothing (this shipped once). New-layout rules can also hard-overwrite values at higher specificity (`body[data-new-layout] [data-component="user-message"] { font-weight: 440 }`) — parameterize those rules with the setting var instead of duplicating hardcoded values.
+- Desktop persists app settings in `~/Library/Application Support/ai.opencode.desktop/default.dat` (JSON-in-JSON, escaped quotes) — NOT localStorage. Read it when debugging whether a settings change saved.
+
 ## Debugging
 
 - NEVER try to restart the app, or the server process, EVER.
