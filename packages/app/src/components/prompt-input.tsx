@@ -1569,7 +1569,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               onKeyDown={handleKeyDown}
               classList={{
                 "select-text": true,
-                "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
+                "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap [font-family:var(--font-family-message,var(--font-family-sans))]": true,
                 "[&_[data-type=file]]:text-syntax-property": true,
                 "[&_[data-type=agent]]:text-syntax-type": true,
                 "font-mono!": store.mode === "shell",
@@ -1577,7 +1577,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               style={{ "padding-bottom": space }}
             />
             <div
-              class="absolute top-0 inset-x-0 pl-3 pr-2 pt-2 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate"
+              class="absolute top-0 inset-x-0 pl-3 pr-2 pt-2 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate [font-family:var(--font-family-message,var(--font-family-sans))]"
               classList={{ "font-mono!": store.mode === "shell" }}
               style={{ "padding-bottom": space, display: prompt.dirty() || composingText() ? "none" : undefined }}
             >
