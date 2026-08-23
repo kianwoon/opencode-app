@@ -57,6 +57,7 @@ import { DebugBar } from "@/components/debug-bar"
 import { TabsInfoPopup } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
+import { makeFolderDrop } from "@/utils/folder-drop"
 import { ServerConnection, useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
@@ -1121,6 +1122,50 @@ export default function LegacyLayout(props: ParentProps) {
     })
   }
 
+  // Compact the opencode server database (VACUUM) to reclaim dead space from
+  // deleted sessions/events. Non-destructive; shows a toast with the reclaimed
+  // size. Desktop-only (requires the IPC handler in the main process).
+  async function vacuumDatabase() {
+    if (!window.api?.vacuumDatabase) return
+    try {
+      showToast({ title: language.t("sidebar.vacuum.started") })
+      const { before, after } = await window.api.vacuumDatabase()
+      if (before === 0) {
+        showToast({ title: language.t("sidebar.vacuum.none") })
+        return
+      }
+      const saved = Math.max(0, before - after)
+      const savedLabel = saved >= 1_073_741_824
+        ? `${(saved / 1_073_741_824).toFixed(1)} GB`
+        : saved >= 1_048_576
+          ? `${(saved / 1_048_576).toFixed(1)} MB`
+          : `${(saved / 1024).toFixed(0)} KB`
+      showToast({
+        title: language.t("sidebar.vacuum.done"),
+        description: language.t("sidebar.vacuum.saved", { saved: savedLabel }),
+      })
+    } catch {
+      showToast({ title: language.t("sidebar.vacuum.error") })
+    }
+  }
+
+  // Reload global + project configs (AGENTS.md, opencode.json, etc.) without
+  // restarting the app. The server invalidates its cached config and disposes
+  // all instances so the next access re-bootstraps each project; the resulting
+  // global.disposed event triggers the app to re-fetch everything.
+  async function reloadConfigs() {
+    try {
+      showToast({ title: language.t("sidebar.reload.started") })
+      await serverSDK().client.global.dispose()
+      showToast({ title: language.t("sidebar.reload.done") })
+    } catch (err) {
+      showToast({
+        title: language.t("sidebar.reload.error"),
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   function projectRoot(directory: string) {
     const key = pathKey(directory)
     const project = layout.projects
@@ -1386,6 +1431,18 @@ export default function LegacyLayout(props: ParentProps) {
       onSelect: resolve,
     })
   }
+
+  // Dropping folders from the OS onto the sidebar adds them as projects, the
+  // same outcome as the add-project picker. Path resolution requires the
+  // desktop platform's getPathForFile; on plain web the drop is a no-op.
+  const folderDrop = makeFolderDrop({
+    getPathForFile: platform.getPathForFile,
+    onAddProjects: (directories) => {
+      for (const directory of directories) void openProject(directory, false)
+      if (directories[0]) void navigateToProject(directories[0])
+    },
+    onNotFolders: () => showToast({ variant: "error", title: language.t("sidebar.drop.foldersOnly") }),
+  })
 
   const deleteWorkspace = async (root: string, directory: string, leaveDeletedWorkspace = false) => {
     if (directory === root) return
@@ -2248,6 +2305,10 @@ export default function LegacyLayout(props: ParentProps) {
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
+      vacuumLabel={() => language.t("sidebar.vacuum")}
+      onVacuum={vacuumDatabase}
+      reloadLabel={() => language.t("sidebar.reload")}
+      onReloadConfigs={reloadConfigs}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
       renderPanel={() =>
@@ -2294,7 +2355,20 @@ export default function LegacyLayout(props: ParentProps) {
 
                 arm()
               }}
+              onDragEnter={folderDrop.dragEnter}
+              onDragOver={folderDrop.dragOver}
+              onDragLeave={folderDrop.dragLeave}
+              onDrop={folderDrop.drop}
             >
+              <Show when={folderDrop.active()}>
+                <div
+                  class="pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 rounded-[10px] border-2 border-dashed border-border-strong-base bg-background-base/95 p-4 text-center"
+                  data-component="sidebar-folder-drop-overlay"
+                >
+                  <IconV2 name="folder-add-left" size="large" />
+                  <div class="text-14-medium text-text-strong">{language.t("sidebar.drop.title")}</div>
+                </div>
+              </Show>
               <div class="@container w-full h-full contain-strict">{sidebarContent()}</div>
             </nav>
 
@@ -2344,7 +2418,20 @@ export default function LegacyLayout(props: ParentProps) {
                   "ltr:-translate-x-full rtl:translate-x-full": !layout.mobileSidebar.opened(),
                 }}
                 onClick={(e) => e.stopPropagation()}
+                onDragEnter={folderDrop.dragEnter}
+                onDragOver={folderDrop.dragOver}
+                onDragLeave={folderDrop.dragLeave}
+                onDrop={folderDrop.drop}
               >
+                <Show when={folderDrop.active()}>
+                  <div
+                    class="pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 rounded-[10px] border-2 border-dashed border-border-strong-base bg-background-base/95 p-4 text-center"
+                    data-component="sidebar-folder-drop-overlay"
+                  >
+                    <IconV2 name="folder-add-left" size="large" />
+                    <div class="text-14-medium text-text-strong">{language.t("sidebar.drop.title")}</div>
+                  </div>
+                </Show>
                 {sidebarContent(true)}
               </nav>
             </div>

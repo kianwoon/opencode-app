@@ -96,6 +96,7 @@ export const dict = {
   "ui.messagePart.review.title": "Прегледајте своје одговоре",
   "ui.messagePart.questions.dismissed": "Питања су одбачена",
   "ui.messagePart.compaction": "сесија је компактна",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} читање",
   "ui.messagePart.context.read.few": "{{count}} читања",
   "ui.messagePart.context.read.other": "{{count}} читања",

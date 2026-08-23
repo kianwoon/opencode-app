@@ -16,6 +16,7 @@ import { Shell } from "@opencode-ai/core/shell"
 import { ShellID } from "./shell/id"
 
 import * as Truncate from "./truncate"
+import { Instruction } from "@/session/instruction"
 import { Plugin } from "@/plugin"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -236,7 +237,7 @@ function tail(text: string, maxLines: number, maxBytes: number) {
   for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
     const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
     if (bytes + size > maxBytes) {
-      if (out.length === 0) {
+      if (bytes === 0) {
         const buf = Buffer.from(lines[i], "utf-8")
         let start = buf.length - maxBytes
         if (start < 0) start = 0
@@ -292,7 +293,8 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
 
 function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && Shell.ps(shell)) {
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+    const encoded = Buffer.from(command, "utf-16le").toString("base64")
+    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
       cwd,
       env,
       stdin: "ignore",
@@ -344,6 +346,7 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    const instruction = yield* Instruction.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -617,6 +620,14 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
+              // Attach package-level AGENTS.md guidance for the directory the
+              // command runs in, the same way the read tool does for files. This
+              // ensures nested package guides (e.g. packages/desktop/AGENTS.md)
+              // surface even when a build is driven purely through bash. Use a
+              // probe path inside the cwd so dirname() lands on the cwd itself.
+              const loaded = yield* instruction
+                .resolve(ctx.messages, path.join(cwd, ".opencode-bash"), ctx.messageID)
+                .pipe(Effect.orDie)
               yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
@@ -628,7 +639,7 @@ export const ShellTool = Tool.define(
                 }),
               )
 
-              return yield* run(
+              const result = yield* run(
                 {
                   shell,
                   command: params.command,
@@ -637,7 +648,18 @@ export const ShellTool = Tool.define(
                   timeout,
                 },
                 ctx,
-              )
+              ).pipe(Effect.orDie)
+
+              if (loaded.length > 0) {
+                return {
+                  ...result,
+                  output:
+                    result.output +
+                    `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`,
+                  metadata: { ...result.metadata, loaded: loaded.map((item) => item.filepath) },
+                }
+              }
+              return result
             }),
         }
       })

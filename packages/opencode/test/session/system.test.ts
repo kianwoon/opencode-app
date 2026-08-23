@@ -5,6 +5,7 @@ import type { Agent } from "../../src/agent/agent"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Skill } from "../../src/skill"
 import { Permission } from "../../src/permission"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import type { Provider } from "../../src/provider/provider"
 import { SystemPrompt } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
@@ -45,6 +46,7 @@ const build: Agent.Info = {
 
 const it = testEffect(
   LayerNode.compile(SystemPrompt.node, [
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkflows: true })],
     [
       MCP.node,
       Layer.mock(MCP.Service, {
@@ -77,6 +79,7 @@ const it = testEffect(
           all: () => Effect.succeed(skills),
           dirs: () => Effect.succeed([]),
           available: () => Effect.succeed(skills),
+          remove: (name) => Effect.fail(new Skill.NotFoundError({ name, available: skills.map((s) => s.name) })),
         }),
       ),
     ],
@@ -163,6 +166,81 @@ describe("session.system", () => {
           "</mcp_instructions>",
         ].join("\n"),
       )
+    }),
+  )
+
+  it.instance("environment output is date-independent (stable cache prefix)", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const env = yield* prompt.environment({ api: { id: "test-model" } } as Provider.Model)
+      const joined = env.join("\n")
+
+      expect(joined).toContain("Working directory:")
+      expect(joined).toContain("Platform:")
+      expect(joined).not.toContain("Today's date")
+      expect(joined).not.toContain(new Date().toDateString())
+    }),
+  )
+
+  it.effect("workflow guidance tells the agent to plan then orchestrate pipeline tasks", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const output = yield* prompt.workflow(build)
+
+      expect(output).toBeDefined()
+      expect(output).toContain("Workflow guidance")
+      expect(output).toContain("1. PLAN")
+      expect(output).toContain("2. ORCHESTRATE")
+      expect(output).toContain("3. REACT")
+      expect(output).toContain("workflow tool")
+      expect(output).toContain("the user should not\nneed to specify a pipeline")
+    }),
+  )
+
+  it.effect("workflow guidance is omitted when the workflow tool is denied", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const denied = { ...build, permission: Permission.fromConfig({ workflow: "deny" }) }
+      const output = yield* prompt.workflow(denied)
+
+      expect(output).toBeUndefined()
+    }),
+  )
+})
+
+describe("session.system (workflows disabled)", () => {
+  const disabledIt = testEffect(
+    LayerNode.compile(SystemPrompt.node, [
+      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkflows: false })],
+      [
+        MCP.node,
+        Layer.mock(MCP.Service, {
+          instructions: () => Effect.succeed([]),
+        }),
+      ],
+      [
+        Skill.node,
+        Layer.succeed(
+          Skill.Service,
+          Skill.Service.of({
+            get: () => Effect.succeed(undefined),
+            require: () => Effect.fail(new Skill.NotFoundError({ name: "none", available: [] })),
+            all: () => Effect.succeed([]),
+            dirs: () => Effect.succeed([]),
+            available: () => Effect.succeed([]),
+            remove: (name) => Effect.fail(new Skill.NotFoundError({ name, available: [] })),
+          }),
+        ),
+      ],
+    ]),
+  )
+
+  disabledIt.effect("workflow guidance is omitted when the feature is disabled", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const output = yield* prompt.workflow(build)
+
+      expect(output).toBeUndefined()
     }),
   )
 })

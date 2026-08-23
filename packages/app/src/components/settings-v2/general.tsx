@@ -28,6 +28,15 @@ import {
 import "./settings-v2.css"
 
 const schemeOptions: ("system" | "light" | "dark")[] = ["system", "light", "dark"]
+const fontWeightOptions = [
+  { value: "100", label: "settings.general.row.fontWeight.thin" },
+  { value: "200", label: "settings.general.row.fontWeight.extraLight" },
+  { value: "300", label: "settings.general.row.fontWeight.light" },
+  { value: "400", label: "settings.general.row.fontWeight.regular" },
+  { value: "500", label: "settings.general.row.fontWeight.medium" },
+  { value: "600", label: "settings.general.row.fontWeight.semibold" },
+  { value: "700", label: "settings.general.row.fontWeight.bold" },
+]
 const fontSettings = {
   ui: {
     action: "settings-ui-font",
@@ -35,6 +44,9 @@ const fontSettings = {
     description: "settings.general.row.uiFont.description",
     font: "ui",
     input: "setUI",
+    weight: "setUIWeight",
+    colorLight: "setUIColorLight",
+    colorDark: "setUIColorDark",
   },
   code: {
     action: "settings-code-font",
@@ -42,6 +54,9 @@ const fontSettings = {
     description: "settings.general.row.font.description",
     font: "code",
     input: "setCode",
+    weight: "setCodeWeight",
+    colorLight: "setCodeColorLight",
+    colorDark: "setCodeColorDark",
   },
   terminal: {
     action: "settings-terminal-font",
@@ -49,6 +64,19 @@ const fontSettings = {
     description: "settings.general.row.terminalFont.description",
     font: "terminal",
     input: "setTerminal",
+    weight: "setTerminalWeight",
+    colorLight: "setTerminalColorLight",
+    colorDark: "setTerminalColorDark",
+  },
+  message: {
+    action: "settings-message-font",
+    title: "settings.general.row.messageFont.title",
+    description: "settings.general.row.messageFont.description",
+    font: "message",
+    input: "setMessage",
+    weight: "setMessageWeight",
+    colorLight: "setMessageColorLight",
+    colorDark: "setMessageColorDark",
   },
 } as const
 const soundSettings = {
@@ -172,36 +200,83 @@ const AppearanceSection: Component<{ controller: AppearanceSettingsController }>
         <FontSetting kind="ui" fonts={props.controller.fonts} />
         <FontSetting kind="code" fonts={props.controller.fonts} />
         <FontSetting kind="terminal" fonts={props.controller.fonts} />
+        <FontSetting kind="message" fonts={props.controller.fonts} />
       </SettingsListV2>
     </div>
   )
 }
 
 const FontSetting: Component<{
-  kind: "ui" | "code" | "terminal"
+  kind: "ui" | "code" | "terminal" | "message"
   fonts: AppearanceSettingsController["fonts"]
 }> = (props) => {
   const language = useLanguage()
   const config = () => fontSettings[props.kind]
+  const current = () => props.fonts[config().font]()
   return (
     <SettingsRowV2 title={language.t(config().title)} description={language.t(config().description)}>
-      <div class="w-full sm:w-[220px]">
+      <div class="flex w-full flex-col gap-2 sm:w-[220px]">
         <TextInputV2
           data-action={config().action}
           type="text"
           appearance="base"
-          value={props.fonts[config().font]().value}
+          value={current().value}
           onInput={(event) => props.fonts[config().input](event.currentTarget.value)}
-          placeholder={props.fonts[config().font]().placeholder}
+          placeholder={current().placeholder}
           spellcheck={false}
           autocorrect="off"
           autocomplete="off"
           autocapitalize="off"
           aria-label={language.t(config().title)}
-          style={{ "font-family": props.fonts[config().font]().family }}
+          style={{ "font-family": current().family }}
         />
+        <SelectV2
+          appearance="inline"
+          data-action={`${config().action}-weight`}
+          options={fontWeightOptions}
+          current={fontWeightOptions.find((option) => option.value === String(current().weight)) ?? fontWeightOptions[1]}
+          placement="bottom-end"
+          gutter={6}
+          value={(option) => option.value}
+          label={(option) => language.t(option.label)}
+          onSelect={(option) => option && props.fonts[config().weight](Number(option.value))}
+        />
+        <FontColorSetting fonts={props.fonts} config={config()} />
       </div>
     </SettingsRowV2>
+  )
+}
+
+const FontColorSetting: Component<{
+  fonts: AppearanceSettingsController["fonts"]
+  config: (typeof fontSettings)[keyof typeof fontSettings]
+}> = (props) => {
+  const language = useLanguage()
+  const current = () => props.fonts[props.config.font]()
+  return (
+    <div class="flex items-center gap-2" data-action={`${props.config.action}-color`}>
+      <label class="flex items-center gap-1.5 text-[12px] text-v2-text-text-muted">
+        <span aria-hidden="true">☀</span>
+        <input
+          type="color"
+          value={current().colorLight || "#000000"}
+          onInput={(event) => props.fonts[props.config.colorLight](event.currentTarget.value)}
+          class="size-5 cursor-pointer appearance-none rounded border border-v2-border-border-base bg-transparent p-0"
+        />
+      </label>
+      <label class="flex items-center gap-1.5 text-[12px] text-v2-text-text-muted">
+        <span aria-hidden="true">☾</span>
+        <input
+          type="color"
+          value={current().colorDark || "#000000"}
+          onInput={(event) => props.fonts[props.config.colorDark](event.currentTarget.value)}
+          class="size-5 cursor-pointer appearance-none rounded border border-v2-border-border-base bg-transparent p-0"
+        />
+      </label>
+      <span class="ml-auto text-[12px] text-v2-text-text-faint">
+        {language.t("settings.general.row.fontColor.help")}
+      </span>
+    </div>
   )
 }
 

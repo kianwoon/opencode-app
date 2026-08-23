@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { homedir } from "node:os"
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
@@ -139,6 +140,20 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("store-length", (_event: IpcMainInvokeEvent, name: string) => {
     const store = getStore(name)
     return Object.keys(store.store).length
+  })
+  // Compact the opencode server database (VACUUM). The server stores its SQLite
+  // DB at <XDG_DATA_HOME>/opencode/opencode.db (default ~/.local/share/opencode).
+  // Deleted sessions/events leave free pages that are never returned to the OS,
+  // so the file only grows; VACUUM reclaims that dead space. Non-destructive.
+  ipcMain.handle("vacuum-database", async () => {
+    const dbPath = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "opencode", "opencode.db")
+    const before = await stat(dbPath).then((s) => s.size, () => 0)
+    if (before === 0) return { before: 0, after: 0 }
+    await new Promise<void>((resolve, reject) => {
+      execFile("sqlite3", [dbPath, "VACUUM;"], (err) => (err ? reject(err) : resolve()))
+    })
+    const after = await stat(dbPath).then((s) => s.size, () => 0)
+    return { before, after }
   })
   ipcMain.handle("draft-get", (_event, key: string) => drafts.get(key))
   ipcMain.handle("draft-set", (_event, key: string, value: string) => drafts.set(key, value))

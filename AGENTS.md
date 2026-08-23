@@ -1,8 +1,17 @@
+# INCLUDE_GLOBAL_CONFIG
+
 - To regenerate the legacy JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit `src/generated` or `src/generated-effect` directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
+
+  ```text
+  schema → core, protocol → server
+  client → schema, protocol (never core or server)
+  sdk-next → client, core, server
+  ```
+
 - The default branch in this repo is `dev`.
-- Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
+- Base diffs on `dev` or `origin/dev`; a local `main` ref may be stale or divergent.
 
 ## Branch Names
 
@@ -14,7 +23,7 @@ Examples: `session-recovery`, `fix-scroll-state`, `regenerate-sdk`.
 
 Use conventional commit-style messages and PR titles: `type(scope): summary`.
 
-Valid types are `feat`, `fix`, `docs`, `chore`, `refactor`, and `test`. Scopes are optional; use the affected package or area when helpful, e.g. `core`, `opencode`, `tui`, `app`, `desktop`, `sdk`, or `plugin`.
+Valid types are `feat`, `fix`, `docs`, `chore`, `refactor`, and `test`. Scopes are optional; use the affected package or area when helpful, e.g. `core`, `opencode`, `llm`, `schema`, `protocol`, `server`, `client`, `sdk-next`, `tui`, `app`, `desktop`, `sdk`, or `plugin`.
 
 Examples: `fix(tui): simplify thinking toggle styling`, `docs: update contributing guide`, `chore(sdk): regenerate types`.
 
@@ -150,6 +159,8 @@ const table = sqliteTable("session", {
 
 ## V2 Session Core
 
+Spans `packages/core` (durable execution, run coordination, system context) and `packages/opencode` (session service surface, prompt admission).
+
 - Keep durable prompt admission separate from model execution. `SessionV2.prompt(...)` admits one durable `session_input` row before scheduling advisory `SessionExecution.wake(sessionID)` unless `resume: false` requests admit-only behavior. The serialized runner promotes admitted inputs into visible user messages at safe boundaries.
 - Reusing a Session ID adopts the existing Session. Reusing a prompt message ID reconciles an exact retry only when Session, prompt, and delivery mode match; conflicting reuse fails. Historical projected prompts lazily synthesize promoted inbox records during exact retry.
 - Keep `SessionExecution` process-global and Session-ID based. Its local implementation owns the process-local Session coordinator and discovers placement through `SessionStore` plus `LocationServiceMap.get(session.location)` only when a drain starts; no layer should take a Session ID. V2 interruption targets the active process-local ownership chain for that Session; idle or missing interruption is a no-op.
@@ -158,4 +169,12 @@ const table = sqliteTable("session", {
 - Keep local Session drains process-local until clustering is implemented. `SessionRunCoordinator` joins explicit same-Session resumes, coalesces prompt wakeups, and allows different Sessions to run concurrently. Advisory wakes drain eligible durable inbox rows only; post-crash continuation recovery requires a separate explicit design before it may retry provider work. A drain has no durable identity or transcript boundary.
 - Keep delivery vocabulary explicit. Prompts steer by default and promote at the next safe provider-turn boundary while the current drain requires continuation. An explicit `queue` input remains pending until the Session would otherwise become idle; promote one queued input at that boundary, then reevaluate continuation before promoting another. Promoting any new user input resets the selected agent's provider-turn allowance; a batch of steers resets it once.
 - Keep EventV2 replay owner claims separate from clustered Session execution ownership.
-- Keep the System Context algebra, registry, and built-ins in `src/system-context`; keep Context Source producers with their observed domains, and keep Session History selection plus Context Epoch persistence Session-owned.
+- Keep the System Context algebra, registry, and built-ins in `packages/core/src/system-context`; keep Context Source producers with their observed domains, and keep Session History selection plus Context Epoch persistence Session-owned.
+
+## Persisting Non-Obvious Learnings (MANDATORY)
+
+- **After resolving a non-obvious issue that caused rework, failed builds, or wasted effort, immediately record a short note in the relevant package's `AGENTS.md` (or the root `AGENTS.md` if cross-cutting) before moving on.** Do not wait for the user to ask.
+- This applies especially to silent/high-stakes gotchas — e.g. build steps that don't do what their script name implies, environment variables that change runtime behavior invisibly (like `OPENCODE_CHANNEL` controlling which DB the app connects to), and traps that only surface late (like `verify-prod.ts`).
+- Notes should be concise, concrete, and actionable: what the gotcha is, the exact correct command/sequence, and the required acceptance gate to confirm success.
+- Treat a repeated mistake as a strong signal that documentation is missing. If you make the same mistake twice, writing it down is not optional — do it immediately.
+- Future sessions load `AGENTS.md` files automatically, so persisting here is how lessons survive across sessions. Do not rely on memory; write it down.

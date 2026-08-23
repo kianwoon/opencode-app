@@ -16,6 +16,8 @@ import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { useUpdaterAction } from "./updater-action"
 import {
+  messageDefault,
+  messageFontFamily,
   monoDefault,
   monoFontFamily,
   monoInput,
@@ -41,6 +43,45 @@ let demoSoundState = {
 type ThemeOption = {
   id: string
   name: string
+}
+
+type FontWeightOption = {
+  value: string
+  label: string
+}
+
+type FontColorControlsProps = {
+  colorLight: string
+  colorDark: string
+  setColorLight: (value: string) => void
+  setColorDark: (value: string) => void
+}
+
+const FontColorControls: Component<FontColorControlsProps> = (props) => {
+  const language = useLanguage()
+  return (
+    <div class="flex items-center gap-2" data-action="settings-font-color">
+      <label class="flex items-center gap-1.5 text-12-regular text-text-muted">
+        <span aria-hidden="true">☀</span>
+        <input
+          type="color"
+          value={props.colorLight || "#000000"}
+          onChange={(event) => props.setColorLight(event.currentTarget.value)}
+          class="h-5 w-5 cursor-pointer appearance-none rounded border border-border-base bg-transparent p-0"
+        />
+      </label>
+      <label class="flex items-center gap-1.5 text-12-regular text-text-muted">
+        <span aria-hidden="true">☾</span>
+        <input
+          type="color"
+          value={props.colorDark || "#000000"}
+          onChange={(event) => props.setColorDark(event.currentTarget.value)}
+          class="h-5 w-5 cursor-pointer appearance-none rounded border border-border-base bg-transparent p-0"
+        />
+      </label>
+      <span class="ml-auto text-12-regular text-text-faint">{language.t("settings.general.row.fontColor.help")}</span>
+    </div>
+  )
 }
 
 type ShellOption = {
@@ -221,6 +262,28 @@ export const SettingsGeneral: Component = () => {
   const mono = () => monoInput(settings.appearance.font())
   const sans = () => sansInput(settings.appearance.uiFont())
   const terminal = () => terminalInput(settings.appearance.terminalFont())
+  const message = () => settings.appearance.messageFont()
+
+  const fontWeightOptions = createMemo(() => [
+    { value: "100", label: language.t("settings.general.row.fontWeight.thin") },
+    { value: "200", label: language.t("settings.general.row.fontWeight.extraLight") },
+    { value: "300", label: language.t("settings.general.row.fontWeight.light") },
+    { value: "400", label: language.t("settings.general.row.fontWeight.regular") },
+    { value: "500", label: language.t("settings.general.row.fontWeight.medium") },
+    { value: "600", label: language.t("settings.general.row.fontWeight.semibold") },
+    { value: "700", label: language.t("settings.general.row.fontWeight.bold") },
+  ])
+
+  const fontWeightSelectProps = (current: () => number, set: (value: number) => void) => ({
+    options: fontWeightOptions(),
+    current: fontWeightOptions().find((o) => o.value === String(current())) ?? fontWeightOptions()[1],
+    value: (o: FontWeightOption) => o.value,
+    label: (o: FontWeightOption) => o.label,
+    onSelect: (option: FontWeightOption | undefined) => option && set(Number(option.value)),
+    variant: "secondary" as const,
+    size: "small" as const,
+    triggerVariant: "settings" as const,
+  })
 
   const soundSelectProps = (
     enabled: () => boolean,
@@ -506,7 +569,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.uiFont.title")}
           description={language.t("settings.general.row.uiFont.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
             <TextField
               data-action="settings-ui-font"
               label={language.t("settings.general.row.uiFont.title")}
@@ -520,7 +583,20 @@ export const SettingsGeneral: Component = () => {
               autocomplete="off"
               autocapitalize="off"
               class="text-12-regular"
-              style={{ "font-family": sansFontFamily(settings.appearance.uiFont()) }}
+              style={{ "font-family": sansFontFamily(settings.appearance.uiFont(), settings.appearance.uiFontWeight()) }}
+            />
+            <Select
+              data-action="settings-ui-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.uiFontWeight(),
+                (value) => settings.appearance.setUIFontWeight(value),
+              )}
+            />
+            <FontColorControls
+              colorLight={settings.appearance.uiFontColorLight()}
+              colorDark={settings.appearance.uiFontColorDark()}
+              setColorLight={settings.appearance.setUIFontColorLight}
+              setColorDark={settings.appearance.setUIFontColorDark}
             />
           </div>
         </SettingsRow>
@@ -529,7 +605,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.font.title")}
           description={language.t("settings.general.row.font.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
             <TextField
               data-action="settings-code-font"
               label={language.t("settings.general.row.font.title")}
@@ -543,7 +619,20 @@ export const SettingsGeneral: Component = () => {
               autocomplete="off"
               autocapitalize="off"
               class="text-12-regular"
-              style={{ "font-family": monoFontFamily(settings.appearance.font()) }}
+              style={{ "font-family": monoFontFamily(settings.appearance.font(), settings.appearance.codeFontWeight()) }}
+            />
+            <Select
+              data-action="settings-code-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.codeFontWeight(),
+                (value) => settings.appearance.setCodeFontWeight(value),
+              )}
+            />
+            <FontColorControls
+              colorLight={settings.appearance.codeFontColorLight()}
+              colorDark={settings.appearance.codeFontColorDark()}
+              setColorLight={settings.appearance.setCodeFontColorLight}
+              setColorDark={settings.appearance.setCodeFontColorDark}
             />
           </div>
         </SettingsRow>
@@ -552,7 +641,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.terminalFont.title")}
           description={language.t("settings.general.row.terminalFont.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
             <TextField
               data-action="settings-terminal-font"
               label={language.t("settings.general.row.terminalFont.title")}
@@ -566,7 +655,56 @@ export const SettingsGeneral: Component = () => {
               autocomplete="off"
               autocapitalize="off"
               class="text-12-regular"
-              style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont()) }}
+              style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont(), settings.appearance.terminalFontWeight()) }}
+            />
+            <Select
+              data-action="settings-terminal-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.terminalFontWeight(),
+                (value) => settings.appearance.setTerminalFontWeight(value),
+              )}
+            />
+            <FontColorControls
+              colorLight={settings.appearance.terminalFontColorLight()}
+              colorDark={settings.appearance.terminalFontColorDark()}
+              setColorLight={settings.appearance.setTerminalFontColorLight}
+              setColorDark={settings.appearance.setTerminalFontColorDark}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.messageFont.title")}
+          description={language.t("settings.general.row.messageFont.description")}
+        >
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
+            <TextField
+              data-action="settings-message-font"
+              label={language.t("settings.general.row.messageFont.title")}
+              hideLabel
+              type="text"
+              value={message()}
+              onChange={(value) => settings.appearance.setMessageFont(value)}
+              placeholder={messageDefault}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              class="text-12-regular"
+              style={{ "font-family": messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()) }}
+            />
+            <Select
+              data-action="settings-message-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.messageFontWeight(),
+                (value) => settings.appearance.setMessageFontWeight(value),
+              )}
+            />
+            <FontColorControls
+              colorLight={settings.appearance.messageFontColorLight()}
+              colorDark={settings.appearance.messageFontColorDark()}
+              setColorLight={settings.appearance.setMessageFontColorLight}
+              setColorDark={settings.appearance.setMessageFontColorDark}
             />
           </div>
         </SettingsRow>

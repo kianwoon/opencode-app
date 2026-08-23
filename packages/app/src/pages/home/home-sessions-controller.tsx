@@ -1,5 +1,5 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
-import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
+import { preloadMarkdownWithWorker } from "@opencode-ai/session-ui/markdown-cache"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useQuery } from "@tanstack/solid-query"
 import { DateTime } from "luxon"
@@ -117,7 +117,7 @@ export function createHomeSessionsController(home: HomeController) {
                   (ctx.sync.session.data.message[record.session.id] ?? []).flatMap((message) =>
                     (ctx.sync.session.data.part[message.id] ?? []).flatMap((part) => {
                       if (part.type !== "text" || !part.text) return []
-                      return preloadMarkdown(part.text, part.id)
+                      return preloadMarkdownWithWorker(part.text, part.id)
                     }),
                   ),
                 ),

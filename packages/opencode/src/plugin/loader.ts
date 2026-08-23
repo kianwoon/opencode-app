@@ -133,15 +133,35 @@ export namespace PluginLoader {
   }
 
   // Import the resolved module only after all earlier validation has succeeded.
+  //
+  // File plugins are development code that users edit in place; the import URL is
+  // suffixed with the entry mtime so a reload after an edit re-evaluates the module
+  // instead of returning Bun's cached one. Plain file:// URLs with a query string
+  // still hit the module cache, so the bust is only applied to bare paths and npm
+  // targets keep their stable URL (their versioned install dir already changes on update).
   export async function load(row: Resolved): Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }> {
     let mod
     try {
-      mod = await import(row.entry)
+      mod = await import(await bustFileEntry(row.entry))
     } catch (error) {
       return { ok: false, error }
     }
     if (!mod) return { ok: false, error: new Error(`Plugin ${row.spec} module is empty`) }
     return { ok: true, value: { ...row, mod } }
+  }
+
+  async function bustFileEntry(entry: string): Promise<string> {
+    if (!entry.startsWith("file:")) return entry
+    const { fileURLToPath } = await import("url")
+    const { stat } = await import("node:fs/promises")
+    const file = fileURLToPath(entry)
+    // Use node:fs/promises (not Bun.file) so this works in the desktop app's
+    // Node sidecar, where the global `Bun` is undefined. A Bun-only stat here
+    // made every file-based plugin fail to load in the app with
+    // "ReferenceError: Bun is undefined" (surfaced only as a TUI toast, never a log).
+    const stats = await stat(file).catch(() => undefined)
+    if (!stats) return entry
+    return `${file}?mtime=${Math.floor(stats.mtimeMs)}`
   }
 
   // Run one candidate through the full pipeline: resolve, optionally surface a missing entry,

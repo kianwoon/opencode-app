@@ -122,8 +122,8 @@ describe("todoState", () => {
     expect(todoState({ count: 2, done: false, live: false })).toBe("clear")
   })
 
-  test("clears completed todos when the session is no longer live", () => {
-    expect(todoState({ count: 2, done: true, live: false })).toBe("clear")
+  test("hides completed todos when the session is no longer live without clearing them", () => {
+    expect(todoState({ count: 2, done: true, live: false })).toBe("hide")
   })
 })
 

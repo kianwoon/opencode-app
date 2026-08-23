@@ -70,6 +70,9 @@ export function fromPromise(plugin: Plugin) {
               resolve: (connection) => Effect.runPromiseWith(context)(host.integration.connection.resolve(connection)),
             },
           },
+          messages: {
+            transform: transform(host.messages),
+          },
           plugin: {
             add: (input) => {
               const child = fromPromise(input)

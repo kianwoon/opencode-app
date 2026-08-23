@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { existsSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { Effect } from "effect"
 import { ProviderTransform } from "@/provider/transform"
 import { LLMRequestPrep } from "@/session/llm/request"
@@ -299,6 +302,68 @@ describe("ProviderTransform.options - setCacheKey", () => {
       providerOptions: {},
     })
     expect(result.prompt_cache_key).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.options - openrouter routing", () => {
+  const sessionID = "test-session-123"
+
+  const model = {
+    id: "meta-llama/llama-3.3-70b-instruct",
+    providerID: "openrouter",
+    api: {
+      id: "meta-llama/llama-3.3-70b-instruct",
+      url: "https://openrouter.ai/api/v1",
+      npm: "@openrouter/ai-sdk-provider",
+    },
+    name: "Llama 3.3 70B Instruct",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+  } as unknown as Parameters<typeof ProviderTransform.options>[0]["model"]
+
+  test("injects the provider-level routing sort", () => {
+    for (const sort of ["price", "throughput", "latency"] as const) {
+      const result = ProviderTransform.options({
+        model,
+        sessionID,
+        providerOptions: { routing: { sort } },
+      })
+      expect(result.provider).toEqual({ sort })
+    }
+  })
+
+  test("omits routing when the provider has no routing preference", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.provider).toBeUndefined()
+  })
+
+  test("rejects an invalid routing sort value", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { sort: "cheapest-gpu" } },
+    })
+    expect(result.provider).toBeUndefined()
+  })
+
+  test("does not apply openrouter routing to other providers", () => {
+    const result = ProviderTransform.options({
+      model: { ...model, providerID: ProviderV2.ID.make("custom"), api: { ...model.api, npm: "@ai-sdk/openai-compatible" } },
+      sessionID,
+      providerOptions: { routing: { sort: "throughput" } },
+    })
+    expect(result.provider).toBeUndefined()
   })
 })
 
@@ -3778,6 +3843,102 @@ describe("ProviderTransform.variants", () => {
     expect(result).toEqual({})
   })
 
+  test("glm-5.3 returns native effort variants for openai-compatible providers", () => {
+    const model = createMockModel({
+      id: "zai-coding-plan/glm-5.3",
+      providerID: "zai-coding-plan",
+      api: {
+        id: "glm-5.3",
+        url: "https://api.z.ai/api/coding/paas/v4",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { reasoningEffort: "high" },
+      max: { reasoningEffort: "max" },
+    })
+  })
+
+  test("recognizes GLM-5.3 provider model IDs", () => {
+    for (const id of ["accounts/fireworks/models/glm-5p3", "zai-org-glm-5-3", "umans-glm-5.3"]) {
+      const model = createMockModel({
+        id: `test/${id}`,
+        api: {
+          id,
+          url: "https://api.test.com",
+          npm: "@ai-sdk/openai-compatible",
+        },
+      })
+      expect(ProviderTransform.variants(model)).toEqual({
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      })
+    }
+  })
+
+  test("recognizes GLM-5.3 from the API ID when the configured model ID is an alias", () => {
+    const model = createMockModel({
+      id: "custom/my-glm",
+      api: {
+        id: "accounts/fireworks/models/glm-5p3",
+        url: "https://api.fireworks.ai/inference/v1",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { reasoningEffort: "high" },
+      max: { reasoningEffort: "max" },
+    })
+  })
+
+  test("glm-5.3 returns openrouter effort variants for openrouter", () => {
+    const model = createMockModel({
+      id: "openrouter/z-ai/glm-5.3",
+      providerID: "openrouter",
+      api: {
+        id: "z-ai/glm-5.3",
+        url: "https://openrouter.ai/api/v1",
+        npm: "@openrouter/ai-sdk-provider",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { reasoning: { effort: "high" } },
+      xhigh: { reasoning: { effort: "xhigh" } },
+    })
+  })
+
+  test("glm-5.3 returns effort variants for anthropic-compatible providers", () => {
+    const model = createMockModel({
+      id: "zai-coding-plan/glm-5.3",
+      providerID: "zai-coding-plan",
+      api: {
+        id: "glm-5.3",
+        url: "https://api.z.ai/api/anthropic",
+        npm: "@ai-sdk/anthropic",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      high: { effort: "high" },
+      max: { effort: "max" },
+    })
+  })
+
+  test("glm-5.3 falls back to provider defaults for other packages", () => {
+    const model = createMockModel({
+      id: "test/glm-5.3",
+      api: {
+        id: "glm-5.3",
+        url: "https://api.test.com",
+        npm: "@ai-sdk/amazon-bedrock",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      low: { reasoningConfig: { type: "enabled", maxReasoningEffort: "low" } },
+      medium: { reasoningConfig: { type: "enabled", maxReasoningEffort: "medium" } },
+      high: { reasoningConfig: { type: "enabled", maxReasoningEffort: "high" } },
+    })
+  })
+
   test("glm-5.2 returns native effort variants for openai-compatible providers", () => {
     const model = createMockModel({
       id: "zhipuai/glm-5.2",
@@ -4557,6 +4718,38 @@ describe("ProviderTransform.variants", () => {
         none: { reasoningEffort: "none" },
         high: { reasoningEffort: "high" },
       })
+    })
+  })
+
+  describe("@ai-sdk/deepseek", () => {
+    test("deepseek-v4 returns a thinking toggle plus effort tiers", () => {
+      const model = createMockModel({
+        id: "deepseek/deepseek-v4-flash",
+        providerID: "deepseek",
+        api: {
+          id: "deepseek-v4-flash",
+          url: "https://api.deepseek.com",
+          npm: "@ai-sdk/deepseek",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(Object.keys(result)).toEqual(["none", "low", "medium", "high", "max"])
+      expect(result.none).toEqual({ thinking: { type: "disabled" } })
+      expect(result.high).toEqual({ thinking: { type: "enabled" }, reasoningEffort: "high" })
+      expect(result.max).toEqual({ thinking: { type: "enabled" }, reasoningEffort: "max" })
+    })
+
+    test("non-v4 deepseek models expose no reasoning variants", () => {
+      const model = createMockModel({
+        id: "deepseek/deepseek-chat",
+        providerID: "deepseek",
+        api: {
+          id: "deepseek-chat",
+          url: "https://api.deepseek.com",
+          npm: "@ai-sdk/deepseek",
+        },
+      })
+      expect(ProviderTransform.variants(model)).toEqual({})
     })
   })
 
@@ -5677,5 +5870,105 @@ describe("ProviderTransform.options - kimi family adaptive thinking", () => {
     }
     const result = ProviderTransform.options({ model, sessionID: "s1", providerOptions: {} })
     expect(result.thinking).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.message - unsupported attachment fallback", () => {
+  const createModel = (input: { image: boolean; pdf: boolean }) =>
+    ({
+      id: "test/non-vision",
+      providerID: "test",
+      api: {
+        id: "non-vision",
+        url: "https://api.test.example",
+        npm: "@ai-sdk/openai-compatible",
+      },
+      name: "Non Vision",
+      capabilities: {
+        temperature: true,
+        reasoning: false,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: input.image, video: false, pdf: input.pdf },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+      limit: { context: 128000, output: 8192 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  const savedPath = (text: string) => {
+    const match = text.match(/saved to (\S+)\./)
+    expect(match).toBeDefined()
+    return match![1]
+  }
+
+  test("saves unsupported image bytes to a temp file and references the path", () => {
+    const bytes = Buffer.from("hello-image")
+    const msgs = [
+      {
+        role: "user" as const,
+        content: [{ type: "image" as const, image: `data:image/png;base64,${bytes.toString("base64")}` }],
+      },
+    ]
+    const result = ProviderTransform.message(msgs, createModel({ image: false, pdf: false }), {})
+    const part = (result[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    expect(part.text).toContain("does not support image input")
+
+    const file = savedPath(part.text)
+    expect(file.startsWith(path.join(tmpdir(), "opencode"))).toBeTrue()
+    expect(existsSync(file)).toBeTrue()
+    expect(readFileSync(file).toString()).toBe("hello-image")
+    rmSync(file, { force: true })
+  })
+
+  test("re-lowering the same attachment overwrites the same hashed path", () => {
+    const bytes = Buffer.from("stable-bytes")
+    const msgs = [
+      {
+        role: "user" as const,
+        content: [{ type: "image" as const, image: `data:image/png;base64,${bytes.toString("base64")}` }],
+      },
+    ]
+    const model = createModel({ image: false, pdf: false })
+    const first = ProviderTransform.message(msgs, model, {})
+    const second = ProviderTransform.message(msgs, model, {})
+    expect(savedPath((first[0].content as any[])[0].text)).toBe(savedPath((second[0].content as any[])[0].text))
+    rmSync(savedPath((first[0].content as any[])[0].text), { force: true })
+  })
+
+  test("saves unsupported PDF file parts with the pdf extension", () => {
+    const bytes = Buffer.from("%PDF-1.7 fake")
+    const msgs = [
+      {
+        role: "user" as const,
+        content: [
+          {
+            type: "file" as const,
+            data: bytes.toString("base64"),
+            mediaType: "application/pdf",
+            filename: "spec.pdf",
+          },
+        ],
+      },
+    ]
+    const result = ProviderTransform.message(msgs, createModel({ image: true, pdf: false }), {})
+    const part = (result[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    const file = savedPath(part.text)
+    expect(file.endsWith(".pdf")).toBeTrue()
+    expect(part.text).toContain('"spec.pdf"')
+    rmSync(file, { force: true })
+  })
+
+  test("passes image parts through unchanged for vision models", () => {
+    const image = "data:image/png;base64,aGVsbG8="
+    const msgs = [{ role: "user" as const, content: [{ type: "image" as const, image }] }]
+    const result = ProviderTransform.message(msgs, createModel({ image: true, pdf: true }), {})
+    expect((result[0].content as any[])[0]).toEqual({ type: "image", image })
   })
 })

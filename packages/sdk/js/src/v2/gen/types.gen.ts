@@ -51,6 +51,7 @@ export type Event =
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
+  | EventSessionWarning
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
   | EventFileEdited
@@ -347,6 +348,15 @@ export type AssistantMessage = {
     | ContextOverflowError
     | ContentFilterError
     | ApiError
+  warning?:
+    | ProviderAuthError
+    | UnknownError
+    | MessageOutputLengthError
+    | MessageAbortedError
+    | StructuredOutputError
+    | ContextOverflowError
+    | ContentFilterError
+    | ApiError
   parentID: string
   modelID: string
   providerID: string
@@ -405,6 +415,29 @@ export type SubtaskPart = {
     modelID: string
   }
   command?: string
+}
+
+export type WorkflowStep = {
+  id: string
+  prompt: string
+  description: string
+  agent: string
+  dependsOn: Array<string>
+  model?: {
+    providerID: string
+    modelID: string
+  }
+  command?: string
+}
+
+export type WorkflowPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "workflow"
+  title: string
+  steps: Array<WorkflowStep>
+  plannedBy?: string
 }
 
 export type ReasoningPart = {
@@ -627,6 +660,7 @@ export type CompactionPart = {
 export type Part =
   | TextPart
   | SubtaskPart
+  | WorkflowPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -1215,6 +1249,22 @@ export type GlobalEvent = {
         properties: {
           sessionID?: string
           error?:
+            | ProviderAuthError
+            | UnknownError
+            | MessageOutputLengthError
+            | MessageAbortedError
+            | StructuredOutputError
+            | ContextOverflowError
+            | ContentFilterError
+            | ApiError
+        }
+      }
+    | {
+        id: string
+        type: "session.warning"
+        properties: {
+          sessionID?: string
+          warning?:
             | ProviderAuthError
             | UnknownError
             | MessageOutputLengthError
@@ -2025,6 +2075,7 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    workflow_concurrency?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
 }
@@ -2369,6 +2420,13 @@ export type Agent = {
   steps?: number
 }
 
+export type SkillRemoveError = {
+  name: "Skill.NotFoundError" | "Skill.NotRemovableError"
+  data: {
+    message: string
+  }
+}
+
 export type LspStatus = {
   id: string
   name: string
@@ -2595,6 +2653,27 @@ export type SubtaskPartInput = {
   command?: string
 }
 
+export type WorkflowStepInput = {
+  id: string
+  prompt: string
+  description: string
+  agent: string
+  dependsOn: Array<string>
+  model?: {
+    providerID: string
+    modelID: string
+  }
+  command?: string
+}
+
+export type WorkflowPartInput = {
+  id?: string
+  type: "workflow"
+  title: string
+  steps: Array<WorkflowStepInput>
+  plannedBy?: string
+}
+
 export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
@@ -2787,6 +2866,23 @@ export type ProviderNotFoundError = {
   message: string
 }
 
+export type SkillRemoved = {
+  name: string
+  location: string
+}
+
+export type SkillNotFoundError = {
+  _tag: "SkillNotFoundError"
+  skill: string
+  message: string
+}
+
+export type SkillNotRemovableError = {
+  _tag: "SkillNotRemovableError"
+  skill: string
+  message: string
+}
+
 export type OutputFormat1 =
   | {
       type: "text"
@@ -2899,6 +2995,7 @@ export type V2Event =
   | MessagePartDelta
   | SessionDiff
   | SessionError
+  | SessionWarning
   | InstallationUpdated
   | InstallationUpdateAvailable
   | FileEdited
@@ -5365,6 +5462,32 @@ export type SessionError = {
   }
 }
 
+export type SessionWarning = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.warning"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID?: string
+    warning?:
+      | ProviderAuthError
+      | UnknownError
+      | MessageOutputLengthError
+      | MessageAbortedError
+      | StructuredOutputError
+      | ContextOverflowError
+      | ContentFilterError
+      | ApiError
+  }
+}
+
 export type InstallationUpdated = {
   id: string
   metadata?: {
@@ -6679,6 +6802,23 @@ export type EventSessionError = {
   properties: {
     sessionID?: string
     error?:
+      | ProviderAuthError
+      | UnknownError
+      | MessageOutputLengthError
+      | MessageAbortedError
+      | StructuredOutputError
+      | ContextOverflowError
+      | ContentFilterError
+      | ApiError
+  }
+}
+
+export type EventSessionWarning = {
+  id: string
+  type: "session.warning"
+  properties: {
+    sessionID?: string
+    warning?:
       | ProviderAuthError
       | UnknownError
       | MessageOutputLengthError
@@ -8372,6 +8512,39 @@ export type AppSkillsResponses = {
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
 
+export type AppSkillRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/{name}"
+}
+
+export type AppSkillRemoveErrors = {
+  /**
+   * SkillRemoveError | InvalidRequestError
+   */
+  400: SkillRemoveError | InvalidRequestError
+}
+
+export type AppSkillRemoveError = AppSkillRemoveErrors[keyof AppSkillRemoveErrors]
+
+export type AppSkillRemoveResponses = {
+  /**
+   * Removed skill
+   */
+  200: {
+    name: string
+    location: string
+  }
+}
+
+export type AppSkillRemoveResponse = AppSkillRemoveResponses[keyof AppSkillRemoveResponses]
+
 export type LspStatusData = {
   body?: never
   path?: never
@@ -9806,7 +9979,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
   }
   path: {
     sessionID: string
@@ -10153,7 +10326,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
   }
   path: {
     sessionID: string
@@ -12964,6 +13137,49 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2SkillRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/skill/{name}"
+}
+
+export type V2SkillRemoveErrors = {
+  /**
+   * SkillNotRemovableError | InvalidRequestError
+   */
+  400: SkillNotRemovableError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SkillNotFoundError
+   */
+  404: SkillNotFoundError
+}
+
+export type V2SkillRemoveError = V2SkillRemoveErrors[keyof V2SkillRemoveErrors]
+
+export type V2SkillRemoveResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: SkillRemoved
+  }
+}
+
+export type V2SkillRemoveResponse = V2SkillRemoveResponses[keyof V2SkillRemoveResponses]
 
 export type V2EventSubscribeData = {
   body?: never

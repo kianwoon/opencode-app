@@ -94,6 +94,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "გადახედეთ თქვენს პასუხებს",
   "ui.messagePart.questions.dismissed": "კითხვები უარყოფილია",
   "ui.messagePart.compaction": "სესია კომპაქტური",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} წაკითხული",
   "ui.messagePart.context.read.other": "{{count}} კითხულობს",
   "ui.messagePart.context.search.one": "{{count}} ძიება",

@@ -42,3 +42,10 @@
     animation-range: calc(100% - 1.1px) calc(100% - 1px);
   }
 }
+
+/* The message font applies to the composer editor and its children
+   (including the placeholder). --font-family-message is set by the
+   settings effect and falls back to the UI font when unconfigured. */
+[data-component="prompt-input-v2"] {
+  font-family: var(--font-family-message, var(--font-family-sans));
+}

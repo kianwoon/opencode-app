@@ -1,4 +1,8 @@
 import type { ModelMessage, ToolResultPart } from "ai"
+import { createHash } from "node:crypto"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
@@ -64,6 +68,8 @@ function sdkKey(npm: string): string | undefined {
       return "cerebras"
     case "@ai-sdk/cohere":
       return "cohere"
+    case "@ai-sdk/deepseek":
+      return "deepseek"
     case "@ai-sdk/deepinfra":
       return "deepinfra"
     case "@ai-sdk/groq":
@@ -301,8 +307,13 @@ function normalizeMessages(
     return result
   }
 
-  // Deepseek requires all assistant messages to have reasoning on them
-  if (model.api.id.toLowerCase().includes("deepseek")) {
+  // Deepseek requires all assistant messages to have reasoning on them.
+  // The dedicated @ai-sdk/deepseek provider already injects reasoning_content
+  // on assistant messages, so only apply this for the openai-compatible path.
+  if (
+    model.api.id.toLowerCase().includes("deepseek") &&
+    model.api.npm !== "@ai-sdk/deepseek"
+  ) {
     msgs = msgs.map((msg) => {
       if (msg.role !== "assistant") return msg
       if (Array.isArray(msg.content)) {
@@ -407,6 +418,63 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage
   return msgs
 }
 
+const MIME_EXTENSIONS: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "application/pdf": ".pdf",
+  "audio/mpeg": ".mp3",
+  "audio/mp4": ".m4a",
+  "audio/wav": ".wav",
+  "video/mp4": ".mp4",
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function attachmentBytes(part: { type: "file" | "image"; image?: unknown; data?: unknown }): Buffer | undefined {
+  const raw = part.type === "image" ? part.image : part.data
+  if (typeof raw === "string") {
+    if (/^https?:\/\//.test(raw)) return undefined
+    const base64 = raw.startsWith("data:") ? raw.slice(raw.indexOf(",") + 1) : raw
+    if (!base64) return undefined
+    const bytes = Buffer.from(base64, "base64")
+    return bytes.length > 0 ? bytes : undefined
+  }
+  if (raw instanceof Uint8Array) return Buffer.from(raw)
+  return undefined
+}
+
+function writeUnsupportedAttachment(input: {
+  part: { type: "file" | "image"; image?: unknown; data?: unknown }
+  mime: string
+  filename?: string
+}) {
+  const bytes = attachmentBytes(input.part)
+  if (!bytes) return undefined
+  try {
+    const dir = path.join(tmpdir(), "opencode")
+    mkdirSync(dir, { recursive: true })
+    // Content-hash naming keeps repeated provider turns idempotent: the same
+    // attachment re-lowered from history overwrites the same path instead of
+    // accumulating duplicates.
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16)
+    const ext =
+      MIME_EXTENSIONS[input.mime] ??
+      (input.filename?.includes(".") ? input.filename.slice(input.filename.lastIndexOf(".")) : undefined) ??
+      ".bin"
+    const file = path.join(dir, hash + ext)
+    writeFileSync(file, bytes)
+    return { path: file, bytes: bytes.length }
+  } catch {
+    return undefined
+  }
+}
+
 function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
   return msgs.map((msg) => {
     if (msg.role !== "user" || !Array.isArray(msg.content)) return msg
@@ -434,7 +502,19 @@ function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMes
       if (!modality) return part
       if (model.capabilities.input[modality]) return part
 
-      const name = filename ? `"${filename}"` : modality
+      // Bytes are not discarded: write them to a deterministic content-hashed
+      // path under <tmpdir>/opencode so the model can still act on the file
+      // (read tool, vision-capable MCP tool) even though this provider turn
+      // cannot accept the modality. Writes stay synchronous because this
+      // transform runs inside a synchronous lowering pipeline.
+      const saved = writeUnsupportedAttachment({ part, mime, filename })
+      const name = filename ? `"${filename}"` : `${modality} attachment`
+      if (saved) {
+        return {
+          type: "text" as const,
+          text: `Attachment ${name} (${mime}, ${formatBytes(saved.bytes)}) saved to ${saved.path}. The current model does not support ${modality} input — inspect the file at that path with a suitable tool if its content matters.`,
+        }
+      }
       return {
         type: "text" as const,
         text: `ERROR: Cannot read ${name} (this model does not support ${modality} input). Inform the user.`,
@@ -728,7 +808,9 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
   if (!model.capabilities.reasoning) return {}
 
   const id = model.id.toLowerCase()
-  const glm52 = ["glm-5.2", "glm-5-2", "glm-5p2"].some(
+  // GLM 5.2+ exposes native reasoning effort controls (high/max). GLM-5.3 keeps
+  // the same native effort semantics, so both are handled together.
+  const glmNativeEffort = ["glm-5.3", "glm-5-3", "glm-5p3", "glm-5.2", "glm-5-2", "glm-5p2"].some(
     (name) => id.includes(name) || model.api.id.toLowerCase().includes(name),
   )
   if (
@@ -748,20 +830,20 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
   }
   const adaptiveThinkingOmitted = anthropicOmitsThinking(model.api.id)
   const adaptiveEfforts = anthropicAdaptiveEfforts(model.api.id)
-  if (glm52 && model.api.npm === "@openrouter/ai-sdk-provider") {
-    // OpenRouter maps xhigh to GLM-5.2's native max effort.
+  if (glmNativeEffort && model.api.npm === "@openrouter/ai-sdk-provider") {
+    // OpenRouter maps xhigh to GLM-5.2/5.3's native max effort.
     return {
       high: { reasoning: { effort: "high" } },
       xhigh: { reasoning: { effort: "xhigh" } },
     }
   }
-  if (glm52 && model.api.npm === "@ai-sdk/openai-compatible") {
+  if (glmNativeEffort && model.api.npm === "@ai-sdk/openai-compatible") {
     return {
       high: { reasoningEffort: "high" },
       max: { reasoningEffort: "max" },
     }
   }
-  if (glm52 && model.api.npm === "@ai-sdk/anthropic") {
+  if (glmNativeEffort && model.api.npm === "@ai-sdk/anthropic") {
     return {
       high: { effort: "high" },
       max: { effort: "max" },
@@ -782,7 +864,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
     id.includes("deepseek-r1") ||
     id.includes("deepseek-v3") ||
     id.includes("minimax") ||
-    (id.includes("glm") && !glm52) ||
+    (id.includes("glm") && !glmNativeEffort) ||
     id.includes("kimi") ||
     id.includes("k2p") ||
     id.includes("qwen") ||
@@ -937,6 +1019,23 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
         efforts.push("max")
       }
       return Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
+
+    case "@ai-sdk/deepseek":
+      // DeepSeek supports a thinking toggle and per-model reasoning effort. Expose
+      // an explicit on/off toggle for deepseek-v4 (thinking enabled by default) plus
+      // the model's supported effort tiers so developers can control both dimensions.
+      if (model.api.id.toLowerCase().includes("deepseek-v4")) {
+        return {
+          none: { thinking: { type: "disabled" } },
+          ...Object.fromEntries(
+            [...WIDELY_SUPPORTED_EFFORTS, "max"].map((effort) => [
+              effort,
+              { thinking: { type: "enabled" }, reasoningEffort: effort },
+            ]),
+          ),
+        }
+      }
+      return {}
 
     case "@ai-sdk/azure":
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/azure
@@ -1189,6 +1288,16 @@ export function options(input: {
     }
     if (input.model.api.id.includes("gemini-3")) {
       result["reasoning"] = { effort: "high" }
+    }
+  }
+
+  // Provider-level routing preference for aggregator providers (OpenRouter).
+  // Config: provider.<id>.options.routing.sort = price | throughput | latency.
+  // Model-level options merge over this via mergeOptions, so per-model overrides still win.
+  if (input.model.api.npm === "@openrouter/ai-sdk-provider") {
+    const sort = input.providerOptions?.routing?.sort
+    if (sort === "price" || sort === "throughput" || sort === "latency") {
+      result["provider"] = { ...result["provider"], sort }
     }
   }
 
@@ -1657,9 +1766,19 @@ export function reasoningVariants(model: ModelsDev.Model, target: Provider.Model
   if (options.length === 0) return {}
 
   const effort = options.find((option) => option.type === "effort")
-  if (effort) return effortVariants(target, effort.values)
-
   const toggle = options.some((option) => option.type === "toggle")
+  if (effort) {
+    const efforts = effortVariants(target, effort.values)
+    // When a model exposes both a toggle and an effort scale (e.g. deepseek-v4),
+    // keep the toggle's off state alongside the effort tiers so developers can
+    // fully disable thinking rather than only scaling it.
+    if (toggle && efforts) {
+      const off = reasoningToggle(target)?.["none"]
+      return off ? { none: off, ...efforts } : efforts
+    }
+    return efforts
+  }
+
   const budget = options.find((option) => option.type === "budget_tokens")
   if (!budget) return toggle ? nonEmptyVariants(reasoningToggle(target)) : undefined
 
@@ -1709,6 +1828,11 @@ function reasoningToggle(model: Provider.Model): NonNullable<Provider.Model["var
       high: { enableThinking: true },
     }
   if (model.api.npm === "@ai-sdk/cohere")
+    return {
+      none: { thinking: { type: "disabled" } },
+      high: { thinking: { type: "enabled" } },
+    }
+  if (model.api.npm === "@ai-sdk/deepseek")
     return {
       none: { thinking: { type: "disabled" } },
       high: { thinking: { type: "enabled" } },
@@ -1774,6 +1898,8 @@ function reasoningEffort(model: Provider.Model, effort: string) {
     case "ai-gateway-provider":
     case "merge-gateway-ai-sdk-provider":
       return { reasoningEffort: effort }
+    case "@ai-sdk/deepseek":
+      return { thinking: { type: "enabled" }, reasoningEffort: effort }
     case "@ai-sdk/cohere":
     case "@ai-sdk/perplexity":
     case "@ai-sdk/vercel":

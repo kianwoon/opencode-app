@@ -15,10 +15,12 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { useLocal } from "../../context/local"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { Identifier } from "@opencode-ai/core/id/id"
 import { tint, useTheme } from "../../context/theme"
 import { EmptyBorder, SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { useClipboard } from "../../context/clipboard"
+import { missingImageClipboardTool } from "../../clipboard"
 import { Spinner } from "../spinner"
 import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
@@ -368,10 +370,9 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Paste",
+        title: "Paste from clipboard",
         name: "prompt.paste",
         category: "Prompt",
-        hidden: true,
         run: async (ctx: CommandContext<Renderable, KeyEvent>) => {
           ctx.event.preventDefault()
           ctx.event.stopPropagation()
@@ -386,6 +387,15 @@ export function Prompt(props: PromptProps) {
           }
           if (content?.mime === "text/plain") {
             await pasteInputText(content.data)
+            return
+          }
+          // Image-only clipboards are unreadable on Linux without wl-clipboard
+          // or xclip; surface the missing dependency instead of failing silently.
+          if (await missingImageClipboardTool()) {
+            toast.show({
+              message: "To paste images, install wl-clipboard (Wayland) or xclip (X11)",
+              variant: "info",
+            })
           }
         },
       },
@@ -1082,6 +1092,7 @@ export function Prompt(props: PromptProps) {
 
       void sdk.client.session.command({
         sessionID,
+        messageID: Identifier.ascending("message"),
         command: command.slice(1),
         arguments: args,
         agent: agent.name,
@@ -1091,11 +1102,16 @@ export function Prompt(props: PromptProps) {
       })
     } else {
       move.startSubmit()
+      // Stable per-submit message ID: the server upserts by message ID, so an
+      // accidental double-submit or transport-level retry of the same logical
+      // message converges on one stored entry instead of duplicating it.
+      const messageID = Identifier.ascending("message")
       sdk.client.session
         .prompt(
           {
             sessionID,
             ...selectedModel,
+            messageID,
             agent: agent.name,
             model: selectedModel,
             variant,
@@ -1110,13 +1126,17 @@ export function Prompt(props: PromptProps) {
           },
           { throwOnError: true },
         )
-        .catch((error) => {
-          toast.show({
-            title: "Failed to send prompt",
-            message: errorMessage(error),
-            variant: "error",
+          .catch((error) => {
+            // The server persists the message before running it, and the run
+            // may still fail after a re-drive attempt. The message is already
+            // in the timeline — say so instead of implying the send dropped it,
+            // which pushes users into resubmitting and duplicating the entry.
+            toast.show({
+              title: "Message saved, but the run failed",
+              message: errorMessage(error),
+              variant: "error",
+            })
           })
-        })
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({
@@ -1266,6 +1286,18 @@ export function Prompt(props: PromptProps) {
         draft.extmarkToPartIndex.set(extmarkId, partIndex)
       }),
     )
+    // Non-blocking heads-up: on send, the server saves unsupported media to a
+    // temp file path for the model to inspect instead of passing it through.
+    const current = local.model.current()
+    const capabilities = current
+      ? sync.data.provider.find((item) => item.id === current.providerID)?.models[current.modelID]?.capabilities
+      : undefined
+    if (capabilities && !capabilities.input.image && !pdf) {
+      toast.show({
+        message: "Current model can't view images. When sent, it is saved to a temp file path instead.",
+        variant: "info",
+      })
+    }
     return
   }
 

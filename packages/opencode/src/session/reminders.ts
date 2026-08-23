@@ -8,6 +8,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
+import { Todo } from "./todo"
 import PROMPT_PLAN from "./prompt/plan.txt"
 import BUILD_SWITCH from "./prompt/build-switch.txt"
 import PLAN_MODE from "./prompt/plan-mode.txt"
@@ -20,8 +21,39 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   const flags = yield* RuntimeFlags.Service
   const fsys = yield* FSUtil.Service
   const sessions = yield* Session.Service
+  const todos = yield* Todo.Service
   const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
   if (!userMessage) return input.messages
+
+  // Keep the todo list alive across turns: without re-injection the list drops
+  // out of the model's attention a few turns after it is written and stays
+  // stale forever (observed: 5-item list untouched through 177 subsequent
+  // turns). The reminder is a synthetic part, so it never persists as user
+  // content and never reaches the transcript.
+  const items = yield* todos.get(input.session.id)
+  if (items.some((item) => item.status !== "completed")) {
+    const list = items
+      .map((item) => {
+        const mark = item.status === "in_progress" ? "▸" : item.status === "completed" ? "✓" : " "
+        return `${mark} ${item.content}${item.status === "in_progress" ? " (in progress)" : ""}`
+      })
+      .join("\n")
+    userMessage.parts.push({
+      id: PartID.ascending(),
+      messageID: userMessage.info.id,
+      sessionID: userMessage.info.sessionID,
+      type: "text",
+      text: [
+        "<system-reminder>",
+        "The current todo list for this session is below. Keep it current: mark items completed as soon as they are done, set the active item in_progress, and clear or extend the list when the plan changes. Use the todowrite tool to update it.",
+        "<todo-list>",
+        list,
+        "</todo-list>",
+        "</system-reminder>",
+      ].join("\n"),
+      synthetic: true,
+    })
+  }
 
   if (!flags.experimentalPlanMode) {
     if (input.agent.name === "plan") {

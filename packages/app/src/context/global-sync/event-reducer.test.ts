@@ -135,6 +135,56 @@ describe("applyGlobalEvent", () => {
 })
 
 describe("applyDirectoryEvent", () => {
+  test("replaces todos wholesale on todo.updated without leaving holes when the list shrinks", () => {
+    // Regression: todos carry no `id`, so a keyed reconcile cannot match
+    // entries; shrinking lists used to leave null holes (stale counts,
+    // phantom rows). The reducer must replace the array.
+    const [store, setStore] = createStore(
+      baseState({
+        todo: {
+          ses_1: [
+            { content: "write code", status: "completed", priority: "high" },
+            { content: "run tests", status: "in_progress", priority: "high" },
+            { content: "update docs", status: "pending", priority: "medium" },
+          ],
+        },
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: {
+        type: "todo.updated",
+        properties: {
+          sessionID: "ses_1",
+          todos: [
+            { content: "write code", status: "completed", priority: "high" },
+            { content: "run tests", status: "completed", priority: "high" },
+          ],
+        },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.todo.ses_1).toHaveLength(2)
+    expect(store.todo.ses_1.every((todo) => todo != null)).toBe(true)
+    expect(store.todo.ses_1.every((todo) => todo.status === "completed")).toBe(true)
+
+    // Clearing the list must fully remove items.
+    applyDirectoryEvent({
+      event: { type: "todo.updated", properties: { sessionID: "ses_1", todos: [] } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+    expect(store.todo.ses_1).toHaveLength(0)
+  })
+
   test("initializes text delta accumulation from the current part text", () => {
     const part = { ...textPart("part", "session", "message"), text: "existing" }
     const [store, setStore] = createStore(baseState({ part: { message: [part] } }))

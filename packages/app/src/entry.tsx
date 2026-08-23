@@ -91,6 +91,26 @@ const restart: Platform["restart"] = async () => {
   window.location.reload()
 }
 
+const readClipboardImage: Platform["readClipboardImage"] = async () => {
+  // Async clipboard read is unavailable in some browsers (e.g. Firefox) and
+  // requires a secure context; absent support we simply report no image.
+  if (typeof navigator.clipboard?.read !== "function") return null
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.includes("image/png")
+        ? "image/png"
+        : item.types.find((value) => value.startsWith("image/"))
+      if (!type) continue
+      const blob = await item.getType(type)
+      const ext = type.slice("image/".length).split(";")[0] || "png"
+      return new File([blob], `pasted-image-${Date.now()}.${ext}`, { type: type.split(";")[0] })
+    }
+  } catch {
+    // Permission denied or clipboard unavailable; treat as no image.
+  }
+  return null
+}
+
 const root = document.getElementById("root")
 if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
   throw new Error(getRootNotFoundError())
@@ -123,6 +143,7 @@ const platform: Platform = {
   openExternal,
   restart,
   notify,
+  readClipboardImage,
   getDefaultServer: async () => {
     const stored = readDefaultServerUrl()
     return stored ? ServerConnection.Key.make(stored) : null

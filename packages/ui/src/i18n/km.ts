@@ -95,6 +95,7 @@ export const dict = {
   "ui.messagePart.review.title": "ពិនិត្យមើលចម្លើយរបស់អ្នក។",
   "ui.messagePart.questions.dismissed": "សំណួរត្រូវបានច្រានចោល",
   "ui.messagePart.compaction": "សម័យត្រូវបានបង្រួម",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} អាន",
   "ui.messagePart.context.read.other": "{{count}} អាន",
   "ui.messagePart.context.search.one": "ការស្វែងរក {{count}}",

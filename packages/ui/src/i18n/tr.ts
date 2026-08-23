@@ -101,6 +101,7 @@ export const dict = {
 
   "ui.messagePart.questions.dismissed": "Sorular kapatıldı",
   "ui.messagePart.compaction": "Oturum sıkıştırıldı",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} okuma",
   "ui.messagePart.context.read.other": "{{count}} okuma",
   "ui.messagePart.context.search.one": "{{count}} arama",

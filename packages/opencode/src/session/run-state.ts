@@ -11,6 +11,8 @@ import { SessionStatus } from "./status"
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  /** Wall-clock millis of the last `cancel` for the session; 0 when never cancelled. */
+  readonly lastCancelledAt: (sessionID: SessionID) => Effect.Effect<number>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -36,6 +38,7 @@ const layer = Layer.effect(
       Effect.fn("SessionRunState.state")(function* () {
         const scope = yield* Scope.Scope
         const runners = new Map<SessionID, Runner.Runner<SessionV1.WithParts>>()
+        const cancelledAt = new Map<SessionID, number>()
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
             yield* Effect.forEach(runners.values(), (runner) => runner.cancel, {
@@ -43,9 +46,10 @@ const layer = Layer.effect(
               discard: true,
             })
             runners.clear()
+            cancelledAt.clear()
           }),
         )
-        return { runners, scope }
+        return { runners, scope, cancelledAt }
       }),
     )
 
@@ -77,12 +81,18 @@ const layer = Layer.effect(
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
       yield* cancelBackgroundJobs(background, sessionID)
       const data = yield* InstanceState.get(state)
+      data.cancelledAt.set(sessionID, Date.now())
       const existing = data.runners.get(sessionID)
       if (!existing) {
         yield* status.set(sessionID, { type: "idle" })
         return
       }
       yield* existing.cancel
+    })
+
+    const lastCancelledAt = Effect.fn("SessionRunState.lastCancelledAt")(function* (sessionID: SessionID) {
+      const data = yield* InstanceState.get(state)
+      return data.cancelledAt.get(sessionID) ?? 0
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
@@ -104,7 +114,7 @@ const layer = Layer.effect(
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell })
+    return Service.of({ assertNotBusy, cancel, lastCancelledAt, ensureRunning, startShell })
   }),
 )
 

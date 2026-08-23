@@ -95,6 +95,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Pārskati savas atbildes",
   "ui.messagePart.questions.dismissed": "Jautājumi noraidīti",
   "ui.messagePart.compaction": "Sesija saspiesta",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} lasījums",
   "ui.messagePart.context.read.other": "{{count}} lasījumi",
   "ui.messagePart.context.read.zero": "{{count}} lasījumu",

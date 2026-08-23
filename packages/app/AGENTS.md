@@ -3,6 +3,24 @@
 - Prioritise, in this order: stability, simplicity, performance.
 - Before changing session or timeline code, record a production benchmark baseline and compare it after the change.
 
+## Model Visibility Semantics
+
+- `visible()` in `src/context/models.tsx` is the single source of truth for both the Settings → Models switches and the session model dropdown.
+- A provider is "manually curated" once `store.user` holds ANY explicit visibility entry (show or hide) for it — selecting a model also writes `show`. Untouched models of a curated provider are hidden; only explicit `show` entries appear.
+- Providers with no explicit entries keep smart defaults (recent "latest" releases, plus models without a valid release date — which is why uncurated OpenRouter shows many models).
+- Do not add a second visibility path for the dropdown; change `visible()` so settings switches and the dropdown can never disagree.
+
+## Paste Screenshot Gotchas
+
+- macOS surfaces copied images as `image/tiff` in `ClipboardEvent.clipboardData.items`; `ACCEPTED_IMAGE_TYPES` intentionally excludes TIFF (no provider accepts it on the wire). Never add `image/tiff` to the accepted set — convert to PNG instead.
+- Conversion happens via `platform.readClipboardImage()` (Electron IPC `clipboard.readImage().toPNG()` on desktop, `navigator.clipboard.read()` on web, defined in `src/entry.tsx`). In both `src/components/prompt-input/attachments.ts` and `@opencode-ai/session-ui` v2 attachments, the paste handler must retry through `readClipboardImage` when `clipboardData` files are REJECTED — an early `return` after `addAttachments(files)` makes the native fallback unreachable and reintroduces the "paste screenshot does nothing" bug. Acceptance guard: `attachments.test.ts` "retries rejected clipboard images through the native PNG reader".
+
+## Font Setting Gotchas
+
+- Composite utility classes like `.text-14-regular` set `font-family` themselves and appear LATER in the compiled CSS than Tailwind arbitrary classes, so a class-based font override on the same element loses the cascade. When applying a user-configurable font to an element that uses composite utilities (legacy composer editor/placeholder), pass the font through inline `style` — inline styles beat every cascade rule. This mirrors how `terminal.tsx` feeds `terminalFontFamily(...)` into xterm options. Acceptance guard: live CDP check that `getComputedStyle(composer).fontFamily` reflects the configured Message Font.
+- Every appearance setting needs BOTH an emitter and a consumer. Emitting `--font-family-message--weight/--color` without any CSS reading them makes the controls silently do nothing (this shipped once). New-layout rules can also hard-overwrite values at higher specificity (`body[data-new-layout] [data-component="user-message"] { font-weight: 440 }`) — parameterize those rules with the setting var instead of duplicating hardcoded values.
+- Desktop persists app settings in `~/Library/Application Support/ai.opencode.desktop/default.dat` (JSON-in-JSON, escaped quotes) — NOT localStorage. Read it when debugging whether a settings change saved.
+
 ## Debugging
 
 - NEVER try to restart the app, or the server process, EVER.
@@ -15,9 +33,21 @@
 - App (from `packages/app`): `bun dev -- --port 4444`
 - Open `http://localhost:4444` to verify UI changes (it targets the backend at `http://localhost:4096`).
 
+## SDK client shape gotcha
+
+- `@opencode-ai/sdk` is a workspace symlink; TypeScript resolves the BUILT `dist/v2` types, so newly generated SDK methods only appear in the app after `bun run build` in `packages/sdk/js`.
+- On `OpencodeClient`, v1 routes hang off `client.app.*` (e.g. `client.app.skill.remove` → `DELETE /skill/:name`) while v2 `/api/*` routes hang off `client.v2.*` (e.g. `client.v2.skill.remove` → `DELETE /api/skill/:name`). A getter directly on `OpencodeClient` is the legacy v1 surface.
+- `@opencode-ai/client` (the promise/effect `api.*` surface in `useServerSDK().api`) is a VENDORED tarball (`file:vendor/opencode-ai-client-*.tgz`); it does NOT gain newly added protocol endpoints until a new tarball is published and the dependency is bumped.
+
 ## SolidJS
 
 - Always prefer `createStore` over multiple `createSignal` calls
+
+## i18n parity gotcha
+
+- Adding a NEW key to `src/i18n/en.ts` is not enough: `src/i18n/parity.test.ts` fails unless the key also exists in EVERY locale file in `src/i18n/` (~60 files). New user-visible strings (dialogs, commands, placeholders) must be added and translated to all locales, positioned consistently (near the related key) so the parity test passes.
+- New plural families must use `.one`/`.other` suffixes in `en.ts` with `{{count}}` in BOTH, and the base key must be registered in the `PluralKey` union in `src/context/language.tsx`. Locales with extra CLDR plural categories (from `desktopNativePluralCategories`, e.g. `ru` needs `.few`/`.many`, `ar` needs `.zero`/`.two`/`.few`/`.many`, `sl` needs `.two`/`.few`) must carry those exact variants, and EVERY variant including duals like `ar`/`sl` `.two` must contain the `{{count}}` placeholder or the placeholder-parity test fails even when key parity passes.
+- The `bun test` suite from `packages/app` currently has PRE-EXISTING failures unrelated to feature work: the i18n parity test (missing `settings.general.row.fontWeight.*` / `sidebar.vacuum.*` keys added to en.ts but not yet translated) and a solid-js SSR `SyntaxError: Export named 'use' not found` in `src/context/comments.test.ts`. Verify whether a failure is caused by your change by checking the specific missing keys / files before chasing it.
 
 ## Localization
 

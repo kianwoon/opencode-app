@@ -73,6 +73,7 @@ const api: ElectronAPI = {
   storeClear: (name) => ipcRenderer.invoke("store-clear", name),
   storeKeys: (name) => ipcRenderer.invoke("store-keys", name),
   storeLength: (name) => ipcRenderer.invoke("store-length", name),
+  vacuumDatabase: () => ipcRenderer.invoke("vacuum-database"),
   draftGet: (key) => ipcRenderer.invoke("draft-get", key),
   draftSet: (key, value) => ipcRenderer.invoke("draft-set", key, value),
   draftDelete: (key) => ipcRenderer.invoke("draft-delete", key),
@@ -133,6 +134,16 @@ const api: ElectronAPI = {
   setForceFocus: (enabled) => ipcRenderer.invoke("set-force-focus", enabled),
   recordFatalRendererError: (error) => ipcRenderer.invoke("record-fatal-renderer-error", error),
   setNativeTranslations: (bundle) => ipcRenderer.invoke("set-native-translations", bundle),
+  onMemoryPressure: (cb) => {
+    const handler = () => cb()
+    ipcRenderer.on("memory-pressure", handler)
+    return () => ipcRenderer.removeListener("memory-pressure", handler)
+  },
+  onToast: (cb) => {
+    const handler = (_: unknown, key: string) => cb(key)
+    ipcRenderer.on("show-toast", handler)
+    return () => ipcRenderer.removeListener("show-toast", handler)
+  },
 }
 
 contextBridge.exposeInMainWorld("api", api)

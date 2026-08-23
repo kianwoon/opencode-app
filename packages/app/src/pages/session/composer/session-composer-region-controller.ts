@@ -113,6 +113,13 @@ export function createSessionComposerRegionController(input: {
     () => `${input.sessionKey()}\0${store.ready}`,
   )
   const value = createMemo(() => Math.max(0, Math.min(1, progress())))
+  // Springs asymptote and can hover just above any small threshold forever
+  // (observed stuck at ~0.00106 > 0.001, keeping the dock mounted indefinitely
+  // after its close animation). Snap the tail to zero so the dock unmounts.
+  const settled = createMemo(() => {
+    const v = value()
+    return v < 0.01 ? 0 : v
+  })
   const ready = Promise.resolve()
   const [promptReady] = createResource(
     () => input.prompt.ready.promise ?? ready,
@@ -134,8 +141,8 @@ export function createSessionComposerRegionController(input: {
     showComposer: () => !input.state.blocked() || !!parentID(),
     handoffPrompt: () => getSessionHandoff(input.sessionKey())?.prompt,
     promptReady: () => input.prompt.ready() || promptReady(),
-    dock: () => (store.ready && input.state.dock()) || value() > 0.001,
-    dockProgress: value,
+    dock: () => (store.ready && input.state.dock()) || settled() > 0.001,
+    dockProgress: settled,
     dockHeight: () => Math.max(78, store.height),
     lift: () => (input.revert()?.items.length ? 18 : 36 * value()),
     setDockBodyRef: (el: HTMLDivElement) => setStore("body", el),

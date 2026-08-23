@@ -96,6 +96,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Javoblaringizni ko'rib chiqing",
   "ui.messagePart.questions.dismissed": "Savollar bekor qilindi",
   "ui.messagePart.compaction": "Seans siqildi",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} o'qildi",
   "ui.messagePart.context.read.other": "{{count}} o'qiydi",
   "ui.messagePart.context.search.one": "{{count}} qidiruvi",

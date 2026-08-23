@@ -1,5 +1,6 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
+import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
@@ -11,6 +12,7 @@ import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
+import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -28,6 +30,64 @@ const PROVIDER_NOTES = [
 ] as const
 
 const PROVIDER_ICON_SIZE = 16
+
+type RoutingSort = "price" | "throughput" | "latency"
+
+const ROUTING_SORTS: RoutingSort[] = ["price", "throughput", "latency"]
+
+// OpenRouter can route each request to one of many backing providers; the
+// sort preference is written to provider.openrouter.options.routing.sort and
+// injected into every OpenRouter request server-side.
+const OpenRouterRoutingSection: Component = () => {
+  const language = useLanguage()
+  const serverSync = useServerSync()
+
+  const routingOptions: { value: "default" | RoutingSort; label: () => string }[] = [
+    { value: "default", label: () => language.t("common.default") },
+    ...ROUTING_SORTS.map((sort) => ({
+      value: sort as "default" | RoutingSort,
+      label: () => language.t(`settings.providers.routing.${sort}`),
+    })),
+  ]
+
+  const currentSort = (): RoutingSort | undefined => {
+    const routing = serverSync().data.config.provider?.openrouter?.options?.routing as { sort?: unknown } | undefined
+    return ROUTING_SORTS.find((sort) => sort === routing?.sort)
+  }
+
+  const setRoutingSort = async (sort: RoutingSort | undefined) => {
+    await serverSync()
+      .updateConfig({ provider: { openrouter: { options: { routing: sort ? { sort } : {} } } } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
+  return (
+    <div class="settings-v2-section" data-component="openrouter-routing-section">
+      <h3 class="settings-v2-section-title">{language.t("settings.providers.section.routing")}</h3>
+      <SettingsListV2>
+        <SettingsRowV2
+          title={language.t("settings.providers.routing.title")}
+          description={language.t("settings.providers.routing.description")}
+        >
+          <SelectV2
+            appearance="inline"
+            data-action="settings-openrouter-routing"
+            options={routingOptions}
+            current={routingOptions.find((option) => option.value === (currentSort() ?? "default"))}
+            placement="bottom-end"
+            gutter={6}
+            value={(option) => option.value}
+            label={(option) => option.label()}
+            onSelect={(option) => option && void setRoutingSort(option.value === "default" ? undefined : option.value)}
+          />
+        </SettingsRowV2>
+      </SettingsListV2>
+    </div>
+  )
+}
 
 export const SettingsProvidersV2: Component<{
   directory: Accessor<string | undefined>
@@ -191,6 +251,10 @@ export const SettingsProvidersV2: Component<{
             </Show>
           </SettingsListV2>
         </div>
+
+        <Show when={connected().some((p) => p.id === "openrouter")}>
+          <OpenRouterRoutingSection />
+        </Show>
 
         <div class="settings-v2-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.popular")}</h3>

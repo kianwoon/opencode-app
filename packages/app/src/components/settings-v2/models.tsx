@@ -28,6 +28,16 @@ export const SettingsModelsV2: Component = () => {
     createStore({ collapsed: {} as Record<string, boolean> }),
   )
 
+  const providerModels = (providerID: string) => models.list().filter((x) => x.provider.id === providerID)
+  const providerAnyVisible = (providerID: string) =>
+    providerModels(providerID).some((x) => models.visible({ providerID: x.provider.id, modelID: x.id }))
+  // Any hidden model turns everything on; only an all-visible provider turns everything off.
+  const setProviderVisibility = (providerID: string) => {
+    const items = providerModels(providerID)
+    const next = !items.every((x) => models.visible({ providerID: x.provider.id, modelID: x.id }))
+    items.forEach((x) => models.setVisibility({ providerID: x.provider.id, modelID: x.id }, next))
+  }
+
   const list = useFilteredList<ModelItem>({
     items: (_filter) => models.list(),
     key: (x) => `${x.provider.id}:${x.id}`,
@@ -150,6 +160,14 @@ export const SettingsModelsV2: Component = () => {
                           <span class="settings-v2-section-title">{group.items[0].provider.name}</span>
                         </span>
                       </button>
+                      <Switch
+                        class="settings-v2-models-group-toggle"
+                        checked={providerAnyVisible(group.category)}
+                        onChange={() => setProviderVisibility(group.category)}
+                        hideLabel
+                      >
+                        {language.t("dialog.model.manage.provider.toggle", { provider: group.items[0].provider.name })}
+                      </Switch>
                     </h3>
                     <Show when={expanded()}>
                       <SettingsListV2>

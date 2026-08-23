@@ -109,3 +109,21 @@ export class PtyNotFoundError extends Schema.TaggedErrorClass<PtyNotFoundError>(
   },
   { httpApiStatus: 404 },
 ) {}
+
+export class SkillNotFoundError extends Schema.TaggedErrorClass<SkillNotFoundError>()(
+  "SkillNotFoundError",
+  {
+    skill: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
+export class SkillNotRemovableError extends Schema.TaggedErrorClass<SkillNotRemovableError>()(
+  "SkillNotRemovableError",
+  {
+    skill: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 400 },
+) {}

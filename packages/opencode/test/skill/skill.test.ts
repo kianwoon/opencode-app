@@ -583,3 +583,61 @@ description: A skill in the .opencode/skills directory.
     ),
   )
 })
+
+describe("skill remove", () => {
+  it.live("removes a file-backed skill and invalidates the cache", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, ".opencode", "skill", "removable-skill", "SKILL.md"),
+              `---
+name: removable-skill
+description: A skill that will be removed.
+---
+
+# Removable Skill
+`,
+            ),
+          )
+
+          const skill = yield* Skill.Service
+          expect((yield* skill.get("removable-skill"))?.description).toBe("A skill that will be removed.")
+
+          const removed = yield* skill.remove("removable-skill")
+          expect(removed.name).toBe("removable-skill")
+
+          expect(yield* skill.get("removable-skill")).toBeUndefined()
+          const stat = yield* Effect.promise(() => fs.stat(path.join(dir, ".opencode", "skill", "removable-skill")).catch(() => undefined))
+          expect(stat).toBeUndefined()
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live("rejects removing the built-in skill", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const skill = yield* Skill.Service
+          const error = yield* skill.remove("customize-opencode").pipe(Effect.flip)
+          expect(error._tag).toBe("Skill.NotRemovableError")
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live("rejects removing an unknown skill", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const skill = yield* Skill.Service
+          const error = yield* skill.remove("does-not-exist").pipe(Effect.flip)
+          if (error._tag !== "Skill.NotFoundError") throw new Error(`expected NotFoundError, got ${error._tag}`)
+          expect(error.available).toContain("customize-opencode")
+        }),
+      { git: true },
+    ),
+  )
+})

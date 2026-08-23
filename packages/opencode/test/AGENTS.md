@@ -1,5 +1,29 @@
 # Test Fixtures Guide
 
+## Global Config Isolation (READ BEFORE DEBUGGING PROVIDER FAILURES)
+
+If tests fail with `ProviderAuthError` mentioning your real providers (deepseek, etc.), the
+developer's machine-global opencode config is leaking into the test runtime. Root causes:
+
+- `@opentui/solid/preload` runs before `test/preload.ts` and can transitively import
+  `xdg-basedir`, freezing the real `~/.config` / `~/.local/state` paths before the env
+  vars are set. `Provider.defaultModel()` then reads a real `model.json` (recent models)
+  and agent config from the user's global config.
+- It is order- and machine-dependent: whole files of tests can fail in isolation but pass
+  in a full run (or vice versa), and always fail identically on the clean tree.
+
+To verify a test is correct regardless of the leak, isolate the global config dir:
+
+```sh
+TMP_GLOBAL=$(mktemp -d) && echo '{"$schema":"https://opencode.ai/config.json"}' > "$TMP_GLOBAL/opencode.json"
+OPENCODE_CONFIG_DIR="$TMP_GLOBAL" bun test test/session/prompt.test.ts -t "<test name>"
+```
+
+A test that passes under `OPENCODE_CONFIG_DIR` isolation but fails without it is
+environmental, not broken. When writing new prompt-loop e2e tests, pin
+`model: "test/test-model"` (and `agent.build.model` in the harness config) so child
+subagent sessions cannot inherit a machine-global default provider.
+
 ## Temporary Directory Fixture
 
 The `tmpdir` function in `fixture/fixture.ts` creates temporary directories for tests with automatic cleanup.

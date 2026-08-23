@@ -16,9 +16,12 @@ export const todoState = (input: {
   live: boolean
 }): "hide" | "clear" | "open" | "close" => {
   if (input.count === 0) return "hide"
+  // Completed lists persist as durable history: hide the dock without wiping
+  // them, so re-entering or new busy turns show the finished list via the
+  // graceful close path instead of re-opening it every message.
+  if (input.done) return input.live ? "close" : "hide"
   if (!input.live) return "clear"
-  if (!input.done) return "open"
-  return "close"
+  return "open"
 }
 
 export const todoDockAtBoundary = (state: ReturnType<typeof todoState>) => state === "open"
@@ -94,6 +97,15 @@ export function createSessionComposerController(options?: { closeMs?: number | (
 
   let timer: number | undefined
   let raf: number | undefined
+  // The completed-close ceremony (hold the checked list, then fade) is for a
+  // list that JUST finished. A list that was already complete when the turn
+  // started must not re-pop the dock on every subsequent busy transition.
+  // `celebrated` marks "this completion has been shown (or was stale)".
+  // `seenOpenWork` tracks whether genuinely unfinished todos were observed
+  // during this view's lifetime — a completed list arriving without any prior
+  // open work (late fetch after page load) is stale and never celebrates.
+  let celebrated = false
+  let seenOpenWork = false
 
   const closeMs = () => {
     const value = options?.closeMs
@@ -102,12 +114,28 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     return 400
   }
 
+  // How long the completed list stays fully visible before the close animation
+  // starts. Without this hold, the spring begins fading the dock the instant
+  // every todo completes, so the checked state is never readable.
+  const completedHoldMs = () => Math.max(closeMs(), 1600)
+
   const scheduleClose = () => {
     if (timer) window.clearTimeout(timer)
     timer = window.setTimeout(() => {
       setStore({ dock: false, closing: false })
       timer = undefined
     }, closeMs())
+  }
+
+  const scheduleCompletedClose = () => {
+    if (timer) window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      setStore("closing", true)
+      timer = window.setTimeout(() => {
+        setStore({ dock: false, closing: false })
+        timer = undefined
+      }, closeMs())
+    }, completedHoldMs())
   }
 
   // Keep stale turn todos from reopening if the model never clears them.
@@ -133,12 +161,31 @@ export function createSessionComposerController(options?: { closeMs?: number | (
         if (!previous || previous[0] !== id) {
           if (timer) window.clearTimeout(timer)
           timer = undefined
+          // Boundary (page load / session switch): a list observed complete
+          // here is stale history — arm the flag so the first busy turn stays
+          // silent. Genuinely open work observed here disarms, and late
+          // arrivals of already-complete lists (todos fetched after this run)
+          // stay stale via `seenOpenWork`.
+          celebrated = complete
+          seenOpenWork = false
           setStore({ sessionID: id, dock: todoDockAtBoundary(next), closing: false, opening: false })
           if (next === "clear") clear()
           return
         }
 
+        if (next === "open") {
+          celebrated = false
+          seenOpenWork = true
+        }
+
         if (next === "hide") {
+          // A list that is already complete while idle never re-celebrates:
+          // hide arms the flag (completion landed outside a live turn) instead
+          // of leaving it disarmed for the next busy transition.
+          if (complete) {
+            celebrated = true
+            seenOpenWork = false
+          }
           if (timer) window.clearTimeout(timer)
           timer = undefined
           setStore({ dock: false, closing: false, opening: false })
@@ -169,8 +216,22 @@ export function createSessionComposerController(options?: { closeMs?: number | (
           return
         }
 
-        setStore({ dock: true, opening: false, closing: true })
-        if (!timer) scheduleClose()
+        // "close": the list is complete while live. Celebrate only a genuine
+        // completion — unfinished work was observed earlier in this view and
+        // has now finished. A completed list that arrived without any prior
+        // open work (late fetch after page load, refetch churn) is stale
+        // history and stays hidden.
+        if (celebrated || !seenOpenWork) {
+          celebrated = true
+          if (timer) window.clearTimeout(timer)
+          timer = undefined
+          setStore({ dock: false, closing: false, opening: false })
+          return
+        }
+        celebrated = true
+        seenOpenWork = false
+        setStore({ dock: true, opening: false, closing: false })
+        scheduleCompletedClose()
       },
     ),
   )

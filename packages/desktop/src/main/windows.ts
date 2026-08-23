@@ -53,6 +53,9 @@ let relaunchHandler = () => {
 const titlebarThemes = new WeakMap<BrowserWindow, Partial<TitlebarTheme>>()
 const pinchZoomEnabled = new WeakMap<BrowserWindow, boolean>()
 const windowIDs = new WeakMap<BrowserWindow, string>()
+// Tracks windows we already auto-reloaded once after an out-of-memory crash,
+// so a second crash falls back to the full recovery dialog.
+const autoReloadedWindows = new WeakSet<BrowserWindow>()
 const registry = createWindowRegistry<BrowserWindow>({
   read: () => getStore().get(WINDOW_IDS_KEY),
   write: (ids) => getStore().set(WINDOW_IDS_KEY, ids),
@@ -64,6 +67,9 @@ const registry = createWindowRegistry<BrowserWindow>({
 const titlebarHeight = 40
 const maxZoomLevel = 10
 const minZoomLevel = 0.2
+// Each zoom step changes the webview zoom factor by 0.01 (~0.1px on a 14px
+// base font), so font-size adjustments step by roughly 1/10px per press.
+export const ZOOM_STEP = 0.01
 
 export function setRelaunchHandler(handler: () => void) {
   relaunchHandler = handler
@@ -442,6 +448,15 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   win.webContents.on("render-process-gone", (_event, details) => {
     sampler.stopAndFlush()
     writeLog("window", "renderer process gone", { window: name, currentURL: safeWindowURL(win), details }, "error")
+    if (details.reason === "oom" && !win.isDestroyed() && !autoReloadedWindows.has(win)) {
+      autoReloadedWindows.add(win)
+      writeLog("window", "auto-reloading renderer after oom", { window: name }, "warn")
+      win.webContents.once("did-finish-load", () => {
+        if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("show-toast", "memory.recovered")
+      })
+      win.webContents.reload()
+      return
+    }
     void show(
       nativeT("desktop.recovery.terminated"),
       nativeT("desktop.recovery.terminated.detail", {
@@ -520,12 +535,11 @@ function wireZoom(win: BrowserWindow) {
   win.webContents.setZoomFactor(1)
   win.webContents.on("zoom-changed", (event, zoomDirection) => {
     event.preventDefault()
-    if (pinchZoomEnabled.get(win)) {
-      win.webContents.setZoomFactor(clampZoom(win.webContents.getZoomFactor() + (zoomDirection === "in" ? 0.2 : -0.2)))
-      updateZoom(win)
-      return
-    }
-    if (win.webContents.getZoomFactor() !== 1) win.webContents.setZoomFactor(1)
+    // zoom-changed fires for trackpad pinch and mouse-wheel zoom gestures.
+    // Keyboard Ctrl+= / Cmd+= is routed through the app menu accelerators
+    // (view.zoomIn / view.zoomOut), which step by ZOOM_STEP too. A programmatic
+    // setZoomFactor does not re-emit zoom-changed, so there is no feedback loop.
+    win.webContents.setZoomFactor(clampZoom(win.webContents.getZoomFactor() + (zoomDirection === "in" ? ZOOM_STEP : -ZOOM_STEP)))
     updateZoom(win)
   })
 }

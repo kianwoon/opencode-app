@@ -66,7 +66,7 @@
   font-feature-settings: var(--font-feature-settings-mono);
   font-size: var(--font-size-small);
   font-style: normal;
-  font-weight: var(--font-weight-regular);
+  font-weight: var(--font-family-mono--font-weight, var(--font-weight-regular));
   line-height: var(--line-height-large); /* 166.667% */
   letter-spacing: var(--letter-spacing-normal);
 }
@@ -94,7 +94,7 @@
   font-feature-settings: var(--font-feature-settings-mono);
   font-size: var(--font-size-base);
   font-style: normal;
-  font-weight: var(--font-weight-regular);
+  font-weight: var(--font-family-mono--font-weight, var(--font-weight-regular));
   line-height: var(--line-height-large); /* 171.429% */
   letter-spacing: var(--letter-spacing-normal);
 }

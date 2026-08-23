@@ -43,6 +43,30 @@ describe("VariantPlugin", () => {
     }),
   )
 
+  it.effect("adds GLM 5.3 variants after catalog sources", () =>
+    Effect.gen(function* () {
+      const service = yield* Catalog.Service
+      yield* service.transform((catalog) => {
+        catalog.provider.update(ProviderV2.ID.opencode, (provider) => {
+          provider.api = { type: "aisdk", package: "@ai-sdk/openai-compatible" }
+        })
+        catalog.model.update(ProviderV2.ID.opencode, ModelV2.ID.make("glm-5.3"), (model) => {
+          model.api = {
+            id: ModelV2.ID.make("glm-5.3"),
+            type: "aisdk",
+            package: "@ai-sdk/openai-compatible",
+          }
+        })
+      })
+      yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) }))
+
+      expect((yield* service.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("glm-5.3")))?.variants).toEqual([
+        expect.objectContaining({ id: "high", body: { reasoning_effort: "high" } }),
+        expect.objectContaining({ id: "max", body: { reasoning_effort: "max" } }),
+      ])
+    }),
+  )
+
   it.effect("keeps explicit variants over generated defaults", () =>
     Effect.gen(function* () {
       const service = yield* Catalog.Service

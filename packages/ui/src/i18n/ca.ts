@@ -95,6 +95,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Revisa les teves respostes",
   "ui.messagePart.questions.dismissed": "Preguntes desestimades",
   "ui.messagePart.compaction": "Sessió compactada",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} llegir",
   "ui.messagePart.context.read.other": "{{count}} llegeix",
   "ui.messagePart.context.read.many": "{{count}} lectures",

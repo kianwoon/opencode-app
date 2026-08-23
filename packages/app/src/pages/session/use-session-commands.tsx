@@ -27,6 +27,7 @@ export type SessionCommandContext = {
   focusInput: () => void
   review?: () => boolean
   fileBrowser?: () => boolean
+  revealMessage?: (id: string) => void
 }
 
 const withCategory = (category: string) => {
@@ -419,6 +420,30 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     )
   }
 
+  const search = () => {
+    const id = params.id
+    if (!id) return
+    void openDialog(
+      () => import("@/components/dialog-search"),
+      (x) =>
+        dialog.show(() => (
+          <x.DialogSearch
+            onSelect={(item) => {
+              // Assistant parts are grouped under their parent user message turn, so
+              // resolve the owning user message before scrolling.
+              const messages = sync().data.message[id] ?? []
+              let target = item.id
+              const message = messages.find((m) => m.id === item.id)
+              if (message && message.role === "assistant" && message.parentID) {
+                target = message.parentID
+              }
+              actions.revealMessage?.(target)
+            }}
+          />
+        )),
+    )
+  }
+
   const shareCmds = () => {
     if (sync().data.config.share === "disabled") return []
     return [
@@ -488,6 +513,15 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       slash: "fork",
       disabled: !params.id || visibleUserMessages().length === 0,
       onSelect: fork,
+    }),
+    sessionCommand({
+      id: "session.search",
+      title: language.t("command.session.search"),
+      description: language.t("command.session.search.description"),
+      keybind: "mod+shift+f",
+      slash: "search",
+      disabled: !params.id,
+      onSelect: search,
     }),
     sessionCommand({
       id: "session.export",

@@ -1,7 +1,7 @@
 export * as SystemContextBuiltIns from "./builtins"
 
 import { makeLocationNode } from "../effect/app-node"
-import { DateTime, Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { Location } from "../location"
 import { SystemContext } from "./index"
 import { InstructionContext } from "../instruction-context"
@@ -29,13 +29,6 @@ const builtIns = Layer.effectDiscard(
         baseline: (environment) =>
           ["Here is some useful information about the environment you are running in:", environment].join("\n"),
         update: (_previous, environment) => ["The environment you are running in is now:", environment].join("\n"),
-      }),
-      SystemContext.make({
-        key: SystemContext.Key.make("core/date"),
-        codec: Schema.toCodecJson(Schema.String),
-        load: DateTime.nowAsDate.pipe(Effect.map((date) => date.toDateString())),
-        baseline: (date) => `Today's date: ${date}`,
-        update: (_previous, date) => `Today's date is now: ${date}`,
       }),
     ])
 

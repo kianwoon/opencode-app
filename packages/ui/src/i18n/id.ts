@@ -101,6 +101,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Tinjau jawaban Anda",
   "ui.messagePart.questions.dismissed": "Pertanyaan ditutup",
   "ui.messagePart.compaction": "Sesi diringkas",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} pembacaan",
   "ui.messagePart.context.read.other": "{{count}} pembacaan",
   "ui.messagePart.context.search.one": "{{count}} pencarian",

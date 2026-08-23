@@ -130,6 +130,20 @@ const layer: Layer.Layer<
             break
           }
         }
+        // Surface every nested AGENTS.md below the project root so package-level
+        // guides (e.g. packages/desktop/AGENTS.md) are visible to the model even
+        // before it touches that subtree. Without this, the agent can only learn
+        // about a nested guide by reading a file there — it cannot know what it
+        // does not know. Only AGENTS.md is globbed (CLAUDE.md is convention-only
+        // at the root); node_modules is pruned by the glob dot:false + the
+        // consumer's ignore rules.
+        const nested = yield* fs
+          .glob("**/AGENTS.md", { cwd: ctx.directory, absolute: true, include: "file", dot: true })
+          .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+        for (const item of nested) {
+          const resolved = path.resolve(item)
+          if (!resolved.includes(`${path.sep}node_modules${path.sep}`)) paths.add(resolved)
+        }
       }
 
       if (config.instructions) {
@@ -191,7 +205,10 @@ const layer: Layer.Layer<
       let current = path.dirname(target)
 
       // Walk upward from the file being read and attach nearby instruction files once per message.
-      while (current.startsWith(root) && current !== root) {
+      // In-project paths stop at the instance root; external paths walk to the
+      // filesystem root (bounded, so we never scan above the drive).
+      while (current !== root && current !== path.dirname(current)) {
+        if (current.startsWith(root) && current === root) break
         const found = yield* find(current)
         if (!found || found === target || sys.has(found) || already.has(found)) {
           current = path.dirname(current)

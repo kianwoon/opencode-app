@@ -12,6 +12,7 @@ import { Filesystem } from "@/util/filesystem"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
 import { Agent } from "../../src/agent/agent"
+import { Instruction } from "../../src/session/instruction"
 import { Truncate } from "@/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -31,6 +32,7 @@ const shellLayer = Layer.mergeAll(
       Truncate.node,
       Config.node,
       Agent.node,
+      Instruction.node,
       RuntimeFlags.node,
     ]),
   ),
@@ -113,11 +115,13 @@ const cmdShell = shells.find((item) => item.label === "cmd")
 const sh = () => Shell.name(Shell.acceptable())
 const evalarg = (text: string) => (sh() === "cmd" ? quote(text) : squote(text))
 
-const fill = (mode: "lines" | "bytes", n: number) => {
+const fill = (mode: "lines" | "bytes" | "bytes-newline", n: number) => {
   const code =
     mode === "lines"
       ? "console.log(Array.from({length:Number(Bun.argv[1])},(_,i)=>i+1).join(String.fromCharCode(10)))"
-      : "process.stdout.write(String.fromCharCode(97).repeat(Number(Bun.argv[1])))"
+      : mode === "bytes-newline"
+        ? "process.stdout.write(String.fromCharCode(97).repeat(Number(Bun.argv[1]))+String.fromCharCode(10))"
+        : "process.stdout.write(String.fromCharCode(97).repeat(Number(Bun.argv[1])))"
   const text = `${bin} -e ${evalarg(code)} ${n}`
   if (PS.has(sh())) return `& ${text}`
   return text
@@ -190,6 +194,21 @@ describe("tool.shell", () => {
         })
         expect(result.metadata.exit).toBe(0)
         expect(result.metadata.output).toContain("test")
+      }),
+    ),
+  )
+
+  each("multi-line commands capture all output", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        const result = yield* run({
+          command: 'echo "first"\necho "second"\necho "third"',
+        })
+        expect(result.metadata.exit).toBe(0)
+        expect(result.output).toContain("first")
+        expect(result.output).toContain("second")
+        expect(result.output).toContain("third")
       }),
     ),
   )
@@ -1162,6 +1181,22 @@ describe("tool.shell truncation", () => {
     ),
   )
 
+  it.live("keeps a tail when the oversized line ends with a newline", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        const byteCount = Truncate.MAX_BYTES + 10000
+        const result = yield* run({
+          command: fill("bytes-newline", byteCount),
+        })
+        mustTruncate(result)
+        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
+        expect(result.output).not.toContain("(no output)")
+        expect(result.output).toContain("a".repeat(1000))
+      }),
+    ),
+  )
+
   it.live("does not truncate small output", () =>
     runIn(
       projectRoot,
@@ -1195,5 +1230,37 @@ describe("tool.shell truncation", () => {
         expect(lines[lineCount - 1]).toBe(String(lineCount))
       }),
     ),
+  )
+
+  it.live("attaches AGENTS.md guidance from an external directory on bash calls", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const outer = yield* tmpdirScoped()
+      // Create an external directory (outside the instance root) with its own
+      // AGENTS.md. In-project nested guides are already surfaced by
+      // systemPaths, so bash attachment covers the external case.
+      const guide = "# External package notes\n\n- OPENCODE_CHANNEL=prod is required for packaging.\n"
+      yield* (yield* FSUtil.Service).writeFileString(path.join(outer, "AGENTS.md"), guide)
+
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const bash = yield* initBash()
+          const result = yield* bash.execute(
+            {
+              command: "echo packaged",
+              workdir: outer,
+            },
+            ctx,
+          )
+          expect(result.metadata.exit).toBe(0)
+          expect(result.output).toContain("packaged")
+          // The external AGENTS.md must be surfaced as a system-reminder.
+          expect(result.output).toContain("OPENCODE_CHANNEL=prod")
+          expect(result.output).toContain("<system-reminder>")
+          expect((result.metadata as { loaded?: string[] }).loaded).toContain(path.join(outer, "AGENTS.md"))
+        }),
+      )
+    }),
   )
 })

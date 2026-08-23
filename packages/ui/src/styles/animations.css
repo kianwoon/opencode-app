@@ -1,12 +1,23 @@
 :root {
   --animate-pulse: pulse-opacity 2s ease-in-out infinite;
   --animate-pulse-scale: pulse-scale 1.2s ease-in-out infinite;
+  --animate-status-blink: status-blink 1s ease-in-out infinite;
 }
 
 @keyframes pulse-opacity {
   0%,
   100% {
     opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes status-blink {
+  0%,
+  100% {
+    opacity: 0.15;
   }
   50% {
     opacity: 1;

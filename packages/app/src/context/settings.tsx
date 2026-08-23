@@ -45,6 +45,19 @@ export interface Settings {
     mono: string
     sans: string
     terminal: string
+    uiFontWeight: number
+    codeFontWeight: number
+    terminalFontWeight: number
+    uiFontColorLight: string
+    uiFontColorDark: string
+    codeFontColorLight: string
+    codeFontColorDark: string
+    terminalFontColorLight: string
+    terminalFontColorDark: string
+    message: string
+    messageFontWeight: number
+    messageFontColorLight: string
+    messageFontColorDark: string
   }
   keybinds: Record<string, string>
   permissions: {
@@ -57,6 +70,7 @@ export interface Settings {
 export const monoDefault = "System Mono"
 export const sansDefault = "System Sans"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
+export const messageDefault = "System Sans"
 const legacyNewLayoutDesignsDefault = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 export const newLayoutDesignsDefault = true
 // Existing users can switch layouts until local midnight on this date. Set new Date(YYYY, M-1, D) to show.
@@ -150,10 +164,38 @@ function family(font: string) {
   return `"${font.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
 }
 
-function stack(font: string | undefined, base: string) {
+// macOS installs many per-weight fonts (IBM Plex, SF Mono, etc.) as separate
+// families: "IBM Plex Mono Light" is its own family and `font-weight: 300` on
+// "IBM Plex Mono" does NOT select it. To honor the weight control for those
+// fonts we prepend weight-qualified family names to the stack; the browser
+// matches the first one that exists and otherwise falls back to the base
+// family with the requested `font-weight` (variable fonts still work).
+const WEIGHT_FAMILY_SUFFIXES: Record<number, string[]> = {
+  100: ["Thin", "UltraLight"],
+  200: ["ExtraLight", "Extra Light"],
+  300: ["Light"],
+  400: ["Regular", "Book"],
+  500: ["Medium"],
+  600: ["SemiBold", "Semi-Bold", "DemiBold", "Semibold"],
+  700: ["Bold"],
+  800: ["ExtraBold", "Extra Bold", "Heavy"],
+  900: ["Black", "Heavy"],
+}
+
+export function weightFamilyNames(font: string, weightValue: number) {
+  const base = font.trim()
+  if (!base) return []
+  const suffixes = WEIGHT_FAMILY_SUFFIXES[weightValue]
+  if (!suffixes || weightValue === 400) return []
+  return suffixes.map((suffix) => `${base} ${suffix}`)
+}
+
+function stack(font: string | undefined, base: string, weightValue?: number) {
   const value = font?.trim() ?? ""
   if (!value) return base
-  return `${family(value)}, ${base}`
+  const weighted = weightFamilyNames(value, weightValue ?? 400)
+  if (!weighted.length) return `${family(value)}, ${base}`
+  return `${weighted.map(family).join(", ")}, ${family(value)}, ${base}`
 }
 
 export function monoInput(font: string | undefined) {
@@ -164,20 +206,46 @@ export function sansInput(font: string | undefined) {
   return input(font)
 }
 
-export function monoFontFamily(font: string | undefined) {
-  return stack(font, monoBase)
+export function monoFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, monoBase, weightValue)
 }
 
-export function sansFontFamily(font: string | undefined) {
-  return stack(font, sansBase)
+export function sansFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, sansBase, weightValue)
 }
 
 export function terminalInput(font: string | undefined) {
   return input(font)
 }
 
-export function terminalFontFamily(font: string | undefined) {
-  return stack(font, terminalBase)
+export function terminalFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, terminalBase, weightValue)
+}
+
+export function messageFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, sansBase, weightValue)
+}
+
+export function weight(weight: number | undefined, fallback: number) {
+  return weight ?? fallback
+}
+
+export function color(color: string | undefined) {
+  const value = color?.trim()
+  return value ? value : ""
+}
+
+// Builds a CSS value for a font color override, resolved per color scheme.
+// When both values are empty we return the empty string so consumers fall back
+// to the themed text color instead of overriding it. When only one scheme has
+// a value, that color applies to both schemes (the settings UI pairs the two
+// fields so users normally set both).
+export function fontColor(light: string | undefined, dark: string | undefined) {
+  const lightValue = color(light)
+  const darkValue = color(dark)
+  if (!lightValue && !darkValue) return ""
+  if (lightValue && darkValue) return `light-dark(${lightValue}, ${darkValue})`
+  return lightValue || darkValue
 }
 
 const defaultSettings: Settings = {
@@ -201,6 +269,19 @@ const defaultSettings: Settings = {
     mono: "",
     sans: "",
     terminal: "",
+    uiFontWeight: 400,
+    codeFontWeight: 400,
+    terminalFontWeight: 400,
+    uiFontColorLight: "",
+    uiFontColorDark: "",
+    codeFontColorLight: "",
+    codeFontColorDark: "",
+    terminalFontColorLight: "",
+    terminalFontColorDark: "",
+    message: "",
+    messageFontWeight: 400,
+    messageFontColorLight: "",
+    messageFontColorDark: "",
   },
   keybinds: {},
   permissions: {
@@ -346,8 +427,61 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (typeof document === "undefined") return
       const root = document.documentElement
-      root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono))
-      root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
+      const uiWeight = weight(store.appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight)
+      const codeWeight = weight(store.appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight)
+      const terminalWeight = weight(
+        store.appearance?.terminalFontWeight,
+        defaultSettings.appearance.terminalFontWeight,
+      )
+      const sans = sansFontFamily(store.appearance?.sans, uiWeight)
+      root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono, codeWeight))
+      root.style.setProperty("--font-family-sans", sans)
+      // The v2 layout renders message and UI text with --font-family-text, so
+      // keep it in sync with the user-configurable UI font.
+      root.style.setProperty("--font-family-text", sans)
+      root.style.setProperty("--font-family-sans--font-weight", String(uiWeight))
+      root.style.setProperty("--font-family-mono--font-weight", String(codeWeight))
+      root.style.setProperty("--font-family-terminal--font-weight", String(terminalWeight))
+      const messageWeight = weight(
+        store.appearance?.messageFontWeight,
+        defaultSettings.appearance.messageFontWeight,
+      )
+      root.style.setProperty(
+        "--font-family-message",
+        messageFontFamily(store.appearance?.message, messageWeight),
+      )
+      root.style.setProperty("--font-family-message--font-weight", String(messageWeight))
+      // Font colors are resolved by the browser per color scheme via light-dark(),
+      // falling back to the themed text color when the user leaves a value empty.
+      root.style.setProperty(
+        "--font-family-sans--color",
+        fontColor(store.appearance?.uiFontColorLight, store.appearance?.uiFontColorDark),
+      )
+      root.style.setProperty(
+        "--font-family-mono--color",
+        fontColor(store.appearance?.codeFontColorLight, store.appearance?.codeFontColorDark),
+      )
+      root.style.setProperty(
+        "--font-family-terminal--color",
+        fontColor(store.appearance?.terminalFontColorLight, store.appearance?.terminalFontColorDark),
+      )
+      root.style.setProperty(
+        "--font-family-message--color",
+        fontColor(store.appearance?.messageFontColorLight, store.appearance?.messageFontColorDark),
+      )
+      // The UI font color overrides the primary text color of the app so the
+      // user-chosen color shows up everywhere themed text is rendered. Setting
+      // the property to an empty string restores the theme default.
+      const uiFontColor = fontColor(store.appearance?.uiFontColorLight, store.appearance?.uiFontColorDark)
+      if (uiFontColor) {
+        root.style.setProperty("--v2-text-text-base", uiFontColor)
+        root.style.setProperty("--text-strong", uiFontColor)
+        root.style.setProperty("--text-base", uiFontColor)
+      } else {
+        root.style.removeProperty("--v2-text-text-base")
+        root.style.removeProperty("--text-strong")
+        root.style.removeProperty("--text-base")
+      }
     })
 
     createEffect(() => {
@@ -474,6 +608,94 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         terminalFont: withFallback(() => store.appearance?.terminal, defaultSettings.appearance.terminal),
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
+        },
+        uiFontWeight: withFallback(
+          () => store.appearance?.uiFontWeight,
+          defaultSettings.appearance.uiFontWeight,
+        ),
+        setUIFontWeight(value: number) {
+          setStore("appearance", "uiFontWeight", value)
+        },
+        codeFontWeight: withFallback(
+          () => store.appearance?.codeFontWeight,
+          defaultSettings.appearance.codeFontWeight,
+        ),
+        setCodeFontWeight(value: number) {
+          setStore("appearance", "codeFontWeight", value)
+        },
+        terminalFontWeight: withFallback(
+          () => store.appearance?.terminalFontWeight,
+          defaultSettings.appearance.terminalFontWeight,
+        ),
+        setTerminalFontWeight(value: number) {
+          setStore("appearance", "terminalFontWeight", value)
+        },
+        uiFontColorLight: withFallback(
+          () => store.appearance?.uiFontColorLight,
+          defaultSettings.appearance.uiFontColorLight,
+        ),
+        setUIFontColorLight(value: string) {
+          setStore("appearance", "uiFontColorLight", color(value))
+        },
+        uiFontColorDark: withFallback(
+          () => store.appearance?.uiFontColorDark,
+          defaultSettings.appearance.uiFontColorDark,
+        ),
+        setUIFontColorDark(value: string) {
+          setStore("appearance", "uiFontColorDark", color(value))
+        },
+        codeFontColorLight: withFallback(
+          () => store.appearance?.codeFontColorLight,
+          defaultSettings.appearance.codeFontColorLight,
+        ),
+        setCodeFontColorLight(value: string) {
+          setStore("appearance", "codeFontColorLight", color(value))
+        },
+        codeFontColorDark: withFallback(
+          () => store.appearance?.codeFontColorDark,
+          defaultSettings.appearance.codeFontColorDark,
+        ),
+        setCodeFontColorDark(value: string) {
+          setStore("appearance", "codeFontColorDark", color(value))
+        },
+        terminalFontColorLight: withFallback(
+          () => store.appearance?.terminalFontColorLight,
+          defaultSettings.appearance.terminalFontColorLight,
+        ),
+        setTerminalFontColorLight(value: string) {
+          setStore("appearance", "terminalFontColorLight", color(value))
+        },
+        terminalFontColorDark: withFallback(
+          () => store.appearance?.terminalFontColorDark,
+          defaultSettings.appearance.terminalFontColorDark,
+        ),
+        setTerminalFontColorDark(value: string) {
+          setStore("appearance", "terminalFontColorDark", color(value))
+        },
+        messageFont: withFallback(() => store.appearance?.message, defaultSettings.appearance.message),
+        setMessageFont(value: string) {
+          setStore("appearance", "message", value.trim() ? value : "")
+        },
+        messageFontWeight: withFallback(
+          () => store.appearance?.messageFontWeight,
+          defaultSettings.appearance.messageFontWeight,
+        ),
+        setMessageFontWeight(value: number) {
+          setStore("appearance", "messageFontWeight", value)
+        },
+        messageFontColorLight: withFallback(
+          () => store.appearance?.messageFontColorLight,
+          defaultSettings.appearance.messageFontColorLight,
+        ),
+        setMessageFontColorLight(value: string) {
+          setStore("appearance", "messageFontColorLight", color(value))
+        },
+        messageFontColorDark: withFallback(
+          () => store.appearance?.messageFontColorDark,
+          defaultSettings.appearance.messageFontColorDark,
+        ),
+        setMessageFontColorDark(value: string) {
+          setStore("appearance", "messageFontColorDark", color(value))
         },
       },
       keybinds: {

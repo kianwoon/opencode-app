@@ -9,7 +9,7 @@ import { Skill } from "@/skill"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { ApiVcsApplyError } from "../groups/instance"
+import { ApiSkillRemoveError, ApiVcsApplyError } from "../groups/instance"
 import { markInstanceForDisposal } from "../lifecycle"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
@@ -85,6 +85,15 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       return yield* skill.all()
     })
 
+    const removeSkill = Effect.fn("InstanceHttpApi.skillRemove")(function* (ctx: { params: { name: string } }) {
+      return yield* skill.remove(ctx.params.name).pipe(
+        Effect.mapBoth({
+          onFailure: (error) => new ApiSkillRemoveError({ name: error._tag, data: { message: error.message } }),
+          onSuccess: (info) => ({ name: info.name, location: info.location }),
+        }),
+      )
+    })
+
     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {
       return yield* lsp.status()
     })
@@ -104,6 +113,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("command", getCommand)
       .handle("agent", getAgent)
       .handle("skill", getSkill)
+      .handle("skillRemove", removeSkill)
       .handle("lsp", getLsp)
       .handle("formatter", getFormatter)
   }),

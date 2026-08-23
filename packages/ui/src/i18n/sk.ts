@@ -96,6 +96,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "Skontrolujte svoje odpovede",
   "ui.messagePart.questions.dismissed": "Otázky zamietnuté",
   "ui.messagePart.compaction": "Relácia bola zhutnená",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} prečítanie",
   "ui.messagePart.context.read.other": "{{count}} prečítaní",
   "ui.messagePart.context.read.few": "{{count}} prečítania",

@@ -73,6 +73,7 @@
   --shadow-lg-border-base: var(--shadow-lg-border-base);
 
   --animate-pulse: var(--animate-pulse);
+  --animate-status-blink: var(--animate-status-blink);
 }
 
 @import "./colors.css";

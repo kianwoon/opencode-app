@@ -16,6 +16,7 @@ import { Tag as TagV2 } from "@opencode-ai/ui/v2/badge-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { ModelTooltip } from "./model-tooltip"
+import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
 import { handleDocumentSearchKeydown } from "@/utils/search-keydown"
@@ -79,6 +80,12 @@ const ModelList: Component<{
         if (!popularProviders.includes(aProvider) && popularProviders.includes(bProvider)) return 1
         return popularProviders.indexOf(aProvider) - popularProviders.indexOf(bProvider)
       }}
+      groupHeader={(group) => (
+        <div class="flex items-center gap-x-2 px-3 py-1">
+          <ProviderIcon id={group.items[0].provider.id} class="size-3.5 shrink-0 text-text-muted" />
+          <span class="truncate">{group.items[0].provider.name}</span>
+        </div>
+      )}
       itemWrapper={(item, node) => (
         <Tooltip
           class="w-full"
@@ -98,7 +105,7 @@ const ModelList: Component<{
       }}
     >
       {(i) => (
-        <div class="w-full flex items-center gap-x-2 text-13-regular">
+        <div class="group w-full flex items-center gap-x-2 text-13-regular">
           <span class="truncate">{i.name}</span>
           <Show when={isFree(i.provider.id, i.cost)}>
             <Tag>{language.t("model.tag.free")}</Tag>
@@ -106,6 +113,18 @@ const ModelList: Component<{
           <Show when={i.latest}>
             <Tag>{language.t("model.tag.latest")}</Tag>
           </Show>
+          <button
+            type="button"
+            data-model-remove
+            class="invisible ml-auto flex size-5 shrink-0 items-center justify-center rounded-sm text-text-muted transition-opacity hover:bg-background-hover hover:text-text-base group-hover:visible"
+            aria-label={language.t("provider.custom.models.remove")}
+            onClick={(event) => {
+              event.stopPropagation()
+              model.setVisibility({ modelID: i.id, providerID: i.provider.id }, false)
+            }}
+          >
+            <Icon name="xmark-small" size="small" />
+          </button>
         </div>
       )}
     </List>
@@ -242,6 +261,7 @@ export function ModelSelectorPopoverV2(props: {
       groups={controller.groups}
       current={controller.current}
       select={controller.select}
+      remove={controller.remove}
       onManage={() => {
         void import("./dialog-manage-models").then((module) => {
           void dialog.show(() => <module.DialogManageModelsV2 />)
@@ -288,6 +308,9 @@ function createModelSelectorController(input: {
       model.set({ modelID: item.id, providerID: item.provider.id }, { recent: true })
       input.onSelect()
     },
+    remove: (item: ModelItem) => {
+      model.setVisibility({ modelID: item.id, providerID: item.provider.id }, false)
+    },
   }
 }
 
@@ -297,6 +320,7 @@ function ModelSelectorPopoverV2View(props: {
   groups: (models: ModelItem[]) => { category: string; items: ModelItem[] }[]
   current: () => string | undefined
   select: (item: ModelItem) => void
+  remove: (item: ModelItem) => void
   onManage: () => void
   onClose: () => void
 }) {
@@ -450,7 +474,11 @@ function ModelSelectorPopoverV2View(props: {
                 <For each={groups()}>
                   {(group) => (
                     <MenuV2.Group>
-                      <MenuV2.GroupLabel class="gap-2 px-3">
+                      <MenuV2.GroupLabel class="gap-1.5">
+                        <ProviderIcon
+                          id={group.items[0].provider.id}
+                          class="size-3 shrink-0 text-v2-icon-icon-muted"
+                        />
                         <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
                       </MenuV2.GroupLabel>
                       <MenuV2.RadioGroup value={props.current()}>
@@ -474,7 +502,7 @@ function ModelSelectorPopoverV2View(props: {
                                 value={modelKey(item)}
                                 data-option-key={modelKey(item)}
                                 data-selected-model={props.current() === modelKey(item) ? true : undefined}
-                                class="scroll-my-6 w-full"
+                                class="group scroll-my-6 w-full"
                                 classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
                                 onMouseEnter={() => {
                                   setStore("active", modelKey(item))
@@ -489,6 +517,20 @@ function ModelSelectorPopoverV2View(props: {
                                 <Show when={item.latest}>
                                   <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
                                 </Show>
+                                <button
+                                  type="button"
+                                  data-model-remove
+                                  class="invisible flex size-5 shrink-0 items-center justify-center rounded-sm text-v2-icon-icon-muted transition-opacity hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base group-hover:visible"
+                                  aria-label={language.t("provider.custom.models.remove")}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onPointerUp={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    props.remove(item)
+                                  }}
+                                >
+                                  <Icon name="outline-xmark" size="small" />
+                                </button>
                               </MenuV2.RadioItem>
                             </TooltipV2>
                           )}

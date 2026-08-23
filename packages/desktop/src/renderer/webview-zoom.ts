@@ -66,8 +66,10 @@ const setPinchZoomEnabled = (enabled: boolean) => {
 }
 
 const resetZoom = () => applyZoom(1)
-const zoomIn = () => applyZoom(clamp(requestedZoom + 0.2))
-const zoomOut = () => applyZoom(clamp(requestedZoom - 0.2))
+// Zoom by 1% of the current level (multiplicative) so Ctrl+= / Ctrl+- give fine,
+// proportional adjustment at any zoom level instead of a fixed step.
+const zoomIn = () => applyZoom(clamp(requestedZoom * 1.01))
+const zoomOut = () => applyZoom(clamp(requestedZoom * 0.99))
 
 const resetWheelPinch = () => {
   clearTimeout(wheelPinch?.timeout)

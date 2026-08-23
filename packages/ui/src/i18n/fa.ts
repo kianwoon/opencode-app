@@ -94,6 +94,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "پاسخ های خود را مرور کنید",
   "ui.messagePart.questions.dismissed": "سوالات رد شد",
   "ui.messagePart.compaction": "جلسه فشرده شده است",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} خوانده شود",
   "ui.messagePart.context.read.other": "{{count}} می خواند",
   "ui.messagePart.context.search.one": "جستجوی {{count}}",

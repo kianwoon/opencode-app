@@ -182,6 +182,9 @@ export const Info = Schema.Struct({
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
+      workflow_concurrency: Schema.optional(PositiveInt).annotate({
+        description: "Maximum number of workflow steps that run concurrently. Defaults to 4.",
+      }),
       policies: Schema.optional(Schema.mutable(Schema.Array(ConfigExperimental.Policy))).annotate({
         description: "Policy statements applied to supported resources, such as provider access",
       }),

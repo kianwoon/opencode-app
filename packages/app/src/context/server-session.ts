@@ -104,15 +104,23 @@ type MessageLoadBaseline = Pick<
   "touchedMessages" | "retainedMessages" | "touchedParts" | "clearedMessageParts"
 >
 
-function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) {
+export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) {
   if (items.length === 0) return { ...page, observed: [] as { messageID: string; parts: Part[] }[] }
   const session = [...page.session]
   const part = new Map(page.part.map((item) => [item.id, item.part]))
   const observed: { messageID: string; parts: Part[] }[] = []
   for (const item of items) {
-    const result = Binary.search(session, messageKey(item.message), messageKey)
-    const found = result.found
-    if (!found) session.splice(result.index, 0, item.message)
+    // Match by id first: an optimistic entry and its confirmed server message
+    // share the id (the client sends messageID) but NOT time.created (client
+    // clock vs server clock), so messageKey alone sees two entries and the
+    // same message renders twice. Fall back to messageKey ordering for inserts.
+    let index = session.findIndex((message) => message.id === item.message.id)
+    const found = index !== -1
+    if (!found) {
+      const result = Binary.search(session, messageKey(item.message), messageKey)
+      index = result.index
+      session.splice(index, 0, item.message)
+    }
     const current = part.get(item.message.id)
     const confirmed = found ? item.parts.filter((part) => current?.some((value) => value.id === part.id)) : []
     if (found) observed.push({ messageID: item.message.id, parts: confirmed })
@@ -1019,7 +1027,10 @@ export function createServerSession(
       }
       case "todo.updated": {
         const props = event.properties as { sessionID: string; todos: Todo[] }
-        setData("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
+        // Todo items carry no `id`, so keyed reconcile cannot match entries;
+        // on shrink it leaves null holes (stale "N of M" counts, phantom
+        // rows). Plain assignment replaces the list wholesale.
+        setData("todo", props.sessionID, props.todos)
         return
       }
       case "session.status": {
@@ -1048,6 +1059,15 @@ export function createServerSession(
         const messages = data.message[info.sessionID]
         if (!messages) {
           setData("message", info.sessionID, [info])
+          return
+        }
+        // Id-first matching: an optimistic entry for the same id (sent as
+        // messageID by the client) has a different time.created, so a
+        // messageKey-only search misses it and inserts a second copy of the
+        // same message. Replace it in place; fall back to ordered insert.
+        let index = messages.findIndex((message) => message.id === info.id)
+        if (index !== -1) {
+          setData("message", info.sessionID, index, reconcile(info))
           return
         }
         const result = Binary.search(messages, messageKey(info), messageKey)
@@ -1388,7 +1408,8 @@ export function createServerSession(
         const active = generation(sessionID)
         return (options?.retry ?? retry)(() => client.session.todo({ sessionID })).then((result) => {
           if (generations.get(sessionID) !== active) return
-          setData("todo", sessionID, reconcile(result.data ?? [], { key: "id" }))
+          // Unkeyed replacement — todos have no id (see todo.updated handler).
+          setData("todo", sessionID, result.data ?? [])
         })
       })
     },

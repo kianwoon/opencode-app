@@ -1,6 +1,6 @@
 import { BrowserWindow } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
-import { createMainWindow, updateTitlebar } from "./windows"
+import { createMainWindow, updateTitlebar, ZOOM_STEP } from "./windows"
 
 export type DesktopMenuActionHandlers = Partial<{
   checkForUpdates: () => void
@@ -45,10 +45,10 @@ export function runDesktopMenuAction(
       setZoom(win, 1)
       return
     case "view.zoomIn":
-      setZoom(win, (win?.webContents.getZoomFactor() ?? 1) + 0.2)
+      setZoom(win, (win?.webContents.getZoomFactor() ?? 1) + ZOOM_STEP)
       return
     case "view.zoomOut":
-      setZoom(win, (win?.webContents.getZoomFactor() ?? 1) - 0.2)
+      setZoom(win, (win?.webContents.getZoomFactor() ?? 1) - ZOOM_STEP)
       return
     case "view.toggleFullscreen":
       win?.setFullScreen(!win.isFullScreen())

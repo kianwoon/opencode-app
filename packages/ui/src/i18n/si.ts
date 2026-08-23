@@ -94,6 +94,7 @@ export const dict: Record<string, string> = {
   "ui.messagePart.review.title": "ඔබේ පිළිතුරු සමාලෝචනය කරන්න",
   "ui.messagePart.questions.dismissed": "ප්‍රශ්න ඉවත දමන ලදී",
   "ui.messagePart.compaction": "සැසිය සංයුක්ත කර ඇත",
+  "ui.messagePart.workflow": "Workflow",
   "ui.messagePart.context.read.one": "{{count}} කියවා ඇත",
   "ui.messagePart.context.read.other": "{{count}} කියවයි",
   "ui.messagePart.context.search.one": "{{count}} සෙවීම",

@@ -609,6 +609,9 @@ function isTitleRequest(body: unknown): boolean {
   return JSON.stringify(body).includes("Generate a title for this conversation")
 }
 
+/** Matches only the background title-generation requests auto-answered by this server. */
+export const titleMatch: Match = (hit) => isTitleRequest(hit.body)
+
 namespace TestLLMServer {
   export interface Service {
     readonly url: string
@@ -669,6 +672,17 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         return first.item
       }
 
+      // Title requests are auto-answered unless a queued item explicitly
+      // matches them via pushMatch/titleMatch, which lets tests script
+      // failing or empty title responses.
+      const pullMatched = (hit: Hit) => {
+        const index = list.findIndex((entry) => entry.match !== undefined && entry.match(hit))
+        if (index === -1) return
+        const first = list[index]
+        list = [...list.slice(0, index), ...list.slice(index + 1)]
+        return first.item
+      }
+
       const handle = Effect.fn("TestLLMServer.handle")(function* (mode: "chat" | "responses") {
         const req = yield* HttpServerRequest.HttpServerRequest
         const body = yield* req.json.pipe(Effect.orElseSucceed(() => ({})))
@@ -676,6 +690,12 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         if (isTitleRequest(body)) {
           hits = [...hits, current]
           yield* notify()
+          const scripted = pullMatched(current)
+          if (scripted) {
+            if (scripted.type !== "sse") return fail(scripted)
+            if (mode === "responses") return send(responses(scripted, modelFrom(body)))
+            return send(scripted)
+          }
           const auto: Sse = { type: "sse", head: [role()], tail: [textLine("E2E Title"), finishLine("stop")] }
           if (mode === "responses") return send(responses(auto, modelFrom(body)))
           return send(auto)

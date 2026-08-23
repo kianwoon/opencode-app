@@ -9,7 +9,7 @@
   --font-size-base: 14px;
   --font-size-large: 16px;
   --font-size-x-large: 20px;
-  --font-weight-regular: 400;
+  --font-weight-regular: var(--font-family-sans--font-weight, 400);
   --font-weight-medium: 500;
   --line-height-normal: 130%;
   --line-height-large: 150%;

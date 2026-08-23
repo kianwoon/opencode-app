@@ -106,7 +106,12 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     })
 
     if (files.length > 0) {
-      await addAttachments(files, true, target)
+      if (await addAttachments(files, false, target)) return
+      // Clipboard items were rejected (e.g. macOS exposes copied images as
+      // image/tiff, which no provider accepts). The native clipboard reader
+      // converts to PNG, so retry through it before warning.
+      if (input.readClipboardImage && (await addClipboardAttachment(input.readClipboardImage(), target))) return
+      input.warn?.()
       return
     }
 

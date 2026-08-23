@@ -1,9 +1,109 @@
 # opencode database guide
 
+## Idle-GC hook (Bun) — remove when Bun ships oven-sh/bun#36638
+
+- `SessionStatus` (src/session/status.ts) schedules one non-blocking `Bun.gc(false)` via a
+  5s debounce when the LAST busy session goes idle; any busy transition cancels the timer.
+  This mimics Bun's upstream idle-GC work (oven-sh/bun#36638, open at time of writing) that
+  halved Claude Code's p99 CPU — Bun's stock GC fires on allocation/timer thresholds and
+  lands mid-turn.
+- Bun-only by runtime check (`typeof Bun === "undefined"`); the Node desktop sidecar is
+  unaffected (V8 GC is already mutator-aware).
+- When Bun releases an idle-driven GC controller, delete the `onIdle` closure from the
+  `InstanceState.make` body in status.ts, bump `packageManager` in the root package.json,
+  and rebuild the compiled binary (script/build.ts). Acceptance guard:
+  test/session/status-gc.test.ts.
+
+## Session auto-title gotchas
+
+- `SessionPrompt.ensureTitle` (src/session/prompt.ts) is forked on the FIRST iteration of every
+  prompt loop while the session title is still the default (`Session.isDefaultTitle`). It derives
+  the title from the first real user message, NOT just the session's first prompt — a failed
+  title-model call (provider down, empty/thinking-only output) retries on the next prompt instead
+  of leaving the session permanently "New session - ...".
+- Title failures are logged (`failed to generate title` / `title model returned no usable text`),
+  never thrown: the stream pipeline converts failures to warnings and the fork keeps
+  `Effect.ignore` as a safety net. Do NOT reintroduce `Effect.orDie` there — combined with the
+  fork's `Effect.ignore` it swallowed every failure silently (that is why broken self-hosted
+  providers used to leave sessions untitled with zero log evidence).
+- To script title requests in e2e tests, use `pushMatch(titleMatch, ...)` from
+  test/lib/llm-server.ts; unmatched title requests are auto-answered with "E2E Title" and never
+  consume plain queued items. Acceptance guard: test/session/prompt.test.ts
+  "auto title retries on a later prompt after the first title generation fails".
+
+## Config reload gotchas
+
+- "Reload configs" (global dispose, SIGUSR2, config-update) drops the TTL-infinity global
+  config cache and disposes every instance; the next instance access re-bootstraps from disk.
+- Bun caches dynamic `import()` by URL, and `file://` URLs with a query string STILL hit that
+  cache — only a bare path + query busts it. `PluginLoader.load` therefore suffixes file
+  plugin entries with `?mtime=<ms>` (via `bustFileEntry`) so edited plugin code re-evaluates
+  across reloads. npm plugin entries keep their stable URL (their versioned install dir
+   already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
+   "re-evaluates edited file plugin code across instance reload".
+
+ ## Plugin loader must be Node-compatible (desktop sidecar)
+
+ - The desktop app runs its server as a **Node.js sidecar**
+   (`utilityProcess.fork` of `sidecar.js`), NOT on Bun. The CLI runs on Bun.
+   Any plugin-loading path that touches a Bun-only global (`Bun.file`, `Bun.$`, …)
+   crashes the sidecar with `ReferenceError: Bun is undefined`.
+ - `PluginLoader.bustFileEntry` used `Bun.file(file).stat()` — so in the app **every
+   file-based plugin silently failed to load** while the CLI loaded them fine. The
+   failure is published as a **session error event (TUI toast), never a log line**,
+   so `opencode.log` showed nothing and the regression stayed hidden.
+ - Rule: plugin load/resolve paths must use `node:fs/promises` (or other Node APIs),
+   never `Bun.*`. Acceptance guard: `bun test test/plugin/loader-shared.test.ts` +
+   a manual sidecar smoke test (the CLI alone cannot catch this — it runs on Bun).
+
+ ## Workflow/DAG engine gotchas
+
+- The `workflow` tool executes inside the session loop's own tool pass. It must admit its
+  `WorkflowPart` with `noReply: true` via `ops.prompt(...)`; calling with a loop would wait
+  on the run it is already inside (`Runner.ensureRunning` joins the current run) and
+  deadlock the session. The next loop iteration dispatches the part from the task queue.
+- `runSubagentTask` (shared by `subtask` parts and workflow steps) must never throw after
+  creating its tool part without settling the part as an error AND completing the assistant
+  message. A settled assistant message after the task part is also the task-consumption
+  boundary in `MessageV2.latest()`; without it the same task part is re-collected and
+  re-dispatched forever.
+- Workflow step outcomes are recorded in scheduler state (`record`), never thrown: failure
+  is a scheduling outcome. Failure reasons (NamedError: read `.data.message`, plain Error:
+  `.message`) go into the synthetic summary so the orchestrating model can react.
+- Scheduling is event-driven (per-step fibers, `Effect.raceAll` over `Fiber.await`) with a
+  concurrency cap from `experimental.workflow_concurrency` (default 4). Do not reintroduce
+  batch-barrier scheduling (`Effect.all` per ready wave) — it delays unrelated dependents.
+- Step fibers must be forked with `Effect.forkChild`, never `Effect.forkIn(scope)`. The
+  instance `scope` is a daemon scope: forking steps there detaches them from the loop
+  fiber, so `prompt.cancel` interrupts the loop but leaves in-flight steps running to
+  completion — burning model turns, mutating the tree, and leaving their tool parts stuck
+  `"running"` forever. As children, steps inherit the loop's interrupt and cascade it into
+  the task tool's own `onInterrupt`, which settles the part and aborts the child session.
+- Workflow admission (graph shape + `MAX_WORKFLOW_STEPS` cap) lives in
+  `src/session/workflow/dag.ts` (`validateWorkflow`). Both the model-facing tool AND the
+  loop dispatcher must enforce it — the HTTP `PromptPayload` accepts `WorkflowPartInput`
+  directly, so without the dispatch-side check a direct API caller bypasses the tool's cap.
+  Acceptance gate: `test/session/prompt.test.ts` "direct API workflow part over the step
+  cap is rejected at dispatch".
+- `validateDag` cycle detection is iterative (explicit DFS stack) on purpose: a long
+  dependency chain (10k+ steps) would overflow the call stack with recursion. Keep it
+  iterative; the 50k-step deep-chain test in `test/session/workflow/dag.test.ts` is the
+  regression guard.
+- When mocking LLM failures in workflow e2e tests, `llm.fail("...")` stream errors are
+  often consumed by session retry (message patterns like "rate limit" match
+  `RETRYABLE_MESSAGE_PATTERNS` in `src/session/retry.ts`, 2s backoff). Use
+  `llm.error(400, {message})` for non-retryable provider failures.
+
 ## Database
 
 - **Schema**: Drizzle schema lives in `packages/core/src/**/*.sql.ts`.
 - **Migrations**: database migrations live in `packages/core` and are applied by core.
+
+## Unsupported attachment fallback
+
+- `unsupportedParts` in `src/provider/transform.ts` handles media the selected model cannot accept (e.g. pasted screenshots on text-only models). It must NOT discard the bytes: write them to `<tmpdir>/opencode/<sha256-prefix><ext>` (content-hash naming keeps repeated provider turns idempotent) and replace the part with a text note carrying the absolute path so the model can inspect the file with a suitable tool.
+- The write stays synchronous (`writeFileSync`) on purpose: `ProviderTransform.message()` is called from the sync `nativeRuntime.stream()` path and the AI SDK `transformParams` middleware — do not make it async without redesigning those call sites.
+- If the write fails, fall back to the old `ERROR: Cannot read ...` text; never fail the provider call over tmp cleanup. Acceptance guard: `test/provider/transform.test.ts` "saves unsupported image bytes to a temp file and references the path".
 
 ## Development server
 

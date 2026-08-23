@@ -11,6 +11,7 @@ import {
   PlatformProvider,
   createDraftStore,
   ServerConnection,
+  showToast,
   useCommand,
   useWslServers,
   useLanguage,
@@ -28,6 +29,7 @@ import { DesktopFirstLaunchOnboarding } from "./onboarding"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { windowFullscreen } from "./window-fullscreen"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
+import { pathFromFileHref } from "./file-link"
 import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
@@ -323,6 +325,25 @@ window.api.onMenuCommand((id) => {
 })
 listenForDeepLinks()
 
+const desktopToastKeyToOptions: Record<string, { title: Parameters<typeof t>[0]; description: Parameters<typeof t>[0] }> = {
+  "memory.recovered": {
+    title: "desktop.toast.memory.recovered.title",
+    description: "desktop.toast.memory.recovered.description",
+  },
+}
+
+window.api.onToast((key) => {
+  const options = desktopToastKeyToOptions[key]
+  if (!options) return
+  showToast({ title: t(options.title), description: t(options.description) })
+})
+
+// Surface memory pressure as a window event so app-level cache owners can
+// release unused state in response to the main process request.
+window.api.onMemoryPressure(() => {
+  window.dispatchEvent(new CustomEvent("opencode:memory-pressure"))
+})
+
 function LoadingSplash() {
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
@@ -355,6 +376,28 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   )
   const onboarding = Promise.withResolvers<void>()
 
+  function handleClick(e: MouseEvent) {
+    const link = (e.target as HTMLElement).closest("a.external-link") as HTMLAnchorElement | null
+    if (!link?.href) return
+    e.preventDefault()
+
+    // Prefer the raw attribute so file: links aren't rewritten against oc://renderer.
+    const href = link.getAttribute("href") || link.href
+    const filePath = pathFromFileHref(href)
+    if (filePath) {
+      const reveal = e.metaKey || e.ctrlKey || e.altKey || e.button === 1
+      if (reveal && platform.revealPath) {
+        void platform.revealPath(filePath)
+        return
+      }
+      if (platform.openPath) {
+        void platform.openPath(filePath)
+        return
+      }
+    }
+
+    platform.openExternal(link.href)
+  }
   function Inner() {
     const cmd = useCommand()
     menuTrigger = (id) => cmd.trigger(id)

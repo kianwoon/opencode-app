@@ -96,6 +96,7 @@ import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
 import { Identifier } from "@/utils/id"
 import { diffs as list } from "@/utils/diffs"
+import { sessionTouchedFiles } from "@/utils/session-files"
 import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { formatServerError, isLocalSessionNotFoundError, isSessionNotFoundError } from "@/utils/server-errors"
@@ -650,6 +651,10 @@ export default function Page() {
   }, desktopReviewOpen())
 
   const turnDiffs = createMemo(() => list(lastUserMessage()?.summary?.diffs))
+  // Files changed by this session across all its turns. The working tree is
+  // shared by every session in the same directory, so the review panel must
+  // be scoped to these files to avoid leaking other sessions' changes.
+  const sessionFiles = createMemo(() => sessionTouchedFiles(messages()))
   const nogit = createMemo(() => {
     const project = sync().project
     return !!project && project.vcs !== "git"
@@ -676,9 +681,17 @@ export default function Page() {
     const mode = reviewMode()
     if (mode === "git" || mode === "branch") return mode
   })
+  const vcsWorkspace = createMemo(() => info()?.workspaceID)
   const vcsKey = createMemo(
     () =>
-      ["session-vcs", sdk().directory, sync().data.vcs?.branch ?? "", sync().data.vcs?.default_branch ?? ""] as const,
+      [
+        "session-vcs",
+        params.id,
+        sdk().directory,
+        vcsWorkspace() ?? "",
+        sync().data.vcs?.branch ?? "",
+        sync().data.vcs?.default_branch ?? "",
+      ] as const,
   )
   const vcsQuery = createQuery(() => {
     const mode = vcsMode()
@@ -690,7 +703,10 @@ export default function Page() {
       queryFn: mode
         ? () =>
             sdk()
-              .api.vcs.diff({ location: { directory: sdk().directory }, mode: mode === "git" ? "working" : mode })
+              .api.vcs.diff({
+                location: { directory: sdk().directory, workspace: vcsWorkspace() },
+                mode: mode === "git" ? "working" : mode,
+              })
               .then((result) => result.data)
               .catch((error) => {
                 console.debug("[session-review] failed to load vcs diff", { mode, error })
@@ -701,9 +717,15 @@ export default function Page() {
   })
   const refreshVcs = debounce(() => void queryClient.invalidateQueries({ queryKey: vcsKey() }), 100)
   const reviewDiffs = () => {
-    if (reviewMode() === "git" || reviewMode() === "branch")
+    if (reviewMode() === "git" || reviewMode() === "branch") {
       // avoids suspense
-      return vcsQuery.isFetched ? (vcsQuery.data ?? []) : []
+      const diffs = vcsQuery.isFetched ? (vcsQuery.data ?? []) : []
+      // The working-tree diff is shared by all sessions in this directory;
+      // only surface changes this session actually made.
+      const files = sessionFiles()
+      if (files.size === 0) return []
+      return diffs.filter((diff) => diff.file !== undefined && files.has(diff.file))
+    }
     return turnDiffs()
   }
   const activeReviewFile = () => {
@@ -739,7 +761,7 @@ export default function Page() {
           queryFn: () =>
             sdk()
               .api.vcs.diff({
-                location: { directory: scope },
+                location: { directory: scope, workspace: vcsWorkspace() },
                 mode: mode === "git" ? "working" : mode,
                 context,
               })
@@ -873,6 +895,7 @@ export default function Page() {
   let content: HTMLDivElement | undefined
   let revealMessage = (_id: string) => {}
   let scrollToEnd = () => {}
+  let scrollToMessageRef = (_message: UserMessage) => {}
   let scrollMark = 0
   let messageMark = 0
 
@@ -1143,6 +1166,11 @@ export default function Page() {
     focusInput,
     review: reviewTab,
     fileBrowser: () => newSessionDesign() && isDesktop() && !!params.id,
+    revealMessage: (id) => {
+      const message = sync().data.message[params.id ?? ""]?.find((m) => m.id === id)
+      if (message && message.role === "user") scrollToMessageRef(message as UserMessage)
+      else revealMessage(id)
+    },
   })
   command.register("session-palette", () => [
     {
@@ -1988,6 +2016,7 @@ export default function Page() {
     scheduleScrollState,
     consumePendingMessage: layout.pendingMessage.consume,
   })
+  scrollToMessageRef = scrollToMessage
 
   createEffect(
     on(

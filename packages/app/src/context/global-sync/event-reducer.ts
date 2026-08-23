@@ -260,7 +260,9 @@ export function applyDirectoryEvent(input: {
     }
     case "todo.updated": {
       const props = event.properties as { sessionID: string; todos: Todo[] }
-      input.setStore("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
+      // Todos carry no `id`; keyed reconcile leaves null holes when the list
+      // shrinks. Replace wholesale instead.
+      input.setStore("todo", props.sessionID, props.todos)
       input.setSessionTodo?.(props.sessionID, props.todos)
       break
     }

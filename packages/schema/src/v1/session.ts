@@ -217,6 +217,32 @@ export const SubtaskPart = Schema.Struct({
 }).annotate({ identifier: "SubtaskPart" })
 export type SubtaskPart = Types.DeepMutable<Schema.Schema.Type<typeof SubtaskPart>>
 
+export const WorkflowStep = Schema.Struct({
+  id: Schema.String,
+  prompt: Schema.String,
+  description: Schema.String,
+  agent: Schema.String,
+  dependsOn: Schema.Array(Schema.String),
+  model: Schema.optional(
+    Schema.Struct({
+      providerID: Provider.ID,
+      modelID: Model.ID,
+    }),
+  ),
+  command: Schema.optional(Schema.String),
+}).annotate({ identifier: "WorkflowStep" })
+export type WorkflowStep = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowStep>>
+
+export const WorkflowPart = Schema.Struct({
+  ...partBase,
+  type: Schema.Literal("workflow"),
+  title: Schema.String,
+  steps: Schema.Array(WorkflowStep),
+  /** Marks the workflow as pre-planned (e.g. produced by a planning phase). */
+  plannedBy: optional(Schema.String),
+}).annotate({ identifier: "WorkflowPart" })
+export type WorkflowPart = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowPart>>
+
 export const RetryPart = Schema.Struct({
   ...partBase,
   type: Schema.Literal("retry"),
@@ -357,6 +383,7 @@ export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 export const Part = Schema.Union([
   TextPart,
   SubtaskPart,
+  WorkflowPart,
   ReasoningPart,
   FilePart,
   ToolPart,
@@ -371,6 +398,7 @@ export const Part = Schema.Union([
 export type Part =
   | TextPart
   | SubtaskPart
+  | WorkflowPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -450,6 +478,32 @@ export const SubtaskPartInput = Schema.Struct({
 }).annotate({ identifier: "SubtaskPartInput" })
 export type SubtaskPartInput = Types.DeepMutable<Schema.Schema.Type<typeof SubtaskPartInput>>
 
+export const WorkflowStepInput = Schema.Struct({
+  id: Schema.String,
+  prompt: Schema.String,
+  description: Schema.String,
+  agent: Schema.String,
+  dependsOn: Schema.Array(Schema.String),
+  model: Schema.optional(
+    Schema.Struct({
+      providerID: Provider.ID,
+      modelID: Model.ID,
+    }),
+  ),
+  command: Schema.optional(Schema.String),
+}).annotate({ identifier: "WorkflowStepInput" })
+export type WorkflowStepInput = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowStepInput>>
+
+export const WorkflowPartInput = Schema.Struct({
+  id: optional(PartID),
+  type: Schema.Literal("workflow"),
+  title: Schema.String,
+  steps: Schema.Array(WorkflowStepInput),
+  /** Marks the workflow as pre-planned (e.g. produced by a planning phase). */
+  plannedBy: optional(Schema.String),
+}).annotate({ identifier: "WorkflowPartInput" })
+export type WorkflowPartInput = Types.DeepMutable<Schema.Schema.Type<typeof WorkflowPartInput>>
+
 export const Assistant = Schema.Struct({
   ...messageBase,
   role: Schema.Literal("assistant"),
@@ -458,6 +512,7 @@ export const Assistant = Schema.Struct({
     completed: Schema.optional(NonNegativeInt),
   }),
   error: Schema.optional(AssistantErrorSchema),
+  warning: Schema.optional(AssistantErrorSchema),
   parentID: MessageID,
   modelID: Model.ID,
   providerID: Provider.ID,
@@ -483,8 +538,12 @@ export const Assistant = Schema.Struct({
   variant: Schema.optional(Schema.String),
   finish: Schema.optional(Schema.String),
 }).annotate({ identifier: "AssistantMessage" })
-export type Assistant = Omit<Types.DeepMutable<Schema.Schema.Type<typeof Assistant>>, "error"> & {
+export type Assistant = Omit<
+  Types.DeepMutable<Schema.Schema.Type<typeof Assistant>>,
+  "error" | "warning"
+> & {
   error?: AssistantError
+  warning?: AssistantError
 }
 
 export const Info = Schema.Union([User, Assistant]).annotate({ discriminator: "role", identifier: "Message" })
@@ -656,11 +715,20 @@ export const Error = define({
   },
 })
 
+export const Warning = define({
+  type: "session.warning",
+  schema: {
+    sessionID: Schema.optional(SessionID),
+    warning: Assistant.fields.warning,
+  },
+})
+
 export const Event = {
   ...events,
   PartDelta,
   Diff,
   Error,
+  Warning,
   Definitions: inventory(
     events.Created,
     events.Updated,
@@ -672,5 +740,6 @@ export const Event = {
     PartDelta,
     Diff,
     Error,
+    Warning,
   ),
 }

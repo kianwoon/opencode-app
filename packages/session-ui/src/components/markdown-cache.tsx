@@ -1,5 +1,7 @@
 import { checksum } from "@opencode-ai/core/util/encode"
 import DOMPurify from "dompurify"
+import { desktopAllowedUriRegexp, isDesktopRenderer } from "./markdown-desktop"
+import { project } from "./markdown-stream"
 import { parseMarkdown } from "./markdown-worker"
 
 export type MarkdownCacheEntry = {
@@ -34,6 +36,11 @@ if (typeof window !== "undefined" && DOMPurify.isSupported) {
 
 export function sanitizeMarkdown(html: string) {
   if (!DOMPurify.isSupported) return ""
+  // Desktop: keep file: hrefs so chat path links stay clickable. Web keeps the
+  // default scheme allowlist (browsers block file: navigation anyway).
+  if (isDesktopRenderer()) {
+    return DOMPurify.sanitize(html, { ...config, ALLOWED_URI_REGEXP: desktopAllowedUriRegexp })
+  }
   return DOMPurify.sanitize(html, config)
 }
 
@@ -52,18 +59,44 @@ export function touchCachedMarkdown(key: string, value: MarkdownCacheEntry) {
   cache.delete(first)
 }
 
-export async function preloadMarkdown(text: string, cacheKey: string) {
-  const key = `${cacheKey}:0:full`
-  const cached = getCachedMarkdown(key)
-  if (cached?.raw === text) {
-    touchCachedMarkdown(key, cached)
-    return
-  }
-  const hash = checksum(text)
-  if (!hash) return
-  touchCachedMarkdown(key, {
-    raw: text,
-    hash,
-    html: sanitizeMarkdown(await parseMarkdown(text)),
-  })
+export async function preloadMarkdown(text: string, cacheKey: string, parser: { parse(text: string): string | Promise<string> }) {
+  await Promise.all(
+    project(undefined, text, false).blocks.map(async (block, index) => {
+      if (block.mode === "code") return
+      const key = `${cacheKey}:${index}:${block.mode}`
+      const cached = getCachedMarkdown(key)
+      if (cached?.raw === block.raw) {
+        touchCachedMarkdown(key, cached)
+        return
+      }
+      const hash = checksum(block.raw)
+      if (!hash) return
+      touchCachedMarkdown(key, {
+        raw: block.raw,
+        hash,
+        html: sanitizeMarkdown(await Promise.resolve(parser.parse(block.src))),
+      })
+    }),
+  )
+}
+
+export async function preloadMarkdownWithWorker(text: string, cacheKey: string) {
+  await Promise.all(
+    project(undefined, text, false).blocks.map(async (block, index) => {
+      if (block.mode === "code") return
+      const key = `${cacheKey}:${index}:${block.mode}`
+      const cached = getCachedMarkdown(key)
+      if (cached?.raw === block.raw) {
+        touchCachedMarkdown(key, cached)
+        return
+      }
+      const hash = checksum(block.raw)
+      if (!hash) return
+      touchCachedMarkdown(key, {
+        raw: block.raw,
+        hash,
+        html: sanitizeMarkdown(await parseMarkdown(block.src)),
+      })
+    }),
+  )
 }

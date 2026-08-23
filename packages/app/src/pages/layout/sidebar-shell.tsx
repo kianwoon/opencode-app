@@ -28,6 +28,10 @@ export const SidebarContent = (props: {
   settingsLabel: Accessor<string>
   settingsKeybind: Accessor<string | undefined>
   onOpenSettings: () => void
+  vacuumLabel: Accessor<string>
+  onVacuum: () => void
+  reloadLabel: Accessor<string>
+  onReloadConfigs: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
   renderPanel: () => JSX.Element
@@ -90,6 +94,24 @@ export const SidebarContent = (props: {
           </DragDropProvider>
         </div>
         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
+          <Tooltip placement={placement()} value={props.reloadLabel()}>
+            <IconButton
+              icon="reset"
+              variant="ghost"
+              size="large"
+              onClick={props.onReloadConfigs}
+              aria-label={props.reloadLabel()}
+            />
+          </Tooltip>
+          <Tooltip placement={placement()} value={props.vacuumLabel()}>
+            <IconButton
+              icon="broom"
+              variant="ghost"
+              size="large"
+              onClick={props.onVacuum}
+              aria-label={props.vacuumLabel()}
+            />
+          </Tooltip>
           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
             <IconButton
               icon="settings-gear"

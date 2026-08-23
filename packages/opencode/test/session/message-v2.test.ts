@@ -1726,4 +1726,36 @@ describe("session.message-v2.latest", () => {
     expect(state.tasks).toHaveLength(1)
     expect(state.tasks[0]).toMatchObject({ type: "subtask", prompt: "inspect" })
   })
+
+  test("collects workflow parts as tasks after the finished boundary", () => {
+    const finished = {
+      ...assistantInfo("msg_z_finished", "msg_parent"),
+      time: { created: 200 },
+      finish: "stop",
+    } as SessionV1.Assistant
+    const wfTask: SessionV1.WithParts = {
+      info: { ...userInfo("msg_a_wf"), time: { created: 300 } },
+      parts: [
+        {
+          ...basePart("msg_a_wf", "wf"),
+          type: "workflow",
+          title: "release",
+          steps: [
+            { id: "build", prompt: "build", description: "build", agent: "build", dependsOn: [] },
+            { id: "publish", prompt: "publish", description: "publish", agent: "build", dependsOn: ["build"] },
+          ],
+        },
+      ] as SessionV1.Part[],
+    }
+
+    const state = MessageV2.latest([wfTask, { info: finished, parts: [] }])
+
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({ type: "workflow", title: "release" })
+    const wf = state.tasks[0]
+    if (wf.type === "workflow") {
+      expect(wf.steps).toHaveLength(2)
+      expect(wf.steps[1]?.dependsOn).toEqual(["build"])
+    }
+  })
 })

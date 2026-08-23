@@ -127,7 +127,7 @@ const SessionRow = (props: {
               <Spinner class="size-[15px]" />
             </Match>
             <Match when={props.hasPermissions()}>
-              <div class="size-1.5 rounded-full bg-surface-warning-strong" />
+              <div class="size-1.5 rounded-full bg-[var(--v2-blue-600)] animate-status-blink" />
             </Match>
             <Match when={props.hasError()}>
               <div class="size-1.5 rounded-full bg-text-diff-delete-base" />
