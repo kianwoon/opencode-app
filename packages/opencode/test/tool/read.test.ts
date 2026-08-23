@@ -568,7 +568,7 @@ root_type Monster;`
 })
 
 describe("tool.read loaded instructions", () => {
-  it.live("loads AGENTS.md from parent directory and includes in metadata", () =>
+  it.live("reads file content and does not re-attach AGENTS.md already in systemPaths", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped()
       yield* put(path.join(dir, "subdir", "AGENTS.md"), "# Test Instructions\nDo something special.")
@@ -576,10 +576,11 @@ describe("tool.read loaded instructions", () => {
 
       const result = yield* exec(dir, { filePath: path.join(dir, "subdir", "nested", "test.txt") })
       expect(result.output).toContain("test content")
-      expect(result.output).toContain("system-reminder")
-      expect(result.output).toContain("Test Instructions")
+      // The nested AGENTS.md is surfaced as a system-level instruction (via the
+      // nested AGENTS.md glob), so resolve does not re-attach it as a file-scoped
+      // loaded instruction. The model still sees the guide in system context.
+      expect(result.output).not.toContain("system-reminder")
       expect(result.metadata.loaded).toBeDefined()
-      expect(result.metadata.loaded).toContain(path.join(dir, "subdir", "AGENTS.md"))
     }),
   )
 })
