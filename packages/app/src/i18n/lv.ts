@@ -957,6 +957,8 @@ export const dict = {
   "settings.general.row.font.description": "Pielāgojiet fontu, kas tiek izmantots koda blokos",
   "settings.general.row.terminalFont.title": "Termināļa fonts",
   "settings.general.row.terminalFont.description": "Pielāgojiet fontu, kas tiek izmantots terminālī",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Saskarnes fonts",
   "settings.general.row.uiFont.description": "Pielāgojiet fontu visā saskarnē",
   "settings.general.row.fontWeight.thin": "Tievs",

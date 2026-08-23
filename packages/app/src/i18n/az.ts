@@ -961,6 +961,8 @@ export const dict = {
   "settings.general.row.font.description": "Kod bloklarında istifadə olunan mono şrifti fərdiləşdirin",
   "settings.general.row.terminalFont.title": "Terminal şrifti",
   "settings.general.row.terminalFont.description": "Terminalda istifadə olunan şrifti fərdiləşdirin",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "İnterfeys şrifti",
   "settings.general.row.uiFont.description": "Bütün interfeysdə istifadə olunan şrifti fərdiləşdirin",
   "settings.general.row.fontWeight.thin": "İncə",

@@ -962,6 +962,8 @@ export const dict = {
   "settings.general.row.font.description": "Tùy chỉnh phông chữ được sử dụng trong khối mã",
   "settings.general.row.terminalFont.title": "Phông chữ terminal",
   "settings.general.row.terminalFont.description": "Tùy chỉnh phông chữ được sử dụng trong terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Phông chữ giao diện",
   "settings.general.row.uiFont.description": "Tùy chỉnh phông chữ dùng trong toàn bộ giao diện",
   "settings.general.row.fontWeight.thin": "Mảnh",

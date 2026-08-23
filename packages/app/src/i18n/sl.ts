@@ -955,6 +955,8 @@ export const dict = {
   "settings.general.row.font.description": "Prilagodite pisavo, uporabljeno v blokih kode",
   "settings.general.row.terminalFont.title": "Pisava terminala",
   "settings.general.row.terminalFont.description": "Prilagodite pisavo, uporabljeno v terminalu",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Pisava uporabniškega vmesnika",
   "settings.general.row.uiFont.description": "Prilagodite pisavo, ki se uporablja v celotnem vmesniku",
   "settings.general.row.fontWeight.thin": "Tanek",

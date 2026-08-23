@@ -957,6 +957,8 @@ export const dict = {
   "settings.general.row.font.description": "کوڈ بلاکس وچ استعمال ہون آلے فونٹ نو اپنی مرضی دے مطابق بناؤ",
   "settings.general.row.terminalFont.title": "Terminal فونٹ",
   "settings.general.row.terminalFont.description": "ٹرمینل وچ استعمال ہون آلے فونٹ نو اپنی مرضی دے مطابق بناؤ",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "یو آئی فونٹ",
   "settings.general.row.uiFont.description": "پورے انٹرفیس تے استعمال ہون آلے فونٹ نو اپنی مرضی دے مطابق بناؤ",
   "settings.general.row.fontWeight.thin": "ਪਤਲਾ",

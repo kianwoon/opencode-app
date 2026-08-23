@@ -966,6 +966,8 @@ export const dict = {
   "settings.general.row.font.description": "ކޯޑް ބްލޮކްތަކުގައި ބޭނުންކުރާ ފޮންޓް ކަސްޓަމައިޒް ކުރުން",
   "settings.general.row.terminalFont.title": "ޓާމިނަލް ފޮންޓެވެ",
   "settings.general.row.terminalFont.description": "ޓާމިނަލްގައި ބޭނުންކުރާ ފޮންޓް ކަސްޓަމައިޒް ކުރުން",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI ފޮންޓް",
   "settings.general.row.uiFont.description": "މުޅި އިންޓަރފޭސްގައި ބޭނުންކުރާ ފޮންޓް ކަސްޓަމައިޒް ކުރުން",
   "settings.general.row.fontWeight.thin": "ތެޅި",

@@ -960,6 +960,8 @@ export const dict = {
   "settings.general.row.font.description": "Testreszabhatja a kódblokkban használt betűtípust",
   "settings.general.row.terminalFont.title": "Terminal betűtípus",
   "settings.general.row.terminalFont.description": "Testreszabhatja a terminálban használt betűtípust",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI betűtípus",
   "settings.general.row.uiFont.description": "Testreszabhatja a felületen használt betűtípust",
   "settings.general.row.fontWeight.thin": "Vékony",

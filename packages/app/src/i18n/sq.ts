@@ -955,6 +955,8 @@ export const dict = {
   "settings.general.row.font.description": "Personalizoni fontin e përdorur në blloqet e kodit",
   "settings.general.row.terminalFont.title": "Fonti i Terminalit",
   "settings.general.row.terminalFont.description": "Personalizojeni fontin e përdorur në terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Fonti UI",
   "settings.general.row.uiFont.description": "Personalizoni fontin e përdorur në të gjithë ndërfaqen",
   "settings.general.row.fontWeight.thin": "I hollë",

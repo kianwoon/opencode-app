@@ -851,6 +851,8 @@ export const dict = {
   "settings.general.row.font.description": "Mukauta koodilohkoissa käytettyä fonttia",
   "settings.general.row.terminalFont.title": "Terminaalin fontti",
   "settings.general.row.terminalFont.description": "Mukauta terminaalissa käytettävää fonttia",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Käyttöliittymän fontti",
   "settings.general.row.uiFont.description": "Mukauta koko käyttöliittymässä käytettyä fonttia",
   "settings.general.row.fontWeight.thin": "Ohut",

@@ -871,6 +871,8 @@ export const dict = {
   "settings.general.row.font.description": "خصّص الخط المستخدم في كتل التعليمات البرمجية",
   "settings.general.row.terminalFont.title": "خط الطرفية",
   "settings.general.row.terminalFont.description": "خصّص الخط المستخدم في الطرفية",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "خط الواجهة",
   "settings.general.row.uiFont.description": "خصّص الخط المستخدم في الواجهة بأكملها",
   "settings.general.row.fontWeight.thin": "رفيع",

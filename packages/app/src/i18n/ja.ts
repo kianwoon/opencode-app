@@ -859,6 +859,8 @@ export const dict = {
   "settings.general.row.font.description": "コードブロックで使用するフォントをカスタマイズします",
   "settings.general.row.terminalFont.title": "ターミナルのフォント",
   "settings.general.row.terminalFont.description": "ターミナルで使用するフォントをカスタマイズ",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UIフォント",
   "settings.general.row.uiFont.description": "インターフェース全体で使用するフォントをカスタマイズします",
   "settings.general.row.fontWeight.thin": "細い",

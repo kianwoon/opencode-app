@@ -968,6 +968,8 @@ export const dict: Record<string, string> = {
   "settings.general.row.font.description": "གསང་གྲངས་སྡེབ་ཚན་ཚུ་ནང་ལག་ལེན་འཐབ་མི་ཡིག་གཟུགས་སྲོལ་སྒྲིག་འབད།",
   "settings.general.row.terminalFont.title": "ཊར་མི་ནཱལ་ཡིག་གཟུགས།",
   "settings.general.row.terminalFont.description": "ཊར་མི་ནཱལ་ནང་ལག་ལེན་འཐབ་ཡོད་པའི་ཡིག་གཟུགས་སྲོལ་སྒྲིག་འབད།",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "ཡུ་ཨའི་ཡིག་གཟུགས།",
   "settings.general.row.uiFont.description": "ངོས་འདྲ་བ་ཆ་མཉམ་ལུ་ལག་ལེན་འཐབ་ཡོད་པའི་ཡིག་གཟུགས་སྲོལ་སྒྲིག་འབད།",
   "settings.general.row.fontWeight.thin": "སླ་པོ།",

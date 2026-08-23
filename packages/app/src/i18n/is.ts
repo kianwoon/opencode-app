@@ -953,6 +953,8 @@ export const dict = {
   "settings.general.row.font.description": "Sérsníddu leturgerðina sem notuð er í kóðablokkum",
   "settings.general.row.terminalFont.title": "Leturgerð skjáhermis",
   "settings.general.row.terminalFont.description": "Sérsníddu leturgerðina sem notuð er í flugstöðinni",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI leturgerð",
   "settings.general.row.uiFont.description": "Sérsníddu leturgerðina sem notuð er í öllu viðmótinu",
   "settings.general.row.fontWeight.thin": "Mjótt",

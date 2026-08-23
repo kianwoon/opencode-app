@@ -794,6 +794,8 @@ export const dict = {
   "settings.general.row.font.description": "Tilpass skrifttypen som brukes i kodeblokker",
   "settings.general.row.terminalFont.title": "Terminalskrift",
   "settings.general.row.terminalFont.description": "Tilpass skrifttypen som brukes i terminalen",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI-skrift",
   "settings.general.row.uiFont.description": "Tilpass skrifttypen som brukes i hele grensesnittet",
   "settings.general.row.fontWeight.thin": "Tynn",

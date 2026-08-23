@@ -961,6 +961,8 @@ export const dict = {
   "settings.general.row.font.description": "Pas het lettertype aan dat in codeblokken wordt gebruikt",
   "settings.general.row.terminalFont.title": "Terminal-lettertype",
   "settings.general.row.terminalFont.description": "Pas het lettertype aan dat in de terminal wordt gebruikt",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI-lettertype",
   "settings.general.row.uiFont.description": "Pas het lettertype aan dat in de hele interface wordt gebruikt",
   "settings.general.row.fontWeight.thin": "Dun",

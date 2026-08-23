@@ -948,6 +948,8 @@ export const dict = {
   "settings.general.row.font.description": "ប្ដូរពុម្ពអក្សរដែលប្រើក្នុងប្លុកកូដតាមបំណង",
   "settings.general.row.terminalFont.title": "ពុម្ពអក្សរស្ថានីយ",
   "settings.general.row.terminalFont.description": "ប្ដូរពុម្ពអក្សរដែលប្រើក្នុងស្ថានីយតាមបំណង",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "ពុម្ពអក្សរ UI",
   "settings.general.row.uiFont.description": "ប្ដូរពុម្ពអក្សរតាមបំណងដែលបានប្រើទូទាំងចំណុចប្រទាក់",
   "settings.general.row.fontWeight.thin": "ស្ដើង",

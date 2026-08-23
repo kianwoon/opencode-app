@@ -955,6 +955,8 @@ export const dict = {
   "settings.general.row.font.description": "Personalizează fontul folosit în blocurile de cod",
   "settings.general.row.terminalFont.title": "Font terminal",
   "settings.general.row.terminalFont.description": "Personalizează fontul folosit în terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Font interfață",
   "settings.general.row.uiFont.description": "Personalizează fontul folosit în toată interfața",
   "settings.general.row.fontWeight.thin": "Subțire",

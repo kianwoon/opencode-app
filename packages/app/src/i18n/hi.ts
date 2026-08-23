@@ -959,6 +959,8 @@ export const dict = {
   "settings.general.row.font.description": "कोड ब्लॉक में प्रयुक्त फ़ॉन्ट को अनुकूलित करें",
   "settings.general.row.terminalFont.title": "टर्मिनल फ़ॉन्ट",
   "settings.general.row.terminalFont.description": "टर्मिनल में प्रयुक्त फ़ॉन्ट को अनुकूलित करें",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI फ़ॉन्ट",
   "settings.general.row.uiFont.description": "पूरे इंटरफ़ेस में उपयोग किए गए फ़ॉन्ट को कस्टमाइज़ करें",
   "settings.general.row.fontWeight.thin": "पतला",

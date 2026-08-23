@@ -932,6 +932,8 @@ export const dict = {
   "settings.general.row.font.description": "በኮድ ብሎኮች ውስጥ ጥቅም ላይ የዋለውን ቅርጸ-ቁምፊ አብጅ",
   "settings.general.row.terminalFont.title": "ተርሚናል ፊደል",
   "settings.general.row.terminalFont.description": "በተርሚናል ውስጥ ጥቅም ላይ የዋለውን ቅርጸ-ቁምፊ አብጅ",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "የUI ቅርጸ ቁምፊ",
   "settings.general.row.uiFont.description": "በመገናኛው ሁሉ ጥቅም ላይ የዋለውን ቅርጸ-ቁምፊ አብጅ",
   "settings.general.row.fontWeight.thin": "ቀጭን",

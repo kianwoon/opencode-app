@@ -964,6 +964,8 @@ export const dict = {
   "settings.general.row.font.description": "ကုဒ်တုံးများတွင် အသုံးပြုသည့် ဖောင့်ကို စိတ်ကြိုက်ပြင်ဆင်ပါ။",
   "settings.general.row.terminalFont.title": "Terminal ဖောင့်",
   "settings.general.row.terminalFont.description": "terminal တွင်အသုံးပြုသောဖောင့်ကို စိတ်ကြိုက်ပြင်ဆင်ပါ။",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI ဖောင့်",
   "settings.general.row.uiFont.description": "အင်တာဖေ့စ်တစ်လျှောက်သုံးဖောင့်ကို စိတ်ကြိုက်ပြင်ဆင်ပါ။",
   "settings.general.row.fontWeight.thin": "ပါးပါး",

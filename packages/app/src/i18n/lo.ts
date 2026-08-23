@@ -945,6 +945,8 @@ export const dict = {
   "settings.general.row.font.description": "ປັບແຕ່ງຕົວອັກສອນທີ່ໃຊ້ໃນບລັອກລະຫັດ",
   "settings.general.row.terminalFont.title": "ຕົວອັກສອນປາຍ",
   "settings.general.row.terminalFont.description": "ປັບແຕ່ງຟອນທີ່ໃຊ້ຢູ່ໃນເຄື່ອງໝາຍປາຍທາງ",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "ຟອນ UI",
   "settings.general.row.uiFont.description": "ປັບແຕ່ງຟອນທີ່ໃຊ້ໃນທົ່ວອິນເຕີເຟດ",
   "settings.general.row.fontWeight.thin": "ບາງ",

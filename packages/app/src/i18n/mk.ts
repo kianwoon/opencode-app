@@ -955,6 +955,8 @@ export const dict = {
   "settings.general.row.font.description": "Приспособете го фонтот што се користи во блоковите со кодови",
   "settings.general.row.terminalFont.title": "Терминален фонт",
   "settings.general.row.terminalFont.description": "Приспособете го фонтот што се користи во терминалот",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI фонт",
   "settings.general.row.uiFont.description": "Прилагодете го фонтот што се користи низ интерфејсот",
   "settings.general.row.fontWeight.thin": "Тенок",

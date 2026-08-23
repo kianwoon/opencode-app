@@ -962,6 +962,8 @@ export const dict = {
   "settings.general.row.font.description": "Προσαρμογή της γραμματοσειράς που χρησιμοποιείται στα μπλοκ κώδικα",
   "settings.general.row.terminalFont.title": "Τερματική γραμματοσειρά",
   "settings.general.row.terminalFont.description": "Προσαρμογή της γραμματοσειράς που χρησιμοποιείται στο τερματικό",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Γραμματοσειρά UI",
   "settings.general.row.uiFont.description": "Προσαρμογή της γραμματοσειράς που χρησιμοποιείται σε όλη τη διεπαφή",
   "settings.general.row.fontWeight.thin": "Λεπτό",

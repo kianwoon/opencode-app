@@ -951,6 +951,8 @@ export const dict: Record<string, string> = {
   "settings.general.row.font.description": "कोड ब्लकहरूमा प्रयोग गरिएको फन्ट अनुकूलित गर्नुहोस्",
   "settings.general.row.terminalFont.title": "टर्मिनल फन्ट",
   "settings.general.row.terminalFont.description": "टर्मिनलमा प्रयोग गरिएको फन्ट अनुकूलन गर्नुहोस्",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI फन्ट",
   "settings.general.row.uiFont.description": "इन्टरफेसमा प्रयोग गरिएको फन्ट अनुकूलित गर्नुहोस्",
   "settings.general.row.fontWeight.thin": "पातलो",

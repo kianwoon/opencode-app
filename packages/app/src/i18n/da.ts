@@ -815,6 +815,8 @@ export const dict = {
   "settings.general.row.font.description": "Tilpas skrifttypen, der bruges i kodeblokke",
   "settings.general.row.terminalFont.title": "Terminalskrifttype",
   "settings.general.row.terminalFont.description": "Tilpas den skrifttype, der bruges i terminalen",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI-skrifttype",
   "settings.general.row.uiFont.description": "Tilpas skrifttypen, der bruges i hele brugergrænsefladen",
   "settings.general.row.fontWeight.thin": "Tynd",

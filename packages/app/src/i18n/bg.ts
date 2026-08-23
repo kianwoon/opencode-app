@@ -957,6 +957,8 @@ export const dict = {
   "settings.general.row.font.description": "Персонализирайте шрифта, използван в кодовите блокове",
   "settings.general.row.terminalFont.title": "Терминален шрифт",
   "settings.general.row.terminalFont.description": "Персонализирайте шрифта, използван в терминала",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI шрифт",
   "settings.general.row.uiFont.description": "Персонализирайте шрифта, използван в целия интерфейс",
   "settings.general.row.fontWeight.thin": "Тънък",

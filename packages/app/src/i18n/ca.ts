@@ -960,6 +960,8 @@ export const dict = {
   "settings.general.row.font.description": "Personalitzeu el tipus de lletra utilitzat als blocs de codi",
   "settings.general.row.terminalFont.title": "Tipus de lletra terminal",
   "settings.general.row.terminalFont.description": "Personalitzeu el tipus de lletra utilitzat al terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Tipus de lletra de la interfície",
   "settings.general.row.uiFont.description": "Personalitzeu el tipus de lletra utilitzat a tota la interfície",
   "settings.general.row.fontWeight.thin": "Prim",

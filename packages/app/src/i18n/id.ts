@@ -1030,6 +1030,8 @@ export const dict = {
   "settings.general.row.font.description": "Sesuaikan font yang digunakan di blok kode",
   "settings.general.row.terminalFont.title": "Font terminal",
   "settings.general.row.terminalFont.description": "Sesuaikan font yang digunakan di terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Font UI",
   "settings.general.row.uiFont.description": "Sesuaikan font yang digunakan di seluruh antarmuka",
   "settings.general.row.fontWeight.thin": "Tipikal",

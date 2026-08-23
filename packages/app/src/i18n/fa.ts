@@ -948,6 +948,8 @@ export const dict = {
   "settings.general.row.font.description": "فونت مورد استفاده در بلوک های کد را سفارشی کنید",
   "settings.general.row.terminalFont.title": "فونت ترمینال",
   "settings.general.row.terminalFont.description": "فونت مورد استفاده در ترمینال را سفارشی کنید",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "قلم UI",
   "settings.general.row.uiFont.description": "فونت مورد استفاده در سراسر رابط را سفارشی کنید",
   "settings.general.row.fontWeight.thin": "نازک",

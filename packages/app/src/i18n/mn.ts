@@ -959,6 +959,8 @@ export const dict = {
   "settings.general.row.font.description": "Кодын блокуудад ашигладаг фонтыг тохируулна уу",
   "settings.general.row.terminalFont.title": "Терминал фонт",
   "settings.general.row.terminalFont.description": "Терминалд ашигласан фонтыг тохируулна уу",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI фонт",
   "settings.general.row.uiFont.description": "Интерфэйс даяар ашигласан фонтыг тохируулна уу",
   "settings.general.row.fontWeight.thin": "Нимгэн",

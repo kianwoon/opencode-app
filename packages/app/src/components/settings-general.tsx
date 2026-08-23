@@ -16,6 +16,8 @@ import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { useUpdaterAction } from "./updater-action"
 import {
+  messageDefault,
+  messageFontFamily,
   monoDefault,
   monoFontFamily,
   monoInput,
@@ -260,6 +262,7 @@ export const SettingsGeneral: Component = () => {
   const mono = () => monoInput(settings.appearance.font())
   const sans = () => sansInput(settings.appearance.uiFont())
   const terminal = () => terminalInput(settings.appearance.terminalFont())
+  const message = () => settings.appearance.messageFont()
 
   const fontWeightOptions = createMemo(() => [
     { value: "100", label: language.t("settings.general.row.fontWeight.thin") },
@@ -666,6 +669,42 @@ export const SettingsGeneral: Component = () => {
               colorDark={settings.appearance.terminalFontColorDark()}
               setColorLight={settings.appearance.setTerminalFontColorLight}
               setColorDark={settings.appearance.setTerminalFontColorDark}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.messageFont.title")}
+          description={language.t("settings.general.row.messageFont.description")}
+        >
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
+            <TextField
+              data-action="settings-message-font"
+              label={language.t("settings.general.row.messageFont.title")}
+              hideLabel
+              type="text"
+              value={message()}
+              onChange={(value) => settings.appearance.setMessageFont(value)}
+              placeholder={messageDefault}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              class="text-12-regular"
+              style={{ "font-family": messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()) }}
+            />
+            <Select
+              data-action="settings-message-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.messageFontWeight(),
+                (value) => settings.appearance.setMessageFontWeight(value),
+              )}
+            />
+            <FontColorControls
+              colorLight={settings.appearance.messageFontColorLight()}
+              colorDark={settings.appearance.messageFontColorDark()}
+              setColorLight={settings.appearance.setMessageFontColorLight}
+              setColorDark={settings.appearance.setMessageFontColorDark}
             />
           </div>
         </SettingsRow>

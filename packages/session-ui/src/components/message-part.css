@@ -8,7 +8,7 @@
 }
 
 [data-component="user-message"] {
-  font-family: var(--font-family-sans);
+  font-family: var(--font-family-message, var(--font-family-sans));
   font-size: var(--font-size-base);
   font-style: normal;
   font-weight: var(--font-weight-regular);

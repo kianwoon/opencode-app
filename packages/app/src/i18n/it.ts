@@ -871,6 +871,8 @@ export const dict = {
   "settings.general.row.font.description": "Personalizza il carattere utilizzato nei blocchi di codice",
   "settings.general.row.terminalFont.title": "Carattere terminale",
   "settings.general.row.terminalFont.description": "Personalizza il carattere utilizzato nel terminale",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Carattere dell'interfaccia utente",
   "settings.general.row.uiFont.description": "Personalizza il carattere utilizzato nell'interfaccia",
   "settings.general.row.fontWeight.thin": "Sottile",

@@ -965,6 +965,8 @@ export const dict = {
   "settings.general.row.font.description": "Tinkinkite kodo blokuose naudojamą šriftą",
   "settings.general.row.terminalFont.title": "Šriftas Terminal",
   "settings.general.row.terminalFont.description": "Tinkinkite terminale naudojamą šriftą",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI šriftas",
   "settings.general.row.uiFont.description": "Tinkinkite visoje sąsajoje naudojamą šriftą",
   "settings.general.row.fontWeight.thin": "Plonas",

@@ -957,6 +957,8 @@ export const dict = {
   "settings.general.row.font.description": "Přizpůsobte písmo používané v blocích kódu",
   "settings.general.row.terminalFont.title": "Terminálové písmo",
   "settings.general.row.terminalFont.description": "Přizpůsobte písmo použité v terminálu",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI Písmo",
   "settings.general.row.uiFont.description": "Přizpůsobte písmo používané v celém rozhraní",
   "settings.general.row.fontWeight.thin": "Tenký",

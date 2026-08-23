@@ -916,6 +916,8 @@ export const dict = {
   "settings.general.row.font.description": "自訂程式碼區塊使用的字型",
   "settings.general.row.terminalFont.title": "終端機字型",
   "settings.general.row.terminalFont.description": "自訂終端機使用的字型",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "介面字型",
   "settings.general.row.uiFont.description": "自訂整個介面使用的字型",
   "settings.general.row.fontWeight.thin": "極細",

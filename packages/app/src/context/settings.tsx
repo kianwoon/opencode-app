@@ -54,6 +54,10 @@ export interface Settings {
     codeFontColorDark: string
     terminalFontColorLight: string
     terminalFontColorDark: string
+    message: string
+    messageFontWeight: number
+    messageFontColorLight: string
+    messageFontColorDark: string
   }
   keybinds: Record<string, string>
   permissions: {
@@ -66,6 +70,7 @@ export interface Settings {
 export const monoDefault = "System Mono"
 export const sansDefault = "System Sans"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
+export const messageDefault = "System Sans"
 const legacyNewLayoutDesignsDefault = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 export const newLayoutDesignsDefault = true
 // Existing users can switch layouts until local midnight on this date. Set new Date(YYYY, M-1, D) to show.
@@ -217,6 +222,10 @@ export function terminalFontFamily(font: string | undefined, weightValue?: numbe
   return stack(font, terminalBase, weightValue)
 }
 
+export function messageFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, sansBase, weightValue)
+}
+
 export function weight(weight: number | undefined, fallback: number) {
   return weight ?? fallback
 }
@@ -269,6 +278,10 @@ const defaultSettings: Settings = {
     codeFontColorDark: "",
     terminalFontColorLight: "",
     terminalFontColorDark: "",
+    message: "",
+    messageFontWeight: 400,
+    messageFontColorLight: "",
+    messageFontColorDark: "",
   },
   keybinds: {},
   permissions: {
@@ -429,6 +442,15 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       root.style.setProperty("--font-family-sans--font-weight", String(uiWeight))
       root.style.setProperty("--font-family-mono--font-weight", String(codeWeight))
       root.style.setProperty("--font-family-terminal--font-weight", String(terminalWeight))
+      const messageWeight = weight(
+        store.appearance?.messageFontWeight,
+        defaultSettings.appearance.messageFontWeight,
+      )
+      root.style.setProperty(
+        "--font-family-message",
+        messageFontFamily(store.appearance?.message, messageWeight),
+      )
+      root.style.setProperty("--font-family-message--font-weight", String(messageWeight))
       // Font colors are resolved by the browser per color scheme via light-dark(),
       // falling back to the themed text color when the user leaves a value empty.
       root.style.setProperty(
@@ -442,6 +464,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       root.style.setProperty(
         "--font-family-terminal--color",
         fontColor(store.appearance?.terminalFontColorLight, store.appearance?.terminalFontColorDark),
+      )
+      root.style.setProperty(
+        "--font-family-message--color",
+        fontColor(store.appearance?.messageFontColorLight, store.appearance?.messageFontColorDark),
       )
       // The UI font color overrides the primary text color of the app so the
       // user-chosen color shows up everywhere themed text is rendered. Setting
@@ -645,6 +671,31 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setTerminalFontColorDark(value: string) {
           setStore("appearance", "terminalFontColorDark", color(value))
+        },
+        messageFont: withFallback(() => store.appearance?.message, defaultSettings.appearance.message),
+        setMessageFont(value: string) {
+          setStore("appearance", "message", value.trim() ? value : "")
+        },
+        messageFontWeight: withFallback(
+          () => store.appearance?.messageFontWeight,
+          defaultSettings.appearance.messageFontWeight,
+        ),
+        setMessageFontWeight(value: number) {
+          setStore("appearance", "messageFontWeight", value)
+        },
+        messageFontColorLight: withFallback(
+          () => store.appearance?.messageFontColorLight,
+          defaultSettings.appearance.messageFontColorLight,
+        ),
+        setMessageFontColorLight(value: string) {
+          setStore("appearance", "messageFontColorLight", color(value))
+        },
+        messageFontColorDark: withFallback(
+          () => store.appearance?.messageFontColorDark,
+          defaultSettings.appearance.messageFontColorDark,
+        ),
+        setMessageFontColorDark(value: string) {
+          setStore("appearance", "messageFontColorDark", color(value))
         },
       },
       keybinds: {

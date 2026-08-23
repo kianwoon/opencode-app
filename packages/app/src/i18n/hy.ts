@@ -958,6 +958,8 @@ export const dict = {
   "settings.general.row.font.description": "Անհատականացրեք կոդերի բլոկներում օգտագործվող տառատեսակը",
   "settings.general.row.terminalFont.title": "Տերմինալ տառատեսակ",
   "settings.general.row.terminalFont.description": "Անհատականացրեք տերմինալում օգտագործվող տառատեսակը",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI տառատեսակը",
   "settings.general.row.uiFont.description": "Անհատականացրեք ինտերֆեյսի ընթացքում օգտագործվող տառատեսակը",
   "settings.general.row.fontWeight.thin": "Բարակ",

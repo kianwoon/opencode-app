@@ -925,6 +925,8 @@ export const dict = {
   "settings.general.row.font.description": "ปรับแต่งแบบอักษรที่ใช้ในบล็อกโค้ด",
   "settings.general.row.terminalFont.title": "แบบอักษรเทอร์มินัล",
   "settings.general.row.terminalFont.description": "ปรับแต่งแบบอักษรที่ใช้ในเทอร์มินัล",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "แบบอักษร UI",
   "settings.general.row.uiFont.description": "ปรับแต่งแบบอักษรที่ใช้ทั่วทั้งอินเทอร์เฟซ",
   "settings.general.row.fontWeight.thin": "บาง",

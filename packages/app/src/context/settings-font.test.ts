@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   fontColor,
+  messageFontFamily,
   monoFontFamily,
   sansFontFamily,
   terminalFontFamily,
@@ -40,6 +41,15 @@ describe("font family stack", () => {
     expect(sansFontFamily("Inter", 700)).toBe('"Inter Bold", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif')
     expect(terminalFontFamily("JetBrainsMono Nerd Font Mono", 500)).toBe(
       '"JetBrainsMono Nerd Font Mono Medium", "JetBrainsMono Nerd Font Mono", "JetBrainsMono Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    )
+  })
+
+  test("message font uses the sans stack", () => {
+    expect(messageFontFamily("Inter", 700)).toBe(
+      '"Inter Bold", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    )
+    expect(messageFontFamily("", 300)).toBe(
+      'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     )
   })
 

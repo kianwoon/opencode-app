@@ -956,6 +956,8 @@ export const dict = {
   "settings.general.row.font.description": "Anpassa teckensnittet som används i kodblock",
   "settings.general.row.terminalFont.title": "Terminaltypsnitt",
   "settings.general.row.terminalFont.description": "Anpassa teckensnittet som används i terminalen",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI-teckensnitt",
   "settings.general.row.uiFont.description": "Anpassa typsnittet som används i hela gränssnittet",
   "settings.general.row.fontWeight.thin": "Tunn",

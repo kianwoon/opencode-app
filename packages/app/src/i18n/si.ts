@@ -947,6 +947,8 @@ export const dict: Record<string, string> = {
   "settings.general.row.font.description": "කේත බ්ලොක් වල භාවිතා කරන අකුරු අභිරුචිකරණය කරන්න",
   "settings.general.row.terminalFont.title": "ටර්මිනල් අකුරු",
   "settings.general.row.terminalFont.description": "ටර්මිනලයේ භාවිතා කරන අකුරු අභිරුචිකරණය කරන්න",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI අකුරු",
   "settings.general.row.uiFont.description": "අතුරු මුහුණත පුරා භාවිතා කරන අකුරු අභිරුචිකරණය කරන්න",
   "settings.general.row.fontWeight.thin": "සිහින්",

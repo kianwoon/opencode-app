@@ -1045,6 +1045,8 @@ export const dict = {
   "settings.general.row.font.description": "Налаштуйте шрифт, який використовується в блоках коду",
   "settings.general.row.terminalFont.title": "Шрифт термінала",
   "settings.general.row.terminalFont.description": "Налаштуйте шрифт, який використовується в терміналі",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Шрифт інтерфейсу",
   "settings.general.row.uiFont.description": "Налаштуйте шрифт, який використовується в інтерфейсі",
   "settings.general.row.fontWeight.thin": "Тонкий",

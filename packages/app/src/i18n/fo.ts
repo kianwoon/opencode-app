@@ -950,6 +950,8 @@ export const dict = {
   "settings.general.row.font.description": "Tillaga skriftslagið, sum verður brúkt í kodublokkum",
   "settings.general.row.terminalFont.title": "Terminalskriftslag",
   "settings.general.row.terminalFont.description": "Tillaga skriftslagið, sum verður brúkt í terminalinum",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI Skrift",
   "settings.general.row.uiFont.description": "Tillaga skriftslagið, sum verður brúkt í øllum nýtsluflatanum",
   "settings.general.row.fontWeight.thin": "Tunnur",

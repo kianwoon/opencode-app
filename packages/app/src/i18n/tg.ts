@@ -956,6 +956,8 @@ export const dict = {
   "settings.general.row.font.description": "Ҳарферо, ки дар блокҳои код истифода мешавад, танзим кунед",
   "settings.general.row.terminalFont.title": "Шрифти терминал",
   "settings.general.row.terminalFont.description": "Ҳарферо, ки дар терминал истифода мешавад, танзим кунед",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Шрифти UI",
   "settings.general.row.uiFont.description": "Ҳарферо, ки дар тамоми интерфейс истифода мешавад, танзим кунед",
   "settings.general.row.fontWeight.thin": "Нозук",

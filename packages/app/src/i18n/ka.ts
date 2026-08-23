@@ -950,6 +950,8 @@ export const dict = {
   "settings.general.row.font.description": "მორგეთ კოდის ბლოკებში გამოყენებული შრიფტი",
   "settings.general.row.terminalFont.title": "ტერმინალის შრიფტი",
   "settings.general.row.terminalFont.description": "მორგეთ ტერმინალში გამოყენებული შრიფტი",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI ფონტი",
   "settings.general.row.uiFont.description": "დააყენეთ ინტერფეისში გამოყენებული შრიფტის მორგება",
   "settings.general.row.fontWeight.thin": "თხელი",

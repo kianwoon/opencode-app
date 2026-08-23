@@ -5,6 +5,8 @@ import { usePermission } from "@/context/permission"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import {
+  messageDefault,
+  messageFontFamily,
   monoDefault,
   monoFontFamily,
   monoInput,
@@ -114,6 +116,14 @@ export function createAppearanceSettingsController() {
         colorLight: settings.appearance.terminalFontColorLight(),
         colorDark: settings.appearance.terminalFontColorDark(),
       })),
+      message: createMemo(() => ({
+        value: settings.appearance.messageFont(),
+        family: messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()),
+        placeholder: messageDefault,
+        weight: settings.appearance.messageFontWeight(),
+        colorLight: settings.appearance.messageFontColorLight(),
+        colorDark: settings.appearance.messageFontColorDark(),
+      })),
       setUI: (value: string) => settings.appearance.setUIFont(value),
       setCode: (value: string) => settings.appearance.setFont(value),
       setTerminal: (value: string) => settings.appearance.setTerminalFont(value),
@@ -126,6 +136,10 @@ export function createAppearanceSettingsController() {
       setCodeColorDark: (value: string) => settings.appearance.setCodeFontColorDark(value),
       setTerminalColorLight: (value: string) => settings.appearance.setTerminalFontColorLight(value),
       setTerminalColorDark: (value: string) => settings.appearance.setTerminalFontColorDark(value),
+      setMessage: (value: string) => settings.appearance.setMessageFont(value),
+      setMessageWeight: (value: number) => settings.appearance.setMessageFontWeight(value),
+      setMessageColorLight: (value: string) => settings.appearance.setMessageFontColorLight(value),
+      setMessageColorDark: (value: string) => settings.appearance.setMessageFontColorDark(value),
     },
   }
 }

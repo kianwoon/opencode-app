@@ -876,6 +876,8 @@ export const dict = {
   "settings.general.row.font.description": "Dostosuj czcionkę używaną w blokach kodu",
   "settings.general.row.terminalFont.title": "Czcionka terminala",
   "settings.general.row.terminalFont.description": "Dostosuj czcionkę używaną w terminalu",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Czcionka interfejsu",
   "settings.general.row.uiFont.description": "Dostosuj czcionkę używaną w całym interfejsie",
   "settings.general.row.fontWeight.thin": "Cienki",

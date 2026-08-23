@@ -766,6 +766,8 @@ export const dict = {
   "settings.general.row.font.description": "Die in Codeblöcken verwendete Schriftart anpassen",
   "settings.general.row.terminalFont.title": "Terminalschriftart",
   "settings.general.row.terminalFont.description": "Die im Terminal verwendete Schriftart anpassen",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI-Schriftart",
   "settings.general.row.uiFont.description": "Die in der gesamten Benutzeroberfläche verwendete Schriftart anpassen",
   "settings.general.row.fontWeight.thin": "Dünn",

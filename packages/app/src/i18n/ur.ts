@@ -961,6 +961,8 @@ export const dict = {
   "settings.general.row.font.description": "کوڈ بلاکس میں استعمال ہونے والے فونٹ کو حسب ضرورت بنائیں",
   "settings.general.row.terminalFont.title": "ٹرمینل فونٹ",
   "settings.general.row.terminalFont.description": "ٹرمینل میں استعمال ہونے والے فونٹ کو حسب ضرورت بنائیں",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI فونٹ",
   "settings.general.row.uiFont.description": "پورے انٹرفیس میں استعمال ہونے والے فونٹ کو حسب ضرورت بنائیں",
   "settings.general.row.fontWeight.thin": "پتلا",

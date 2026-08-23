@@ -611,6 +611,8 @@ export const dict = {
   "settings.general.row.font.description": "코드 블록에 사용되는 글꼴을 사용자 지정",
   "settings.general.row.terminalFont.title": "터미널 글꼴",
   "settings.general.row.terminalFont.description": "터미널에서 사용할 글꼴을 설정합니다",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI 글꼴",
   "settings.general.row.uiFont.description": "인터페이스 전반에 사용되는 글꼴을 사용자 지정",
   "settings.general.row.fontWeight.thin": "씬",

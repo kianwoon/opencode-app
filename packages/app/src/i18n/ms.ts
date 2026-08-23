@@ -950,6 +950,8 @@ export const dict = {
   "settings.general.row.font.description": "Sesuaikan fon yang digunakan dalam blok kod",
   "settings.general.row.terminalFont.title": "Fon Terminal",
   "settings.general.row.terminalFont.description": "Sesuaikan fon yang digunakan dalam terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Fon Antara Muka",
   "settings.general.row.uiFont.description": "Sesuaikan fon yang digunakan di seluruh antara muka",
   "settings.general.row.fontWeight.thin": "Nipis",

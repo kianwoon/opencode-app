@@ -874,6 +874,8 @@ export const dict = {
   "settings.general.row.font.description": "Personalize a fonte usada em blocos de código",
   "settings.general.row.terminalFont.title": "Fonte do terminal",
   "settings.general.row.terminalFont.description": "Personalize a fonte usada no terminal",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "Fonte da interface",
   "settings.general.row.uiFont.description": "Personalize a fonte usada em toda a interface",
   "settings.general.row.fontWeight.thin": "Tanav",

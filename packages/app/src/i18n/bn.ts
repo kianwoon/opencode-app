@@ -949,6 +949,8 @@ export const dict: Record<string, string> = {
   "settings.general.row.font.description": "কোড ব্লকে ব্যবহৃত ফন্ট কাস্টমাইজ করুন",
   "settings.general.row.terminalFont.title": "টার্মিনাল ফন্ট",
   "settings.general.row.terminalFont.description": "টার্মিনালে ব্যবহৃত ফন্টটি কাস্টমাইজ করুন",
+  "settings.general.row.messageFont.title": "Message Font",
+  "settings.general.row.messageFont.description": "Customise the font used in chat messages and the composer",
   "settings.general.row.uiFont.title": "UI ফন্ট",
   "settings.general.row.uiFont.description": "ইন্টারফেস জুড়ে ব্যবহৃত ফন্ট কাস্টমাইজ করুন",
   "settings.general.row.fontWeight.thin": "পাতলা",
