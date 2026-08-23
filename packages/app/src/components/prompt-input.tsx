@@ -14,6 +14,7 @@ import {
   type JSX,
 } from "solid-js"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
+import { fontColor, messageFontFamily, useSettings } from "@/context/settings"
 import {
   ContentPart,
   DEFAULT_PROMPT,
@@ -116,6 +117,7 @@ const EXAMPLES = [
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
+  const settings = useSettings()
 
   const sync = useSync()
   const files = useFile()
@@ -1569,17 +1571,30 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               onKeyDown={handleKeyDown}
               classList={{
                 "select-text": true,
-                "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap [font-family:var(--font-family-message,var(--font-family-sans))]": true,
+                "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
                 "[&_[data-type=file]]:text-syntax-property": true,
                 "[&_[data-type=agent]]:text-syntax-type": true,
                 "font-mono!": store.mode === "shell",
               }}
-              style={{ "padding-bottom": space }}
+              style={{
+                "padding-bottom": space,
+                // Inline styles so the message font wins the cascade over
+                // composite utilities like .text-14-regular.
+                "font-family": messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()),
+                "font-weight": String(settings.appearance.messageFontWeight()),
+                color: fontColor(settings.appearance.messageFontColorLight(), settings.appearance.messageFontColorDark()) || undefined,
+              }}
             />
             <div
-              class="absolute top-0 inset-x-0 pl-3 pr-2 pt-2 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate [font-family:var(--font-family-message,var(--font-family-sans))]"
+              class="absolute top-0 inset-x-0 pl-3 pr-2 pt-2 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate"
               classList={{ "font-mono!": store.mode === "shell" }}
-              style={{ "padding-bottom": space, display: prompt.dirty() || composingText() ? "none" : undefined }}
+              style={{
+                "padding-bottom": space,
+                display: prompt.dirty() || composingText() ? "none" : undefined,
+                "font-family": messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()),
+                "font-weight": String(settings.appearance.messageFontWeight()),
+                color: fontColor(settings.appearance.messageFontColorLight(), settings.appearance.messageFontColorDark()) || undefined,
+              }}
             >
               {placeholder()}
             </div>

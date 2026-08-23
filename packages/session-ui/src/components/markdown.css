@@ -11,8 +11,9 @@
   min-width: 0;
   max-width: 100%;
   overflow-wrap: break-word;
-  color: var(--v2-text-text-base);
   font-family: var(--font-family-message, var(--font-family-sans));
+  font-weight: var(--font-family-message--font-weight, 400);
+  color: var(--font-family-message--color, var(--v2-text-text-base));
   font-size: var(--font-size-base); /* 14px */
   line-height: 160%;
 

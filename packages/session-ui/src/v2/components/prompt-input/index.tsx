@@ -176,7 +176,14 @@ export function PromptInputV2(props: PromptInputV2Props) {
             spellcheck={state.mode === "normal"}
             // @ts-expect-error
             autocomplete="off"
-            class="relative z-10 block min-h-[60px] max-h-[180px] w-full overflow-y-auto whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none empty:before:content-['\200B'] [font-family:var(--font-family-message,var(--font-family-sans))] [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
+            style={{
+              // Inline style so the message font wins the cascade over any
+              // utility class; mirrors how the terminal applies its font.
+              "font-family": "var(--font-family-message, var(--font-family-sans))",
+              "font-weight": "var(--font-family-message--font-weight, 400)",
+              color: "var(--font-family-message--color, inherit)",
+            }}
+            class="relative z-10 block min-h-[60px] max-h-[180px] w-full overflow-y-auto whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none empty:before:content-['\200B'] [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
             classList={{ "font-mono!": state.mode === "shell", "opacity-50": props.disabled }}
             onInput={(event) => {
               // Safari fires input (insertCompositionText) before compositionstart
@@ -224,6 +231,11 @@ export function PromptInputV2(props: PromptInputV2Props) {
             <div
               class="pointer-events-none absolute inset-x-0 top-0 px-4 pt-4 text-[13px] font-[440] leading-5 text-v2-text-text-faint"
               classList={{ "font-mono!": state.mode === "shell" }}
+              style={{
+                "font-family": "var(--font-family-message, var(--font-family-sans))",
+                "font-weight": "var(--font-family-message--font-weight, 400)",
+                color: "var(--font-family-message--color, var(--v2-text-text-faint))",
+              }}
             >
               {view.placeholder?.() ??
                 (state.mode === "shell"
