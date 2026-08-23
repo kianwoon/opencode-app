@@ -1293,5 +1293,15 @@ export const dict = {
     "Du finder alle dine sessioner og projekter på den nye startskærm. Når du vælger en session, åbnes den i en fane.",
   "help.tabs.persistence": "Dine faner er stadig åbne, når du åbner appen igen.",
   "help.tabs.worktrees":
-    "Det nye design understøtter endnu ikke Git Worktrees, men understøttelsen kommer snart. Hvis du foretrækker at fortsætte med det tidligere layout, kan du skifte mellem layoutene under Indstillinger. Bemærk, at det nye layout bliver permanent om nogle få uger.",
+    "Det nye design understøtter endnu ikke Git Worktrees, men understøttelsen kommer snart. Hvis du foretrækker at fortsætte med det tidligere layout, kan du skifte mellem layoutene under Indstillinger. Bemærk, at det nye layout bliver permanent om nogle få uger.",,
+  "sidebar.vacuum": "Compact database",,
+  "sidebar.vacuum.started": "Compacting database…",,
+  "sidebar.vacuum.done": "Database compacted",,
+  "sidebar.vacuum.saved": "Reclaimed {{saved}}",,
+  "sidebar.vacuum.none": "No database to compact",,
+  "sidebar.vacuum.error": "Failed to compact database",,
+  "sidebar.reload": "Reload configs",,
+  "sidebar.reload.started": "Reloading configs…",,
+  "sidebar.reload.done": "Configs reloaded",,
+  "sidebar.reload.error": "Failed to reload configs",
 }

@@ -1247,5 +1247,15 @@ export const dict = {
   "terminal.connectTicket.statusError": "Le ticket de connexion PTY a échoué avec le statut {{status}}",
 
   "titlebar.update": "Mettre à jour",
-  "titlebar.updateVersion": "Mettre à jour {{version}}",
+  "titlebar.updateVersion": "Mettre à jour {{version}}",,
+  "sidebar.vacuum": "Compact database",,
+  "sidebar.vacuum.started": "Compacting database…",,
+  "sidebar.vacuum.done": "Database compacted",,
+  "sidebar.vacuum.saved": "Reclaimed {{saved}}",,
+  "sidebar.vacuum.none": "No database to compact",,
+  "sidebar.vacuum.error": "Failed to compact database",,
+  "sidebar.reload": "Reload configs",,
+  "sidebar.reload.started": "Reloading configs…",,
+  "sidebar.reload.done": "Configs reloaded",,
+  "sidebar.reload.error": "Failed to reload configs",
 }

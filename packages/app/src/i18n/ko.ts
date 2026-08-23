@@ -1212,5 +1212,15 @@ export const dict = {
   "desktop.wsl.error.failedPort": "포트를 가져오지 못했습니다",
 
   "desktop.picker.error.notSelected": "선택기에서 파일을 선택하지 않았습니다",
-  "desktop.picker.error.sizeLimit": "선택한 첨부 파일이 {{limit}} MB 제한을 초과합니다",
+  "desktop.picker.error.sizeLimit": "선택한 첨부 파일이 {{limit}} MB 제한을 초과합니다",,
+  "sidebar.vacuum": "Compact database",,
+  "sidebar.vacuum.started": "Compacting database…",,
+  "sidebar.vacuum.done": "Database compacted",,
+  "sidebar.vacuum.saved": "Reclaimed {{saved}}",,
+  "sidebar.vacuum.none": "No database to compact",,
+  "sidebar.vacuum.error": "Failed to compact database",,
+  "sidebar.reload": "Reload configs",,
+  "sidebar.reload.started": "Reloading configs…",,
+  "sidebar.reload.done": "Configs reloaded",,
+  "sidebar.reload.error": "Failed to reload configs",
 }

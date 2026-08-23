@@ -1231,5 +1231,15 @@ export const dict = {
     "Auf der neuen Startseite finden Sie alle Ihre Sitzungen und Projekte. Wenn Sie eine Sitzung auswählen, wird sie in einem Tab geöffnet.",
   "help.tabs.persistence": "Wenn Sie die App erneut öffnen, sind Ihre Tabs weiterhin geöffnet.",
   "help.tabs.worktrees":
-    "Das neue Design unterstützt Git-Worktrees noch nicht. Diese Funktion folgt in Kürze. Wenn Sie das bisherige Layout vorerst weiterverwenden möchten, können Sie in den Einstellungen zwischen den Layouts wechseln. Beachten Sie jedoch, dass das neue Layout in einigen Wochen dauerhaft verwendet wird.",
+    "Das neue Design unterstützt Git-Worktrees noch nicht. Diese Funktion folgt in Kürze. Wenn Sie das bisherige Layout vorerst weiterverwenden möchten, können Sie in den Einstellungen zwischen den Layouts wechseln. Beachten Sie jedoch, dass das neue Layout in einigen Wochen dauerhaft verwendet wird.",,
+  "sidebar.vacuum": "Compact database",,
+  "sidebar.vacuum.started": "Compacting database…",,
+  "sidebar.vacuum.done": "Database compacted",,
+  "sidebar.vacuum.saved": "Reclaimed {{saved}}",,
+  "sidebar.vacuum.none": "No database to compact",,
+  "sidebar.vacuum.error": "Failed to compact database",,
+  "sidebar.reload": "Reload configs",,
+  "sidebar.reload.started": "Reloading configs…",,
+  "sidebar.reload.done": "Configs reloaded",,
+  "sidebar.reload.error": "Failed to reload configs",
 } satisfies Partial<Record<Keys, string>>

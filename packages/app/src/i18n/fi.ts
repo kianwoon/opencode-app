@@ -1214,5 +1214,15 @@ export const dict = {
     "Kaikki istuntosi ja projektisi ovat uudessa etusivunäkymässä. Istunnon valitseminen avaa sen välilehteen.",
   "help.tabs.persistence": "Kun avaat sovelluksen uudelleen, välilehtesi ovat yhä avoinna.",
   "help.tabs.worktrees":
-    "Uusi ulkoasu ei vielä tue Git-työpuita, mutta tuki on tulossa pian. Jos haluat jatkaa aiemman ulkoasun käyttöä, voit vaihtaa ulkoasua asetuksissa. Huomaa kuitenkin, että uudesta ulkoasusta tulee pysyvä muutaman viikon kuluttua.",
+    "Uusi ulkoasu ei vielä tue Git-työpuita, mutta tuki on tulossa pian. Jos haluat jatkaa aiemman ulkoasun käyttöä, voit vaihtaa ulkoasua asetuksissa. Huomaa kuitenkin, että uudesta ulkoasusta tulee pysyvä muutaman viikon kuluttua.",,
+  "sidebar.vacuum": "Compact database",,
+  "sidebar.vacuum.started": "Compacting database…",,
+  "sidebar.vacuum.done": "Database compacted",,
+  "sidebar.vacuum.saved": "Reclaimed {{saved}}",,
+  "sidebar.vacuum.none": "No database to compact",,
+  "sidebar.vacuum.error": "Failed to compact database",,
+  "sidebar.reload": "Reload configs",,
+  "sidebar.reload.started": "Reloading configs…",,
+  "sidebar.reload.done": "Configs reloaded",,
+  "sidebar.reload.error": "Failed to reload configs",
 }
