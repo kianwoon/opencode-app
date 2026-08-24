@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { APICallError } from "ai"
 import { MessageV2 } from "../../src/session/message-v2"
+import { MessageError } from "../../src/session/message-error"
 import { ProviderTransform } from "@/provider/transform"
 import type { Provider } from "@/provider/provider"
 
@@ -1551,6 +1552,20 @@ describe("session.message-v2.fromError", () => {
     const result = MessageV2.fromError(zlibError, { providerID, aborted: true })
 
     expect(result.name).toBe("MessageAbortedError")
+  })
+
+  test("maps RepetitionLoopError to a non-retryable APIError", () => {
+    const error = new MessageError.RepetitionLoopError({
+      repeated: "Let me commit.",
+      message: "Assistant response degenerated into a repetition loop.",
+    })
+
+    const result = MessageV2.fromError(error, { providerID })
+
+    expect(SessionV1.APIError.isInstance(result)).toBe(true)
+    expect((result as SessionV1.APIError).data.isRetryable).toBe(false)
+    expect((result as SessionV1.APIError).data.metadata?.["code"]).toBe("repetition_loop")
+    expect((result as SessionV1.APIError).data.metadata?.["repeated"]).toBe("Let me commit.")
   })
 })
 

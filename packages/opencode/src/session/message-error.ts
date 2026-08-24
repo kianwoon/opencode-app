@@ -8,6 +8,11 @@ export const AuthError = NamedError.create("ProviderAuthError", {
   message: Schema.String,
 })
 
+export const RepetitionLoopError = NamedError.create("MessageRepetitionLoopError", {
+  repeated: Schema.String,
+  message: Schema.String,
+})
+
 export const Shared = [AuthError.EffectSchema, NamedError.Unknown.EffectSchema, OutputLengthError.EffectSchema] as const
 export const SharedSchema = Schema.Union(Shared)
 

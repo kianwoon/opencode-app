@@ -17,6 +17,7 @@ import {
 } from "@opencode-ai/core/v1/session"
 
 import { NamedError } from "@opencode-ai/core/util/error"
+import { MessageError } from "./message-error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -619,6 +620,15 @@ export function fromError(
       ).toObject()
     case OutputLengthError.isInstance(e):
       return e
+    case MessageError.RepetitionLoopError.isInstance(e):
+      return new APIError(
+        {
+          message: e.data.message,
+          isRetryable: false,
+          metadata: { code: "repetition_loop", repeated: e.data.repeated },
+        },
+        { cause: e },
+      ).toObject()
     case LoadAPIKeyError.isInstance(e):
       return new AuthError(
         {

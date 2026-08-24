@@ -31,6 +31,26 @@
   consume plain queued items. Acceptance guard: test/session/prompt.test.ts
   "auto title retries on a later prompt after the first title generation fails".
 
+## Degenerate repetition-loop guard
+
+- Some models (notably behind aggregator/proxy providers like B.AI) can enter a state where
+  they stream the same sentence forever ("Let me commit. Let me commit. ...") without ever
+  finishing the turn or calling a tool. The provider never emits a stop token, so the session
+  hangs until the user aborts manually.
+- `src/session/llm/repetition-guard.ts` scans `text-delta` LLM events for consecutive
+  repetition of the same sentence (default: 3+ repeats of a ≥12-char sentence) and fails the
+  stream with a **non-retryable** `MessageError.RepetitionLoopError`. It is applied in
+  `LLM.Service.stream` (`src/session/llm.ts`) to BOTH the native and AI SDK runtimes.
+- The guard only watches user-visible text deltas, not reasoning/tool-input deltas, and
+  ignores short fragments ("ok.", "yes") that legitimately repeat.
+- `MessageV2.fromError` maps `RepetitionLoopError` to an `APIError` with
+  `isRetryable: false` and `metadata.code = "repetition_loop"`, so the retry policy does not
+  re-run a degenerate generation. Do NOT make this retryable.
+- Prevention: configure `frequency_penalty` / `presence_penalty` on the provider's models
+  (`provider.<id>.models.<model>.options`). For OpenAI-compatible providers these reach the
+  request body via `providerOptions["<provider-id>"]` (see `ProviderTransform.providerOptions`
+  dot-split key resolution). Acceptance guard: test/session/repetition-guard.test.ts.
+
 ## Config reload gotchas
 
 - "Reload configs" (global dispose, SIGUSR2, config-update) drops the TTL-infinity global
