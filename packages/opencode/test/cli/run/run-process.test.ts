@@ -81,9 +81,10 @@ describe("opencode run (non-interactive subprocess)", () => {
     30_000,
   )
 
-  // The test provider's SSE error item is interpreted by the SDK as an unknown
-  // finish, not a fatal provider/session error. Unknown finishes should continue
-  // the prompt loop so a subsequent response can complete the run.
+  // The test provider's SSE error item surfaces as a retryable stream error in
+  // the fork (ai-sdk maps a missing finish reason to ResponseStreamError, which
+  // is retried transparently). The partial output is preserved and the run
+  // continues so a subsequent response can complete it.
   cliIt.concurrent(
     "unknown stream finish preserves partial output and continues",
     ({ llm, opencode }) =>
@@ -229,20 +230,22 @@ describe("opencode run (non-interactive subprocess)", () => {
 
         const events = opencode.parseJsonEvents(result.stdout)
         expect(result.exitCode).toBe(0)
+        // The fork maps an interrupted provider stream to a retryable stream
+        // error instead of an "unknown" finish, so the aborted turn's step is
+        // retried transparently: no step-finish is emitted between the aborted
+        // step-start and the retried step-start.
         expect(events.map((event) => event.type)).toEqual([
           "step_start",
           "text",
           "tool_use",
           "step_finish",
           "step_start",
-          "step_finish",
           "step_start",
           "text",
           "step_finish",
         ])
         expect(events[1]?.part).toEqual(expect.objectContaining({ type: "text", text: "partial json" }))
-        expect(events[5]?.part).toEqual(expect.objectContaining({ type: "step-finish", reason: "unknown" }))
-        expect(events[7]?.part).toEqual(expect.objectContaining({ type: "text", text: "recovered" }))
+        expect(events[6]?.part).toEqual(expect.objectContaining({ type: "text", text: "recovered" }))
         expect(events.at(-1)?.part).toEqual(expect.objectContaining({ type: "step-finish", reason: "stop" }))
       }),
     60_000,
