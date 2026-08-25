@@ -185,7 +185,7 @@ describe("applyDirectoryEvent", () => {
     expect(store.todo.ses_1).toHaveLength(0)
   })
 
-  test("initializes text delta accumulation from the current part text", () => {
+  test("appends streamed deltas to the current part text in place", () => {
     const part = { ...textPart("part", "session", "message"), text: "existing" }
     const [store, setStore] = createStore(baseState({ part: { message: [part] } }))
 
@@ -201,8 +201,10 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
 
-    expect(store.part_text_accum_delta.part).toBe("existing appended")
+    // The in-place part text is the single accumulated value; the legacy
+    // accum map stays unpopulated.
     expect((store.part.message?.[0] as { text: string }).text).toBe("existing appended")
+    expect(store.part_text_accum_delta.part).toBeUndefined()
   })
 
   test("preserves a Home-specific retained session limit", () => {

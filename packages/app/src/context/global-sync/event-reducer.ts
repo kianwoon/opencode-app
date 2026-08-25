@@ -369,21 +369,14 @@ export function applyDirectoryEvent(input: {
       if (!parts) break
       const result = Binary.search(parts, props.partID, (part) => part.id)
       if (!result.found) break
-      const field = props.field as keyof (typeof parts)[number]
-      const current = parts[result.index]?.[field]
-      input.setStore(
-        "part_text_accum_delta",
-        props.partID,
-        (existing) => (existing ?? (typeof current === "string" ? current : "")) + props.delta,
-      )
+      // Single write: the in-place part-field append IS the accumulated value.
       input.setStore(
         "part",
         props.messageID,
         produce((draft) => {
           const part = draft[result.index]
           const field = props.field as keyof typeof part
-          const existing = part[field] as string | undefined
-          ;(part[field] as string) = (existing ?? "") + props.delta
+          ;(part[field] as string) = ((part[field] as string | undefined) ?? "") + props.delta
         }),
       )
       break

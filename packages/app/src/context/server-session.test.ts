@@ -1026,7 +1026,7 @@ describe("server session", () => {
     await store.sync("child", { force: true })
 
     expect(store.data.part[message.id]).toEqual([{ ...part, text: "stale delta" }])
-    expect(store.data.part_text_accum_delta[part.id]).toBe("stale delta")
+    expect(store.data.part_text_accum_delta[part.id]).toBeUndefined()
   })
 
   test("accepts fetched text that intentionally replaces an accumulated prefix", async () => {
@@ -1064,7 +1064,7 @@ describe("server session", () => {
     await store.sync("child", { force: true })
 
     expect(store.data.part[message.id]).toEqual([{ ...part, text: "abc" }])
-    expect(store.data.part_text_accum_delta[part.id]).toBe("abc")
+    expect(store.data.part_text_accum_delta[part.id]).toBeUndefined()
   })
 
   test("clears delta state after exact server catch-up", async () => {
