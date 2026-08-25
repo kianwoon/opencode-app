@@ -186,6 +186,14 @@ export function sessionMessagePartID(messageID: string, type: "text" | "reasonin
   return `${messageID}:${type}:${ordinal}`
 }
 
+export function streamingToolState(
+  name: string,
+  raw: string,
+): Extract<ToolPart["state"], { status: "pending" }> {
+  const value = Option.getOrUndefined(decodeToolInput(raw))
+  return { status: "pending", input: normalizeToolInput(name, record(value) ? value : {}), raw }
+}
+
 function userMessage(
   sessionID: string,
   message: SessionMessageUser,
@@ -304,9 +312,7 @@ function toolPart(sessionID: string, messageID: string, tool: SessionMessageAssi
   const start = tool.time.ran ?? tool.time.created
   const state = (() => {
     if (tool.state.status === "streaming") {
-      const value = Option.getOrUndefined(decodeToolInput(tool.state.input))
-      const input = normalizeToolInput(tool.name, record(value) ? value : {})
-      return { status: "pending" as const, input, raw: tool.state.input }
+      return streamingToolState(tool.name, tool.state.input)
     }
     if (tool.state.status === "running") {
       return {

@@ -18,7 +18,13 @@ import { message as cleanMessage } from "@/utils/diffs"
 import { sessionNotFoundError } from "@/utils/server-errors"
 import { rootSession } from "@/utils/session-route"
 import { normalizeSessionInfo } from "@/utils/session"
-import { compareMessages, messageKey, normalizeSessionMessages } from "@/utils/session-message"
+import {
+  compareMessages,
+  messageKey,
+  normalizeSessionMessages,
+  sessionMessagePartID,
+  streamingToolState,
+} from "@/utils/session-message"
 import { dropSessionCaches, pickSessionCacheEvictions, SESSION_CACHE_LIMIT } from "./global-sync/session-cache"
 import { createV2SessionReducer, type V2SessionReduction } from "./server-session-v2-reducer"
 import type { ServerApi } from "@/utils/server"
@@ -226,14 +232,8 @@ export function createServerSession(
   const orphanParts = new Map<string, Set<string>>()
   const removedMessages = new Map<string, Set<string>>()
   const deltaBases = new Map<string, { base: string; sessionID: string }>()
-  const deleteMessageParts = (
-    cache: { part: Record<string, Part[] | undefined>; part_text_accum_delta: Record<string, string | undefined> },
-    messageID: string,
-  ) => {
-    for (const part of cache.part[messageID] ?? []) {
-      delete cache.part_text_accum_delta[part.id]
-      deltaBases.delete(part.id)
-    }
+  const deleteMessageParts = (cache: { part: Record<string, Part[] | undefined> }, messageID: string) => {
+    for (const part of cache.part[messageID] ?? []) deltaBases.delete(part.id)
     delete cache.part[messageID]
   }
   const seen = new Set<string>()
@@ -258,6 +258,7 @@ export function createServerSession(
   const indexLegacyMessage = (message: Message) => {
     const current = data.session_message[message.sessionID] ?? []
     if (current.some((item) => item.id === message.id)) return
+    dropV2DeltaIndex(message.sessionID)
     setData(
       "session_message",
       message.sessionID,
@@ -496,6 +497,7 @@ export function createServerSession(
       inflightTodo.delete(sessionID)
       messageLoads.delete(sessionID)
       v2.clear(sessionID)
+      v2DeltaIndexes.delete(sessionID)
       pendingParts.delete(sessionID)
       orphanParts.delete(sessionID)
       removedMessages.delete(sessionID)
@@ -638,16 +640,20 @@ export function createServerSession(
       const pending = pendingParts.get(sessionID)?.get(item.id)
       const touched = new Set([...(load?.touchedParts.get(item.id) ?? []), ...(pending ?? [])])
       for (const part of fetched) {
-        const accumulated = data.part_text_accum_delta[part.id]
+        const live = data.part[item.id]?.find((candidate) => candidate.id === part.id)
+        const liveText = live && "text" in live && typeof live.text === "string" ? live.text : undefined
         const base = deltaBases.get(part.id)?.base
+        // The live part text IS the accumulated value (deltas append in
+        // place). preserveDelta keeps the live streamed text over a fetched
+        // page that only caught up to a strict prefix of it.
         const preserveDelta =
           base !== undefined &&
-          accumulated !== undefined &&
+          liveText !== undefined &&
           "text" in part &&
           typeof part.text === "string" &&
           part.text.startsWith(base) &&
-          accumulated.startsWith(part.text) &&
-          accumulated !== part.text
+          liveText.startsWith(part.text) &&
+          liveText !== part.text
         if (preserveDelta) touched.add(part.id)
         if (load?.carriedDeltaParts.get(item.id)?.has(part.id) && !preserveDelta) touched.delete(part.id)
       }
@@ -662,13 +668,9 @@ export function createServerSession(
       }
       const partIDs = new Set(parts.map((part) => part.id))
       setData(
-        "part_text_accum_delta",
         produce((draft) => {
           for (const part of data.part[item.id] ?? []) {
-            if (!partIDs.has(part.id) || !touched.has(part.id)) {
-              delete draft[part.id]
-              deltaBases.delete(part.id)
-            }
+            if (!partIDs.has(part.id) || !touched.has(part.id)) deltaBases.delete(part.id)
           }
         }),
       )
@@ -721,7 +723,10 @@ export function createServerSession(
       compare: compareMessages,
     })
     batch(() => {
-      if (source) setData("session_message", sessionID, reconcile(source))
+      if (source) {
+        dropV2DeltaIndex(sessionID)
+        setData("session_message", sessionID, reconcile(source))
+      }
       const messageIDs = replaceMessages(sessionID, messages)
       replaceParts(sessionID, merged.part, messageIDs, load)
       const orphans = orphanParts.get(sessionID)
@@ -866,6 +871,143 @@ export function createServerSession(
     await runInflight(inflight, sessionID, () => loadMessages(sessionID, limit))
   }
 
+  // Fast-path indexes for v2 streaming deltas. The fold array in
+  // `session_message` is rebuilt on every structural change, so element
+  // identity is only stable between such changes; caches are keyed by the
+  // fold-array reference and drop wholesale on mismatch.
+  type V2DeltaIndex = {
+    source: SessionMessageInfo[]
+    assistantByID: Map<string, number>
+    textOrdinals: Map<string, number>
+    reasoningOrdinals: Map<string, number>
+    toolCalls: Map<string, number>
+  }
+  const v2DeltaIndexes = new Map<string, { source: SessionMessageInfo[]; index: V2DeltaIndex }>()
+
+  const dropV2DeltaIndex = (sessionID: string) => v2DeltaIndexes.delete(sessionID)
+
+  const v2DeltaIndex = (sessionID: string) => {
+    const source = data.session_message[sessionID]
+    if (!source) return
+    const cached = v2DeltaIndexes.get(sessionID)
+    if (cached && cached.source === source) return cached.index
+    const index: V2DeltaIndex = {
+      source,
+      assistantByID: new Map(),
+      textOrdinals: new Map(),
+      reasoningOrdinals: new Map(),
+      toolCalls: new Map(),
+    }
+    for (let i = 0; i < source.length; i++) {
+      const message = source[i]
+      if (message?.type !== "assistant") continue
+      index.assistantByID.set(message.id, i)
+      let text = 0
+      let reasoning = 0
+      for (let c = 0; c < message.content.length; c++) {
+        const content = message.content[c]
+        if (content?.type === "text") index.textOrdinals.set(`${message.id}:${text++}`, c)
+        if (content?.type === "reasoning") index.reasoningOrdinals.set(`${message.id}:${reasoning++}`, c)
+        if (content?.type === "tool") index.toolCalls.set(`${message.id}:${content.id}`, c)
+      }
+    }
+    v2DeltaIndexes.set(sessionID, { source, index })
+    return index
+  }
+
+  /**
+   * Targeted fast path for pure-append v2 deltas (text/reasoning/tool-input/
+   * compaction-summary). These events carry no structural change: the same
+   * assistant message gains a fragment on an existing content item. Instead of
+   * reducing + normalizing the whole session per token, this mutates the one
+   * content item and the matching legacy part in place, matching the semantics
+   * of the legacy `message.part.delta` handler. Any miss falls back to the
+   * generic path.
+   */
+  const applyV2Delta = (event: OpenCodeEvent, sessionID: string): boolean => {
+    const index = v2DeltaIndex(sessionID)
+    if (!index) return false
+
+    if (event.type === "session.compaction.delta") {
+      const delta = (event.data as { text: string }).text
+      let applied = false
+      for (let i = index.source.length - 1; i >= 0; i--) {
+        const message = index.source[i]
+        if (message?.type !== "compaction" || message.status !== "running") continue
+        messageLoads.get(sessionID)?.touchedSource.add(message.id)
+        message.summary += delta
+        applied = true
+        break
+      }
+      return applied
+    }
+
+    const props = event.data as {
+      assistantMessageID: string
+      ordinal?: number
+      callID?: string
+      delta: string
+    }
+    const messageIndex = index.assistantByID.get(props.assistantMessageID)
+    if (messageIndex === undefined) return false
+    const message = index.source[messageIndex]
+    if (!message || message.type !== "assistant") return false
+
+    if (event.type === "session.tool.input.delta") {
+      const contentIndex = index.toolCalls.get(`${message.id}:${props.callID}`)
+      if (contentIndex === undefined) return false
+      const content = message.content[contentIndex]
+      if (!content || content.type !== "tool" || content.state.status !== "streaming") return false
+      const parts = data.part[message.id]
+      if (!parts) return false
+      const result = Binary.search(parts, content.id, (item) => item.id)
+      if (!result.found) return false
+      messageLoads.get(sessionID)?.touchedSource.add(message.id)
+      trackPartChange(sessionID, message.id, content.id)
+      const raw = content.state.input + props.delta
+      content.state.input = raw
+      setData(
+        "part",
+        message.id,
+        produce((draft) => {
+          const part = draft?.[result.index]
+          if (part?.type !== "tool" || part.state.status !== "pending") return
+          part.state = streamingToolState(part.tool, raw)
+        }),
+      )
+      return true
+    }
+
+    const kind = event.type === "session.reasoning.delta" ? ("reasoning" as const) : ("text" as const)
+    const ordinal = props.ordinal ?? 0
+    const contentIndex = index[kind === "text" ? "textOrdinals" : "reasoningOrdinals"].get(
+      `${message.id}:${ordinal}`,
+    )
+    if (contentIndex === undefined) return false
+    const content = message.content[contentIndex]
+    if (!content || content.type !== kind) return false
+
+    const partID = sessionMessagePartID(message.id, kind, ordinal)
+    const parts = data.part[message.id]
+    const result = parts ? Binary.search(parts, partID, (item) => item.id) : undefined
+    // Normalize drops empty-text parts, so the first visible fragment must go
+    // through the full path to insert the part.
+    if (!result?.found) return false
+
+    messageLoads.get(sessionID)?.touchedSource.add(message.id)
+    trackPartChange(sessionID, message.id, partID)
+    content.text += props.delta
+    setData(
+      "part",
+      message.id,
+      produce((draft) => {
+        const part = draft?.[result.index]
+        if (part?.type === kind) part.text = content.text
+      }),
+    )
+    return true
+  }
+
   const eventSessionID = (event: { type: string; properties?: unknown }) => {
     const properties = event.properties
     if (!properties || typeof properties !== "object") return
@@ -891,6 +1033,9 @@ export function createServerSession(
   const projectV2 = (reduction: V2SessionReduction) => {
     reduction.touched.forEach((messageID) => messageLoads.get(reduction.sessionID)?.touchedSource.add(messageID))
     setData("session_message", reduction.sessionID, reconcile(reduction.messages))
+    // reconcile() keeps the store array reference while replacing element
+    // identities, so the fast-path position cache must be dropped explicitly.
+    dropV2DeltaIndex(reduction.sessionID)
     if (reduction.touched.length === 0) return
 
     const touched = new Set(reduction.touched)
@@ -944,6 +1089,14 @@ export function createServerSession(
   const applyV2 = (event: OpenCodeEvent) => {
     if (!("data" in event) || !("sessionID" in event.data) || typeof event.data.sessionID !== "string") return
     const sessionID = event.data.sessionID
+    if (
+      (event.type === "session.text.delta" ||
+        event.type === "session.reasoning.delta" ||
+        event.type === "session.tool.input.delta" ||
+        event.type === "session.compaction.delta") &&
+      applyV2Delta(event, sessionID)
+    )
+      return
     const reduction = v2.reduce(data.session_message[sessionID] ?? [], event)
     if (reduction) {
       projectV2(reduction)
@@ -1082,6 +1235,7 @@ export function createServerSession(
       }
       case "message.removed": {
         const props = event.properties as { sessionID: string; messageID: string }
+        dropV2DeltaIndex(props.sessionID)
         setData("session_message", props.sessionID, (messages) =>
           messages?.filter((message) => message.id !== props.messageID),
         )
@@ -1150,10 +1304,6 @@ export function createServerSession(
         deltaBases.delete(part.id)
         trackPartChange(part.sessionID, part.messageID, part.id)
         confirmOptimisticPart(part.sessionID, part.messageID, part)
-        setData(
-          "part_text_accum_delta",
-          produce((draft) => void delete draft[part.id]),
-        )
         const parts = data.part[part.messageID]
         if (!parts) {
           setData("part", part.messageID, [part])
@@ -1196,7 +1346,6 @@ export function createServerSession(
         clearOptimisticPart(props.sessionID, props.messageID, props.partID)
         setData(
           produce((draft) => {
-            delete draft.part_text_accum_delta[props.partID]
             deltaBases.delete(props.partID)
             const parts = draft.part[props.messageID]
             if (!parts) return
@@ -1233,11 +1382,10 @@ export function createServerSession(
         const current = parts[result.index]?.[field]
         if (!deltaBases.has(props.partID) && typeof current === "string")
           deltaBases.set(props.partID, { base: current, sessionID: props.sessionID })
-        setData(
-          "part_text_accum_delta",
-          props.partID,
-          (value) => (value ?? (typeof current === "string" ? current : "")) + props.delta,
-        )
+        // Single write: the in-place part-field append IS the accumulated
+        // value. part_text_accum_delta is no longer populated; reconciliation
+        // reads the live part text directly (accum was always kept identical
+        // to it in every path that touched either).
         setData(
           "part",
           props.messageID,
@@ -1361,15 +1509,7 @@ export function createServerSession(
         if (!items)
           optimistic.set(input.sessionID, new Map([[input.message.id, { ...input, parts, confirmedParts: [] }]]))
         setData("message", input.sessionID, (messages = []) => merge(messages, [input.message]).sort(compareMessages))
-        setData(
-          "part_text_accum_delta",
-          produce((draft) => {
-            for (const part of [...(data.part[input.message.id] ?? []), ...parts]) {
-              delete draft[part.id]
-              deltaBases.delete(part.id)
-            }
-          }),
-        )
+        for (const part of [...(data.part[input.message.id] ?? []), ...parts]) deltaBases.delete(part.id)
         setData("part", input.message.id, parts)
       },
       remove(input: { sessionID: string; messageID: string }) {
@@ -1381,10 +1521,7 @@ export function createServerSession(
           const partIDs = new Set(item.parts.map((part) => part.id))
           setData(
             produce((draft) => {
-              for (const part of item.parts) {
-                delete draft.part_text_accum_delta[part.id]
-                deltaBases.delete(part.id)
-              }
+              for (const part of item.parts) deltaBases.delete(part.id)
               const parts = draft.part[input.messageID]
               if (!parts) return
               draft.part[input.messageID] = parts.filter((part) => !partIDs.has(part.id))
