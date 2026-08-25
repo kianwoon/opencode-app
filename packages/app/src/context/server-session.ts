@@ -1033,9 +1033,38 @@ export function createServerSession(
 
   const projectV2 = (reduction: V2SessionReduction) => {
     reduction.touched.forEach((messageID) => messageLoads.get(reduction.sessionID)?.touchedSource.add(messageID))
-    setData("session_message", reduction.sessionID, reconcile(reduction.messages))
-    // reconcile() keeps the store array reference while replacing element
-    // identities, so the fast-path position cache must be dropped explicitly.
+    // Targeted fold update: instead of O(N) reconcile(reduction.messages),
+    // mutate the store array in place at the touched indices only. The
+    // new fold may insert/remove/reorder, but the new array IS the desired
+    // state, so a position-by-position overlay + tail trim produces the
+    // same final content as reconcile() at O(touched + delta-length).
+    setData(
+      produce((draft) => {
+        const map = (draft as { session_message: Record<string, SessionMessageInfo[] | undefined> })
+          .session_message
+        const current = map[reduction.sessionID]
+        if (!current) {
+          map[reduction.sessionID] = reduction.messages.slice()
+          return
+        }
+        const next = reduction.messages
+        const limit = Math.min(current.length, next.length)
+        for (let i = 0; i < limit; i++) {
+          const incoming = next[i]
+          if (!incoming) continue
+          if (current[i] !== incoming) current[i] = incoming
+        }
+        for (let i = limit; i < next.length; i++) {
+          const incoming = next[i]
+          if (!incoming) continue
+          current.push(incoming)
+        }
+        if (current.length > next.length) current.length = next.length
+      }),
+    )
+    // The fast-path position cache is keyed on the fold-array reference; the
+    // produce() above mutates the same reference, but element identities at
+    // every index may have changed. Drop the cache so the next delta re-keys.
     dropV2DeltaIndex(reduction.sessionID)
     if (reduction.touched.length === 0) return
 
