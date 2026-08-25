@@ -481,13 +481,14 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
     // Live deltas may be coalesced: adjacent fragments for the same stream
     // target merge before publish. Collect into an array; resume settling
     // guarantees every delta was flushed ahead of the boundary events.
-    const liveEvents: Array<EventV2.Payload> = []
+    type LiveDelta = EventV2.Payload<(typeof fixture)["delta"]>
+    const liveEvents: LiveDelta[] = []
     const collector = yield* events
       .subscribe(fixture.delta)
       .pipe(
         Stream.runForEach((event) =>
           Effect.sync(() => {
-            liveEvents.push(event as EventV2.Payload)
+            liveEvents.push(event)
           }),
         ),
         Effect.forkScoped,
@@ -504,8 +505,10 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
       .where(eq(EventTable.type, EventV2.versionedType(fixture.delta.type, 1)))
       .all()
       .pipe(Effect.orDie)
-    const fragment = (event: EventV2.Payload) =>
-      "delta" in event.data ? (event.data.delta as string) : (event.data as { text: string }).text
+    const fragment = (event: (typeof liveEvents)[number]) => {
+      const data = event.data as { delta?: string; text?: string }
+      return data.delta ?? data.text ?? ""
+    }
     expect(liveEvents.map(fragment).join("")).toBe(chunks.join(""))
     expect(liveEvents.length).toBeLessThanOrEqual(chunks.length)
     expect(deltas).toHaveLength(0)
