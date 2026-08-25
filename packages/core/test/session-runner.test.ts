@@ -478,7 +478,20 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
     const expectedContext = [{ type: "user", text: prompt }, fixture.expectedAssistant]
     yield* session.prompt({ sessionID, prompt: Prompt.make({ text: prompt }), resume: false })
     const events = yield* EventV2.Service
-    const live = yield* events.subscribe(fixture.delta).pipe(Stream.take(32), Stream.runCollect, Effect.forkScoped)
+    // Live deltas may be coalesced: adjacent fragments for the same stream
+    // target merge before publish. Collect into an array; resume settling
+    // guarantees every delta was flushed ahead of the boundary events.
+    const liveEvents: Array<EventV2.Payload> = []
+    const collector = yield* events
+      .subscribe(fixture.delta)
+      .pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            liveEvents.push(event as EventV2.Payload)
+          }),
+        ),
+        Effect.forkScoped,
+      )
     yield* Effect.yieldNow
     response = fixture.completeEvents
 
@@ -491,7 +504,10 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
       .where(eq(EventTable.type, EventV2.versionedType(fixture.delta.type, 1)))
       .all()
       .pipe(Effect.orDie)
-    expect(Array.from(yield* Fiber.join(live))).toHaveLength(32)
+    const fragment = (event: EventV2.Payload) =>
+      "delta" in event.data ? (event.data.delta as string) : (event.data as { text: string }).text
+    expect(liveEvents.map(fragment).join("")).toBe(chunks.join(""))
+    expect(liveEvents.length).toBeLessThanOrEqual(chunks.length)
     expect(deltas).toHaveLength(0)
     expect(yield* session.context(sessionID)).toMatchObject(expectedContext)
 

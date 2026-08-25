@@ -10,7 +10,9 @@ import type { ProviderMetadata, Usage } from "@opencode-ai/llm"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { createDeltaCoalescer } from "@opencode-ai/core/session/delta-coalescer"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
 import { locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
@@ -496,6 +498,25 @@ const layer: Layer.Layer<
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
 
+    // Legacy live-only part deltas are merged before publish; every other
+    // event from this service flushes pending fragments first so ordering
+    // with full-value part updates is preserved.
+    const publish = <D extends EventV2.Definition>(definition: D, data: EventV2.Data<D>) => events.publish(definition, data)
+    const legacyDeltaCoalescer = createDeltaCoalescer<string>({
+      publish: (key, fragment) => {
+        const [sessionID, messageID, partID, field] = key.split("|")
+        return publish(MessageV2.Event.PartDelta, {
+          sessionID: sessionID as SessionID,
+          messageID: messageID as MessageID,
+          partID: partID as PartID,
+          field: field!,
+          delta: fragment,
+        })
+      },
+    })
+    const publishGuarded = <D extends EventV2.Definition>(definition: D, data: EventV2.Data<D>) =>
+      legacyDeltaCoalescer.publishGuarded(() => events.publish(definition, data))
+
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
       title?: string
@@ -532,7 +553,7 @@ const layer: Layer.Layer<
       }
       yield* Effect.logInfo("created", result)
 
-      yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
+      yield* publishGuarded(SessionV1.Event.Created, { sessionID: result.id, info: result })
 
       return result
     })
@@ -619,7 +640,7 @@ const layer: Layer.Layer<
           yield* remove(child.id)
         }
 
-        yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
+        yield* publishGuarded(SessionV1.Event.Deleted, { sessionID, info: session })
         yield* events.remove(sessionID)
       } catch (error) {
         yield* Effect.logError("failed to remove session", { sessionID, error })
@@ -628,13 +649,13 @@ const layer: Layer.Layer<
 
     const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
+        yield* publishGuarded(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends SessionV1.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* events.publish(SessionV1.Event.PartUpdated, {
+        yield* publishGuarded(SessionV1.Event.PartUpdated, {
           sessionID: part.sessionID,
           part: structuredClone(part),
           time: Date.now(),
@@ -743,7 +764,7 @@ const layer: Layer.Layer<
           revert: info.revert === null ? undefined : (info.revert ?? current.revert),
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
-        yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
+        yield* publishGuarded(SessionV1.Event.Updated, { sessionID, info: next })
       })
 
     const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID) {
@@ -854,7 +875,7 @@ const layer: Layer.Layer<
       sessionID: SessionID
       messageID: MessageID
     }) {
-      yield* events.publish(SessionV1.Event.MessageRemoved, {
+      yield* publishGuarded(SessionV1.Event.MessageRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
       })
@@ -866,7 +887,7 @@ const layer: Layer.Layer<
       messageID: MessageID
       partID: PartID
     }) {
-      yield* events.publish(SessionV1.Event.PartRemoved, {
+      yield* publishGuarded(SessionV1.Event.PartRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
         partID: input.partID,
@@ -881,7 +902,7 @@ const layer: Layer.Layer<
       field: string
       delta: string
     }) {
-      yield* events.publish(MessageV2.Event.PartDelta, input)
+      yield* legacyDeltaCoalescer.append(`${input.sessionID}|${input.messageID}|${input.partID}|${input.field}`, input.delta)
     })
 
     /** Finds the first message matching the predicate, searching newest-first. */
