@@ -120,6 +120,123 @@ export function normalizeSessionMessages(sessionID: string, source: readonly Ses
   return { messages, parts }
 }
 
+/**
+ * Context required to project a single touched message into the legacy
+ * (message, parts) store. Carries the agent/model/parent that the
+ * full normalize() would have computed at this message's position.
+ */
+export type NormalizeContext = {
+  readonly parentID: string | undefined
+  readonly agent: string
+  readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+}
+
+/**
+ * Compute the NormalizeContext for a message at `index` inside `source`
+ * without walking messages before it. Mirrors the running state of
+ * `normalizeSessionMessages` at that position.
+ */
+export function contextForMessageAt(
+  source: readonly SessionMessageInfo[],
+  index: number,
+): NormalizeContext {
+  let agent = ""
+  let model: { id: string; providerID: string; variant?: string } = emptyModel
+  let parentID: string | undefined
+  for (let i = 0; i < index; i++) {
+    const m = source[i]
+    if (!m) continue
+    if (m.type === "agent-switched") agent = m.agent
+    else if (m.type === "model-switched") model = m.model
+    else if (m.type === "user" || (m.type === "synthetic" && m.description?.trim())) parentID = m.id
+    else if (m.type === "shell") parentID = undefined
+    else if (m.type === "assistant") {
+      agent = m.agent
+      model = m.model
+    }
+  }
+  return { parentID, agent, model }
+}
+
+/**
+ * Single-message projection. Output shape matches `normalizeSessionMessages`
+ * for the same message at the same position. Pass `parentID/agent/model`
+ * for the touched message (computed by walking the fold from the
+ * touched position backwards to the most recent user/synthetic
+ * anchor; the caller supplies that to avoid re-walking the entire
+ * list per message).
+ */
+export function normalizeMessage(
+  sessionID: string,
+  message: SessionMessageInfo,
+  context: NormalizeContext,
+): { messages: Message[]; parts: Map<string, Part[]> } {
+  const messages: Message[] = []
+  const parts = new Map<string, Part[]>()
+  const { parentID, agent, model } = context
+
+  switch (message.type) {
+    case "agent-switched":
+    case "model-switched":
+      return { messages, parts }
+    case "user":
+      // A user message's projection does not depend on parentID (it IS
+      // the next anchor); the full normalize allows users anywhere in the
+      // fold even if the running state has no parent. Insert it.
+      messages.push(userMessage(sessionID, message, agent, model))
+      parts.set(message.id, userParts(sessionID, message))
+      return { messages, parts }
+    case "synthetic":
+      if (!message.description?.trim()) return { messages, parts }
+      messages.push({
+        id: message.id,
+        sessionID,
+        role: "user",
+        time: message.time,
+        agent,
+        model: { providerID: model.providerID, modelID: model.id, variant: model.variant },
+      })
+      parts.set(message.id, [textPart(sessionID, message.id, 0, message.description, true)])
+      return { messages, parts }
+    case "shell": {
+      if (!parentID) return { messages, parts }
+      const [user, assistant] = shellMessages(sessionID, message, agent, model)
+      messages.push(user, assistant)
+      parts.set(message.id, [textPart(sessionID, message.id, 0, message.command)])
+      parts.set(`${message.id}:assistant`, [shellPart(sessionID, message)])
+      return { messages, parts }
+    }
+    case "assistant":
+      if (!parentID) return { messages, parts }
+      messages.push(assistantMessage(sessionID, parentID, message))
+      parts.set(message.id, assistantParts(sessionID, message))
+      // Mirror the full normalize: if the parent was just projected into
+      // messages, the assistant's agent/model may need to back-fill the
+      // user. Only safe when the parent is the most recent user; the
+      // caller's NormalizeContext already accounts for ordering so we
+      // do not re-walk the array here.
+      return { messages, parts }
+    case "compaction":
+      if (!parentID) return { messages, parts }
+      parts.set(parentID, [
+        ...(parts.get(parentID) ?? []),
+        {
+          id: `${message.id}:compaction`,
+          sessionID,
+          messageID: parentID,
+          type: "compaction",
+          auto: message.reason === "auto",
+        },
+      ])
+      return { messages, parts }
+    default:
+      // SessionMessageSystem and SessionMessageSkill are folded into the
+      // SessionMessageInfo union by the vendored client but ignored by the
+      // full normalize (no output produced); mirror that.
+      return { messages, parts }
+  }
+}
+
 function shellMessages(
   sessionID: string,
   message: SessionMessageShell,

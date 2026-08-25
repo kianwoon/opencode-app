@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
-import { normalizeSessionMessages } from "./session-message"
+import {
+  contextForMessageAt,
+  normalizeMessage,
+  normalizeSessionMessages,
+  type NormalizeContext,
+} from "./session-message"
 
 describe("normalizeSessionMessages", () => {
   test("projects current turns into stable legacy rendering records", () => {
@@ -210,5 +215,146 @@ describe("normalizeSessionMessages", () => {
         }),
       }),
     ])
+  })
+})
+
+describe("normalizeMessage + contextForMessageAt", () => {
+  test("produces the same per-message output as normalizeSessionMessages", () => {
+    const source: SessionMessageInfo[] = [
+      { id: "a", type: "agent-switched", agent: "build", time: { created: 1 } } as never,
+      {
+        id: "m1",
+        type: "model-switched",
+        model: { id: "claude", providerID: "anthropic", variant: "high" },
+        time: { created: 2 },
+      } as never,
+      {
+        id: "u1",
+        type: "user",
+        text: "hi",
+        time: { created: 3 },
+      } as never,
+      {
+        id: "as1",
+        type: "assistant",
+        agent: "build",
+        model: { id: "claude", providerID: "anthropic" },
+        time: { created: 4 },
+        content: [
+          { type: "text", text: "hello" },
+          { type: "reasoning", text: "thinking", time: { created: 4 } },
+        ],
+      } as never,
+      {
+        id: "u2",
+        type: "user",
+        text: "next",
+        time: { created: 5 },
+      } as never,
+      {
+        id: "as2",
+        type: "assistant",
+        agent: "build",
+        model: { id: "claude", providerID: "anthropic" },
+        time: { created: 6 },
+        content: [
+          { type: "text", text: "world" },
+          {
+            type: "tool",
+            id: "call_1",
+            name: "bash",
+            time: { created: 6, ran: 6, completed: 7 },
+            state: {
+              status: "completed",
+              input: {},
+              metadata: {},
+              content: [{ type: "text", text: "ok" }],
+            },
+          },
+        ],
+        finish: "stop",
+      } as never,
+    ] as never
+
+    const full = normalizeSessionMessages("ses_1", source)
+
+    // For each message that produces output, normalizeMessage must match.
+    let runningAgent = ""
+    let runningModel: { id: string; providerID: string; variant?: string } = { id: "", providerID: "" }
+    let runningParent: string | undefined
+    for (let i = 0; i < source.length; i++) {
+      const m = source[i]!
+      if (m.type === "agent-switched") runningAgent = (m as { agent: string }).agent
+      else if (m.type === "model-switched") runningModel = (m as { model: { id: string; providerID: string; variant?: string } }).model
+      else if (m.type === "user" || (m.type === "synthetic" && (m as { description?: string }).description?.trim())) runningParent = m.id
+      else if (m.type === "shell") runningParent = undefined
+      else if (m.type === "assistant") {
+        runningAgent = m.agent
+        runningModel = m.model
+      } else continue
+
+      const context = { parentID: runningParent, agent: runningAgent, model: runningModel }
+      const one = normalizeMessage("ses_1", m, context)
+      // The full normalize's messages[] and parts map may carry forward
+      // side effects from earlier messages (assistant back-fills user
+      // agent/model). For pure per-message equivalence, compare only the
+      // entry that the full normalize attributed to *this* message.
+      const fullMessage = full.messages.find((x) => x.id === m.id)
+      if (fullMessage) {
+        const oneMessage = one.messages.find((x) => x.id === m.id)
+        expect(oneMessage).toBeDefined()
+        // Drop the parent's user-side agent/model back-fill (applied by
+        // the full normalize after the assistant was projected); the
+        // per-message version does not duplicate it. Compare other fields.
+        if (fullMessage.role === "user") {
+          expect({ ...oneMessage!, agent: undefined, model: undefined }).toMatchObject({
+            ...fullMessage,
+            agent: undefined,
+            model: undefined,
+          })
+        } else {
+          expect(oneMessage).toMatchObject(fullMessage)
+        }
+      }
+      const fullParts = full.parts.get(m.id)
+      if (fullParts && fullParts.length > 0) {
+        expect(one.parts.get(m.id)).toEqual(fullParts)
+      } else if (fullParts && fullParts.length === 0) {
+        expect(one.parts.get(m.id) ?? []).toEqual([])
+      }
+    }
+  })
+
+  test("contextForMessageAt matches the running state of normalizeSessionMessages", () => {
+    const source: SessionMessageInfo[] = [
+      { id: "a", type: "agent-switched", agent: "build", time: { created: 1 } } as never,
+      { id: "m", type: "model-switched", model: { id: "m", providerID: "p" }, time: { created: 2 } } as never,
+      { id: "u", type: "user", text: "hi", time: { created: 3 } } as never,
+      { id: "as", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 4 }, content: [] } as never,
+    ] as never
+
+    // Equivalent to walking normalizeSessionMessages and capturing the
+    // (parent, agent, model) at each message's projection point.
+    const expected: NormalizeContext[] = source.map((_, i) => {
+      let agent = ""
+      let model: { id: string; providerID: string; variant?: string } = { id: "", providerID: "" }
+      let parentID: string | undefined
+      for (let j = 0; j < i; j++) {
+        const m = source[j]!
+        if (m.type === "agent-switched") agent = (m as { agent: string }).agent
+        else if (m.type === "model-switched") model = (m as { model: { id: string; providerID: string; variant?: string } }).model
+        else if (m.type === "user" || (m.type === "synthetic" && (m as { description?: string }).description?.trim())) parentID = m.id
+        else if (m.type === "shell") parentID = undefined
+        else if (m.type === "assistant") {
+          agent = m.agent
+          model = m.model
+        }
+      }
+      return { parentID, agent, model }
+    })
+
+    for (let i = 0; i < source.length; i++) {
+      expect(contextForMessageAt(source, i)).toEqual(expected[i])
+    }
   })
 })

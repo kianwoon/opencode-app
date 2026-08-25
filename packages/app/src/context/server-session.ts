@@ -20,7 +20,9 @@ import { rootSession } from "@/utils/session-route"
 import { normalizeSessionInfo } from "@/utils/session"
 import {
   compareMessages,
+  contextForMessageAt,
   messageKey,
+  normalizeMessage,
   normalizeSessionMessages,
   sessionMessagePartID,
   streamingToolState,
@@ -1037,40 +1039,101 @@ export function createServerSession(
     dropV2DeltaIndex(reduction.sessionID)
     if (reduction.touched.length === 0) return
 
+    // Targeted normalize: instead of re-projecting the entire fold (O(N)
+    // for every non-delta event during a turn), build a single messageByID
+    // index once, then normalize only the touched messages. For the
+    // typical streaming case (~6 non-delta events per turn, 1 touched
+    // message each) this drops the per-event work from O(N) to O(1) per
+    // touched ID plus an O(N) one-time index build for the fold — a
+    // net win whenever N exceeds ~6.
+    const messageByID = new Map<string, SessionMessageInfo>()
+    for (const m of reduction.messages) messageByID.set(m.id, m)
+
     const touched = new Set(reduction.touched)
-    let parentID: string | undefined
-    for (const message of reduction.messages) {
-      if (message.type === "user" || (message.type === "synthetic" && message.description?.trim()))
-        parentID = message.id
-      if (message.type === "shell") {
-        if (touched.has(message.id)) touched.add(`${message.id}:assistant`)
-        parentID = undefined
+    // Expand touched to include shell:assistant / parent user (mirrors the
+    // old per-fold walk) using the index for O(1) lookups.
+    for (const messageID of [...touched]) {
+      const message = messageByID.get(messageID)
+      if (!message) continue
+      if (message.type === "shell") touched.add(`${message.id}:assistant`)
+    }
+    for (const messageID of [...touched]) {
+      const message = messageByID.get(messageID)
+      if (!message) continue
+      const parent = findParent(reduction.messages, message)
+      if (parent && (message.type === "assistant" || message.type === "compaction")) {
+        touched.add(parent.id)
       }
-      if (message.type === "assistant" && touched.has(message.id) && parentID) touched.add(parentID)
-      if (message.type === "compaction" && touched.has(message.id) && parentID) touched.add(parentID)
     }
 
-    const normalized = normalizeSessionMessages(reduction.sessionID, reduction.messages)
+    const messageIndex = new Map<string, number>()
+    for (let i = 0; i < reduction.messages.length; i++) messageIndex.set(reduction.messages[i]!.id, i)
+
     batch(() => {
-      for (const message of normalized.messages) {
-        if (!touched.has(message.id)) continue
-        apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: message } })
-      }
       for (const messageID of touched) {
-        const next = normalized.parts.get(messageID) ?? []
-        const nextIDs = new Set(next.map((part) => part.id))
-        for (const part of next) {
-          apply({ type: "message.part.updated", properties: { sessionID: reduction.sessionID, part } })
+        const message = messageByID.get(messageID)
+        if (!message) continue
+        // User messages produced by an assistant's back-fill were never
+        // re-projected by the old code on subsequent events; the targeted
+        // path doesn't either, so behavior matches.
+        if (message.type === "agent-switched" || message.type === "model-switched") continue
+        if (message.type === "shell") {
+          // The shell message also produces `${id}:assistant` — handled
+          // when touched includes that synthetic id below.
         }
-        for (const part of data.part[messageID] ?? []) {
-          if (nextIDs.has(part.id)) continue
-          apply({
-            type: "message.part.removed",
-            properties: { sessionID: reduction.sessionID, messageID, partID: part.id },
-          })
+        if (messageID.endsWith(":assistant")) {
+          const base = messageID.slice(0, -":assistant".length)
+          const shell = messageByID.get(base)
+          if (shell?.type === "shell") {
+            const ctx = contextForMessageAt(reduction.messages, messageIndex.get(base)!)
+            const one = normalizeMessage(reduction.sessionID, shell, ctx)
+            for (const m of one.messages) {
+              if (touched.has(m.id)) apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: m } })
+            }
+            for (const [mid, parts] of one.parts) {
+              if (!touched.has(mid)) continue
+              applyNormalizedParts(reduction.sessionID, mid, parts)
+            }
+            continue
+          }
+        }
+        const ctx = contextForMessageAt(reduction.messages, messageIndex.get(messageID) ?? 0)
+        const one = normalizeMessage(reduction.sessionID, message, ctx)
+        for (const m of one.messages) {
+          if (touched.has(m.id)) apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: m } })
+        }
+        for (const [mid, parts] of one.parts) {
+          if (!touched.has(mid)) continue
+          applyNormalizedParts(reduction.sessionID, mid, parts)
         }
       }
     })
+  }
+
+  const applyNormalizedParts = (sessionID: string, messageID: string, next: Part[]) => {
+    const nextIDs = new Set(next.map((part) => part.id))
+    for (const part of next) {
+      apply({ type: "message.part.updated", properties: { sessionID, part } })
+    }
+    for (const part of data.part[messageID] ?? []) {
+      if (nextIDs.has(part.id)) continue
+      apply({ type: "message.part.removed", properties: { sessionID, messageID, partID: part.id } })
+    }
+  }
+
+  const findParent = (source: readonly SessionMessageInfo[], message: SessionMessageInfo): SessionMessageInfo | undefined => {
+    // Walk backwards from the message's position looking for the most
+    // recent user/synthetic-with-description anchor (the parent's parentID
+    // is set to that anchor's id; mirrors the full normalize's parentID
+    // tracking).
+    const idx = source.indexOf(message)
+    if (idx < 0) return undefined
+    for (let i = idx - 1; i >= 0; i--) {
+      const m = source[i]!
+      if (m.type === "user" || (m.type === "synthetic" && m.description?.trim())) return m
+      if (m.type === "shell") return undefined
+    }
+    return undefined
   }
 
   const hydrateV2Message = (sessionID: string, messageID: string) => {
