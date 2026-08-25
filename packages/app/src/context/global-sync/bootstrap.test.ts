@@ -71,7 +71,6 @@ function directoryState() {
     message: {},
     session_message: {},
     part: {},
-    part_text_accum_delta: {},
   })
 }
 

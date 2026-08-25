@@ -304,7 +304,7 @@ export function applyDirectoryEvent(input: {
           const parts = draft.part[props.messageID]
           if (parts) {
             for (const part of parts) {
-              delete draft.part_text_accum_delta[part.id]
+              void part
             }
           }
           delete draft.part[props.messageID]
@@ -315,11 +315,6 @@ export function applyDirectoryEvent(input: {
     case "message.part.updated": {
       const part = (event.properties as { part: Part }).part
       if (SKIP_PARTS.has(part.type)) break
-      input.setStore(
-        produce((draft) => {
-          delete draft.part_text_accum_delta[part.id]
-        }),
-      )
       const parts = input.store.part[part.messageID]
       if (!parts) {
         input.setStore("part", part.messageID, [part])
@@ -341,11 +336,6 @@ export function applyDirectoryEvent(input: {
     }
     case "message.part.removed": {
       const props = event.properties as { messageID: string; partID: string }
-      input.setStore(
-        produce((draft) => {
-          delete draft.part_text_accum_delta[props.partID]
-        }),
-      )
       const parts = input.store.part[props.messageID]
       if (!parts) break
       const result = Binary.search(parts, props.partID, (part) => part.id)

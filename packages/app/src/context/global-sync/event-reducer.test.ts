@@ -201,10 +201,8 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
 
-    // The in-place part text is the single accumulated value; the legacy
-    // accum map stays unpopulated.
+    // The in-place part text is the single accumulated value.
     expect((store.part.message?.[0] as { text: string }).text).toBe("existing appended")
-    expect(store.part_text_accum_delta.part).toBeUndefined()
   })
 
   test("preserves a Home-specific retained session limit", () => {
