@@ -7,7 +7,10 @@ process.env.OPENCODE_PERFORMANCE_RUN_ID ??= `${new Date().toISOString().replace(
 export default {
   ...config,
   testDir: ".",
-  testIgnore: "unit/**",
+  // `unit/**` and timeline-stability/fixture.test.ts are bun:test suites;
+  // Playwright's Node loader cannot import `bun:test` modules (the
+  // `protocol 'bun:'` ESM error), so exclude them from spec discovery.
+  testIgnore: ["unit/**", "**/*.test.ts"],
   outputDir: "../test-results/performance",
   fullyParallel: false,
   workers: 1,
