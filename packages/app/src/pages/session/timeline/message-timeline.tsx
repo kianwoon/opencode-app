@@ -1294,16 +1294,7 @@ export function MessageTimeline(props: {
             element = value
           }}
           data-index={item().index}
-          // Offscreen rows within the render overscan stay mounted but skip
-          // style/layout/paint via content-visibility; the outer wrapper's
-          // explicit height preserves virtualizer geometry, and the
-          // intrinsic-size fallback (last measured height) keeps scrollbar
-          // and scroll-anchoring estimates stable while skipped.
-          style={{
-            "min-height": ready() ? undefined : `${initialItem.size}px`,
-            "content-visibility": "auto",
-            "contain-intrinsic-size": `auto ${item().size}px`,
-          }}
+          style={{ "min-height": ready() ? undefined : `${initialItem.size}px` }}
         >
           <TimelineRowView
             row={row()}
