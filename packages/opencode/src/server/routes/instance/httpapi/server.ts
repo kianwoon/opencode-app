@@ -10,6 +10,7 @@ import { Auth } from "@/auth"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
+import { ConfigWatcher } from "@/config/config-watcher"
 import { Workspace } from "@/control-plane/workspace"
 import { Env } from "@/env"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -216,6 +217,7 @@ const app = LayerNode.group([
   Auth.node,
   Account.node,
   Config.node,
+  ConfigWatcher.node,
   Env.node,
   Git.node,
   Ripgrep.node,

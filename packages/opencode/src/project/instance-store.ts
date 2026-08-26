@@ -23,6 +23,8 @@ export interface Interface {
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
   readonly disposeDirectory: (directory: string) => Effect.Effect<void>
   readonly disposeAll: () => Effect.Effect<void>
+  /** Directories with a live instance in this process. */
+  readonly directories: () => string[]
   readonly provide: <A, E, R>(input: LoadInput, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
@@ -197,6 +199,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       dispose,
       disposeDirectory,
       disposeAll,
+      directories: () => [...cache.keys()],
       provide,
     })
   }),
