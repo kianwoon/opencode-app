@@ -16,7 +16,6 @@ import {
   createSignal,
 } from "solid-js"
 import { createStore } from "solid-js/store"
-import path from "path"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
@@ -110,9 +109,12 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
     for (const skill of skills.latest ?? []) {
       if (builtinSkill(skill)) continue
       if (!skill.location || skill.location === "<built-in>") continue
-      const folder = path.dirname(skill.location)
-      const root = path.dirname(folder)
-      if (root !== folder) roots.add(root)
+      // location is ".../<root>/<skill-name>/SKILL.md"; strip filename + skill
+      // folder with plain string math (no node:path in the renderer bundle).
+      const idx = skill.location.lastIndexOf("/")
+      if (idx <= 0) continue
+      const root = skill.location.slice(0, skill.location.lastIndexOf("/", idx - 1))
+      if (root) roots.add(root)
     }
     return [...roots].sort((a, b) => a.localeCompare(b)).map((p) => ({ path: p, enabled: !disabled.has(p) }))
   })
