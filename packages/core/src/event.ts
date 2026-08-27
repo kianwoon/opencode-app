@@ -10,6 +10,7 @@ import { Location } from "./location"
 import { makeGlobalNode } from "./effect/app-node"
 import { isDeepStrictEqual } from "node:util"
 import { Durable } from "@opencode-ai/schema/durable-event-manifest"
+import { Flag } from "./flag/flag"
 
 export const ID = Event.ID
 export type ID = import("@opencode-ai/schema/event").ID
@@ -114,6 +115,13 @@ export class SubscriberOverflowError extends Schema.TaggedErrorClass<SubscriberO
 
 export const define = Event.define
 export const versionedType = Event.versionedType
+
+/** V1 session snapshot events persist full message/part payloads that nothing
+ * local reads back (history/timeline use V2 session.next.* compact events via
+ * readAggregate). They dominate DB size; gate-able for local-only installs. */
+function isV1SnapshotEvent(definition: Definition) {
+  return definition.type.startsWith("message.updated") || definition.type.startsWith("message.part.updated")
+}
 
 export interface PublishOptions {
   readonly id?: ID
@@ -333,19 +341,30 @@ export const layerWith = (options?: LayerOptions) =>
                             })
                             .run()
                             .pipe(Effect.orDie)
-                          yield* db
-                            .insert(EventTable)
-                            .values([
-                              {
-                                id: event.id,
-                                aggregate_id: aggregateID,
-                                seq,
-                                type: versionedType(definition.type, durable.version),
-                                data: encoded,
-                              },
-                            ])
-                            .run()
-                            .pipe(Effect.orDie)
+                          if (Flag.OPENCODE_DISABLE_V1_EVENT_LOG && isV1SnapshotEvent(definition)) {
+                            // For local-only use without workspace sync, the full
+                            // snapshot payloads persisted for V1 events are dead
+                            // weight: nothing reads them back and they dominate DB
+                            // size (single streaming messages reach ~11MB per
+                            // snapshot). The projectors above already materialize
+                            // the data everyone reads; skip writing log rows.
+                            // V2 compact events (session.next.*) stay durable —
+                            // the app timeline reads them via readAggregate.
+                          } else {
+                            yield* db
+                              .insert(EventTable)
+                              .values([
+                                {
+                                  id: event.id,
+                                  aggregate_id: aggregateID,
+                                  seq,
+                                  type: versionedType(definition.type, durable.version),
+                                  data: encoded,
+                                },
+                              ])
+                              .run()
+                              .pipe(Effect.orDie)
+                          }
                           return { aggregateID, seq }
                         }),
                       { behavior: "immediate" },

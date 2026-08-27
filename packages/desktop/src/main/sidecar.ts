@@ -93,6 +93,9 @@ function prepareSidecarEnv(password: string, userDataPath: string) {
     OPENCODE_SERVER_USERNAME: "opencode",
     OPENCODE_SERVER_PASSWORD: password,
     XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? userDataPath,
+    // Local-only desktop usage does not need the V1 event log persisted;
+    // snapshot rows are dead weight (dominate DB size, nothing reads them).
+    OPENCODE_DISABLE_V1_EVENT_LOG: "true",
   })
 }
 
