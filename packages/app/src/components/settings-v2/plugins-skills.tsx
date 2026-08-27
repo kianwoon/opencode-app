@@ -107,14 +107,16 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
   // Toggles write straight to config via updateConfig; while that request is in
   // flight the local set holds the optimistic state so switches respond instantly.
   const [pendingDisabled, setPendingDisabled] = createStore({ paths: [] as string[] })
-  // Known roots persist across refetches: once a directory is disabled the
-  // server stops listing its skills, but the row must stay so it can be
-  // re-enabled. Seeds from the first successful skills fetch, then accumulates.
+  // The row list must survive remounts and server refetches: config's
+  // `disabled_directories` is the durable record of known-but-off directories,
+  // `knownRoots` accumulates enabled ones seen locally. Union of both plus
+  // whatever the current skill list implies.
   const [knownRoots, setKnownRoots] = createStore({ paths: [] as string[] })
   const directories = createMemo<SkillDirectory[]>(() => {
-    const disabled = new Set(pendingDisabled.paths.length > 0 ? pendingDisabled.paths : ((configSkills().disabled_directories as string[] | undefined) ?? []))
+    const disabledList = (configSkills().disabled_directories as string[] | undefined) ?? []
+    const disabled = new Set(pendingDisabled.paths.length > 0 ? pendingDisabled.paths : disabledList)
     const counts = new Map<string, number>()
-    const roots = new Set(knownRoots.paths)
+    const roots = new Set<string>([...disabledList, ...knownRoots.paths])
     for (const skill of skills.latest ?? []) {
       if (builtinSkill(skill)) continue
       if (!skill.location || skill.location === "<built-in>") continue
