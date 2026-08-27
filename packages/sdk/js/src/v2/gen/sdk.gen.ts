@@ -8,6 +8,8 @@ import type {
   AppAgentsResponses,
   AppLogErrors,
   AppLogResponses,
+  AppSkillDirectoriesErrors,
+  AppSkillDirectoriesResponses,
   AppSkillRemoveErrors,
   AppSkillRemoveResponses,
   AppSkillsErrors,
@@ -385,6 +387,8 @@ import type {
   V2SessionSwitchModelResponses,
   V2SessionWaitErrors,
   V2SessionWaitResponses,
+  V2SkillDirectoriesErrors,
+  V2SkillDirectoriesResponses,
   V2SkillListErrors,
   V2SkillListResponses,
   V2SkillRemoveErrors,
@@ -399,7 +403,6 @@ import type {
   VcsGetResponses,
   VcsStatusErrors,
   VcsStatusResponses,
-  WorkflowPartInput,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -513,6 +516,36 @@ export class Auth extends HeyApiClient {
 }
 
 export class Skill extends HeyApiClient {
+  /**
+   * List skill directories
+   *
+   * List the directories skills are discovered from and whether each is currently enabled in config.
+   */
+  public directories<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppSkillDirectoriesResponses, AppSkillDirectoriesErrors, ThrowOnError>({
+      url: "/skill/directories",
+      ...options,
+      ...params,
+    })
+  }
+
   /**
    * Remove skill
    *
@@ -3801,7 +3834,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
-      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
+      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4154,7 +4187,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
-      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
+      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6584,6 +6617,28 @@ export class Skill2 extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
     return (options?.client ?? this.client).get<V2SkillListResponses, V2SkillListErrors, ThrowOnError>({
       url: "/api/skill",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List skill directories
+   *
+   * List the directories skills are discovered from and whether each is currently enabled in config.
+   */
+  public directories<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<V2SkillDirectoriesResponses, V2SkillDirectoriesErrors, ThrowOnError>({
+      url: "/api/skill/directories",
       ...options,
       ...params,
     })

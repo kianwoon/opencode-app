@@ -76,6 +76,7 @@ const it = testEffect(
           },
           all: () => Effect.succeed(skills),
           dirs: () => Effect.succeed([]),
+          sourceDirectories: () => Effect.succeed([]),
           available: () => Effect.succeed(skills),
           remove: (name) => Effect.fail(new Skill.NotFoundError({ name, available: skills.map((s) => s.name) })),
         }),

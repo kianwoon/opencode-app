@@ -785,6 +785,11 @@
   margin-bottom: 12px;
 }
 
+.settings-v2-plugins-skill-disabled {
+  color: var(--v2-text-text-muted);
+  opacity: 0.6;
+}
+
 .settings-v2-plugins-skill-actions {
   display: flex;
   align-items: center;

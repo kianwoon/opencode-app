@@ -4,6 +4,7 @@ import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
+import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { showToast } from "@/utils/toast"
 import {
   type Accessor,
@@ -31,6 +32,11 @@ type SkillItem = {
   description?: string
   slash?: boolean
   location: string
+}
+
+type SkillDirectory = {
+  path: string
+  enabled: boolean
 }
 
 type PluginSpec = string | [string, Record<string, unknown>]
@@ -90,6 +96,42 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       showToast({ title: language.t("settings.plugins.skills.remove.failed"), description: message })
+    }
+  }
+
+  const [directories, { refetch: refetchDirectories }] = createResource(
+    () => ({ protocol: protocol(), directory: props.directory() }),
+    async (input) => {
+      if (input.protocol !== "v2") return []
+      return retry(async () => {
+        // `client.v2` (workspace SDK) is used here because the vendored
+        // `api` compat surface does not gain new endpoints between tarballs.
+        const result = await serverSdk().client.v2.skill.directories({ location: { directory: input.directory } })
+        return ((result.data ?? []) as SkillDirectory[]).map((dir) => ({ ...dir }))
+        return (result.data ?? []) as SkillDirectory[]
+      })
+    },
+  )
+
+  const configSkills = createMemo(() => (serverSync().data.config.skills ?? {}) as Record<string, unknown>)
+
+  const toggleDirectory = async (dir: SkillDirectory) => {
+    const before = [...((configSkills().disabled_directories as string[]) ?? [])]
+    const next = dir.enabled ? [...before, dir.path] : before.filter((item) => item !== dir.path)
+    // Optimistic flip; rolled back if the config write fails. Discovery picks
+    // up the new list on the server side when the config write lands.
+    serverSync().set("config", "skills", "disabled_directories", next as never)
+    try {
+      await serverSync().updateConfig({
+        ...serverSync().data.config,
+        skills: { ...configSkills(), disabled_directories: next },
+      } as never)
+      await refetchDirectories()
+      await refetchSkills()
+    } catch (err) {
+      serverSync().set("config", "skills", "disabled_directories", before as never)
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("settings.plugins.skills.directories.toggle.failed"), description: message })
     }
   }
 
@@ -197,7 +239,43 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
               </div>
             }
           >
-            <SkillsList skills={skills.latest ?? []} onRemove={removeSkill} />
+            <Show when={directories.latest?.length}>
+              <div class="settings-v2-section" data-component="settings-skill-directories">
+                <h3 class="settings-v2-section-title">{language.t("settings.plugins.skills.directories.title")}</h3>
+                <SettingsListV2>
+                  <For each={[...(directories.latest ?? [])].sort((a, b) => a.path.localeCompare(b.path))}>
+                    {(dir) => (
+                      <SettingsRowV2
+                        title={dir.path}
+                        description={
+                          <span class={dir.enabled ? undefined : "settings-v2-plugins-skill-disabled"}>
+                            {dir.enabled
+                              ? undefined
+                              : language.t("settings.plugins.skills.directories.disabled")}
+                          </span>
+                        }
+                      >
+                        <Switch
+                          checked={dir.enabled}
+                          onChange={() => void toggleDirectory(dir)}
+                          hideLabel
+                        >
+                          {language.t("settings.plugins.skills.directories.toggle", { directory: dir.path })}
+                        </Switch>
+                      </SettingsRowV2>
+                    )}
+                  </For>
+                </SettingsListV2>
+                <p class="settings-v2-plugins-hint">
+                  {language.t("settings.plugins.skills.directories.hint")}
+                </p>
+              </div>
+            </Show>
+            <SkillsList
+              skills={skills.latest ?? []}
+              disabledDirectories={(directories.latest ?? []).filter((dir) => !dir.enabled).map((dir) => dir.path)}
+              onRemove={removeSkill}
+            />
           </Show>
           <p class="settings-v2-plugins-hint">{language.t("settings.plugins.skills.hint")}</p>
         </div>
@@ -286,9 +364,16 @@ const LocationReveal: Component<{ path: string; action: string }> = (props) => {
   )
 }
 
-const SkillsList: Component<{ skills: SkillItem[]; onRemove: (name: string) => Promise<void> }> = (props) => {
+const SkillsList: Component<{
+  skills: SkillItem[]
+  disabledDirectories: string[]
+  onRemove: (name: string) => Promise<void>
+}> = (props) => {
   const language = useLanguage()
   const [filter, setFilter] = createStore({ value: "" })
+
+  const isDisabled = (skill: SkillItem) =>
+    props.disabledDirectories.some((dir) => skill.location === dir || skill.location.startsWith(`${dir}/`))
 
   const filtered = createMemo(() => {
     const query = filter.value.trim().toLowerCase()
@@ -337,13 +422,16 @@ const SkillsList: Component<{ skills: SkillItem[]; onRemove: (name: string) => P
         <For each={filtered()}>
           {(skill) => {
             const builtin = builtinSkill(skill)
+            const disabled = !builtin && isDisabled(skill)
             return (
               <SettingsRowV2
                 title={skill.name}
                 description={
                   <>
                     <Show when={builtin ? skill.location : skill.description}>
-                      <div>{builtin ? skill.location : skill.description}</div>
+                      <div class={disabled ? "settings-v2-plugins-skill-disabled" : undefined}>
+                        {builtin ? skill.location : skill.description}
+                      </div>
                     </Show>
                     <Show when={!builtin}>
                       <LocationReveal path={skill.location} action="settings-skill-reveal" />
@@ -352,6 +440,9 @@ const SkillsList: Component<{ skills: SkillItem[]; onRemove: (name: string) => P
                 }
               >
                 <div class="settings-v2-plugins-skill-actions">
+                  <Show when={disabled}>
+                    <Tag>{language.t("settings.plugins.skills.directories.disabled")}</Tag>
+                  </Show>
                   <Show when={skill.slash}>
                     <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
                   </Show>

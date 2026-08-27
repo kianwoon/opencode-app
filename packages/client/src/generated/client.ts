@@ -85,6 +85,8 @@ import type {
   CommandsListOutput,
   SkillsListInput,
   SkillsListOutput,
+  SkillsDirectoriesInput,
+  SkillsDirectoriesOutput,
   SkillsRemoveInput,
   SkillsRemoveOutput,
   EventsSubscribeOutput,
@@ -802,6 +804,18 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/skill`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      directories: (input?: SkillsDirectoriesInput, requestOptions?: RequestOptions) =>
+        request<SkillsDirectoriesOutput>(
+          {
+            method: "GET",
+            path: `/api/skill/directories`,
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],

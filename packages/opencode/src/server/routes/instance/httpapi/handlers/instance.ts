@@ -85,6 +85,10 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       return yield* skill.all()
     })
 
+    const getSkillDirectories = Effect.fn("InstanceHttpApi.skillDirectories")(function* () {
+      return yield* skill.sourceDirectories()
+    })
+
     const removeSkill = Effect.fn("InstanceHttpApi.skillRemove")(function* (ctx: { params: { name: string } }) {
       return yield* skill.remove(ctx.params.name).pipe(
         Effect.mapBoth({
@@ -113,6 +117,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("command", getCommand)
       .handle("agent", getAgent)
       .handle("skill", getSkill)
+      .handle("skillDirectories", getSkillDirectories)
       .handle("skillRemove", removeSkill)
       .handle("lsp", getLsp)
       .handle("formatter", getFormatter)

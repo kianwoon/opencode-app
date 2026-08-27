@@ -51,7 +51,6 @@ export type Event =
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
-  | EventSessionWarning
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
   | EventFileEdited
@@ -348,15 +347,6 @@ export type AssistantMessage = {
     | ContextOverflowError
     | ContentFilterError
     | ApiError
-  warning?:
-    | ProviderAuthError
-    | UnknownError
-    | MessageOutputLengthError
-    | MessageAbortedError
-    | StructuredOutputError
-    | ContextOverflowError
-    | ContentFilterError
-    | ApiError
   parentID: string
   modelID: string
   providerID: string
@@ -415,29 +405,6 @@ export type SubtaskPart = {
     modelID: string
   }
   command?: string
-}
-
-export type WorkflowStep = {
-  id: string
-  prompt: string
-  description: string
-  agent: string
-  dependsOn: Array<string>
-  model?: {
-    providerID: string
-    modelID: string
-  }
-  command?: string
-}
-
-export type WorkflowPart = {
-  id: string
-  sessionID: string
-  messageID: string
-  type: "workflow"
-  title: string
-  steps: Array<WorkflowStep>
-  plannedBy?: string
 }
 
 export type ReasoningPart = {
@@ -660,7 +627,6 @@ export type CompactionPart = {
 export type Part =
   | TextPart
   | SubtaskPart
-  | WorkflowPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -1249,22 +1215,6 @@ export type GlobalEvent = {
         properties: {
           sessionID?: string
           error?:
-            | ProviderAuthError
-            | UnknownError
-            | MessageOutputLengthError
-            | MessageAbortedError
-            | StructuredOutputError
-            | ContextOverflowError
-            | ContentFilterError
-            | ApiError
-        }
-      }
-    | {
-        id: string
-        type: "session.warning"
-        properties: {
-          sessionID?: string
-          warning?:
             | ProviderAuthError
             | UnknownError
             | MessageOutputLengthError
@@ -1951,6 +1901,7 @@ export type Config = {
   skills?: {
     paths?: Array<string>
     urls?: Array<string>
+    disabled_directories?: Array<string>
   }
   references?: {
     [key: string]: string | ConfigV2ReferenceGit | ConfigV2ReferenceLocal
@@ -2075,7 +2026,6 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
-    workflow_concurrency?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
 }
@@ -2653,27 +2603,6 @@ export type SubtaskPartInput = {
   command?: string
 }
 
-export type WorkflowStepInput = {
-  id: string
-  prompt: string
-  description: string
-  agent: string
-  dependsOn: Array<string>
-  model?: {
-    providerID: string
-    modelID: string
-  }
-  command?: string
-}
-
-export type WorkflowPartInput = {
-  id?: string
-  type: "workflow"
-  title: string
-  steps: Array<WorkflowStepInput>
-  plannedBy?: string
-}
-
 export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
@@ -2866,6 +2795,11 @@ export type ProviderNotFoundError = {
   message: string
 }
 
+export type SkillDirectory = {
+  path: string
+  enabled: boolean
+}
+
 export type SkillRemoved = {
   name: string
   location: string
@@ -2995,7 +2929,6 @@ export type V2Event =
   | MessagePartDelta
   | SessionDiff
   | SessionError
-  | SessionWarning
   | InstallationUpdated
   | InstallationUpdateAvailable
   | FileEdited
@@ -5462,32 +5395,6 @@ export type SessionError = {
   }
 }
 
-export type SessionWarning = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  type: "session.warning"
-  durable?: {
-    aggregateID: string
-    seq: number
-    version: number
-  }
-  location?: LocationRef
-  data: {
-    sessionID?: string
-    warning?:
-      | ProviderAuthError
-      | UnknownError
-      | MessageOutputLengthError
-      | MessageAbortedError
-      | StructuredOutputError
-      | ContextOverflowError
-      | ContentFilterError
-      | ApiError
-  }
-}
-
 export type InstallationUpdated = {
   id: string
   metadata?: {
@@ -6802,23 +6709,6 @@ export type EventSessionError = {
   properties: {
     sessionID?: string
     error?:
-      | ProviderAuthError
-      | UnknownError
-      | MessageOutputLengthError
-      | MessageAbortedError
-      | StructuredOutputError
-      | ContextOverflowError
-      | ContentFilterError
-      | ApiError
-  }
-}
-
-export type EventSessionWarning = {
-  id: string
-  type: "session.warning"
-  properties: {
-    sessionID?: string
-    warning?:
       | ProviderAuthError
       | UnknownError
       | MessageOutputLengthError
@@ -8512,6 +8402,37 @@ export type AppSkillsResponses = {
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
 
+export type AppSkillDirectoriesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/directories"
+}
+
+export type AppSkillDirectoriesErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AppSkillDirectoriesError = AppSkillDirectoriesErrors[keyof AppSkillDirectoriesErrors]
+
+export type AppSkillDirectoriesResponses = {
+  /**
+   * Skill source directories with enabled state
+   */
+  200: Array<{
+    path: string
+    enabled: boolean
+  }>
+}
+
+export type AppSkillDirectoriesResponse = AppSkillDirectoriesResponses[keyof AppSkillDirectoriesResponses]
+
 export type AppSkillRemoveData = {
   body?: never
   path: {
@@ -9979,7 +9900,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
     sessionID: string
@@ -10326,7 +10247,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
     sessionID: string
@@ -13137,6 +13058,43 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2SkillDirectoriesData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/skill/directories"
+}
+
+export type V2SkillDirectoriesErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2SkillDirectoriesError = V2SkillDirectoriesErrors[keyof V2SkillDirectoriesErrors]
+
+export type V2SkillDirectoriesResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: Array<SkillDirectory>
+  }
+}
+
+export type V2SkillDirectoriesResponse = V2SkillDirectoriesResponses[keyof V2SkillDirectoriesResponses]
 
 export type V2SkillRemoveData = {
   body?: never

@@ -21,6 +21,28 @@ export const SkillGroup = HttpApiGroup.make("server.skill")
       ),
   )
   .add(
+    HttpApiEndpoint.get("skill.directories", "/api/skill/directories", {
+      query: LocationQuery,
+      success: Location.response(
+        Schema.Array(
+          Schema.Struct({ path: Schema.String, enabled: Schema.Boolean }).annotate({
+            identifier: "SkillDirectory",
+            description: "A directory skills are discovered from and whether it is currently enabled.",
+          }),
+        ),
+      ),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.skill.directories",
+          summary: "List skill directories",
+          description:
+            "List the directories skills are discovered from and whether each is currently enabled in config.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.delete("skill.remove", "/api/skill/:name", {
       params: { name: Schema.String },
       query: LocationQuery,

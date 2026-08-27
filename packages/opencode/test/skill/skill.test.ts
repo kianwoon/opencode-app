@@ -151,6 +151,72 @@ description: Skill for dirs test.
     ),
   )
 
+  it.live("excludes a disabled source directory and reports enabled state", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.promise(() => tmpdir({ git: true }))
+      const dir = tmp.path
+      const agentsRoot = path.join(dir, ".agents", "skills")
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            skills: { disabled_directories: [agentsRoot] },
+          }),
+        ),
+      )
+      yield* Effect.promise(() =>
+        Promise.all([
+          Bun.write(
+            path.join(agentsRoot, "agent-skill", "SKILL.md"),
+            `---
+name: agent-skill
+description: From external agents directory.
+---
+
+# Agent Skill
+`,
+          ),
+          Bun.write(
+            path.join(dir, ".opencode", "skill", "local-skill", "SKILL.md"),
+            `---
+name: local-skill
+description: From opencode skill directory.
+---
+
+# Local Skill
+`,
+          ),
+          Bun.write(
+            path.join(dir, ".opencode", "skills", "alt-skill", "SKILL.md"),
+            `---
+name: alt-skill
+description: From opencode skills directory.
+---
+
+# Alt Skill
+`,
+          ),
+        ]),
+      )
+
+      yield* provideInstance(dir)(
+        Effect.gen(function* () {
+          const skill = yield* Skill.Service
+          const all = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
+          expect(all.some((s) => s.name === "local-skill")).toBe(true)
+          expect(all.some((s) => s.name === "alt-skill")).toBe(true)
+          expect(all.some((s) => s.name === "agent-skill")).toBe(false)
+
+          const sources = Object.fromEntries((yield* skill.sourceDirectories()).map((s) => [s.path, s.enabled]))
+          expect(sources[agentsRoot]).toBe(false)
+          expect(sources[path.join(dir, ".opencode", "skill")]).toBe(true)
+          expect(sources[path.join(dir, ".opencode", "skills")]).toBe(true)
+        }),
+      )
+    }),
+  )
+
   it.live("discovers multiple skills from .opencode/skill/ directory", () =>
     provideTmpdirInstance(
       (dir) =>

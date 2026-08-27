@@ -2554,6 +2554,21 @@ export type SkillsListOutput = {
   }>
 }
 
+export type SkillsDirectoriesInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type SkillsDirectoriesOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: ReadonlyArray<{ readonly path: string; readonly enabled: boolean }>
+}
+
 export type SkillsRemoveInput = {
   readonly name: { readonly name: string }["name"]
   readonly location?: {

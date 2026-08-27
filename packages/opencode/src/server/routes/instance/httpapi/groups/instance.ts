@@ -61,6 +61,7 @@ export const InstancePaths = {
   command: "/command",
   agent: "/agent",
   skill: "/skill",
+  skillDirectories: "/skill/directories",
   skillRemove: "/skill/:name",
   lsp: "/lsp",
   formatter: "/formatter",
@@ -175,6 +176,20 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "app.skills",
             summary: "List skills",
             description: "Get a list of all available skills in the OpenCode system.",
+          }),
+        ),
+        HttpApiEndpoint.get("skillDirectories", InstancePaths.skillDirectories, {
+          query: WorkspaceRoutingQuery,
+          success: described(
+            Schema.Array(Schema.Struct({ path: Schema.String, enabled: Schema.Boolean })),
+            "Skill source directories with enabled state",
+          ),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.skill.directories",
+            summary: "List skill directories",
+            description:
+              "List the directories skills are discovered from and whether each is currently enabled in config.",
           }),
         ),
         HttpApiEndpoint.delete("skillRemove", InstancePaths.skillRemove, {

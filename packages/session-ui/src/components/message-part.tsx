@@ -30,7 +30,6 @@ import {
   Todo,
   QuestionAnswer,
   QuestionInfo,
-  WorkflowPart,
 } from "@opencode-ai/sdk/v2"
 import { useData } from "../context"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
@@ -1650,26 +1649,6 @@ export function MessageDivider(props: { label: string }) {
 PART_MAPPING["compaction"] = function CompactionPartDisplay() {
   const i18n = useI18n()
   return <MessageDivider label={i18n.t("ui.messagePart.compaction")} />
-}
-
-PART_MAPPING["workflow"] = function WorkflowPartDisplay(props) {
-  const i18n = useI18n()
-  const part = () => props.part as WorkflowPart
-  return (
-    <div data-component="workflow-part" class="flex flex-col gap-1 px-3 py-2">
-      <div data-slot="workflow-part-title" class="text-13-medium text-text-base">
-        {i18n.t("ui.messagePart.workflow")}: {part().title}
-      </div>
-      <ul data-slot="workflow-part-steps" class="flex flex-col gap-0.5">
-        {part().steps.map((step) => (
-          <li data-slot="workflow-part-step" class="text-12-regular text-text-weak">
-            <span class="capitalize">{step.id}</span>
-            {step.dependsOn.length > 0 ? ` (after: ${step.dependsOn.join(", ")})` : ""}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
 }
 
 PART_MAPPING["text"] = function TextPartDisplay(props) {

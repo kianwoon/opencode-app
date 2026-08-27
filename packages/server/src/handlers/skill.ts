@@ -8,6 +8,17 @@ import { response } from "../location"
 export const SkillHandler = HttpApiBuilder.group(Api, "server.skill", (handlers) =>
   handlers
     .handle("skill.list", () => response(SkillV2.Service.use((skill) => skill.list())))
+    .handle("skill.directories", () =>
+      response(
+        Effect.flatMap(SkillV2.Service, (skill) =>
+          Effect.map(skill.sources(), (sources) =>
+            sources
+              .filter((source) => source.type === "directory")
+              .map((source) => ({ path: source.path, enabled: true })),
+          ),
+        ),
+      ),
+    )
     .handle(
       "skill.remove",
       Effect.fn("SkillHttpApi.remove")(function* (ctx: { params: { name: string } }) {

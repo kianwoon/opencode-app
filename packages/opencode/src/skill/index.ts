@@ -97,6 +97,7 @@ type State = {
 type DiscoveryState = {
   matches: string[]
   dirs: string[]
+  sources: Array<{ path: string; enabled: boolean }>
 }
 
 type ScanState = {
@@ -109,6 +110,7 @@ export interface Interface {
   readonly require: (name: string) => Effect.Effect<Info, NotFoundError>
   readonly all: () => Effect.Effect<Info[]>
   readonly dirs: () => Effect.Effect<string[]>
+  readonly sourceDirectories: () => Effect.Effect<Array<{ path: string; enabled: boolean }>>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
   readonly remove: (name: string) => Effect.Effect<Info, NotFoundError | NotRemovableError>
 }
@@ -192,6 +194,14 @@ const discoverSkills = Effect.fnUntraced(function* (
   worktree: string,
 ) {
   const state: ScanState = { matches: new Set(), dirs: new Set() }
+  const cfg = yield* config.get()
+  // Users can switch a discovered source directory off from the settings UI
+  // without deleting files, so other tools sharing the directory keep working.
+  const disabled = new Set((cfg.skills?.disabled_directories ?? []).map((item) => path.resolve(item)))
+  const sources: Array<{ root: string; pattern: string; dot?: boolean; scope?: string }> = []
+  // Canonical skill directories reported to the settings UI, including ones
+  // toggled off. Matches under a disabled entry are filtered from state.
+  const candidates: string[] = []
 
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
@@ -201,7 +211,8 @@ const discoverSkills = Effect.fnUntraced(function* (
     for (const dir of externalDirs) {
       const root = path.join(global.home, dir)
       if (!(yield* fsys.isDir(root))) continue
-      yield* scan(state, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "global" })
+      sources.push({ root, pattern: EXTERNAL_SKILL_PATTERN, dot: true, scope: "global" })
+      candidates.push(root)
     }
 
     const upDirs = yield* fsys
@@ -209,16 +220,21 @@ const discoverSkills = Effect.fnUntraced(function* (
       .pipe(Effect.catch(() => Effect.succeed([] as string[])))
 
     for (const root of upDirs) {
-      yield* scan(state, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "project" })
+      sources.push({ root, pattern: EXTERNAL_SKILL_PATTERN, dot: true, scope: "project" })
+      candidates.push(path.join(root, "skills"))
     }
   }
 
   const configDirs = yield* config.directories()
   for (const dir of configDirs) {
-    yield* scan(state, dir, OPENCODE_SKILL_PATTERN)
+    sources.push({ root: dir, pattern: OPENCODE_SKILL_PATTERN })
+    for (const name of ["skill", "skills"]) {
+      const root = path.join(dir, name)
+      if (!(yield* fsys.isDir(root))) continue
+      candidates.push(root)
+    }
   }
 
-  const cfg = yield* config.get()
   for (const item of cfg.skills?.paths ?? []) {
     const expanded = item.startsWith("~/") ? path.join(global.home, item.slice(2)) : item
     const dir = path.isAbsolute(expanded) ? expanded : path.join(directory, expanded)
@@ -226,20 +242,36 @@ const discoverSkills = Effect.fnUntraced(function* (
       yield* Effect.logWarning("skill path not found", { path: dir })
       continue
     }
-
-    yield* scan(state, dir, SKILL_PATTERN)
+    sources.push({ root: dir, pattern: SKILL_PATTERN })
+    candidates.push(dir)
   }
 
   for (const url of cfg.skills?.urls ?? []) {
     const pulledDirs = yield* discovery.pull(url)
     for (const dir of pulledDirs) {
-      yield* scan(state, dir, SKILL_PATTERN)
+      sources.push({ root: dir, pattern: SKILL_PATTERN })
+      candidates.push(dir)
+    }
+  }
+
+  const killed = [...disabled].filter((entry) => candidates.some((c) => c === entry || entry.startsWith(c + path.sep)))
+  for (const source of sources) {
+    yield* scan(state, source.root, source.pattern, { dot: source.dot, scope: source.scope })
+  }
+
+  if (killed.length > 0) {
+    for (const match of state.matches) {
+      if (killed.some((root) => match === root || match.startsWith(root + path.sep))) state.matches.delete(match)
+    }
+    for (const dir of state.dirs) {
+      if (killed.some((root) => dir === root || dir.startsWith(root + path.sep))) state.dirs.delete(dir)
     }
   }
 
   return {
     matches: Array.from(state.matches),
     dirs: Array.from(state.dirs),
+    sources: candidates.map((p) => ({ path: p, enabled: !disabled.has(path.resolve(p)) })),
   }
 })
 
@@ -318,6 +350,10 @@ const layer = Layer.effect(
       return (yield* InstanceState.get(discovered)).dirs
     })
 
+    const sourceDirectories = Effect.fn("Skill.sourceDirectories")(function* () {
+      return (yield* InstanceState.get(discovered)).sources
+    })
+
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
       const s = yield* InstanceState.get(state)
       const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
@@ -366,7 +402,7 @@ const layer = Layer.effect(
       return info
     })
 
-    return Service.of({ get, require, all, dirs, available, remove })
+    return Service.of({ get, require, all, dirs, sourceDirectories, available, remove })
   }),
 )
 
