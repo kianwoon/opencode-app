@@ -103,19 +103,24 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
   // Derive source directories from the already-loaded skill locations
   // (<root>/<skill-name>/SKILL.md) instead of a server endpoint, so the
   // toggles work against any server version. Enabled state comes from config.
+  const configSkills = createMemo(() => (serverSync().data.config?.skills ?? {}) as Record<string, unknown>)
   const directories = createMemo<SkillDirectory[]>(() => {
-    const disabled = new Set((configSkills().disabled_directories as string[]) ?? [])
+    const disabled = new Set((configSkills().disabled_directories as string[] | undefined) ?? [])
     const roots = new Set<string>()
     for (const skill of skills.latest ?? []) {
       if (builtinSkill(skill)) continue
+      if (!skill.location || skill.location === "<built-in>") continue
       const folder = path.dirname(skill.location)
       const root = path.dirname(folder)
-      if (path.basename(folder) !== "SKILL.md" && root !== folder) roots.add(root)
+      if (root !== folder) roots.add(root)
     }
     return [...roots].sort((a, b) => a.localeCompare(b)).map((p) => ({ path: p, enabled: !disabled.has(p) }))
   })
-
-  const configSkills = createMemo(() => (serverSync().data.config.skills ?? {}) as Record<string, unknown>)
+  const disabledDirectories = createMemo<string[]>(() =>
+    directories()
+      .filter((dir) => !dir.enabled)
+      .map((dir) => dir.path),
+  )
 
   const toggleDirectory = async (dir: SkillDirectory) => {
     const before = [...((configSkills().disabled_directories as string[]) ?? [])]
@@ -274,9 +279,7 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
             </Show>
             <SkillsList
               skills={skills.latest ?? []}
-              disabledDirectories={directories()
-                .filter((dir) => !dir.enabled)
-                .map((dir) => dir.path)}
+              disabledDirectories={disabledDirectories()}
               onRemove={removeSkill}
             />
           </Show>
@@ -377,7 +380,6 @@ const SkillsList: Component<{
 
   const isDisabled = (skill: SkillItem) =>
     (props.disabledDirectories ?? []).some((dir) => skill.location === dir || skill.location.startsWith(`${dir}/`))
-
   const filtered = createMemo(() => {
     const query = filter.value.trim().toLowerCase()
     const items = [...props.skills].sort((a, b) => a.name.localeCompare(b.name))
