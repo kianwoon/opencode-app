@@ -839,3 +839,8 @@ button.settings-v2-plugins-location:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+[data-component="dialog-v2"]:has(> [data-slot="dialog-container"] > .settings-v2-dialog) [data-slot="dialog-container"] {
+  width: 80vw;
+  height: 80vh;
+}

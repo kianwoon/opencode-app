@@ -108,7 +108,6 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
         // `api` compat surface does not gain new endpoints between tarballs.
         const result = await serverSdk().client.v2.skill.directories({ location: { directory: input.directory } })
         return ((result.data ?? []) as SkillDirectory[]).map((dir) => ({ ...dir }))
-        return (result.data ?? []) as SkillDirectory[]
       })
     },
   )
