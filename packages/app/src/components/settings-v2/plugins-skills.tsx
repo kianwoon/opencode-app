@@ -16,6 +16,7 @@ import {
   createSignal,
 } from "solid-js"
 import { createStore } from "solid-js/store"
+import path from "path"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
@@ -99,18 +100,20 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
     }
   }
 
-  const [directories, { refetch: refetchDirectories }] = createResource(
-    () => ({ protocol: protocol(), directory: props.directory() }),
-    async (input) => {
-      if (input.protocol !== "v2") return []
-      return retry(async () => {
-        // `client.v2` (workspace SDK) is used here because the vendored
-        // `api` compat surface does not gain new endpoints between tarballs.
-        const result = await serverSdk().client.v2.skill.directories({ location: { directory: input.directory } })
-        return ((result.data ?? []) as SkillDirectory[]).map((dir) => ({ ...dir }))
-      })
-    },
-  )
+  // Derive source directories from the already-loaded skill locations
+  // (<root>/<skill-name>/SKILL.md) instead of a server endpoint, so the
+  // toggles work against any server version. Enabled state comes from config.
+  const directories = createMemo<SkillDirectory[]>(() => {
+    const disabled = new Set((configSkills().disabled_directories as string[]) ?? [])
+    const roots = new Set<string>()
+    for (const skill of skills.latest ?? []) {
+      if (builtinSkill(skill)) continue
+      const folder = path.dirname(skill.location)
+      const root = path.dirname(folder)
+      if (path.basename(folder) !== "SKILL.md" && root !== folder) roots.add(root)
+    }
+    return [...roots].sort((a, b) => a.localeCompare(b)).map((p) => ({ path: p, enabled: !disabled.has(p) }))
+  })
 
   const configSkills = createMemo(() => (serverSync().data.config.skills ?? {}) as Record<string, unknown>)
 
@@ -125,7 +128,6 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
         ...serverSync().data.config,
         skills: { ...configSkills(), disabled_directories: next },
       } as never)
-      await refetchDirectories()
       await refetchSkills()
     } catch (err) {
       serverSync().set("config", "skills", "disabled_directories", before as never)
@@ -238,11 +240,11 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
               </div>
             }
           >
-            <Show when={directories.latest?.length}>
+            <Show when={directories().length}>
               <div class="settings-v2-section" data-component="settings-skill-directories">
                 <h3 class="settings-v2-section-title">{language.t("settings.plugins.skills.directories.title")}</h3>
                 <SettingsListV2>
-                  <For each={[...(directories.latest ?? [])].sort((a, b) => a.path.localeCompare(b.path))}>
+                  <For each={directories()}>
                     {(dir) => (
                       <SettingsRowV2
                         title={dir.path}
@@ -272,7 +274,9 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
             </Show>
             <SkillsList
               skills={skills.latest ?? []}
-              disabledDirectories={(directories.latest ?? []).filter((dir) => !dir.enabled).map((dir) => dir.path)}
+              disabledDirectories={directories()
+                .filter((dir) => !dir.enabled)
+                .map((dir) => dir.path)}
               onRemove={removeSkill}
             />
           </Show>
