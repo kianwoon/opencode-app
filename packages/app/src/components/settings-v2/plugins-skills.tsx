@@ -107,10 +107,14 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
   // Toggles write straight to config via updateConfig; while that request is in
   // flight the local set holds the optimistic state so switches respond instantly.
   const [pendingDisabled, setPendingDisabled] = createStore({ paths: [] as string[] })
+  // Known roots persist across refetches: once a directory is disabled the
+  // server stops listing its skills, but the row must stay so it can be
+  // re-enabled. Seeds from the first successful skills fetch, then accumulates.
+  const [knownRoots, setKnownRoots] = createStore({ paths: [] as string[] })
   const directories = createMemo<SkillDirectory[]>(() => {
     const disabled = new Set(pendingDisabled.paths.length > 0 ? pendingDisabled.paths : ((configSkills().disabled_directories as string[] | undefined) ?? []))
     const counts = new Map<string, number>()
-    const roots = new Set<string>()
+    const roots = new Set(knownRoots.paths)
     for (const skill of skills.latest ?? []) {
       if (builtinSkill(skill)) continue
       if (!skill.location || skill.location === "<built-in>") continue
@@ -120,6 +124,7 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
       if (idx <= 0) continue
       const root = skill.location.slice(0, skill.location.lastIndexOf("/", idx - 1))
       if (!root) continue
+      if (!roots.has(root)) setKnownRoots("paths", knownRoots.paths.length, root)
       roots.add(root)
       counts.set(root, (counts.get(root) ?? 0) + 1)
     }
@@ -142,7 +147,14 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
         ...serverSync().data.config,
         skills: { ...configSkills(), disabled_directories: next },
       } as never)
-      await refetchSkills()
+      // The config write disposes instances (global.disposed); the skills
+      // refetch races that teardown. Best-effort only — a failure here must
+      // not surface as an error since the write itself succeeded.
+      try {
+        await refetchSkills()
+      } catch {
+        // ignored: disposal race
+      }
     } catch (err) {
       showToast({ title: language.t("settings.plugins.skills.directories.toggle.failed"), description: err instanceof Error ? err.message : String(err) })
     } finally {
