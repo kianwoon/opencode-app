@@ -165,10 +165,25 @@ const layer = Layer.effect(
     const continueAfterOverflowCompaction = (step: number) =>
       new TurnTransitionError({ _tag: "ContinueAfterOverflowCompaction", step })
 
-    const loadSystemContext = (agent: AgentV2.Selection) =>
-      Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
-        concurrency: "unbounded",
-      }).pipe(Effect.map(SystemContext.combine))
+    // Per-drain memo: sources (AGENTS.md files, skill list, references) rarely
+    // change mid-drain. Re-observing them on every step of a 10+ step tool loop
+    // re-reads files and re-renders guidance for no benefit; keyed by agent id
+    // so a steer that switches agents still observes fresh values for the new
+    // agent. The epoch snapshot reconcile in `SessionContextEpoch` still
+    // detects real drift on the first step of each subsequent drain.
+    const contextCache = new Map<string, Effect.Effect<SystemContext.SystemContext>>()
+    const loadSystemContext = (agent: AgentV2.Selection) => {
+      const cached = contextCache.get(agent.id)
+      if (cached) return cached
+      const loaded = Effect.cached(
+        Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
+          concurrency: "unbounded",
+        }).pipe(Effect.map(SystemContext.combine)),
+      ).pipe(Effect.flatten)
+      contextCache.set(agent.id, loaded)
+      return loaded
+    }
+    const resetContextCache = () => contextCache.clear()
 
     const runTurnAttempt = Effect.fn("SessionRunner.runTurn")(function* (
       sessionID: SessionSchema.ID,
@@ -398,6 +413,7 @@ const layer = Layer.effect(
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
       yield* failInterruptedTools(input.sessionID)
+      resetContextCache()
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
       while (shouldRun) {

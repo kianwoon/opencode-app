@@ -3212,6 +3212,42 @@ describe("ProviderTransform.message - cache control on gateway", () => {
     expect(result.every((message) => message.providerOptions === undefined)).toBe(true)
   })
 
+  test("pins the trailing breakpoint at the latest user message, not a sliding last-two window", () => {
+    const model = createModel({
+      providerID: "anthropic",
+      api: { id: "claude-sonnet-4", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    })
+    // Tool-loop shape: system, user prompt, assistant tool call, tool result.
+    // A sliding last-two window would re-mark assistant+tool each step and let
+    // the prefix boundary drift; the latest-user-message pin keeps it stable.
+    const msgs = [
+      { role: "system", content: "You are a helpful assistant" },
+      { role: "user", content: "List files" },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call_1", toolName: "glob", args: {} }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "glob",
+            output: { type: "text", value: "[]" },
+          },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+    const marked = result
+      .map((message, index) => ({ message, index }))
+      .filter(({ message }) => message.providerOptions !== undefined)
+      .map(({ index }) => index)
+    expect(marked).toEqual([0, 1])
+  })
+
   test("google-vertex-anthropic applies cache control", () => {
     const model = createModel({
       providerID: "google-vertex-anthropic",

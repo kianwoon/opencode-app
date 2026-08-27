@@ -369,7 +369,11 @@ function normalizeMessages(
 
 function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
-  const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
+  // Match the `@opencode-ai/llm` cache-policy "auto" shape: pin the trailing
+  // breakpoint at the latest user message instead of a sliding last-N window,
+  // so intra-turn tool-loop requests reuse one stable cached prefix.
+  const lastUserIndex = msgs.findLastIndex((msg) => msg.role === "user")
+  const final = lastUserIndex >= 0 ? [msgs[lastUserIndex]!] : []
 
   const providerOptions = {
     anthropic: {
