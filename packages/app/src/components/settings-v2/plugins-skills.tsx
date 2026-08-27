@@ -376,7 +376,7 @@ const SkillsList: Component<{
   const [filter, setFilter] = createStore({ value: "" })
 
   const isDisabled = (skill: SkillItem) =>
-    props.disabledDirectories.some((dir) => skill.location === dir || skill.location.startsWith(`${dir}/`))
+    (props.disabledDirectories ?? []).some((dir) => skill.location === dir || skill.location.startsWith(`${dir}/`))
 
   const filtered = createMemo(() => {
     const query = filter.value.trim().toLowerCase()
