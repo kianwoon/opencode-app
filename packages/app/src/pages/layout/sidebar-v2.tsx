@@ -83,6 +83,11 @@ export function NewSidebar() {
     try {
       showToast({ title: language.t("sidebar.reload.started") })
       await serverSDK().client.global.dispose()
+      // The dispose emits global.disposed, which tears down instances and
+      // re-triggers every app-side query. Requests racing that teardown can
+      // reject even though the reload itself succeeded; let the churn settle
+      // so a racing failure can't flip this toast to "Failed to reload configs".
+      await new Promise((resolve) => setTimeout(resolve, 500))
       showToast({ title: language.t("sidebar.reload.done") })
     } catch (err) {
       showToast({
@@ -484,6 +489,11 @@ function ExpandedSidebar(props: SidebarActions) {
     try {
       showToast({ title: language.t("sidebar.reload.started") })
       await serverSDK().client.global.dispose()
+      // The dispose emits global.disposed, which tears down instances and
+      // re-triggers every app-side query. Requests racing that teardown can
+      // reject even though the reload itself succeeded; let the churn settle
+      // so a racing failure can't flip this toast to "Failed to reload configs".
+      await new Promise((resolve) => setTimeout(resolve, 500))
       showToast({ title: language.t("sidebar.reload.done") })
     } catch (err) {
       showToast({
