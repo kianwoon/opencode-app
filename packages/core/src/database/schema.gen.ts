@@ -5,6 +5,19 @@ export default {
   up(tx) {
     return Effect.gen(function* () {
       yield* tx.run(`
+        CREATE TABLE \`background_job\` (
+          \`id\` text PRIMARY KEY,
+          \`type\` text NOT NULL,
+          \`title\` text,
+          \`status\` text NOT NULL,
+          \`started_at\` integer NOT NULL,
+          \`completed_at\` integer,
+          \`output\` text,
+          \`error\` text,
+          \`metadata\` text
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`workspace\` (
           \`id\` text PRIMARY KEY,
           \`type\` text NOT NULL,
