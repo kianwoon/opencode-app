@@ -111,6 +111,19 @@ const MAX_ESCALATIONS_PER_TASK = 2
 /** Session state. Effort moves upward only; a new user message re-assesses it. */
 const state = new Map<string, State>()
 
+/** Bounded session map: long-lived processes must not grow it without limit. */
+const MAX_SESSIONS = 1_000
+
+function trackSession(sessionID: string) {
+  state.delete(sessionID)
+  state.set(sessionID, { escalated: undefined, baseline: undefined, escalations: 0, risky: false })
+  if (state.size > MAX_SESSIONS) {
+    // Map preserves insertion order — evict the oldest session.
+    const oldest = state.keys().next().value
+    if (oldest !== undefined) state.delete(oldest)
+  }
+}
+
 function rank(effort: Effort): number {
   return LADDER.indexOf(effort)
 }
@@ -193,6 +206,7 @@ export const TaskEffortRouterPlugin = (async () => {
         .flatMap((part) => (part.type === "text" ? [part.text] : []))
         .join(" ")
       const profile = assess(text)
+      trackSession(input.sessionID)
       state.set(input.sessionID, { escalated: undefined, baseline: profile.baseline, escalations: 0, risky: profile.risky })
     },
 
