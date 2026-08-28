@@ -14,6 +14,7 @@ import {
   SubtaskPart,
   User,
   WithParts,
+  WorkflowPart,
 } from "@opencode-ai/core/v1/session"
 
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -595,7 +596,10 @@ export function latest(msgs: WithParts[]) {
   const tasks = msgs.flatMap((m) =>
     finished && !isAfter(m.info, finished)
       ? []
-      : m.parts.filter((p): p is CompactionPart | SubtaskPart => p.type === "compaction" || p.type === "subtask"),
+      : m.parts.filter(
+          (p): p is CompactionPart | SubtaskPart | WorkflowPart =>
+            p.type === "compaction" || p.type === "subtask" || p.type === "workflow",
+        ),
   )
   return { user, assistant, finished, tasks }
 }

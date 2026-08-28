@@ -407,6 +407,29 @@ export type SubtaskPart = {
   command?: string
 }
 
+export type WorkflowStep = {
+  id: string
+  prompt: string
+  description: string
+  agent: string
+  dependsOn: Array<string>
+  model?: {
+    providerID: string
+    modelID: string
+  }
+  command?: string
+}
+
+export type WorkflowPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "workflow"
+  title: string
+  steps: Array<WorkflowStep>
+  plannedBy?: string
+}
+
 export type ReasoningPart = {
   id: string
   sessionID: string
@@ -627,6 +650,7 @@ export type CompactionPart = {
 export type Part =
   | TextPart
   | SubtaskPart
+  | WorkflowPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -2026,6 +2050,7 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    workflow_concurrency?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
 }
@@ -2601,6 +2626,27 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
+}
+
+export type WorkflowStepInput = {
+  id: string
+  prompt: string
+  description: string
+  agent: string
+  dependsOn: Array<string>
+  model?: {
+    providerID: string
+    modelID: string
+  }
+  command?: string
+}
+
+export type WorkflowPartInput = {
+  id?: string
+  type: "workflow"
+  title: string
+  steps: Array<WorkflowStepInput>
+  plannedBy?: string
 }
 
 export type SessionBusyError = {
@@ -9900,7 +9946,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
   }
   path: {
     sessionID: string
@@ -10247,7 +10293,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | WorkflowPartInput>
   }
   path: {
     sessionID: string

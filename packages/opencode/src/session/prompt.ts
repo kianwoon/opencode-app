@@ -7,6 +7,13 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
+import {
+  validateWorkflow,
+  readySteps,
+  propagateFailure,
+  isComplete,
+  workflowErrorMessage,
+} from "./workflow/dag"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
@@ -42,7 +49,7 @@ import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
@@ -254,19 +261,36 @@ const layer = Layer.effect(
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
     })
 
-    const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
-      task: SessionV1.SubtaskPart
-      model: Provider.Model
+
+    /**
+     * Run one subagent task (a `subtask` part or a workflow step) through the
+     * task tool. Owns the assistant message + tool part bookkeeping so the
+     * part always settles — running parts are finalized on every early-exit
+     * path (unknown agent, execution failure, interruption), never orphaned.
+     *
+     * Returns a discriminated result so callers can report the real failure
+     * reason: `ok` carries the task output; `failed` carries the error
+     * message that was also persisted on the tool part.
+     */
+    type SubagentResult = { ok: true; output: string } | { ok: false; reason: string }
+    const runSubagentTask = Effect.fn("SessionPrompt.runSubagentTask")(function* (input: {
+      task: Pick<SessionV1.SubtaskPart, "prompt" | "description" | "agent" | "model" | "command">
+      fallbackModel: Provider.Model
       lastUser: SessionV1.User
       sessionID: SessionID
       session: Session.Info
       msgs: SessionV1.WithParts[]
+      /** Extra metadata stamped on the running task part (workflow step context). */
+      partMetadata?: Record<string, unknown>
     }) {
-      const { task, model, lastUser, sessionID, session, msgs } = input
+      const { task, fallbackModel, lastUser, sessionID, session, msgs, partMetadata } = input
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
-      const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
+
+      const taskModel = task.model
+        ? yield* getModel(task.model.providerID, task.model.modelID, sessionID)
+        : fallbackModel
       const assistantMessage: SessionV1.Assistant = yield* sessions.updateMessage({
         id: MessageID.ascending(),
         role: "assistant",
@@ -297,6 +321,7 @@ const layer = Layer.effect(
             subagent_type: task.agent,
             command: task.command,
           },
+          metadata: partMetadata,
           time: { start: Date.now() },
         },
       })
@@ -306,20 +331,49 @@ const layer = Layer.effect(
         subagent_type: task.agent,
         command: task.command,
       }
-      yield* plugin.trigger(
-        "tool.execute.before",
-        { tool: TaskTool.id, sessionID, callID: part.id },
-        { args: taskArgs },
-      )
 
+      /** Settle the part as an error and close the assistant message. */
+      const failPart = Effect.fnUntraced(function* (message: string) {
+        assistantMessage.finish = "tool-calls"
+        assistantMessage.time.completed = Date.now()
+        yield* sessions.updateMessage(assistantMessage)
+        if (part.state.status === "running" || part.state.status === "pending") {
+          const running = part.state.status === "running" ? part.state : undefined
+          yield* sessions.updatePart({
+            ...part,
+            state: {
+              status: "error",
+              error: message,
+              time: {
+                start: running ? running.time.start : Date.now(),
+                end: Date.now(),
+              },
+              metadata: running?.metadata,
+              input: part.state.input,
+            },
+          } satisfies SessionV1.ToolPart)
+        }
+      })
+
+      // Unknown agents settle the part as an error (never an orphaned
+      // "running" part) and surface as a session error event. The settled
+      // assistant message also creates the task-consumption boundary the
+      // loop relies on, so the enclosing task is not re-dispatched.
       const taskAgent = yield* agents.get(task.agent)
       if (!taskAgent) {
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
         yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        yield* failPart(error.message)
         throw error
       }
+
+      yield* plugin.trigger(
+        "tool.execute.before",
+        { tool: TaskTool.id, sessionID, callID: part.id },
+        { args: taskArgs },
+      )
 
       let error: Error | undefined
       const taskAbort = new AbortController()
@@ -334,11 +388,13 @@ const layer = Layer.effect(
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
-              part = yield* sessions.updatePart({
-                ...part,
-                type: "tool",
-                state: { ...part.state, ...val },
-              } satisfies SessionV1.ToolPart)
+              // Workflow step context survives task-tool metadata updates.
+              const merged = { ...partMetadata, ...val.metadata }
+              const state =
+                part.state.status === "pending" || part.state.status === "running"
+                  ? { ...part.state, ...val, metadata: merged }
+                  : part.state
+              part = yield* sessions.updatePart({ ...part, type: "tool", state } satisfies SessionV1.ToolPart)
             }),
           ask: (req: any) =>
             permission
@@ -353,7 +409,7 @@ const layer = Layer.effect(
           Effect.catchCause((cause) => {
             const defect = Cause.squash(cause)
             error = defect instanceof Error ? defect : new Error(String(defect))
-            return Effect.logError("subtask execution failed", {
+            return Effect.logError("subagent task execution failed", {
               error,
               agent: task.agent,
               description: task.description,
@@ -362,21 +418,7 @@ const layer = Layer.effect(
           Effect.onInterrupt(() =>
             Effect.gen(function* () {
               taskAbort.abort()
-              assistantMessage.finish = "tool-calls"
-              assistantMessage.time.completed = Date.now()
-              yield* sessions.updateMessage(assistantMessage)
-              if (part.state.status === "running") {
-                yield* sessions.updatePart({
-                  ...part,
-                  state: {
-                    status: "error",
-                    error: "Cancelled",
-                    time: { start: part.state.time.start, end: Date.now() },
-                    metadata: part.state.metadata,
-                    input: part.state.input,
-                  },
-                } satisfies SessionV1.ToolPart)
-              }
+              yield* failPart("Cancelled")
             }),
           ),
         )
@@ -405,7 +447,7 @@ const layer = Layer.effect(
             status: "completed",
             input: part.state.input,
             title: result.title,
-            metadata: result.metadata,
+            metadata: { ...partMetadata, ...result.metadata },
             output: result.output,
             attachments,
             time: { ...part.state.time, end: Date.now() },
@@ -414,20 +456,30 @@ const layer = Layer.effect(
       }
 
       if (!result) {
-        yield* sessions.updatePart({
-          ...part,
-          state: {
-            status: "error",
-            error: error ? `Tool execution failed: ${error.message}` : "Tool execution failed",
-            time: {
-              start: part.state.status === "running" ? part.state.time.start : Date.now(),
-              end: Date.now(),
-            },
-            metadata: part.state.status === "pending" ? undefined : part.state.metadata,
-            input: part.state.input,
-          },
-        } satisfies SessionV1.ToolPart)
+        const reason = error ? `Tool execution failed: ${error.message}` : "Tool execution failed"
+        yield* failPart(reason)
+        return { ok: false, reason }
       }
+      if (!result.output) {
+        const reason = error ? `Tool execution failed: ${error.message}` : "Task produced no output"
+        yield* failPart(reason)
+        return { ok: false, reason }
+      }
+      return { ok: true, output: result.output }
+    })
+
+    const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
+      task: SessionV1.SubtaskPart
+      model: Provider.Model
+      lastUser: SessionV1.User
+      sessionID: SessionID
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+    }) {
+      const { task, model, lastUser, sessionID, session, msgs } = input
+      // The part is settled either way inside runSubagentTask; hard failures
+      // (unknown agent) throw, soft ones are already persisted on the part.
+      yield* runSubagentTask({ task, fallbackModel: model, lastUser, sessionID, session, msgs })
 
       if (!task.command) return
 
@@ -449,6 +501,217 @@ const layer = Layer.effect(
         synthetic: true,
       } satisfies SessionV1.TextPart)
     })
+
+    /**
+     * Extract the payload text from a task tool result. The task tool wraps
+     * its final text as <task id=... state=...>...<task_result>text</task_result>
+     * </task>; downstream step prompts want the inner text, not the envelope
+     * (and not the child session id noise it carries).
+     */
+    const taskResultPayload = (output: string) => {
+      const start = output.indexOf("<task_result>")
+      if (start === -1) return output
+      const end = output.lastIndexOf("</task_result>")
+      if (end === -1 || end < start) return output
+      return output.slice(start + "<task_result>".length, end).trim()
+    }
+
+    /** Per-upstream cap on injected result text; keeps fan-in prompts bounded. */
+    const UPSTREAM_RESULT_MAX_CHARS = 20_000
+
+    /** Build a step's prompt with upstream results injected for dataflow. */
+    const workflowStepPrompt = (step: SessionV1.WorkflowStep, results: Map<string, string>) => {
+      const upstream = step.dependsOn
+        .map((dep) => results.get(dep))
+        .filter((output): output is string => output !== undefined)
+      if (upstream.length === 0) return step.prompt
+      return [
+        step.prompt,
+        "",
+        "Results from upstream workflow steps:",
+        ...upstream.map((output) => {
+          const payload = taskResultPayload(output)
+          const clipped =
+            payload.length > UPSTREAM_RESULT_MAX_CHARS
+              ? payload.slice(0, UPSTREAM_RESULT_MAX_CHARS) + "\n...[truncated]..."
+              : payload
+          return `<upstream-result>\n${clipped}\n</upstream-result>`
+        }),
+      ].join("\n")
+    }
+
+    /**
+     * Execute a workflow (DAG of subagent steps). Event-driven scheduling: a
+     * step starts the moment its dependencies settle (no batch barriers), up
+     * to the concurrency cap. A failed step marks its transitive dependents
+     * skipped; failures carry their reason into the final summary so the
+     * orchestrating model can react. The final step statuses are rendered as
+     * a synthetic text part.
+     */
+    const handleWorkflow = Effect.fn("SessionPrompt.handleWorkflow")(function* (input: {
+      task: SessionV1.WorkflowPart
+      model: Provider.Model
+      lastUser: SessionV1.User
+      sessionID: SessionID
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+    }) {
+      const { task, model, lastUser, sessionID, session, msgs } = input
+
+      // Same admission as the workflow tool: the direct API path
+      // (PromptInput with a workflow part) must not bypass graph-shape,
+      // step-count, or agent-name enforcement.
+      const knownAgents = new Set((yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name))
+      const dag = validateWorkflow(task.steps, knownAgents)
+      if ("_tag" in dag) {
+        const error = new NamedError.Unknown({ message: workflowErrorMessage(task.title, dag) })
+        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        throw error
+      }
+
+      const cfg = yield* config.get()
+      const concurrency = Math.max(1, cfg.experimental?.workflow_concurrency ?? 4)
+
+      const completed = new Set<string>()
+      const skipped = new Set<string>()
+      const failed = new Set<string>()
+      const settled = new Set<string>() // completed ∪ failed, for readiness
+      const outputs = new Map<string, string>()
+      const failureReasons = new Map<string, string>()
+      // Steps started but not yet settled, and their fibers. Fibers remove
+      // their id from `inflight` on every exit path; the scheduler prunes
+      // `running` by inflight membership. Failure is a scheduling outcome
+      // recorded in state, so step fibers never fail.
+      const inflight = new Set<string>()
+      const running = new Map<string, Fiber.Fiber<void>>()
+
+      /** Record a step outcome (sync, atomic). */
+      const record = (stepId: string, result: SubagentResult) => {
+        settled.add(stepId)
+        if (result.ok) {
+          completed.add(stepId)
+          outputs.set(stepId, result.output)
+          return
+        }
+        failed.add(stepId)
+        failureReasons.set(stepId, result.reason)
+        for (const id of propagateFailure(dag, stepId)) skipped.add(id)
+      }
+
+      const runStep = Effect.fnUntraced(function* (step: (typeof dag.steps)[number]) {
+        const exit = yield* Effect.exit(
+          runSubagentTask({
+            task: {
+              prompt: workflowStepPrompt(step, outputs),
+              description: step.description,
+              agent: step.agent,
+              model: step.model,
+              command: step.command,
+            },
+            fallbackModel: model,
+            lastUser,
+            sessionID,
+            session,
+            msgs,
+            // Step context on the task part so UIs and telemetry can
+            // correlate steps with their owning workflow and graph edge.
+            partMetadata: { workflow: { title: task.title, stepId: step.id, dependsOn: [...step.dependsOn] } },
+          }),
+        )
+        // `exit.value`'s literal discriminator widens through Effect.fn's
+        // inferred generator type; reassert the declared union.
+        if (Exit.isSuccess(exit)) return record(step.id, exit.value as SubagentResult)
+        // Hard failures (unknown agent, defects) settle the step as failed
+        // too — scheduling outcome, never a fiber failure.
+        const defect = Cause.squash(exit.cause)
+        // NamedError messages live on `.data.message`; plain Errors on `.message`.
+        const data = defect as { data?: { message?: string } }
+        record(step.id, {
+          ok: false,
+          reason: defect instanceof Error ? (data.data?.message ?? defect.message) : String(defect),
+        })
+      })
+
+      // Event-driven frontier: start newly-ready steps the moment capacity
+      // frees up, then wait on live fibers. No batch barrier — a slow sibling
+      // never delays an unrelated dependent.
+      while (!isComplete(dag.steps, settled, skipped)) {
+        const startable = readySteps(dag.steps, settled, skipped)
+          .filter((step) => !inflight.has(step.id))
+          .slice(0, concurrency - inflight.size)
+        if (startable.length > 0) {
+          for (const step of startable) {
+            inflight.add(step.id)
+            const fiber = yield* runStep(step).pipe(
+              // On any exit (including interruption) release capacity; a step
+              // interrupted before recording settles as failed so the
+              // scheduler can always make progress.
+              Effect.ensuring(
+                Effect.sync(() => {
+                  inflight.delete(step.id)
+                  if (!settled.has(step.id)) record(step.id, { ok: false, reason: "Cancelled" })
+                }),
+              ),
+              // Step fibers are children of the workflow/loop fiber, not
+              // daemons in the instance scope. Forking into `scope` detaches
+              // them from cancellation: cancelling the session interrupts the
+              // loop fiber but leaves already-started steps running to
+              // completion, burning turns and mutating the tree. As children,
+              // they inherit the loop's interrupt, which cascades into the
+              // task tool's own onInterrupt (aborting the child session).
+              Effect.forkChild,
+            )
+            running.set(step.id, fiber)
+          }
+          continue
+        }
+
+        if (inflight.size === 0) {
+          // Nothing running, nothing startable, work left: deadlock.
+          const message = `Workflow "${task.title}" cannot make progress (deadlock)`
+          const error = new NamedError.Unknown({ message })
+          yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+          throw error
+        }
+
+        // Wait for any live step to settle. Racing the `Fiber.await` effects
+        // only interrupts these ephemeral awaiters — the underlying step
+        // fibers run in the prompt scope and are unaffected.
+        yield* Effect.raceAll([...running.values()].map((fiber) => Fiber.await(fiber)))
+        for (const [id] of running) {
+          if (!inflight.has(id)) running.delete(id)
+        }
+      }
+
+      // Statuses in declaration order keep the summary deterministic.
+      const statusLine = (id: string) => {
+        if (completed.has(id)) return `- ${id}: completed`
+        if (failed.has(id)) {
+          const reason = failureReasons.get(id)
+          return `- ${id}: failed${reason ? ` (${reason})` : ""}`
+        }
+        return `- ${id}: skipped`
+      }
+      const summary = [`Workflow "${task.title}" finished.`, ...dag.steps.map((s) => statusLine(s.id))].join("\n")
+      const summaryMsg: SessionV1.User = {
+        id: MessageID.ascending(),
+        sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: lastUser.agent,
+        model: lastUser.model,
+      }
+      yield* sessions.updateMessage(summaryMsg)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: summaryMsg.id,
+        sessionID,
+        type: "text",
+        text: summary,
+        synthetic: true,
+      } satisfies SessionV1.TextPart)
+    })
+
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
       return yield* Effect.uninterruptibleMask((restore) =>
@@ -991,6 +1254,19 @@ const layer = Layer.effect(
           ]
         }
 
+        if (part.type === "workflow") {
+          // The workflow part carries a DAG of steps; deep-mutate so it fits
+          // the stored Part type (schema DeepMutable semantics).
+          return [
+            {
+              ...part,
+              messageID: info.id,
+              sessionID: input.sessionID,
+              steps: part.steps.map((step) => ({ ...step, dependsOn: [...step.dependsOn] })),
+            },
+          ]
+        }
+
         return [{ ...part, messageID: info.id, sessionID: input.sessionID }]
       })
 
@@ -1148,6 +1424,11 @@ const layer = Layer.effect(
             continue
           }
 
+          if (task?.type === "workflow") {
+            yield* handleWorkflow({ task, model, lastUser, sessionID, session, msgs })
+            continue
+          }
+
           if (task?.type === "compaction") {
             const result = yield* compaction.process({
               messages: msgs,
@@ -1257,11 +1538,12 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
+            const [skills, env, instructions, mcpInstructions, workflowGuidance, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
               sys.mcp(agent, session.permission),
+              sys.workflow(agent),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [
@@ -1269,6 +1551,7 @@ const layer = Layer.effect(
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
+              ...(workflowGuidance ? [workflowGuidance] : []),
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
@@ -1518,6 +1801,7 @@ export const PromptInput = Schema.Struct({
       SessionV1.FilePartInput,
       SessionV1.AgentPartInput,
       SessionV1.SubtaskPartInput,
+      SessionV1.WorkflowPartInput,
     ]).annotate({ discriminator: "type" }),
   ),
 })
