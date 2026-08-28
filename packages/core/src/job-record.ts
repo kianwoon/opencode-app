@@ -1,6 +1,6 @@
 export * as JobRecord from "./job-record"
 
-import { desc, eq, inArray } from "drizzle-orm"
+import { desc, eq, inArray, sql } from "drizzle-orm"
 import { Effect } from "effect"
 import { Database } from "./database/database"
 import { BackgroundJobTable } from "./background-job-record.sql"
@@ -53,7 +53,13 @@ export type BoundOps = {
 }
 
 export const ops: Ops = {
-  /** Insert or overwrite the record for one job. */
+  /**
+   * Insert or overwrite the record for one job. Status transitions are
+   * serialized: a "running" record never overwrites a terminal row (guards
+   * against a slow start-record landing after the completion-record from a
+   * different fiber). Preserve-on-update keeps fields written by earlier
+   * transitions (title/metadata from start, output from completion).
+   */
   record: (info) =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service
@@ -73,7 +79,7 @@ export const ops: Ops = {
         .onConflictDoUpdate({
           target: BackgroundJobTable.id,
           set: {
-            status: info.status,
+            status: sql`CASE WHEN ${BackgroundJobTable.status} = 'running' OR ${info.status} <> 'running' THEN ${info.status} ELSE ${BackgroundJobTable.status} END`,
             ...(info.completed_at !== undefined ? { completed_at: info.completed_at } : {}),
             ...(info.output !== undefined ? { output: info.output } : {}),
             ...(info.error !== undefined ? { error: info.error } : {}),

@@ -76,6 +76,17 @@ describe("background job durable record", () => {
         const all = yield* jobs.list()
         expect(all.some((job) => job.id === info.id)).toBe(true)
         expect(all.some((job) => job.id === "job_ghost")).toBe(true)
+
+        // Serialization: a late-arriving "running" record must never overwrite
+        // a terminal row (cross-fiber race between start-record and wait-record).
+        yield* ops.record({
+          id: info.id,
+          type: "test",
+          status: "running",
+          started_at: info.started_at,
+        })
+        const serialized = yield* ops.get(info.id)
+        expect(serialized?.status).toBe("completed")
       }),
     { timeout: 30_000 },
   )

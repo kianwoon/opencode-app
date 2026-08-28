@@ -28,11 +28,19 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database.Service
     const withDb = JobRecord.provided(database)
+    // Process-global sweep guard: the startup sweep must run exactly once per
+    // process, not per instance. Instances of the same process share the DB —
+    // a second instance sweeping would cancel the first instance's LIVE jobs
+    // (their records still say "running").
+    let swept = false
     const state = yield* InstanceState.make(() =>
       Effect.gen(function* () {
         const jobs = yield* CoreBackgroundJob.make
-        // Startup sweep: rows still "running" belong to a dead process.
-        yield* withDb.sweepStale().pipe(Effect.ignore)
+        if (!swept) {
+          swept = true
+          // Startup sweep: rows still "running" belong to a dead process.
+          yield* withDb.sweepStale().pipe(Effect.ignore)
+        }
         return jobs
       }),
     )

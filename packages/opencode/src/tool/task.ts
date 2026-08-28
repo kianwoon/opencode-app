@@ -211,14 +211,26 @@ export const TaskTool = Tool.define(
           parts,
         })
         if (result.info.role === "assistant" && result.info.error) {
+          // A user-initiated cancel surfaces as MessageAbortedError (or the
+          // stream-level AbortError text). Report it as cancelled, not as a
+          // failure — the subagent did nothing wrong.
+          if (SessionV1.AbortedError.isInstance(result.info.error)) {
+            return yield* Effect.fail(new Error(`Subagent cancelled (task_id: ${nextSession.id})`))
+          }
           const message =
             "message" in result.info.error.data && typeof result.info.error.data.message === "string"
               ? result.info.error.data.message
               : result.info.error.name
+          if (/^The operation was aborted$/i.test(message)) {
+            return yield* Effect.fail(new Error(`Subagent cancelled (task_id: ${nextSession.id})`))
+          }
           return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}`))
         }
         const failed = result.parts.findLast((item) => item.type === "tool" && item.state.status === "error")
         if (failed?.type === "tool" && failed.state.status === "error") {
+          if (/^The operation was aborted$|^Cancelled$/i.test(failed.state.error ?? "")) {
+            return yield* Effect.fail(new Error(`Subagent cancelled (task_id: ${nextSession.id})`))
+          }
           return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${failed.state.error}`))
         }
         return result.parts.findLast((item) => item.type === "text")?.text ?? ""

@@ -567,6 +567,35 @@ const layer = Layer.effect(
       if ("_tag" in dag) {
         const error = new NamedError.Unknown({ message: workflowErrorMessage(task.title, dag) })
         yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        // Settle a terminal assistant message AFTER the workflow part before
+        // throwing: the settled message is the task-consumption boundary in
+        // MessageV2.latest, so a rejected WorkflowPart cannot be re-collected
+        // and re-dispatched on every later prompt (which would poison the
+        // session — the next user message would never reach the model).
+        const rejected: SessionV1.Assistant = {
+          id: MessageID.ascending(),
+          sessionID,
+          parentID: lastUser.id,
+          mode: lastUser.agent,
+          agent: lastUser.agent,
+          cost: 0,
+          path: { cwd: (yield* InstanceState.context).directory, root: (yield* InstanceState.context).worktree },
+          time: { created: Date.now(), completed: Date.now() },
+          finish: "stop",
+          role: "assistant",
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: model.id,
+          providerID: model.providerID,
+        }
+        yield* sessions.updateMessage(rejected)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: rejected.id,
+          sessionID,
+          type: "text",
+          text: error.message,
+          synthetic: true,
+        } satisfies SessionV1.TextPart)
         throw error
       }
 
