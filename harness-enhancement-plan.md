@@ -1,8 +1,24 @@
 # Opencode Harness Enhancement Plan
 
 Date: 2026-08-28
-Status: Approved (internal enhancement direction)
+Status: ✅ All phases implemented (0–3, commits a9575281fd → b6684a7646)
 Goal: Personal daily-driver — fast, pragmatic, plugin/config-first shipping
+
+## Implementation Status (updated 2026-08-29)
+
+| Phase | Deliverable | Commit | Notes |
+|---|---|---|---|
+| Plan | `harness-enhancement-plan.md` | `a9575281fd` | Analysis + phased plan committed to main |
+| 0 | Effort router activated | `e43f7bc872` | Auto-discovery wrapper in `.opencode/plugins/`; context optimizer was already live globally (676k+ tokens saved) |
+| 1 | TaskProfile assessor | `437e03d653` | Heuristic assessment in effort router: `{complexity, risk}` → pre-escalated baseline + risk notice; 16 tests |
+| 2 | Workflow DAG engine resurrected | `d0e1460473` | Recovered from `ab647985c4` (removed by v1.18.24-25 merge); ported onto current tree; 89 tests green; `OPENCODE_EXPERIMENTAL_WORKFLOWS=false` to disable (default ON) |
+| 3a | Verification gate + reviewer pass | `335996f69f` | Pure risk detector + one reviewer subagent pass at task tail; `OPENCODE_EXPERIMENTAL_VERIFICATION` (default OFF) |
+| 3b | Followup delivery mode | `f78dc5ef1a` | `delivery: "followup"` + `deliverAt` through schema/event/projector/SQL/runner; `SessionExecution.schedule` wake-at-time |
+| 3c | Durable BackgroundJob record slice | `b6684a7646` | `background_job` table, best-effort lifecycle recording, restart sweep, list/get merge |
+
+Binaries: CLI `0.0.0-main-202608281602` (Phases 0–2) installed to `~/.opencode/bin`;
+desktop app rebuilt via the `OPENCODE_CHANNEL=prod` chain with `verify-prod.ts`
+passing. Rebuild both again to pick up Phase 3 (post-`b6684a7646`).
 
 ## Architecture Decision
 
