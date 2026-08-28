@@ -1087,6 +1087,7 @@ export const dict = {
   "settings.plugins.plugins.empty": "未設定任何外掛程式",
   "settings.plugins.plugins.hint": "外掛程式會根據 opencode.json 設定中 plugin 陣列列出的 npm 套件或本機路徑安裝。",
   "settings.plugins.plugins.add.title": "新增外掛程式",
+  "settings.plugins.plugins.add.browse": "瀏覽…",
   "settings.plugins.plugins.add.description": "輸入 npm 套件名稱、本機路徑（file://）或 GitHub 簡寫。",
   "settings.plugins.plugins.add.placeholder": "套件名稱或路徑",
   "settings.plugins.plugins.add.failed": "新增外掛程式失敗",

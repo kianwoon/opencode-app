@@ -210,6 +210,17 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       })
     },
 
+    async openFilePickerDialog(opts) {
+      const result = await window.api.openFilePicker({
+        title: opts?.title,
+        defaultPath: opts?.defaultPath,
+        extensions: opts?.extensions,
+      })
+      if (!result) return null
+      void window.api.releasePickedFiles(result.token).catch(() => undefined)
+      return result.files[0]?.path ?? null
+    },
+
     openExternal(url: string) {
       window.api.openExternal(url)
     },

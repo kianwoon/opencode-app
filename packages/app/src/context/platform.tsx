@@ -17,6 +17,7 @@ type OpenAttachmentPickerOptions = {
   defaultPath?: string
 }
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
+type OpenFilePickerOptions = { title?: string; defaultPath?: string; extensions?: string[] }
 type PlatformName = "web" | "desktop"
 type DesktopOS = "macos" | "windows" | "linux"
 
@@ -61,6 +62,9 @@ type PlatformBase = {
 
   /** Open a native save file picker dialog (desktop only) */
   saveFilePickerDialog?(opts?: SaveFilePickerOptions): Promise<string | null>
+
+  /** Open a native file picker and return the selected file's absolute path (desktop only) */
+  openFilePickerDialog?(opts?: OpenFilePickerOptions): Promise<string | null>
 
   /** Storage mechanism, defaults to localStorage */
   storage?: (name?: string) => SyncStorage | AsyncStorage

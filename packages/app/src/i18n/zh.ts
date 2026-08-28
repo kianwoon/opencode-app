@@ -1093,6 +1093,7 @@ export const dict = {
   "settings.plugins.plugins.empty": "未配置任何插件",
   "settings.plugins.plugins.hint": "插件根据 opencode.json 配置中 plugin 数组里列出的 npm 包或本地路径安装。",
   "settings.plugins.plugins.add.title": "添加插件",
+  "settings.plugins.plugins.add.browse": "浏览…",
   "settings.plugins.plugins.add.description": "输入 npm 包名、本地路径（file://）或 GitHub 简写。",
   "settings.plugins.plugins.add.placeholder": "包名或路径",
   "settings.plugins.plugins.add.failed": "添加插件失败",

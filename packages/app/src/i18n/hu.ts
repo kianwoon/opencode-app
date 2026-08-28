@@ -1135,6 +1135,7 @@ export const dict = {
   "settings.plugins.plugins.empty": "No plugins configured",
   "settings.plugins.plugins.hint": "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
   "settings.plugins.plugins.add.title": "Add plugin",
+  "settings.plugins.plugins.add.browse": "Tallózás…",
   "settings.plugins.plugins.add.description": "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
   "settings.plugins.plugins.add.placeholder": "Package name or path",
   "settings.plugins.plugins.add.failed": "Failed to add plugin",

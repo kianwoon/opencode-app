@@ -309,6 +309,8 @@ export const SettingsPluginsSkillsV2: Component<{ directory: Accessor<string | u
 
 const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props) => {
   const language = useLanguage()
+  const platform = usePlatform()
+  const serverSdk = useServerSDK()
   const [value, setValue] = createSignal("")
   const [busy, setBusy] = createSignal(false)
 
@@ -317,6 +319,34 @@ const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props)
     if (!spec || busy()) return
     setBusy(true)
     try {
+      await props.onAdd(spec)
+      setValue("")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Start the native file picker in the server's global plugin folder when available.
+  const defaultPluginDir = async () => {
+    try {
+      const paths = await serverSdk().client.path.get().then((result) => result.data)
+      return paths?.config ? `${paths.config}/plugin` : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  const browse = async () => {
+    if (!platform.openFilePickerDialog || busy()) return
+    setBusy(true)
+    try {
+      const picked = await platform.openFilePickerDialog({
+        title: language.t("settings.plugins.plugins.add.title"),
+        defaultPath: await defaultPluginDir(),
+        extensions: ["js", "ts", "mjs", "cjs"],
+      })
+      if (!picked) return
+      const spec = picked.startsWith("file://") ? picked : `file://${picked}`
       await props.onAdd(spec)
       setValue("")
     } finally {
@@ -344,6 +374,11 @@ const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props)
         autocomplete="off"
         autocapitalize="off"
       />
+      <Show when={platform.openFilePickerDialog}>
+        <ButtonV2 size="small" variant="neutral" disabled={busy()} onClick={() => void browse()}>
+          {language.t("settings.plugins.plugins.add.browse")}
+        </ButtonV2>
+      </Show>
       <ButtonV2 size="small" variant="neutral" disabled={!value().trim() || busy()} onClick={() => void submit()}>
         {language.t("settings.plugins.plugins.add.title")}
       </ButtonV2>
