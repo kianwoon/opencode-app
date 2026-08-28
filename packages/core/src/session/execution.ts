@@ -13,6 +13,13 @@ export interface Interface {
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
   /** Registers newly recorded work. Repeated wakeups may coalesce. */
   readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  /**
+   * Schedules a future wake for a durably-recorded followup. At `deliverAt`
+   * the scheduler wakes the session so the runner can promote the due input.
+   * Never throws: durability lives in `session_input`, the timer is only a
+   * prompt (a restart drops pending timers until the next wake).
+   */
+  readonly schedule: (sessionID: SessionSchema.ID, deliverAt: number) => Effect.Effect<void>
   /** Interrupt active work owned by this process. Idle interruption is a no-op. */
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
 }
@@ -29,6 +36,7 @@ export const noopLayer = Layer.succeed(
     active: Effect.succeed(new Set()),
     resume: () => Effect.void,
     wake: () => Effect.void,
+    schedule: () => Effect.void,
     interrupt: () => Effect.void,
   }),
 )

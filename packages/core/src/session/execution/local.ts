@@ -1,4 +1,4 @@
-import { Cause, Effect, Layer } from "effect"
+import { Cause, Effect, FiberSet, Layer } from "effect"
 import { LocationServiceMap } from "../../location-service-map"
 import { makeGlobalNode } from "../../effect/app-node"
 import { SessionRunCoordinator } from "../run-coordinator"
@@ -27,12 +27,35 @@ const layer = Layer.effect(
         )
       }),
     })
+    // Scoped fork runner: timer fibers die with the layer scope.
+    const forkTimer = yield* FiberSet.makeRuntime<never, void, never>()
+
+    // Followup timers: one fiber per scheduled wake, keyed by session. An
+    // earlier deadline replaces the pending timer; a later one is ignored.
+    // Timers are prompt-only — `session_input.deliver_at` is the durable
+    // source of truth, and any wake re-checks due inputs before promoting.
+    const timers = new Map<SessionSchema.ID, number>()
+    const schedule = (sessionID: SessionSchema.ID, deliverAt: number) =>
+      Effect.sync(() => {
+        const pending = timers.get(sessionID)
+        if (pending !== undefined && pending <= deliverAt) return
+        timers.set(sessionID, deliverAt)
+        forkTimer(
+          Effect.gen(function* () {
+            yield* Effect.sleep(Math.max(0, deliverAt - Date.now()))
+            if (timers.get(sessionID) !== deliverAt) return
+            timers.delete(sessionID)
+            yield* coordinator.wake(sessionID)
+          }),
+        )
+      }).pipe(Effect.asVoid)
 
     return SessionExecution.Service.of({
       active: coordinator.active,
       interrupt: coordinator.interrupt,
       resume: coordinator.run,
       wake: coordinator.wake,
+      schedule,
     })
   }),
 )

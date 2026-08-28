@@ -26,6 +26,7 @@ const fromRow = (row: typeof SessionInputTable.$inferSelect): Admitted =>
     prompt: decodePrompt(row.prompt),
     delivery: row.delivery,
     timeCreated: DateTime.makeUnsafe(row.time_created),
+    ...(row.deliver_at === null ? {} : { deliverAt: row.deliver_at }),
     ...(row.promoted_seq === null ? {} : { promotedSeq: row.promoted_seq }),
   })
 
@@ -46,6 +47,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly deliverAt?: number | undefined
   },
 ) {
   const existing = yield* find(db, input.id)
@@ -58,6 +60,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
       timestamp,
       prompt: input.prompt,
       delivery: input.delivery,
+      ...(input.deliverAt === undefined ? {} : { deliverAt: input.deliverAt }),
     })
     .pipe(
       Effect.flatMap((event) =>
@@ -71,6 +74,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
                 prompt: input.prompt,
                 delivery: input.delivery,
                 timeCreated: timestamp,
+                ...(input.deliverAt === undefined ? {} : { deliverAt: input.deliverAt }),
               }),
             ),
       ),
@@ -88,6 +92,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly deliverAt?: number | undefined
     readonly timeCreated: DateTime.Utc
   },
 ) {
@@ -106,6 +111,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
       admitted_seq: input.admittedSeq,
       prompt: encodePrompt(input.prompt),
       delivery: input.delivery,
+      ...(input.deliverAt === undefined ? {} : { deliver_at: input.deliverAt }),
       time_created: DateTime.toEpochMillis(input.timeCreated),
     })
     .onConflictDoNothing()
@@ -285,4 +291,54 @@ export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(fun
     .get()
     .pipe(Effect.orDie)
   return row === undefined ? false : yield* publish(db, events, sessionID, [row]).pipe(Effect.as(true))
+})
+
+/**
+ * Promote every followup input whose `deliver_at` has passed, in admission
+ * order. Returns the number promoted; the runner treats them like queue
+ * promotions at the idle boundary.
+ */
+export const promoteFollowups = Effect.fn("SessionInput.promoteFollowups")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  sessionID: SessionSchema.ID,
+  now: number,
+) {
+  const rows = yield* db
+    .select()
+    .from(SessionInputTable)
+    .where(
+      and(
+        eq(SessionInputTable.session_id, sessionID),
+        isNull(SessionInputTable.promoted_seq),
+        eq(SessionInputTable.delivery, "followup"),
+        lte(SessionInputTable.deliver_at, now),
+      ),
+    )
+    .orderBy(asc(SessionInputTable.admitted_seq))
+    .all()
+    .pipe(Effect.orDie)
+  return yield* publish(db, events, sessionID, rows)
+})
+
+/** Epoch millis when the next unpromoted followup becomes due, if any. */
+export const nextFollowupAt = Effect.fn("SessionInput.nextFollowupAt")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+) {
+  const row = yield* db
+    .select({ deliver_at: SessionInputTable.deliver_at })
+    .from(SessionInputTable)
+    .where(
+      and(
+        eq(SessionInputTable.session_id, sessionID),
+        isNull(SessionInputTable.promoted_seq),
+        eq(SessionInputTable.delivery, "followup"),
+      ),
+    )
+    .orderBy(asc(SessionInputTable.deliver_at))
+    .limit(1)
+    .get()
+    .pipe(Effect.orDie)
+  return row?.deliver_at ?? undefined
 })

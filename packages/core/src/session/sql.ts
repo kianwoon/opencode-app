@@ -149,6 +149,7 @@ export const SessionInputTable = sqliteTable(
     delivery: text().$type<SessionInput.Delivery>().notNull(),
     admitted_seq: integer().notNull(),
     promoted_seq: integer(),
+    deliver_at: integer(),
     time_created: integer()
       .notNull()
       .$default(() => Date.now()),

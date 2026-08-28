@@ -33,6 +33,8 @@ const PromptFields = {
   messageID: SessionMessage.ID,
   prompt: Prompt,
   delivery: Delivery,
+  /** Set for followup delivery: epoch millis when the input may promote. */
+  deliverAt: optional(NonNegativeInt),
 }
 
 const options = {

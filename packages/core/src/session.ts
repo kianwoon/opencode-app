@@ -149,6 +149,8 @@ export interface Interface {
     sessionID: SessionSchema.ID
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
+    /** Required with delivery "followup": epoch millis when the input may promote. */
+    deliverAt?: number
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
   readonly shell: (input: {
@@ -364,12 +366,16 @@ const layer = Layer.effect(
             const prompt = resolvePrompt(input.prompt)
             const messageID = input.id ?? SessionMessage.ID.create()
             const delivery = input.delivery ?? "steer"
+            const deliverAt = delivery === "followup" ? input.deliverAt : undefined
+            if (delivery === "followup" && deliverAt === undefined)
+              return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
             const expected = { sessionID: input.sessionID, messageID, prompt, delivery }
             const admitted = yield* SessionInput.admit(db, events, {
               id: messageID,
               sessionID: input.sessionID,
               prompt,
               delivery,
+              deliverAt,
             }).pipe(
               Effect.catchDefect((defect) =>
                 defect instanceof SessionInput.LifecycleConflict
@@ -379,7 +385,10 @@ const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            if (input.resume !== false) yield* execution.wake(admitted.sessionID)
+            if (input.resume !== false) {
+              yield* execution.wake(admitted.sessionID)
+              if (delivery === "followup") yield* execution.schedule(admitted.sessionID, deliverAt!)
+            }
             return admitted
           }),
         ),

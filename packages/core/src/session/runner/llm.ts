@@ -207,6 +207,10 @@ const layer = Layer.effect(
           promoted += Number(yield* SessionInput.promoteNextQueued(db, events, session.id))
           promoted += yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
         }
+        if (promotion === "followup") {
+          promoted += yield* SessionInput.promoteFollowups(db, events, session.id, Date.now())
+          promoted += yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
+        }
         if (promoted > 0) currentStep = 1
       }
       const system =
@@ -411,11 +415,24 @@ const layer = Layer.effect(
     }) {
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
-      if (!input.force && !hasSteer && !hasQueue) return
+      // Followups count as runnable only when due; not-yet-due ones are left
+      // for their scheduled wake.
+      let hasFollowup = false
+      if (!hasSteer && !hasQueue) {
+        const dueAt = yield* SessionInput.nextFollowupAt(db, input.sessionID)
+        hasFollowup = dueAt !== undefined && dueAt <= Date.now()
+      }
+      if (!input.force && !hasSteer && !hasQueue && !hasFollowup) return
       yield* failInterruptedTools(input.sessionID)
       resetContextCache()
-      let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
-      let shouldRun = input.force || hasSteer || hasQueue
+      let promotion: SessionInput.Delivery | undefined = hasSteer
+        ? "steer"
+        : hasQueue
+          ? "queue"
+          : hasFollowup
+            ? "followup"
+            : undefined
+      let shouldRun = input.force || hasSteer || hasQueue || hasFollowup
       while (shouldRun) {
         let needsContinuation = true
         let step = 1
@@ -427,7 +444,20 @@ const layer = Layer.effect(
           if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
         }
         shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
-        promotion = shouldRun ? "queue" : undefined
+        let nextPromotion: SessionInput.Delivery | undefined = undefined
+        if (shouldRun) {
+          nextPromotion = "queue"
+        } else {
+          // Only due followups continue the drain; not-yet-due ones wait for
+          // their scheduled wake (checking deliver_at directly avoids an
+          // infinite loop over pending-but-future inputs).
+          const dueAt = yield* SessionInput.nextFollowupAt(db, input.sessionID)
+          if (dueAt !== undefined && dueAt <= Date.now()) {
+            shouldRun = true
+            nextPromotion = "followup"
+          }
+        }
+        promotion = nextPromotion
       }
     })
 

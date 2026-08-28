@@ -19,5 +19,7 @@ export const Admitted = Schema.Struct({
   prompt: Prompt,
   delivery: Delivery,
   timeCreated: DateTimeUtcFromMillis,
+  /** Epoch millis at which a `followup` input becomes promotable. */
+  deliverAt: NonNegativeInt.pipe(optional),
   promotedSeq: NonNegativeInt.pipe(optional),
 }).annotate({ identifier: "SessionInput.Admitted" })

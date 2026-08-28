@@ -247,6 +247,7 @@ const execution = Layer.effect(
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
+      schedule: () => Effect.void,
       interrupt: coordinator.interrupt,
     })
   }),
@@ -2021,6 +2022,55 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(2)
       expect(userTexts(requests[0]!)).toEqual(["Interrupt current work"])
       expect(userTexts(requests[1]!)).toEqual(["Interrupt current work", "Run after interrupt"])
+    }),
+  )
+
+  it.effect("followup input stays pending until deliverAt, then drains on wake", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      const eventV2 = yield* EventV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Seed task" }), resume: false })
+      const done = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+        LLMEvent.finish({ reason: "stop" }),
+      ]
+      requests.length = 0
+      responses = [done]
+      const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Fiber.join(first)
+      expect(requests).toHaveLength(1)
+
+      // Followup in the future: a plain resume must NOT drain it.
+      const dueAt = Date.now() + 60_000
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Run later" }),
+        delivery: "followup",
+        deliverAt: dueAt,
+        resume: false,
+      })
+      expect(yield* SessionInput.hasPending(db, sessionID, "followup")).toBe(true)
+      responses = [done]
+      const idle = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Fiber.join(idle)
+      // A resume is force: it runs a turn, but the future followup is NOT
+      // promoted — its text must not reach the model and it stays pending.
+      expect(yield* SessionInput.hasPending(db, sessionID, "followup")).toBe(true)
+      for (const request of requests) {
+        expect(userTexts(request).join(" ")).not.toContain("Run later")
+      }
+
+      // Once due: promotion (as the scheduled wake would do) makes it
+      // promotable and the next drain takes it.
+      const promotedCount = yield* SessionInput.promoteFollowups(db, eventV2, sessionID, dueAt + 1)
+      expect(promotedCount).toBe(1)
+      responses = [done]
+      const later = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Fiber.join(later)
+      expect(userTexts(requests[requests.length - 1]!).join(" ")).toContain("Run later")
     }),
   )
 
