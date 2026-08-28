@@ -14,6 +14,7 @@ import {
   isComplete,
   workflowErrorMessage,
 } from "./workflow/dag"
+import { verificationGate } from "./verification"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
@@ -712,6 +713,68 @@ const layer = Layer.effect(
       } satisfies SessionV1.TextPart)
     })
 
+    /**
+     * Automatic verification gate: after a task finishes, run one reviewer
+     * subagent pass over the session's changes when the risk gate fires.
+     * The reviewer's summary is injected as a synthetic user message so the
+     * model can react to findings; a marker part records that the pass
+     * already ran so the loop tail never re-triggers it for the same task.
+     * Flag-gated: OPENCODE_EXPERIMENTAL_VERIFICATION (default off).
+     */
+    const reviewPass = Effect.fn("SessionPrompt.reviewPass")(function* (input: {
+      lastUser: SessionV1.User
+      model: Provider.Model
+      sessionID: SessionID
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+      reason: string
+    }) {
+      const { lastUser, model, sessionID, session, msgs, reason } = input
+      const prompt = [
+        "Automatic verification pass. Review the changes made in this session for:",
+        "correctness, regressions, edge cases, error handling, and security issues.",
+        "Gate reason: " + reason + ".",
+        "Report critical issues, important issues, and recommended fixes concisely.",
+      ].join(" ")
+      const result = yield* Effect.exit(
+        runSubagentTask({
+          task: {
+            prompt,
+            description: "Verification review",
+            agent: "reviewer",
+            model: undefined,
+            command: undefined,
+          },
+          fallbackModel: model,
+          lastUser,
+          sessionID,
+          session,
+          msgs,
+        }),
+      )
+      const summary = Exit.isSuccess(result)
+        ? (result.value.output ?? "Reviewer pass completed with no output.")
+        : "Reviewer pass failed to run."
+      const markerMsg: SessionV1.User = {
+        id: MessageID.ascending(),
+        sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: lastUser.agent,
+        model: lastUser.model,
+      }
+      yield* sessions.updateMessage(markerMsg)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: markerMsg.id,
+        sessionID,
+        type: "text",
+        text: summary,
+        synthetic: true,
+      } satisfies SessionV1.TextPart)
+    })
+
+
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
       return yield* Effect.uninterruptibleMask((restore) =>
@@ -1404,6 +1467,40 @@ const layer = Layer.effect(
               })
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+
+            // Automatic verification gate: risk-gated single reviewer pass
+            // per task. Runs before the session goes idle so findings land
+            // in the same turn; the injected summary ends the loop again
+            // (the reviewer's subtask part is consumed by its own reply).
+            if (flags.experimentalVerification && !session.parentID) {
+              const lastUserMsg = msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)
+              const taskTools = msgs
+                .filter((m) => m.info.role === "assistant" && m.info.time.created >= lastUser.time.created)
+                .flatMap((m) => m.parts.filter((part): part is SessionV1.ToolPart => part.type === "tool"))
+              const verdict = verificationGate({
+                prompt: (lastUserMsg?.parts ?? [])
+                  .flatMap((part) => (part.type === "text" ? [part.text] : []))
+                  .join(" "),
+                tools: taskTools.map((part) => ({ tool: part.tool, state: part.state })),
+              })
+              const reviewerAgent = yield* agents.get("reviewer")
+              if (verdict.review && reviewerAgent && !reviewerAgent.hidden) {
+                const turnModel = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+                yield* Effect.logInfo("verification gate triggered reviewer pass", {
+                  "session.id": sessionID,
+                  reason: verdict.reason,
+                  tools: taskTools.length,
+                })
+                yield* reviewPass({
+                  lastUser,
+                  model: turnModel,
+                  sessionID,
+                  session,
+                  msgs,
+                  reason: verdict.reason,
+                })
+              }
+            }
             break
           }
 
