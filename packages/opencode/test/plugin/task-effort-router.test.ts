@@ -79,6 +79,12 @@ describe("task effort router", () => {
     expect(output.options).toEqual({ reasoningEffort: "low" })
   })
 
+  test("chat.params is a no-op when chat.message was never called", async () => {
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    await hooks["chat.params"]?.({ ...chatParamsInput(), sessionID: "ses_never" } as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "low" })
+  })
+
   test("escalating merges the requested tier's variant options", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "medium", reason: "architecture change needs deeper analysis" })
@@ -105,6 +111,99 @@ describe("task effort router", () => {
     const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
     expect(output.options).toEqual({})
+  })
+
+  test("assesses complex tasks to a medium baseline", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "Refactor the provider module and redesign the session loop across the codebase",
+          },
+        ] as never,
+      },
+    )
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "medium" })
+  })
+
+  test("assesses complex + risky tasks to a high baseline and pushes a risk notice", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "Migrate the auth database schema and redesign the permission model",
+          },
+        ] as never,
+      },
+    )
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "high" })
+
+    const system = { system: ["base"] }
+    await hooks["experimental.chat.system.transform"]?.({ sessionID: "ses_test", model: model() } as never, system as never)
+    expect(system.system[2]).toContain("Task risk notice")
+  })
+
+  test("minimal baseline defers to model defaults when the model lacks the tier", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "fix typo in comment",
+          },
+        ] as never,
+      },
+    )
+    // Model ships only low/medium/high — no `minimal` tier exists, so the
+    // governor has no wire-level way to express its opinion and must no-op.
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
+    expect(output.options).toEqual({})
+  })
+
+  test("request_effort above an assessed baseline still escalates", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "Refactor the provider module and redesign the session loop across the codebase",
+          },
+        ] as never,
+      },
+    )
+    const first = await requestEffort("ses_test", { level: "high", reason: "bigger than it looked" })
+    expect(first).toContain("raised to high")
+
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "high" })
   })
 
   test("never lowers a user-pinned higher effort", async () => {
