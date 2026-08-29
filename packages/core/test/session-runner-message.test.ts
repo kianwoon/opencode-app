@@ -9,7 +9,9 @@ import { toLLMMessages } from "@opencode-ai/core/session/runner/to-llm-message"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { DateTime } from "effect"
 
-const created = DateTime.makeUnsafe(0)
+// Session fixtures use a recent timestamp so the eviction window (relative to
+// the newest message) never applies to the base lowering tests.
+const created = DateTime.makeUnsafe(Date.now())
 const id = (value: string) => SessionMessage.ID.make(`msg_${value}`)
 const model = Model.make({ id: "model", provider: "provider", route: OpenAIChat.route })
 
@@ -497,5 +499,140 @@ Recent work
         providerMetadata: undefined,
       },
     ])
+  })
+
+  describe("tool result eviction", () => {
+    // Anchored to the filler timestamp so the window is relative to history,
+    // matching the newest-message-relative eviction cutoff.
+    const old = DateTime.makeUnsafe(Date.now() - 60 * 60 * 1000)
+    const recent = DateTime.makeUnsafe(Date.now())
+    const builder = (time: { created: typeof old }) =>
+      SessionMessage.Assistant.make({
+        id: id("assistant"),
+        type: "assistant",
+        agent: "build",
+        model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+        content: [
+          SessionMessage.AssistantTool.make({
+            type: "tool",
+            id: "call-1",
+            name: "bash",
+            state: SessionMessage.ToolStateCompleted.make({
+              status: "completed",
+              input: { command: "cat build.log" },
+              content: [{ type: "text", text: "x".repeat(2000) }],
+              structured: {},
+            }),
+            time: { created: time.created, completed: time.created },
+          }),
+        ],
+        time: { created: time.created, completed: time.created },
+      })
+
+    const fillers = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        SessionMessage.User.make({
+          id: id(`user-${index}`),
+          type: "user",
+          text: `filler ${index}`,
+          time: { created },
+        }),
+      )
+
+    const resultFor = (messages: ReturnType<typeof toLLMMessages>, callID: string) => {
+      const part = messages
+        .flatMap((message) => message.content)
+        .find((part) => part.type === "tool-result" && part.id === callID)
+      if (!part || part.type !== "tool-result") throw new Error(`no tool result for ${callID}`)
+      return part
+    }
+
+    test("evicts old completed local tool results beyond the eviction window", () => {
+      const history = [builder({ created: old }), ...fillers(60)]
+      const messages = toLLMMessages(history, model)
+      expect(resultFor(messages, "call-1").result).toMatchObject({
+        type: "json",
+        value: expect.stringContaining("[Tool result evicted from context"),
+      })
+    })
+
+    test("keeps recent tool results verbatim", () => {
+      const history = [...fillers(10), builder({ created: recent })]
+      const messages = toLLMMessages(history, model)
+      expect(resultFor(messages, "call-1").result).toMatchObject({
+        type: "text",
+        value: "x".repeat(2000),
+      })
+    })
+
+    test("eviction of zero disables eviction entirely", () => {
+      const history = [builder({ created: old }), ...fillers(100)]
+      const messages = toLLMMessages(history, model, 0)
+      expect(resultFor(messages, "call-1").result).toMatchObject({
+        type: "text",
+        value: "x".repeat(2000),
+      })
+    })
+
+    test("explicit window overrides the default (evict_results_ms semantics)", () => {
+      // A 45-minute-old result is evicted by the 30-minute default but kept
+      // when configured with a 60-minute window.
+      const fortyFiveMinOld = DateTime.makeUnsafe(Date.now() - 45 * 60 * 1000)
+      const history = [builder({ created: fortyFiveMinOld }), ...fillers(5)]
+      const evicted = toLLMMessages(history, model)
+      expect(resultFor(evicted, "call-1").result).toMatchObject({
+        type: "json",
+        value: expect.stringContaining("[Tool result evicted from context"),
+      })
+      const kept = toLLMMessages(history, model, 60 * 60 * 1000)
+      expect(resultFor(kept, "call-1").result).toMatchObject({
+        type: "text",
+        value: "x".repeat(2000),
+      })
+    })
+
+    test("never evicts provider-executed results or tool errors", () => {
+      const hosted = SessionMessage.Assistant.make({
+        id: id("hosted-assistant"),
+        type: "assistant",
+        agent: "build",
+        model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+        content: [
+          SessionMessage.AssistantTool.make({
+            type: "tool",
+            id: "hosted-call",
+            name: "web_search",
+            provider: { executed: true },
+            state: SessionMessage.ToolStateCompleted.make({
+              status: "completed",
+              input: { query: "Effect" },
+              content: [{ type: "text", text: "Found it" }],
+              structured: {},
+            }),
+            time: { created, completed: created },
+          }),
+          SessionMessage.AssistantTool.make({
+            type: "tool",
+            id: "failed-call",
+            name: "bash",
+            state: SessionMessage.ToolStateError.make({
+              status: "error",
+              input: { command: "make" },
+              content: [],
+              structured: {},
+              error: { type: "unknown", message: "exit 2" },
+            }),
+            time: { created, completed: created },
+          }),
+        ],
+        time: { created, completed: created },
+      })
+      const messages = toLLMMessages([hosted, ...fillers(80)], model)
+      // History built at epoch 0 is older than the 30-minute eviction window.
+      expect(resultFor(messages, "hosted-call").result).toMatchObject({ type: "text", value: "Found it" })
+      const failed = resultFor(messages, "failed-call")
+      expect(failed.result.type).toBe("error")
+      expect(JSON.stringify(failed.result)).toContain("exit 2")
+    })
   })
 })

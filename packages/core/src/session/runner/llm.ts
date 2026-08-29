@@ -23,6 +23,7 @@ import { SystemContextRegistry } from "../../system-context/registry"
 import { SkillGuidance } from "../../skill/guidance"
 import { ReferenceGuidance } from "../../reference/guidance"
 import { ToolRegistry } from "../../tool/registry"
+import { TOOL_RESULT_EVICT_AFTER_MS } from "./to-llm-message"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
@@ -106,7 +107,14 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
     const db = (yield* Database.Service).db
-    const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
+    const documents = yield* config.entries()
+    const compaction = SessionCompaction.make({ events, llm, config: documents })
+    const toolOutputConfig = documents.reduce(
+      (result, entry) =>
+        entry.type === "document" ? { ...result, ...(entry.info.tool_output ?? {}) } : result,
+      {} as { evict_results_ms?: number },
+    )
+    const evictResultsMs = toolOutputConfig.evict_results_ms ?? TOOL_RESULT_EVICT_AFTER_MS
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
@@ -237,7 +245,10 @@ const layer = Layer.effect(
         system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
-        messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
+        messages: [
+          ...toLLMMessages(context, model, evictResultsMs),
+          ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : []),
+        ],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })

@@ -12,6 +12,11 @@ import type { ToolOutput } from "@opencode-ai/llm"
 
 export const MAX_LINES = 2_000
 export const MAX_BYTES = 50 * 1024
+/** Minimum size a repeated line must have before consecutive duplicates collapse. */
+const REPEAT_MIN_CHARS = 12
+/** Consecutive identical lines allowed before the rest of the run collapses to one notice. */
+const REPEAT_MAX_RUN = 3
+const REPEAT_NOTICE = "[repeated line omitted]"
 export const RETENTION = Duration.days(7)
 
 export const MANAGED_DIRECTORY = "tool-output"
@@ -40,7 +45,11 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()("ToolO
 export type Error = StorageError
 
 export interface Interface {
-  readonly limits: () => Effect.Effect<{ readonly maxLines: number; readonly maxBytes: number }>
+  readonly limits: () => Effect.Effect<{
+    readonly maxLines: number
+    readonly maxBytes: number
+    readonly collapseRepeats: boolean
+  }>
   readonly bound: (input: BoundInput) => Effect.Effect<BoundResult, Error>
   readonly cleanup: () => Effect.Effect<void>
 }
@@ -109,6 +118,36 @@ const lineCount = (text: string) => {
   return count
 }
 
+/**
+ * Collapse long runs of identical lines (banner spam, retry loops, progress
+ * output) before sampling. Runs of the same non-trivial line collapse to
+ * REPEAT_MAX_RUN occurrences plus one notice, so bounded previews keep
+ * information instead of burning their head/tail budget on duplicates.
+ */
+const collapseRepeats = (text: string) => {
+  const lines = text.split("\n")
+  const output: string[] = []
+  let index = 0
+  while (index < lines.length) {
+    const line = lines[index]
+    if (line.length < REPEAT_MIN_CHARS) {
+      output.push(line)
+      index++
+      continue
+    }
+    let run = 1
+    while (index + run < lines.length && lines[index + run] === line) run++
+    if (run <= REPEAT_MAX_RUN) {
+      for (let offset = 0; offset < run; offset++) output.push(line)
+    } else {
+      for (let offset = 0; offset < REPEAT_MAX_RUN; offset++) output.push(line)
+      output.push(`${REPEAT_NOTICE} (${run - REPEAT_MAX_RUN} identical lines)`)
+    }
+    index += run
+  }
+  return output.join("\n")
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -117,13 +156,17 @@ const layer = Layer.effect(
     const config = yield* Effect.serviceOption(Config.Service)
     const directory = path.join(global.data, MANAGED_DIRECTORY)
     const limits = Effect.fn("ToolOutputStore.limits")(function* () {
-      if (Option.isNone(config)) return { maxLines: MAX_LINES, maxBytes: MAX_BYTES }
+      if (Option.isNone(config)) return { maxLines: MAX_LINES, maxBytes: MAX_BYTES, collapseRepeats: true }
       const entries = yield* config.value.entries().pipe(Effect.catch(() => Effect.succeed([] as Config.Entry[])))
       const configured = Object.assign(
         {},
         ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info.tool_output ?? {}] : [])),
       )
-      return { maxLines: configured.max_lines ?? MAX_LINES, maxBytes: configured.max_bytes ?? MAX_BYTES }
+      return {
+        maxLines: configured.max_lines ?? MAX_LINES,
+        maxBytes: configured.max_bytes ?? MAX_BYTES,
+        collapseRepeats: configured.collapse_repeats ?? true,
+      }
     })
 
     const write = Effect.fn("ToolOutputStore.write")(function* (content: string) {
@@ -146,12 +189,17 @@ const layer = Layer.effect(
               catch: (cause) => new StorageError({ operation: "encode", cause }),
             })
           : text.map((item) => item.text).join("")
-      if (
-        lineCount(contextual) <= outputLimits.maxLines &&
-        Buffer.byteLength(contextual, "utf-8") <= outputLimits.maxBytes
-      )
+      // Collapse repeated-line runs before measuring so deduplication can keep
+      // output under the limit instead of spilling to a managed file.
+      const compacted =
+        text.length > 0 && outputLimits.collapseRepeats ? collapseRepeats(contextual) : contextual
+      const withinLimits =
+        lineCount(compacted) <= outputLimits.maxLines &&
+        Buffer.byteLength(compacted, "utf-8") <= outputLimits.maxBytes
+      if (withinLimits && compacted === contextual) return { output: input.output, outputPaths: [] }
+      if (withinLimits)
         return {
-          output: input.output,
+          output: { structured: input.output.structured, content: [{ type: "text" as const, text: compacted }, ...media] },
           outputPaths: [],
         }
 
@@ -164,7 +212,7 @@ const layer = Layer.effect(
           content: [
             {
               type: "text" as const,
-              text: boundedPreview(contextual, marker, outputLimits.maxLines, outputLimits.maxBytes),
+              text: boundedPreview(compacted, marker, outputLimits.maxLines, outputLimits.maxBytes),
             },
             ...media,
           ],

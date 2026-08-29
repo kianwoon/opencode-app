@@ -12,4 +12,10 @@ export class Info extends Schema.Class<Info>("ConfigV2.Compaction")({
   prune: Schema.Boolean.pipe(Schema.optional),
   keep: Keep.pipe(Schema.optional),
   buffer: NonNegativeInt.pipe(Schema.optional),
+  trigger: Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 0.95 }))
+    .pipe(Schema.optional)
+    .annotate({
+      description:
+        "Compact proactively once estimated context reaches this fraction of the model window (0.05-0.95), instead of waiting until the window is nearly full",
+    }),
 }) {}

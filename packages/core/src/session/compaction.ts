@@ -11,6 +11,7 @@ import { Token } from "../util/token"
 
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
+const DEFAULT_TRIGGER = 1
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_OUTPUT_TOKENS = 4_096
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
@@ -63,6 +64,7 @@ type Settings = {
   readonly auto: boolean
   readonly buffer: number
   readonly tokens: number
+  readonly trigger: number
 }
 
 type Dependencies = {
@@ -129,8 +131,9 @@ const settings = (documents: readonly Config.Entry[]) => {
       auto: current.auto ?? result.auto,
       buffer: current.buffer ?? result.buffer,
       tokens: current.keep?.tokens ?? result.tokens,
+      trigger: current.trigger ?? result.trigger,
     }),
-    { auto: true, buffer: DEFAULT_BUFFER, tokens: DEFAULT_KEEP_TOKENS },
+    { auto: true, buffer: DEFAULT_BUFFER, tokens: DEFAULT_KEEP_TOKENS, trigger: DEFAULT_TRIGGER },
   )
 }
 
@@ -234,11 +237,12 @@ export const make = (dependencies: Dependencies) => {
     const context = input.model.route.defaults.limits?.context
     if (context === undefined || context <= 0) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
-    if (
-      estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools }) <=
-      context - Math.max(output, config.buffer)
-    )
-      return false
+    const projected = estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools })
+    const budget = context * config.trigger
+    const hardLimit = context - Math.max(output, config.buffer)
+    // Compact at the configured fraction of the window before it is nearly full,
+    // or at the hard limit once a big output reservation dominates the budget.
+    if (projected <= Math.min(budget, hardLimit)) return false
     return yield* compactAfterOverflow(input)
   })
   return {

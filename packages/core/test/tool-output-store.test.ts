@@ -144,6 +144,34 @@ describe("ToolOutputStore", () => {
     ),
   )
 
+  it.live("collapses repeated identical lines before bounding", () =>
+    withStore(({ store }) =>
+      Effect.gen(function* () {
+        const line = "waiting for lock to release....."
+        const text = Array.from({ length: 500 }, () => line).join("\n")
+        const result = yield* store.bound({ sessionID, toolCallID: "call-repeat", output: { structured: {}, content: [{ type: "text", text }] } })
+        expect(result.outputPaths).toHaveLength(0)
+        if (result.output.content[0]?.type !== "text") throw new Error("expected text")
+        const preview = result.output.content[0].text
+        expect(preview.split("\n").filter((entry) => entry === line)).toHaveLength(3)
+        expect(preview).toContain("[repeated line omitted] (497 identical lines)")
+      }),
+    ),
+  )
+
+  it.live("keeps short repeated lines and non-maximal runs untouched", () =>
+    withStore(({ store }) =>
+      Effect.gen(function* () {
+        const short = "ok"
+        const long = "this line is long enough to matter"
+        const text = [short, short, short, long, long, long].join("\n")
+        const result = yield* store.bound({ sessionID, toolCallID: "call-repeat-small", output: { structured: {}, content: [{ type: "text", text }] } })
+        if (result.output.content[0]?.type !== "text") throw new Error("expected text")
+        expect(result.output.content[0].text).toBe(text)
+      }),
+    ),
+  )
+
   it.live("fails oversized settlement when complete retention cannot be written", () =>
     withStore(({ root, store, fs }) =>
       Effect.gen(function* () {
@@ -213,7 +241,7 @@ describe("ToolOutputStore", () => {
     withStore(
       ({ store }) =>
         Effect.gen(function* () {
-          expect(yield* store.limits()).toEqual({ maxLines: 2, maxBytes: 1_000 })
+          expect(yield* store.limits()).toEqual({ maxLines: 2, maxBytes: 1_000, collapseRepeats: true })
           const result = yield* store.bound({
             sessionID,
             toolCallID: "call-config",
@@ -222,6 +250,34 @@ describe("ToolOutputStore", () => {
           expect(result.outputPaths).toHaveLength(1)
         }),
       new Config.Info({ tool_output: new ConfigToolOutput.Info({ max_lines: 2, max_bytes: 1_000 }) }),
+    ),
+  )
+
+  it.live("defaults collapse_repeats on and lets config disable it", () =>
+    withStore(
+      ({ store }) =>
+        Effect.gen(function* () {
+          const line = "streaming chunk delivered....."
+          const text = Array.from({ length: 10 }, () => line).join("\n")
+          const result = yield* store.bound({ sessionID, toolCallID: "call-default", output: { structured: {}, content: [{ type: "text", text }] } })
+          if (result.output.content[0]?.type !== "text") throw new Error("expected text")
+          expect(result.output.content[0].text).toContain("[repeated line omitted]")
+        }),
+      new Config.Info({ tool_output: new ConfigToolOutput.Info({}) }),
+    ),
+  )
+
+  it.live("collapse_repeats false restores byte-exact passthrough", () =>
+    withStore(
+      ({ store }) =>
+        Effect.gen(function* () {
+          const line = "streaming chunk delivered....."
+          const text = Array.from({ length: 10 }, () => line).join("\n")
+          const result = yield* store.bound({ sessionID, toolCallID: "call-legacy", output: { structured: {}, content: [{ type: "text", text }] } })
+          expect(result.outputPaths).toHaveLength(0)
+          expect(result.output).toEqual({ structured: {}, content: [{ type: "text", text }] })
+        }),
+      new Config.Info({ tool_output: new ConfigToolOutput.Info({ collapse_repeats: false }) }),
     ),
   )
 

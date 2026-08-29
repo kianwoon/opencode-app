@@ -7,8 +7,19 @@ import {
   type Model,
   type ProviderMetadata,
 } from "@opencode-ai/llm"
+import { DateTime } from "effect"
 import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
+
+/**
+ * Completed local tool results from turns older than this offset (relative to
+ * the newest message's timestamp, so resumed sessions keep their recent work)
+ * are lowered to a compact placeholder at provider-history lowering. The
+ * authoritative artifact stays durable in the message row (and managed output
+ * paths); only the replayed context shrinks. 0 disables eviction entirely.
+ */
+export const TOOL_RESULT_EVICT_AFTER_MS = 30 * 60 * 1000
+const TOOL_RESULT_EVICTED_TEXT = "[Tool result evicted from context: this output is no longer recent. Re-run the tool if you need its content again.]"
 
 const media = (file: FileAttachment): ContentPart => ({
   type: "media",
@@ -36,10 +47,20 @@ const toolCall = (tool: SessionMessage.AssistantTool, providerMetadata: Provider
     providerMetadata,
   })
 
-const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: ProviderMetadata | undefined) => {
+const toolResult = (
+  tool: SessionMessage.AssistantTool,
+  providerMetadata: ProviderMetadata | undefined,
+  evicted: boolean,
+) => {
   if (tool.state.status === "completed") {
     // TODO: Materialize remote and managed URIs before provider-history lowering.
     // ToolOutput.toResultValue rejects unresolved URIs rather than treating them as media bytes.
+    if (evicted && tool.provider?.executed !== true)
+      return ToolResultPart.make({
+        id: tool.id,
+        name: tool.name,
+        result: TOOL_RESULT_EVICTED_TEXT,
+      })
     const result =
       tool.provider?.executed === true && tool.state.result !== undefined
         ? tool.state.result
@@ -67,10 +88,19 @@ const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: Provid
   }
 }
 
-const assistant = (message: SessionMessage.Assistant, model: Model) => {
+const assistant = (
+  message: SessionMessage.Assistant,
+  model: Model,
+  evictBefore: number,
+) => {
   const sameModel =
     String(message.model.providerID) === String(model.provider) && String(message.model.id) === String(model.id)
   const reuseProviderMetadata = sameModel && message.error === undefined
+  const evictToolResult = (item: SessionMessage.AssistantTool) =>
+    item.provider?.executed !== true &&
+    item.state.status === "completed" &&
+    evictBefore > 0 &&
+    DateTime.toEpochMillis(message.time.created) < evictBefore
   const content = message.content.flatMap((item): ContentPart[] => {
     if (item.type === "text") return [{ type: "text", text: item.text }]
     if (item.type === "reasoning")
@@ -90,6 +120,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
     const result = toolResult(
       item,
       reuseProviderMetadata ? (item.provider.resultMetadata ?? item.provider.metadata) : undefined,
+      evictToolResult(item),
     )
     return result ? [call, result] : [call]
   })
@@ -101,7 +132,11 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
   const results = message.content
     .filter((item): item is SessionMessage.AssistantTool => item.type === "tool" && item.provider?.executed !== true)
     .map((item) =>
-      toolResult(item, reuseProviderMetadata ? (item.provider?.resultMetadata ?? item.provider?.metadata) : undefined),
+      toolResult(
+        item,
+        reuseProviderMetadata ? (item.provider?.resultMetadata ?? item.provider?.metadata) : undefined,
+        evictToolResult(item),
+      ),
     )
     .filter((message) => message !== undefined)
     .map(Message.tool)
@@ -112,7 +147,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
   ]
 }
 
-function toLLMMessage(message: SessionMessage.Message, model: Model): Message[] {
+function toLLMMessage(message: SessionMessage.Message, model: Model, evictBefore: number): Message[] {
   switch (message.type) {
     case "agent-switched":
     case "model-switched":
@@ -143,7 +178,7 @@ function toLLMMessage(message: SessionMessage.Message, model: Model): Message[] 
         }),
       ]
     case "assistant":
-      return assistant(message, model)
+      return assistant(message, model, evictBefore)
     case "compaction":
       return [
         Message.make({
@@ -167,5 +202,16 @@ ${message.recent}
 }
 
 /** Translate projected V2 Session history into canonical @opencode-ai/llm context. */
-export const toLLMMessages = (messages: readonly SessionMessage.Message[], model: Model) =>
-  messages.flatMap((message) => toLLMMessage(message, model))
+export const toLLMMessages = (
+  messages: readonly SessionMessage.Message[],
+  model: Model,
+  evictAfter: number = TOOL_RESULT_EVICT_AFTER_MS,
+) => {
+  if (evictAfter <= 0) return messages.flatMap((message) => toLLMMessage(message, model, 0))
+  const newest = messages.reduce(
+    (latest, message) => Math.max(latest, DateTime.toEpochMillis(message.time.created)),
+    0,
+  )
+  const evictBefore = newest - evictAfter
+  return messages.flatMap((message) => toLLMMessage(message, model, evictBefore))
+}
