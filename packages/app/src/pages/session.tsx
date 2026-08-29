@@ -473,9 +473,6 @@ export default function Page() {
     () => panelRow,
     ({ width }) => setPanelRowWidth(width),
   )
-  const splitReview = createMemo(
-    () => (newSessionDesign() ? desktopV2ReviewOpen() : desktopReviewOpen()) && layout.review.diffStyle() === "split",
-  )
   // The observer reports the content-box width, which already excludes the row
   // padding; only the flex gap between the panels remains to subtract.
   const sessionPanelAvailable = createMemo(() => {
@@ -486,7 +483,7 @@ export default function Page() {
   const sessionPanelMax = createMemo(() => {
     const available = sessionPanelAvailable()
     if (available === undefined) return 1000
-    return sessionPanelWidthMax({ available, split: splitReview() })
+    return sessionPanelWidthMax({ available })
   })
   // Clamp at render time so window or sidebar resizes squeeze the chat panel
   // instead of the review pane, without overwriting the persisted width.
@@ -494,7 +491,6 @@ export default function Page() {
     clampSessionPanelWidth({
       width: layout.session.width(),
       available: sessionPanelAvailable(),
-      split: splitReview(),
     }),
   )
   const sessionPanelWidth = createMemo(() => {
