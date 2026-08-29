@@ -7,42 +7,158 @@
     </picture>
   </a>
 </p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
 
+<p align="center"><b>The AI coding agent, upgraded into an AI harness.</b></p>
+<p align="center">A fork of <a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a> with a built-in harness layer: task-aware effort routing, cache-safe context control, workflow orchestration, verification gates, and durable runtime state.</p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="https://github.com/kianwoon/opencode-app/releases"><img alt="Latest fork release" src="https://img.shields.io/github/v/release/kianwoon/opencode-app?style=flat-square&label=fork%20release" /></a>
+  <a href="https://github.com/anomalyco/opencode"><img alt="Upstream" src="https://img.shields.io/badge/upstream-opencode-blue?style=flat-square" /></a>
 </p>
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
- <img width="1375" height="1307" alt="Screenshot 2026-08-13 at 11 24 18 PM" src="https://github.com/user-attachments/assets/b9ba98d2-2c3f-4b7e-9b1d-a61be2a8dff7" />
 ---
+
+## Why This Fork
+
+Upstream opencode is a capable agent loop surrounded by providers, tools, and
+permissions. This fork turns that agent loop into a **harness** — a control
+plane that manages context, intelligence allocation, orchestration, and
+verification around every turn. All enhancements are implemented in-process
+(no external meta-harness), staying upstream-mergeable.
+
+## Unique Features
+
+### ⚡ Workflow DAG Engine (default ON)
+Multi-step pipelines as parallel subagent graphs. The model declares steps and
+dependencies with the `workflow` tool; the engine runs independent steps
+concurrently (event-driven, concurrency-capped), skips dependents of failed
+steps, reports per-step outcomes, and detects deadlocks. Admission validation
+(cycles, duplicate/missing deps, step cap, unknown agents) fails fast at both
+the tool and the dispatch boundary.
+
+```text
+User: "run lint and tests in parallel, then commit if both pass"
+  → PLAN    model lays out steps + dependencies
+  → ORCHESTRATE  one workflow call; lint ∥ tests run concurrently
+  → REACT   per-step summary; model fixes failures or commits
+```
+
+### 🧠 Task Assessor + Effort Governor
+Every task boundary is profiled by cheap heuristics (complexity, risk domains —
+zero LLM cost). Complex tasks **start** at medium reasoning effort,
+complex+risky at high — no wasted turns discovering difficulty. The model can
+still escalate via a `request_effort` tool (monotonic, capped). Never lowers a
+user-pinned effort. Risky tasks get a "verify blast radius" system notice.
+
+### 🗜️ Context Optimizer (KV-cache-aware pruning)
+Compresses the conversation before each request **without wrecking the
+provider cache**: under budget it is a strict no-op (byte-identical prefix =
+max cache hits); over budget it prunes the minimum needed, nearest the
+protected tail. Reasoning is always stripped; token estimation is CJK-aware;
+live telemetry tracks hit rate and tokens saved (~90% hit rate in daily use).
+
+### 🪟 Context Governor
+Token-efficient turns for the runner: per-agent context budgets for
+compaction, per-agent tool-catalog visibility (trim schema overhead), and a
+repo-index system context source that surfaces repository structure through
+the same delta-updated, epoch-persisted pipeline as other context.
+
+### ✅ Verification Gate (opt-in)
+After a task finishes, a pure risk detector (sensitive paths, destructive
+prompts, broad refactors) can trigger **one reviewer subagent pass** whose
+findings are injected back before the session goes idle. Enable with
+`OPENCODE_EXPERIMENTAL_VERIFICATION=true`.
+
+### ⏰ Followup Delivery (V2 sessions)
+Durably admitted prompts with a delivery time: `delivery: "followup"` +
+`deliverAt` keeps the input pending until its time passes, then promotes it at
+the idle boundary. The execution scheduler wakes the session when it is due;
+the database stays the source of truth.
+
+### 💾 Durable Background Job Records
+Background job lifecycle transitions persist best-effort to a `background_job`
+table (never breaks live work). Restarts sweep stale "running" rows to
+cancelled ("interrupted by restart"); `list`/`get` merge live entries over
+recorded history.
+
+### 🔎 Honest Failure Semantics
+Aborts are classified as aborts (not mystery `UnknownError`s), user-initiated
+subagent cancels report "Subagent cancelled", and early stream teardowns emit
+diagnosable telemetry instead of failing silently.
+
+---
+
+## Harness Architecture
+
+```text
+                     ┌──────────────────────────────────────────┐
+                     │            HARNESS CONTROL PLANE         │
+                     │                                          │
+   user task ──────▶ │  Task Assessor ──▶ effort/risk profile   │
+                     │        │                                 │
+                     │        ▼                                 │
+                     │  Effort Governor   request_effort ▲      │
+                     │  (pre-escalate)    (model escalates)│     │
+                     │        │                            │     │
+                     │        ▼                            │     │
+                     │  Context Engine                     │     │
+                     │  ├─ Context Optimizer (prune)       │     │
+                     │  ├─ Context Governor (budgets)      │     │
+                     │  └─ System Context (deltas+epochs)  │     │
+                     │        │                            │     │
+                     │        ▼                            │     │
+                     │  Orchestrator ──────────────────────┘     │
+                     │  ├─ single loop (simple tasks)            │
+                     │  └─ workflow DAG (parallel subagents)     │
+                     │        │                                 │
+                     │        ▼                                 │
+                     │  Verification Gate ──▶ reviewer pass     │
+                     │        │                                 │
+                     │        ▼                                 │
+                     │  Durable State (inputs, jobs, events)    │
+                     └───────────────────┬──────────────────────┘
+                                         │
+                        single provider turn (LLM.stream)
+                                         │
+                                         ▼
+                              providers / tools / MCP
+```
+
+Every element is in-process: plugins handle assessment/effort/pruning, core
+handles orchestration/delivery/durability. No external meta-harness.
+
+---
+
+## Feature Flags
+
+| Flag | Default | Controls |
+|---|---|---|
+| `OPENCODE_EXPERIMENTAL_WORKFLOWS` | on | Workflow DAG engine |
+| `OPENCODE_EXPERIMENTAL_VERIFICATION` | off | Automatic reviewer gate |
+| `experimental.workflow_concurrency` | 4 | Parallel workflow steps |
+
+## Releases (macOS Apple Silicon)
+
+Fork releases are published on the
+[releases page](https://github.com/kianwoon/opencode-app/releases) with a
+prod-channel desktop app whose embedded server channel is machine-verified
+before publishing:
+
+| Release | Highlights |
+|---|---|
+| [v1.18.25-fork.3](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.3) | Context governor, abort handling |
+| [v1.18.25-fork.2](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.2) | Review hardening, honest cancel reporting |
+| [v1.18.25-fork.1](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.1) | Workflow engine, effort governor, context optimizer, Phase 3 durability |
+
+The full plan and rationale live in
+[harness-enhancement-plan.md](./harness-enhancement-plan.md).
+
+---
+
+## Everything From Upstream
+
+This fork tracks anomalyco/opencode (`merge-v1.18.24-25` base). Upstream
+features all work unchanged:
 
 ### Installation
 
@@ -62,41 +178,13 @@ mise use -g opencode               # Any OS
 nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
 ```
 
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
-
 ### Desktop App (BETA)
 
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
-
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
-
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
-```
+Also available as a desktop application from the
+[upstream releases page](https://github.com/anomalyco/opencode/releases) or
+[opencode.ai/download](https://opencode.ai/download). This fork publishes its
+own macOS-arm64 desktop builds on
+[our releases page](https://github.com/kianwoon/opencode-app/releases).
 
 ### Agents
 
@@ -111,20 +199,19 @@ OpenCode includes two built-in agents you can switch between with the `Tab` key.
 Also included is a **general** subagent for complex searches and multistep tasks.
 This is used internally and can be invoked using `@general` in messages.
 
-Learn more about [agents](https://opencode.ai/docs/agents).
-
 ### Documentation
 
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+For upstream configuration and usage,
+[**head over to the docs**](https://opencode.ai/docs).
 
 ### Contributing
 
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
-
-### Building on OpenCode
-
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+See upstream [contributing docs](./CONTRIBUTING.md). Fork-specific changes are
+documented in [harness-enhancement-plan.md](./harness-enhancement-plan.md).
 
 ---
 
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+**Upstream community:** [Discord](https://discord.gg/opencode) |
+[X.com](https://x.com/opencode)
+
+*This fork is not built by the OpenCode team and is not affiliated with them.*
