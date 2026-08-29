@@ -1,4 +1,4 @@
-import { splitProps, type JSX } from "solid-js"
+import { createSignal, splitProps, type JSX } from "solid-js"
 
 export interface ResizeHandleProps extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "onResize"> {
   direction: "horizontal" | "vertical"
@@ -27,10 +27,14 @@ export function ResizeHandle(props: ResizeHandleProps) {
     "class",
     "classList",
   ])
+  // `:active` is unreliable here because mousedown is preventDefault-ed, so
+  // dragging state is reflected via data-active for the highlight style.
+  const [dragging, setDragging] = createSignal(false)
 
   const handleMouseDown = (e: MouseEvent) => {
     if (e.detail > 1) return
     e.preventDefault()
+    setDragging(true)
     const edge = local.edge ?? (local.direction === "vertical" ? "start" : "end")
     const start = local.direction === "horizontal" ? e.clientX : e.clientY
     const rtl =
@@ -74,6 +78,7 @@ export function ResizeHandle(props: ResizeHandleProps) {
       document.body.style.overflow = ""
       document.removeEventListener("mousemove", onMouseMove)
       document.removeEventListener("mouseup", onMouseUp)
+      setDragging(false)
 
       if (collapsed) {
         onCollapse?.()
@@ -92,6 +97,7 @@ export function ResizeHandle(props: ResizeHandleProps) {
       data-component="resize-handle"
       data-direction={local.direction}
       data-edge={local.edge ?? (local.direction === "vertical" ? "start" : "end")}
+      data-active={dragging()}
       classList={{
         ...local.classList,
         [local.class ?? ""]: !!local.class,

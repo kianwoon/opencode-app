@@ -6,12 +6,15 @@
     content: "";
     position: absolute;
     opacity: 0;
+    background-color: var(--border-weak-base);
+    border-radius: 2px;
     transition: opacity 0.15s ease-in-out;
   }
 
   &:hover::after,
-  &:active::after {
+  &[data-active="true"]::after {
     opacity: 1;
+    background-color: var(--border-strong-base);
   }
 
   &:where([data-direction="horizontal"]) {
