@@ -24,6 +24,7 @@ import { Pty } from "./pty"
 import { QuestionV2 } from "./question"
 import { Reference } from "./reference"
 import { ReferenceGuidance } from "./reference/guidance"
+import { RepoIndexContext } from "./repo-index-context"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
 import { SessionTodo } from "./session/todo"
@@ -60,6 +61,7 @@ export const locationServices = LayerNode.group([
   SkillV2.node,
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
+  RepoIndexContext.node,
   LocationMutation.node,
   FileMutation.node,
   PermissionV2.node,
