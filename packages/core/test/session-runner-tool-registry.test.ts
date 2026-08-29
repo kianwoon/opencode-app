@@ -110,6 +110,21 @@ describe("ToolRegistry", () => {
     }),
   )
 
+  it.effect("hides definitions for hidden tools while keeping them executable", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      yield* service.register({ echo: make(), bash: make() })
+      const materialized = yield* service.materialize([], { hidden: new Set(["bash"]) })
+      expect(materialized.definitions.map((definition) => definition.name)).toEqual(["echo"])
+      // Catalog visibility is not authorization: a hidden tool still settles.
+      const result = yield* materialized.settle(call("bash"))
+      expect(result.result).toEqual({ type: "text", value: "bash" })
+      // Unknown tools stay unknown regardless.
+      const unknown = yield* materialized.settle(call("missing"))
+      expect(unknown.result).toEqual({ type: "error", value: "Unknown tool: missing" })
+    }),
+  )
+
   it.effect("reuses model definitions across provider turns", () =>
     Effect.gen(function* () {
       const service = yield* ToolRegistry.Service

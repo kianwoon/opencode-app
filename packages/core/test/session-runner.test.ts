@@ -675,6 +675,25 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("hides agent-deselected tools from advertised definitions", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const agent = yield* AgentV2.Service
+      yield* agent.transform((editor) =>
+        editor.update(AgentV2.ID.make("build"), (agent) => {
+          agent.tools = { defect: false }
+        }),
+      )
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+      requests.length = 0
+      response = fragmentFixture("text", "text-tools-hidden", ["Done"]).completeEvents
+      yield* session.resume(sessionID)
+
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["echo"])
+    }),
+  )
+
   it.effect("retries the first provider turn after system context becomes available", () =>
     Effect.gen(function* () {
       yield* setup

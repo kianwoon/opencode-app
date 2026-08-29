@@ -161,6 +161,7 @@ export type AgentsListOutput = {
       readonly resource: string
       readonly effect: "allow" | "deny" | "ask"
     }>
+    readonly tools?: { readonly [x: string]: boolean }
   }>
 }
 
@@ -414,7 +415,7 @@ export type SessionsPromptInput = {
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
-    readonly delivery?: "steer" | "queue" | null
+    readonly delivery?: "steer" | "queue" | "followup" | null
     readonly resume?: boolean | null
   }["id"]
   readonly prompt: {
@@ -432,7 +433,7 @@ export type SessionsPromptInput = {
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
-    readonly delivery?: "steer" | "queue" | null
+    readonly delivery?: "steer" | "queue" | "followup" | null
     readonly resume?: boolean | null
   }["prompt"]
   readonly delivery?: {
@@ -450,7 +451,7 @@ export type SessionsPromptInput = {
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
-    readonly delivery?: "steer" | "queue" | null
+    readonly delivery?: "steer" | "queue" | "followup" | null
     readonly resume?: boolean | null
   }["delivery"]
   readonly resume?: {
@@ -468,7 +469,7 @@ export type SessionsPromptInput = {
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
-    readonly delivery?: "steer" | "queue" | null
+    readonly delivery?: "steer" | "queue" | "followup" | null
     readonly resume?: boolean | null
   }["resume"]
 }
@@ -492,8 +493,9 @@ export type SessionsPromptOutput = {
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
-    readonly delivery: "steer" | "queue"
+    readonly delivery: "steer" | "queue" | "followup"
     readonly timeCreated: number
+    readonly deliverAt?: number
     readonly promotedSeq?: number
   }
 }["data"]
@@ -763,7 +765,8 @@ export type SessionsHistoryOutput = {
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
           }
-          readonly delivery: "steer" | "queue"
+          readonly delivery: "steer" | "queue" | "followup"
+          readonly deliverAt?: number
         }
       }
     | {
@@ -790,7 +793,8 @@ export type SessionsHistoryOutput = {
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
           }
-          readonly delivery: "steer" | "queue"
+          readonly delivery: "steer" | "queue" | "followup"
+          readonly deliverAt?: number
         }
       }
     | {
@@ -1221,7 +1225,8 @@ export type SessionsEventsOutput =
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
         }
-        readonly delivery: "steer" | "queue"
+        readonly delivery: "steer" | "queue" | "followup"
+        readonly deliverAt?: number
       }
     }
   | {
@@ -1248,7 +1253,8 @@ export type SessionsEventsOutput =
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
         }
-        readonly delivery: "steer" | "queue"
+        readonly delivery: "steer" | "queue" | "followup"
+        readonly deliverAt?: number
       }
     }
   | {

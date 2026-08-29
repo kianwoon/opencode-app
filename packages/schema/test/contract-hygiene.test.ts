@@ -19,6 +19,27 @@ describe("contract hygiene", () => {
     expect(Schema.encodeSync(Value)({ value: undefined })).toEqual({})
   })
 
+  test("agent tools catalog visibility omits undefined while encoding", () => {
+    const info = Schema.decodeUnknownSync(Agent.Info)({
+      id: "build",
+      request: { headers: {}, body: {} },
+      mode: "all",
+      hidden: false,
+      permissions: [],
+    })
+    expect(info.tools).toBeUndefined()
+    expect(Schema.encodeSync(Agent.Info)(info)).not.toHaveProperty("tools")
+    const withTools = Schema.decodeUnknownSync(Agent.Info)({
+      id: "build",
+      request: { headers: {}, body: {} },
+      mode: "all",
+      hidden: false,
+      permissions: [],
+      tools: { webfetch: false },
+    })
+    expect(withTools.tools).toEqual({ webfetch: false })
+  })
+
   test("todo status and priority preserve arbitrary strings", () => {
     const decode = Schema.decodeUnknownSync(SessionTodo.Info)
     expect(decode({ content: "ship", status: "waiting", priority: "urgent" })).toEqual({

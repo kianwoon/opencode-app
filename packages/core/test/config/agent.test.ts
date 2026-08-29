@@ -199,6 +199,34 @@ describe("ConfigAgentPlugin.Plugin", () => {
     }),
   )
 
+  it.effect("maps agent tools catalog visibility onto agent state", () =>
+    Effect.gen(function* () {
+      const agents = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: decode({
+                agents: {
+                  reviewer: {
+                    tools: { webfetch: false, bash: false },
+                  },
+                },
+              }),
+            }),
+          ]),
+      })
+
+      yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) })).pipe(
+        Effect.provideService(Config.Service, config),
+      )
+
+      const reviewer = yield* agents.get(AgentV2.ID.make("reviewer"))
+      expect(reviewer?.tools).toEqual({ webfetch: false, bash: false })
+    }),
+  )
+
   it.effect("removes a built-in agent disabled by configuration", () =>
     Effect.gen(function* () {
       const agents = yield* AgentV2.Service

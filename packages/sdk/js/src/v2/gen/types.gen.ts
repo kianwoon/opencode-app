@@ -880,7 +880,8 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           prompt: Prompt
-          delivery: "steer" | "queue"
+          delivery: "steer" | "queue" | "followup"
+          deliverAt?: number
         }
       }
     | {
@@ -891,7 +892,8 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           prompt: Prompt
-          delivery: "steer" | "queue"
+          delivery: "steer" | "queue" | "followup"
+          deliverAt?: number
         }
       }
     | {
@@ -3438,7 +3440,8 @@ export type SyncEventSessionNextPrompted = {
       sessionID: string
       messageID: string
       prompt: Prompt
-      delivery: "steer" | "queue"
+      delivery: "steer" | "queue" | "followup"
+      deliverAt?: number
     }
   }
 }
@@ -3456,7 +3459,8 @@ export type SyncEventSessionNextPromptAdmitted = {
       sessionID: string
       messageID: string
       prompt: Prompt
-      delivery: "steer" | "queue"
+      delivery: "steer" | "queue" | "followup"
+      deliverAt?: number
     }
   }
 }
@@ -3976,6 +3980,9 @@ export type AgentV2Info = {
   color?: AgentColor
   steps?: number
   permissions: PermissionV2Ruleset
+  tools?: {
+    [key: string]: boolean
+  }
 }
 
 export type SessionV2Info = {
@@ -4017,8 +4024,9 @@ export type SessionInputAdmitted = {
   id: string
   sessionID: string
   prompt: Prompt
-  delivery: "steer" | "queue"
+  delivery: "steer" | "queue" | "followup"
   timeCreated: number
+  deliverAt?: number
   promotedSeq?: number
 }
 
@@ -4315,7 +4323,8 @@ export type SessionNextPrompted = {
     sessionID: string
     messageID: string
     prompt: Prompt
-    delivery: "steer" | "queue"
+    delivery: "steer" | "queue" | "followup"
+    deliverAt?: number
   }
 }
 
@@ -4336,7 +4345,8 @@ export type SessionNextPromptAdmitted = {
     sessionID: string
     messageID: string
     prompt: Prompt
-    delivery: "steer" | "queue"
+    delivery: "steer" | "queue" | "followup"
+    deliverAt?: number
   }
 }
 
@@ -6365,7 +6375,8 @@ export type EventSessionNextPrompted = {
     sessionID: string
     messageID: string
     prompt: Prompt
-    delivery: "steer" | "queue"
+    delivery: "steer" | "queue" | "followup"
+    deliverAt?: number
   }
 }
 
@@ -6377,7 +6388,8 @@ export type EventSessionNextPromptAdmitted = {
     sessionID: string
     messageID: string
     prompt: Prompt
-    delivery: "steer" | "queue"
+    delivery: "steer" | "queue" | "followup"
+    deliverAt?: number
   }
 }
 
@@ -11694,7 +11706,7 @@ export type V2SessionPromptData = {
   body: {
     id?: string
     prompt: PromptInput
-    delivery?: "steer" | "queue"
+    delivery?: "steer" | "queue" | "followup"
     resume?: boolean
   }
   path: {

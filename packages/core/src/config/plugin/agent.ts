@@ -41,6 +41,7 @@ const agentKeys = new Set([
   "steps",
   "disabled",
   "permissions",
+  "tools",
 ])
 
 export const Plugin = define({
@@ -107,6 +108,9 @@ export const Plugin = define({
               if (item.steps !== undefined) agent.steps = item.steps
               if (item.permissions !== undefined) {
                 agent.permissions.push(...expandPermissions(item.permissions, global.home))
+              }
+              if (item.tools !== undefined) {
+                agent.tools = { ...agent.tools, ...item.tools }
               }
             })
           }

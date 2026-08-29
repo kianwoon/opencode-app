@@ -5702,7 +5702,7 @@ export class Session3 extends HeyApiClient {
       sessionID: string
       id?: string
       prompt?: PromptInput
-      delivery?: "steer" | "queue"
+      delivery?: "steer" | "queue" | "followup"
       resume?: boolean
     },
     options?: Options<never, ThrowOnError>,

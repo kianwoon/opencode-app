@@ -22,4 +22,8 @@ export class Info extends Schema.Class<Info>("ConfigV2.Agent")({
   steps: PositiveInt.pipe(Schema.optional),
   disabled: Schema.Boolean.pipe(Schema.optional),
   permissions: Permission.Ruleset.pipe(Schema.optional),
+  tools: Schema.Record(Schema.String, Schema.Boolean).pipe(Schema.optional).annotate({
+    description:
+      "Tool catalog visibility for this agent. Tools mapped to false are hidden from the model's tool definitions without changing permissions",
+  }),
 }) {}
