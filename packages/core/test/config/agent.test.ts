@@ -211,6 +211,7 @@ describe("ConfigAgentPlugin.Plugin", () => {
                 agents: {
                   reviewer: {
                     tools: { webfetch: false, bash: false },
+                    budget: 8_192,
                   },
                 },
               }),
@@ -224,6 +225,7 @@ describe("ConfigAgentPlugin.Plugin", () => {
 
       const reviewer = yield* agents.get(AgentV2.ID.make("reviewer"))
       expect(reviewer?.tools).toEqual({ webfetch: false, bash: false })
+      expect(reviewer?.budget).toBe(8_192)
     }),
   )
 

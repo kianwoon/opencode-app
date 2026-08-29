@@ -42,6 +42,7 @@ const agentKeys = new Set([
   "disabled",
   "permissions",
   "tools",
+  "budget",
 ])
 
 export const Plugin = define({
@@ -111,6 +112,9 @@ export const Plugin = define({
               }
               if (item.tools !== undefined) {
                 agent.tools = { ...agent.tools, ...item.tools }
+              }
+              if (item.budget !== undefined) {
+                agent.budget = item.budget
               }
             })
           }

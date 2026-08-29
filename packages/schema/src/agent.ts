@@ -29,6 +29,10 @@ export const Info = Schema.Struct({
   steps: PositiveInt.pipe(optional),
   permissions: Permission.Ruleset,
   tools: Schema.Record(Schema.String, Schema.Boolean).pipe(optional),
+  budget: PositiveInt.pipe(optional).annotate({
+    description:
+      "Target context budget in tokens for this agent. Compaction keeps estimated context at or below this window instead of the full model context",
+  }),
 })
   .annotate({ identifier: "AgentV2.Info" })
   .pipe(

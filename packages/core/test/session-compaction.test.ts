@@ -138,3 +138,33 @@ test("trigger rejects out-of-range fractions at config validation", () => {
     () => new ConfigCompaction.Info({ trigger: 0.01 }),
   ).toThrow()
 })
+
+test("agent budget shrinks the effective compaction window", async () => {
+  const harness = await triggerHarness.makeCompaction({ buffer: 200 })
+  // 10k model context, 5k agent budget: compacts past 5k (trigger defaults
+  // to 1) instead of the ~9.8k hard limit.
+  const withinBudget = triggerHarness.request(25) // ≈ 3.8k tokens
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...withinBudget, sessionID: "ses_x" as never, model: harness.model, budget: 5_000 }),
+    ),
+  ).toBe(false)
+  const overBudget = triggerHarness.request(45) // ≈ 6.8k tokens
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...overBudget, sessionID: "ses_x" as never, model: harness.model, budget: 5_000 }),
+    ),
+  ).toBe(true)
+})
+
+test("agent budget at or below the keep floor keeps the full keep budget", async () => {
+  const harness = await triggerHarness.makeCompaction({ buffer: 200 })
+  // Default keep = 8000; a 100-token budget floors the effective window to 8k
+  // and must not halve the keep tail.
+  const over = triggerHarness.request(70) // ≈ 10.6k tokens, past the floored ~7.8k limit
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...over, sessionID: "ses_x" as never, model: harness.model, budget: 100 }),
+    ),
+  ).toBe(true)
+})

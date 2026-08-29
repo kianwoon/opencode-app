@@ -26,4 +26,8 @@ export class Info extends Schema.Class<Info>("ConfigV2.Agent")({
     description:
       "Tool catalog visibility for this agent. Tools mapped to false are hidden from the model's tool definitions without changing permissions",
   }),
+  budget: PositiveInt.pipe(Schema.optional).annotate({
+    description:
+      "Target context budget in tokens for this agent. Compaction keeps estimated context at or below this window instead of the full model context",
+  }),
 }) {}

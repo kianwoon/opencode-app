@@ -3983,6 +3983,7 @@ export type AgentV2Info = {
   tools?: {
     [key: string]: boolean
   }
+  budget?: number
 }
 
 export type SessionV2Info = {

@@ -12,6 +12,8 @@ import { Token } from "../util/token"
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
 const DEFAULT_TRIGGER = 1
+/** Smallest usable compaction window; budgets below this are raised to it. */
+const MIN_WINDOW_TOKENS = 2_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_OUTPUT_TOKENS = 4_096
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
@@ -66,7 +68,6 @@ type Settings = {
   readonly tokens: number
   readonly trigger: number
 }
-
 type Dependencies = {
   readonly events: EventV2.Interface
   readonly llm: {
@@ -80,6 +81,8 @@ type Input = {
   readonly entries: readonly Entry[]
   readonly model: Model
   readonly request: LLMRequest
+  /** Agent-configured target context window in tokens; undefined uses the full model context. */
+  readonly budget?: number
 }
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
@@ -178,11 +181,33 @@ export const buildPrompt = (input: { readonly previousSummary?: string; readonly
 
 export const make = (dependencies: Dependencies) => {
   const config = settings(dependencies.config)
-  const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
+  // Effective compaction window for one turn: the agent budget shrinks the
+  // model context. The floor keeps degenerate values (0, 1) from producing an
+  // unusable window but never overrides an explicit mid-size budget; when the
+  // model context itself is smaller than the keep budget, the context wins.
+  const effective = (input: Input) => {
     const context = input.model.route.defaults.limits?.context
-    if (context === undefined || context <= 0) return false
+    if (context === undefined || context <= 0) return undefined
+    if (input.budget === undefined || input.budget <= 0) return context
+    const floor = Math.min(context, MIN_WINDOW_TOKENS)
+    return Math.max(Math.min(context, input.budget), floor)
+  }
+  const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
+    const modelContext = input.model.route.defaults.limits?.context
+    if (modelContext === undefined || modelContext <= 0) return false
+    // Summarization is its own provider turn: it always has the full model
+    // window available. The agent budget only governs what gets replayed.
+    const context = modelContext
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
-    const selected = select(input.entries, config.tokens)
+    // Budgeted agents replay a compact tail: keep only what fits the effective
+    // window. Budgets at or below the keep floor keep the full keep budget —
+    // the floor exists so tiny budgets stay usable.
+    const window = effective(input)!
+    const keep =
+      input.budget === undefined || window >= modelContext || window <= config.tokens
+        ? config.tokens
+        : Math.min(config.tokens, Math.floor(window / 2))
+    const selected = select(input.entries, keep)
     const previousSummary = input.entries.find((entry) => entry.message.type === "compaction")?.message
     if (!selected || (selected.head.length === 0 && previousSummary?.type !== "compaction")) return false
     const summaryPrompt = buildPrompt({
@@ -234,8 +259,8 @@ export const make = (dependencies: Dependencies) => {
   })
   const compactIfNeeded = Effect.fn("SessionCompaction.compactIfNeeded")(function* (input: Input) {
     if (!config.auto) return false
-    const context = input.model.route.defaults.limits?.context
-    if (context === undefined || context <= 0) return false
+    const context = effective(input)
+    if (context === undefined) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     const projected = estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools })
     const budget = context * config.trigger

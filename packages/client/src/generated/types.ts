@@ -162,6 +162,7 @@ export type AgentsListOutput = {
       readonly effect: "allow" | "deny" | "ask"
     }>
     readonly tools?: { readonly [x: string]: boolean }
+    readonly budget?: number
   }>
 }
 
