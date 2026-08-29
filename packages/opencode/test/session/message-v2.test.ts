@@ -1383,6 +1383,33 @@ describe("session.message-v2.fromError", () => {
     })
   })
 
+  test("classifies DOMException AbortError as AbortedError", () => {
+    const input = new DOMException("The operation was aborted.", "AbortError")
+    const result = MessageV2.fromError(input, { providerID })
+    expect(result.name).toBe("MessageAbortedError")
+    expect(result).toMatchObject({ data: { message: "The operation was aborted." } })
+  })
+
+  test("classifies Bun's plain fetch-abort Error as AbortedError", () => {
+    // Bun's fetch rejects with a plain Error (not DOMException) whose message
+    // is exactly "The operation was aborted".
+    const input = new Error("The operation was aborted")
+    const result = MessageV2.fromError(input, { providerID })
+    expect(result.name).toBe("MessageAbortedError")
+  })
+
+  test("classifies AI-SDK-style named AbortError as AbortedError", () => {
+    const input = new Error("This operation was aborted")
+    input.name = "AbortError"
+    const result = MessageV2.fromError(input, { providerID })
+    expect(result.name).toBe("MessageAbortedError")
+  })
+
+  test("does not misclassify unrelated plain errors as aborts", () => {
+    const result = MessageV2.fromError(new Error("The server was aborted by an operator"), { providerID })
+    expect(result.name).toBe("UnknownError")
+  })
+
   test("serializes response error codes", () => {
     const cases = [
       {

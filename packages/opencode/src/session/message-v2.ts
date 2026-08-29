@@ -610,14 +610,27 @@ function isAfter(info: Info, other?: Info) {
   return info.id > other.id
 }
 
+/**
+ * Recognize fetch/stream aborts across runtimes. DOMException AbortError is
+ * the browser/Node shape; Bun throws a plain Error whose message is "The
+ * operation was aborted"; the AI SDK wraps some aborts in errors named
+ * "AbortError". All of these mean the same thing: our own abort signal fired.
+ */
+export function isAbortError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === "AbortError") return true
+  if (!(e instanceof Error)) return false
+  if ((e as Error).name === "AbortError") return true
+  return /^The operation was aborted$/i.test(e.message) || /^This operation was aborted$/i.test(e.message)
+}
+
 export function fromError(
   e: unknown,
   ctx: { providerID: ProviderV2.ID; aborted?: boolean },
 ): NonNullable<Assistant["error"]> {
   switch (true) {
-    case e instanceof DOMException && e.name === "AbortError":
+    case isAbortError(e):
       return new AbortedError(
-        { message: e.message },
+        { message: errorMessage(e) },
         {
           cause: e,
         },

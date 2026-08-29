@@ -359,9 +359,27 @@ const live: Layer.Layer<
       Stream.scoped(
         Stream.unwrap(
           Effect.gen(function* () {
+            // Distinguish "stream completed normally" from "scope closed while
+            // the stream was still live". The finalizer aborts the fetch signal
+            // either way; if the stream was still live, that abort surfaces
+            // downstream as an AbortError — this flag records whether the close
+            // was an early teardown, so mid-stream aborts are diagnosable.
+            let streamSettled = false
             const ctrl = yield* Effect.acquireRelease(
               Effect.sync(() => new AbortController()),
-              (ctrl) => Effect.sync(() => ctrl.abort()),
+              (ctrl) =>
+                Effect.sync(() => {
+                  if (!streamSettled) {
+                    void Effect.runPromise(
+                      Effect.logWarning("llm stream scope closed while stream was still live — aborting fetch", {
+                        "session.id": input.sessionID,
+                        provider: input.model.providerID,
+                        model: input.model.id,
+                      }),
+                    ).catch(() => {})
+                  }
+                  ctrl.abort()
+                }),
             )
 
             const result = yield* run({ ...input, abort: ctrl.signal })
@@ -379,6 +397,14 @@ const live: Layer.Layer<
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
               RepetitionGuard.guardStream,
+              // Mark settled only after the source exits (done, error, or
+              // interruption) — an early teardown by the consumer leaves this
+              // unset and the finalizer logs the early close.
+              Stream.onExit(() =>
+                Effect.sync(() => {
+                  streamSettled = true
+                }),
+              ),
             )
           }),
         ),
