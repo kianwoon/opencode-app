@@ -1,15 +1,18 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Duration, Effect, Layer, Schedule, Schema, Semaphore, Context } from "effect"
+import { Cause, Duration, Effect, Layer, Option, Schedule, Schema, Semaphore, Context } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import { AppProcess } from "@opencode-ai/core/process"
+import { Watcher } from "@opencode-ai/core/filesystem/watcher"
+import { EventV2 } from "@opencode-ai/core/event"
 import { InstanceState } from "@/effect/instance-state"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Config } from "@/config/config"
 import { Global } from "@opencode-ai/core/global"
 import { Info } from "@opencode-ai/schema/file-diff"
+import { EventV2Bridge } from "@/event-v2-bridge"
 
 export const Patch = Schema.Struct({
   hash: Schema.String,
@@ -73,6 +76,35 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         }
 
         const args = (cmd: string[]) => ["--git-dir", state.gitdir, "--work-tree", state.worktree, ...cmd]
+
+        // Dirty-set tracking: opencode's own edit/write/apply_patch tools publish
+        // Watcher.Event.Updated, and the native file watcher (when enabled) mirrors
+        // external changes onto the same bus. Collecting those paths lets add()
+        // stage only changed files instead of scanning the whole worktree.
+        const dirty = new Set<string>()
+        let dirtyConsumer = false
+        const markDirty = (file: string) => {
+          dirty.add(file)
+          // A deleted path may have been a directory: mark ancestors so their
+          // directory listings are re-evaluated on the next staged add.
+          for (let parent = path.dirname(file); parent.startsWith(state.worktree); parent = path.dirname(parent)) {
+            dirty.add(parent)
+          }
+        }
+
+        const bridge = Option.getOrUndefined(yield* Effect.serviceOption(EventV2Bridge.Service))
+        if (bridge) {
+          dirtyConsumer = true
+          const unsubscribe = yield* bridge.listen((event) => {
+            if (event.type !== Watcher.Event.Updated.type) return Effect.void
+            if (event.location && event.location.directory !== ctx.directory) return Effect.void
+            const data = event.data as EventV2.Data<typeof Watcher.Event.Updated>
+            const file = path.isAbsolute(data.file) ? data.file : path.resolve(state.worktree, data.file)
+            markDirty(file)
+            return Effect.void
+          })
+          yield* Effect.addFinalizer(() => unsubscribe)
+        }
 
         const encodeNulTerminatedPaths = (files: string[]) => files.join("\0") + "\0"
         const encodeTopLevelLiteralPathspecs = (files: string[]) =>
@@ -232,9 +264,14 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           }
         })
 
-        const add = Effect.fnUntraced(function* () {
-          yield* sync()
-          const [diff, other] = yield* Effect.all(
+        // Upper bound on dirty-scoped staging: past this many pending paths a full
+        // scan is as cheap and strictly more correct (catches watcher misses).
+        const dirtyLimit = 500
+        // Periodic full scan while dirty tracking is active, as a safety net.
+        const fullScanInterval = 10
+
+        const listAll = Effect.gen(function* () {
+          return yield* Effect.all(
             [
               git([...quote, ...args(["diff-files", "--name-only", "-z", "--", "."])], {
                 cwd: state.directory,
@@ -245,6 +282,59 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
             ],
             { concurrency: 2 },
           )
+        })
+
+        // diff-files and ls-files do not support --pathspec-from-file (that flag
+        // family exists only for high-level commands like add/restore), so the
+        // dirty candidates are passed as ordinary pathspecs after `--`. Paths are
+        // worktree-relative (no leading dashes), and magic pathspec prefixes are
+        // neutralized with the ":(top,literal)" form.
+        const encodeTopLevelLiteralArgs = (files: string[]) => files.map((file) => `:(top,literal)${file}`)
+
+        const listDirty = (paths: string[]) => {
+          const pathspecs = encodeTopLevelLiteralArgs(paths)
+          return Effect.gen(function* () {
+            return yield* Effect.all(
+              [
+                git(
+                  [...quote, ...args(["diff-files", "--name-only", "-z", "--", ...pathspecs])],
+                  { cwd: state.directory },
+                ),
+                git(
+                  [
+                    ...quote,
+                    ...args(["ls-files", "--full-name", "--others", "--exclude-standard", "-z", "--", ...pathspecs]),
+                  ],
+                  { cwd: state.directory },
+                ),
+              ],
+              { concurrency: 2 },
+            )
+          })
+        }
+
+        let dirtyAdds = 0
+
+        const add = Effect.fnUntraced(function* () {
+          yield* sync()
+          // Dirty pathspecs are relative to the worktree; anything that escapes it
+          // (or exceeds the cap) falls back to the full scan. The set is cleared
+          // immediately after scoping: the array is the single candidate list for
+          // this pass, and edits arriving mid-pass simply count for the next one.
+          const scoped =
+            dirtyConsumer && dirty.size > 0 && dirty.size <= dirtyLimit
+              ? Array.from(dirty)
+                  .map((file) => path.relative(state.worktree, file))
+                  .filter((item) => item && !item.startsWith("..") && !path.isAbsolute(item))
+              : []
+          const hadDirty = scoped.length > 0
+          dirty.clear()
+          // Safety net: every Nth dirty pass re-verifies the whole worktree, so a
+          // missed watcher event can only delay detection, not lose it.
+          const forceFull = hadDirty && ++dirtyAdds >= fullScanInterval
+          if (forceFull) dirtyAdds = 0
+          const useDirty = hadDirty && !forceFull
+          const [diff, other] = yield* (useDirty ? listDirty(scoped) : listAll)
           if (diff.code !== 0 || other.code !== 0) {
             yield* Effect.logWarning("failed to list snapshot files", {
               diffCode: diff.code,
