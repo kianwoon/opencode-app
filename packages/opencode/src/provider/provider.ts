@@ -1864,6 +1864,7 @@ const layer = Layer.effect(
         const customFetch = options["fetch"]
         const chunkTimeout = options["chunkTimeout"]
         const headerTimeout = options["headerTimeout"]
+        const requestTimeout = options["timeout"]
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
 
@@ -1880,16 +1881,34 @@ const layer = Layer.effect(
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
-          const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
-          const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
-          const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
+          // Legacy `timeout` used to be an uncancellable whole-request
+          // AbortSignal.timeout, which killed healthy streaming responses
+          // (e.g. long reasoning turns) mid-flight at exactly N seconds while
+          // data was still flowing. It is now an IDLE timeout: it applies to
+          // the headers phase and, unless explicit chunkTimeout/headerTimeout
+          // override it, to gaps between SSE chunks. Explicit phase timeouts
+          // always win for their phase.
+          const idleMs =
+            typeof requestTimeout === "number" && requestTimeout > 0
+              ? requestTimeout
+              : typeof requestTimeout === "string" && requestTimeout !== "" && Number(requestTimeout) > 0
+                ? Number(requestTimeout)
+                : undefined
+          const effectiveChunkMs =
+            typeof chunkTimeout === "number" && chunkTimeout > 0 ? chunkTimeout : idleMs
+          const effectiveHeaderMs =
+            headerTimeout === false
+              ? undefined
+              : typeof headerTimeout === "number" && headerTimeout > 0
+                ? headerTimeout
+                : idleMs
+          const chunkAbortCtl = effectiveChunkMs ? new AbortController() : undefined
+          const headerTimeoutCtl = effectiveHeaderMs ? timeoutController(effectiveHeaderMs) : undefined
           const signals: AbortSignal[] = []
 
           if (opts.signal) signals.push(opts.signal)
           if (chunkAbortCtl) signals.push(chunkAbortCtl.signal)
           if (headerTimeoutCtl) signals.push(headerTimeoutCtl.signal)
-          if (options["timeout"] !== undefined && options["timeout"] !== null && options["timeout"] !== false)
-            signals.push(AbortSignal.timeout(options["timeout"]))
 
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
@@ -1903,8 +1922,8 @@ const layer = Layer.effect(
               })
           ).finally(() => headerTimeoutCtl?.clear())
 
-          if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          if (!chunkAbortCtl || !effectiveChunkMs) return res
+          return wrapSSE(res, effectiveChunkMs, chunkAbortCtl)
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]

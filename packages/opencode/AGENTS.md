@@ -1,5 +1,23 @@
 # opencode database guide
 
+## Provider `options.timeout` is an IDLE timeout, not a whole-request deadline
+
+- `provider.<id>.options.timeout` in opencode.json used to be wired as `AbortSignal.timeout(ms)`
+  in src/provider/provider.ts — an UNCANCELLABLE whole-request timer that killed healthy
+  streaming responses mid-turn at exactly N seconds while chunks were still flowing (observed:
+  `timeout: 300000` on zai-coding-plan aborted every GLM reasoning turn longer than 5 minutes,
+  9+ times over 3 days). Because the resulting AbortError maps to `AbortedError`, it looks
+  exactly like a user cancel and is easy to misdiagnose as infra flakiness.
+- It is now IDLE-based: it guards the headers phase and, unless explicit `chunkTimeout` /
+  `headerTimeout` override it, gaps between SSE chunks. Explicit phase timeouts always win
+  for their phase. NEVER reintroduce a hard total-time timeout on provider fetch — long
+  reasoning turns legitimately run for many minutes.
+- Diagnostic: pair `message=process ... messageID=X` log lines (start vs error timestamps);
+  an exact repeated delta across aborts = a config/code timer, not infra.
+- Acceptance guard: test/provider/header-timeout.test.ts ("timeout does not abort a healthy
+  SSE stream mid-body", "timeout aborts when response headers never arrive", "timeout acts
+  as idle guard between SSE chunks").
+
 ## Idle-GC hook (Bun) — remove when Bun ships oven-sh/bun#36638
 
 - `SessionStatus` (src/session/status.ts) schedules one non-blocking `Bun.gc(false)` via a

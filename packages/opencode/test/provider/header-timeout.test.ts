@@ -171,6 +171,110 @@ it.live("OpenAI API auth gets default headerTimeout", () =>
   }),
 )
 
+it.live("timeout does not abort a healthy SSE stream mid-body (regression: 300s kill)", () =>
+  Effect.gen(function* () {
+    // Gaps of 30ms between chunks, 50ms idle limit: every idle gap passes,
+    // while total body duration (150ms) exceeds the limit. The old hard
+    // whole-request AbortSignal.timeout would have killed this stream.
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        spacedChunksServer([
+          { delay: 0, chunk: "a" },
+          { delay: 30, chunk: "b" },
+          { delay: 30, chunk: "c" },
+          { delay: 30, chunk: "d" },
+          { delay: 30, chunk: "e" },
+          { delay: 30, chunk: "f" },
+        ]),
+      ),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          expect(yield* Effect.promise(() => result.text)).toBe("abcdef")
+        }),
+      { config: providerConfig(server.url, { timeout: 50 }) },
+    )
+  }),
+)
+
+it.live("timeout aborts when response headers never arrive", () =>
+  Effect.gen(function* () {
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => delayedHeaderServer(250)),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            onError() {},
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          const errors = yield* Effect.promise(async () => {
+            const errors: string[] = []
+            for await (const part of result.fullStream) {
+              if (part.type === "error") errors.push(String(part.error))
+            }
+            return errors
+          })
+          expect(errors.join("\n")).toContain("response headers timed out")
+        }),
+      { config: providerConfig(server.url, { timeout: 50 }) },
+    )
+  }),
+)
+
+it.live("timeout acts as idle guard between SSE chunks when chunkTimeout is unset", () =>
+  Effect.gen(function* () {
+    // First chunk arrives immediately; the second never does, so the idle
+    // guard (50ms) must raise a response stream error.
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => stalledChunksServer({ after: 0, stall: 60_000 })),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            onError() {},
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          const error = yield* Effect.promise(async () => {
+            try {
+              for await (const part of result.fullStream) {
+                if (part.type === "error") return part.error
+              }
+            } catch (error) {
+              return error
+            }
+          })
+          expect(error).toBeInstanceOf(ProviderError.ResponseStreamError)
+        }),
+      { config: providerConfig(server.url, { timeout: 50 }) },
+    )
+  }),
+)
+
 function providerConfig(url: string, options: Record<string, unknown> = {}) {
   const config = testProviderConfig(url)
   return {
@@ -204,6 +308,45 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
     setTimeout(() => {
       res.end('data: {"choices":[{"delta":{"content":"late"}}]}\n\ndata: [DONE]\n\n')
     }, delay)
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("server did not bind to a TCP port")
+  return { server, url: `http://127.0.0.1:${address.port}` }
+}
+
+// Sends the first chunk immediately and the next after `after` ms, then keeps
+// the connection open (no [DONE]) so an idle-between-chunks guard can fire.
+async function stalledChunksServer(options: { after: number; stall: number }): Promise<{ server: Server; url: string }> {
+  const server = createServer((_, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" })
+    res.write('data: {"choices":[{"delta":{"content":"a"}}]}\n\n')
+    setTimeout(() => {
+      res.write('data: {"choices":[{"delta":{"content":"b"}}]}\n\n')
+    }, options.after)
+    // stall longer than any test timeout; server closes on test cleanup
+    setTimeout(() => res.end("data: [DONE]\n\n"), options.stall)
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("server did not bind to a TCP port")
+  return { server, url: `http://127.0.0.1:${address.port}` }
+}
+
+// Streams chunks with gaps: chunk i arrives options[i].delay ms after the
+// previous one. Total body duration can exceed an idle `timeout` while still
+// delivering every chunk.
+async function spacedChunksServer(chunks: { delay: number; chunk: string }[]): Promise<{ server: Server; url: string }> {
+  const server = createServer((_, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" })
+    let elapsed = 0
+    for (const { delay, chunk } of chunks) {
+      elapsed += delay
+      setTimeout(() => {
+        res.write(`data: {"choices":[{"delta":{"content":"${chunk}"}}]}\n\n`)
+      }, elapsed)
+    }
+    setTimeout(() => res.end("data: [DONE]\n\n"), elapsed + 20)
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()
