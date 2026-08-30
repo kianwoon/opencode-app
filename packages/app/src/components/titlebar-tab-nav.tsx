@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, Show, type Ref } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX, type Ref } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { createMutation } from "@tanstack/solid-query"
@@ -8,6 +8,7 @@ import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { ServerConnection, serverName } from "@/context/server"
 import { displayName, projectForSession } from "@/pages/layout/helpers"
+import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
 import { SessionTabAvatar } from "@/pages/layout/session-tab-avatar"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { canOpenTabRename, forwardTabRef } from "./titlebar-tab-gesture"
@@ -77,6 +78,11 @@ export function TabNavItem(props: {
 
   const [popoverOpen, setPopoverOpen] = createSignal(false)
   const previewBlocked = () => !!props.dragging || editing() || !!props.pressed || !props.session()
+
+  // Mirror the sidebar's session status colors: running sessions blink red and
+  // sessions waiting on the user (permission or question) blink blue. The
+  // SessionTabStatusIndicator below owns that state so tab, sidebar, and
+  // notification state agree.
 
   const measureTitleOverflow = () => {
     if (!titleEl || editing()) {
@@ -231,11 +237,18 @@ export function TabNavItem(props: {
             }
           >
             {(session) => (
-              <SessionTabAvatar
-                project={project()}
+              <SessionTabStatusIndicator
+                server={props.server}
                 directory={session.directory}
                 sessionId={session.id}
-                server={props.server}
+                fallback={
+                  <SessionTabAvatar
+                    project={project()}
+                    directory={session.directory}
+                    sessionId={session.id}
+                    server={props.server}
+                  />
+                }
               />
             )}
           </Show>
@@ -403,5 +416,44 @@ export function DraftTabItem(props: {
         />
       </div>
     </div>
+  )
+}
+
+// Same treatment as the sidebar's session rows: red blinking dot while the
+// session is running, blue while it waits on the user (permission/question).
+// Renders the fallback (the project avatar / spinner) while idle.
+function SessionTabStatusIndicator(props: {
+  server: ServerConnection.Key
+  directory: string
+  sessionId: string
+  fallback: JSX.Element
+}) {
+  const state = useSessionTabAvatarState(
+    () => props.server,
+    () => props.directory,
+    () => props.sessionId,
+  )
+  const status = createMemo<"running" | "pending" | undefined>(() => {
+    if (state.pending()) return "pending"
+    if (state.loading()) return "running"
+  })
+  return (
+    <Show when={status()} keyed fallback={props.fallback}>
+      {(color) => <SessionStatusDot color={color} />}
+    </Show>
+  )
+}
+
+function SessionStatusDot(props: { color: "running" | "pending" }) {
+  return (
+    <span class="flex size-4 items-center justify-center">
+      <span
+        class="size-1.5 rounded-full animate-status-blink"
+        classList={{
+          "bg-[var(--v2-red-600)]": props.color === "running",
+          "bg-[var(--v2-blue-600)]": props.color === "pending",
+        }}
+      />
+    </span>
   )
 }
