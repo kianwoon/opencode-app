@@ -217,6 +217,65 @@ description: From opencode skills directory.
     }),
   )
 
+  it.live("excludes user-disabled skills from require and available but keeps them listed", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Promise.all([
+              Bun.write(
+                path.join(dir, ".opencode", "skill", "enabled-skill", "SKILL.md"),
+                `---
+name: enabled-skill
+description: A skill that stays enabled.
+---
+
+# Enabled Skill
+`,
+              ),
+              Bun.write(
+                path.join(dir, ".opencode", "skill", "off-skill", "SKILL.md"),
+                `---
+name: off-skill
+description: A skill the user turned off.
+---
+
+# Off Skill
+`,
+              ),
+            ]),
+          )
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, "opencode.json"),
+              JSON.stringify({
+                $schema: "https://opencode.ai/config.json",
+                skills: { disabled_skills: ["off-skill"] },
+              }),
+            ),
+          )
+
+          yield* provideInstance(dir)(
+            Effect.gen(function* () {
+              const skill = yield* Skill.Service
+              // Listing keeps disabled skills visible so settings can re-enable.
+              const all = Object.fromEntries((yield* skill.all()).map((s) => [s.name, s]))
+              expect(all["off-skill"]).toBeDefined()
+              expect(all["enabled-skill"]).toBeDefined()
+
+                            expect(yield* skill.disabled()).toEqual(new Set(["off-skill"]))
+              expect((yield* skill.available()).map((s) => s.name)).toEqual(["customize-opencode", "enabled-skill"])
+              expect((yield* skill.get("off-skill"))).toBeUndefined()
+              const error = yield* Effect.flip(skill.require("off-skill"))
+              expect(error._tag).toBe("Skill.NotFoundError")
+              expect(yield* skill.require("enabled-skill")).toBeDefined()
+            }),
+          )
+        }),
+      { git: true },
+    ),
+  )
+
   it.live("discovers multiple skills from .opencode/skill/ directory", () =>
     provideTmpdirInstance(
       (dir) =>

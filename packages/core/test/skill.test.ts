@@ -90,6 +90,36 @@ describe("SkillV2", () => {
     ),
   )
 
+  it.live("reports user-disabled skill names and filters them from active list", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(tmp.path, "deploy"), { recursive: true })
+            await fs.mkdir(path.join(tmp.path, "review"), { recursive: true })
+            await write(tmp.path, "deploy", "Deploy production")
+            await write(tmp.path, "review", "Review changes")
+          })
+
+          const skill = yield* SkillV2.Service
+          yield* skill.transform((editor) => {
+            editor.source({ type: "directory", path: AbsolutePath.make(tmp.path) })
+            editor.disable("deploy")
+          })
+
+          expect((yield* skill.list()).map((item) => item.name).toSorted()).toEqual(["deploy", "review"])
+          expect(yield* skill.disabled()).toEqual(new Set(["deploy"]))
+          expect(SkillV2.active(yield* skill.list(), yield* skill.disabled()).map((item) => item.name)).toEqual([
+            "review",
+          ])
+        }),
+      ),
+    ),
+  )
+
   it.live("loads URL sources and filters skills for agents", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

@@ -1863,6 +1863,7 @@ export type McpLocalConfig = {
   }
   enabled?: boolean
   timeout?: number
+  alwaysLoad?: boolean
 }
 
 export type McpOAuthConfig = {
@@ -1891,6 +1892,7 @@ export type McpRemoteConfig = {
    */
   oauth?: McpOAuthConfig | false
   timeout?: number
+  alwaysLoad?: boolean
 }
 
 /**
@@ -1928,6 +1930,7 @@ export type Config = {
     paths?: Array<string>
     urls?: Array<string>
     disabled_directories?: Array<string>
+    disabled_skills?: Array<string>
   }
   references?: {
     [key: string]: string | ConfigV2ReferenceGit | ConfigV2ReferenceLocal
@@ -2052,6 +2055,7 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    tool_search_threshold?: number
     workflow_concurrency?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }

@@ -28,9 +28,15 @@ const denied = SkillV2.Info.make({
   content: "Denied guidance",
 })
 
-const layer = (list: () => SkillV2.Info[]) =>
+const layer = (list: () => SkillV2.Info[], disabled: () => ReadonlySet<string> = () => new Set<string>()) =>
   AppNodeBuilder.build(SkillGuidance.node, [
-    [SkillV2.node, Layer.mock(SkillV2.Service, { list: () => Effect.succeed(list()) })],
+    [
+      SkillV2.node,
+      Layer.mock(SkillV2.Service, {
+        list: () => Effect.succeed(list()),
+        disabled: () => Effect.succeed(disabled()),
+      }),
+    ],
   ])
 
 describe("SkillGuidance", () => {

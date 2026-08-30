@@ -1,8 +1,11 @@
-export * as ConfigSkillsV1 from "./skills"
+export * as ConfigSkills from "./skills"
 
 import { Schema } from "effect"
 
-export const Info = Schema.Struct({
+// Structured skills config carries discovery paths plus user toggles made from
+// the settings UI. The flat string-array form is the legacy current-config
+// shape; the union in config.ts accepts both.
+export const Structured = Schema.Struct({
   paths: Schema.optional(Schema.Array(Schema.String)).annotate({
     description: "Additional paths to skill folders",
   }),
@@ -17,4 +20,4 @@ export const Info = Schema.Struct({
     description: "Skill names to exclude from discovery and slash commands, matched exactly against the skill name",
   }),
 })
-export type Info = Schema.Schema.Type<typeof Info>
+export type Structured = Schema.Schema.Type<typeof Structured>

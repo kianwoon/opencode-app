@@ -39,10 +39,12 @@ const decodeFrontmatter = Schema.decodeUnknownOption(Frontmatter)
 
 export type Data = {
   sources: Types.DeepMutable<Source>[]
+  disabled: Set<string>
 }
 
 export type Draft = {
   source: (source: Source) => void
+  disable: (name: string) => void
   list: () => readonly Source[]
 }
 
@@ -66,9 +68,15 @@ export class NotRemovableError extends Schema.TaggedErrorClass<NotRemovableError
 
 export interface Interface extends State.Transformable<Draft> {
   readonly sources: () => Effect.Effect<Source[]>
+  readonly disabled: () => Effect.Effect<ReadonlySet<string>>
   readonly list: () => Effect.Effect<Info[]>
   readonly remove: (name: string) => Effect.Effect<Info, NotFoundError | NotRemovableError>
 }
+
+// Active = listed AND not user-disabled. User disables are name-based config
+// toggles; permission denies remain a separate per-agent filter (available).
+export const active = (skills: ReadonlyArray<Info>, disabled: ReadonlySet<string>) =>
+  skills.filter((skill) => !disabled.has(skill.name))
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Skill") {}
 
@@ -79,11 +87,14 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
 
     const state = State.create<Data, Draft>({
-      initial: () => ({ sources: [] }),
+      initial: () => ({ sources: [], disabled: new Set() }),
       draft: (draft) => ({
         source: (source) => {
           if (draft.sources.some((item) => Source.equals(item, source))) return
           draft.sources.push(source as Types.DeepMutable<Source>)
+        },
+        disable: (name) => {
+          draft.disabled.add(name)
         },
         list: () => draft.sources as Source[],
       }),
@@ -183,6 +194,9 @@ const layer = Layer.effect(
       reload: state.reload,
       sources: Effect.fn("SkillV2.sources")(function* () {
         return state.get().sources
+      }),
+      disabled: Effect.fn("SkillV2.disabled")(function* () {
+        return state.get().disabled as ReadonlySet<string>
       }),
       list,
       remove,

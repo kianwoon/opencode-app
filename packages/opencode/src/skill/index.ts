@@ -109,6 +109,7 @@ export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
   readonly require: (name: string) => Effect.Effect<Info, NotFoundError>
   readonly all: () => Effect.Effect<Info[]>
+  readonly disabled: () => Effect.Effect<ReadonlySet<string>>
   readonly dirs: () => Effect.Effect<string[]>
   readonly sourceDirectories: () => Effect.Effect<Array<{ path: string; enabled: boolean }>>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
@@ -329,16 +330,36 @@ const layer = Layer.effect(
       }),
     )
 
+    // User-disabled skill names from config. `all` stays unfiltered so the
+    // settings UI can list and re-enable disabled skills; the accessors below
+    // enforce the toggle at every consumption point.
+    const disabled = Effect.fn("Skill.disabled")(function* () {
+      const cfg = yield* config.get()
+      return new Set(cfg.skills?.disabled_skills ?? []) as ReadonlySet<string>
+    })
+
+    const isDisabled = Effect.fnUntraced(function* (name: string) {
+      return (yield* disabled()).has(name)
+    })
+
+    const activeNames = (s: State, disabledSet: ReadonlySet<string>) =>
+      Object.values(s.skills)
+        .filter((skill) => !disabledSet.has(skill.name))
+        .map((skill) => skill.name)
+        .toSorted()
+
     const get = Effect.fn("Skill.get")(function* (name: string) {
       const s = yield* InstanceState.get(state)
+      if (yield* isDisabled(name)) return undefined
       return s.skills[name]
     })
 
     const require = Effect.fn("Skill.require")(function* (name: string) {
       const s = yield* InstanceState.get(state)
-      const info = s.skills[name]
-      if (info) return info
-      return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
+      const disabledSet = yield* disabled()
+      const available = activeNames(s, disabledSet)
+      if (disabledSet.has(name) || !s.skills[name]) return yield* new NotFoundError({ name, available })
+      return s.skills[name]
     })
 
     const all = Effect.fn("Skill.all")(function* () {
@@ -356,7 +377,10 @@ const layer = Layer.effect(
 
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
       const s = yield* InstanceState.get(state)
-      const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
+      const disabledSet = yield* disabled()
+      const list = Object.values(s.skills)
+        .filter((skill) => !disabledSet.has(skill.name))
+        .toSorted((a, b) => a.name.localeCompare(b.name))
       if (!agent) return list
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
     })
@@ -402,7 +426,7 @@ const layer = Layer.effect(
       return info
     })
 
-    return Service.of({ get, require, all, dirs, sourceDirectories, available, remove })
+    return Service.of({ get, require, all, disabled, dirs, sourceDirectories, available, remove })
   }),
 )
 

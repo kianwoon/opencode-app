@@ -22,4 +22,14 @@ describe("SkillPlugin.Plugin", () => {
       )
     }),
   )
+
+  it.effect("records disabled skills from structured config documents", () =>
+    Effect.gen(function* () {
+      const skill = yield* SkillV2.Service
+      yield* SkillPlugin.Plugin.effect(host({ skill: { ...skill, reload: skill.reload } }))
+      yield* skill.transform((editor) => editor.disable("external-skill"))
+
+      expect(yield* skill.disabled()).toEqual(new Set(["external-skill"]))
+    }),
+  )
 })

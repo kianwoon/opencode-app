@@ -62,6 +62,7 @@ describe("SkillTool", () => {
               transform: (_transform) => Effect.die("unused"),
               reload: () => Effect.die("unused"),
               sources: () => Effect.die("unused"),
+              disabled: () => Effect.succeed(new Set<string>()),
               list: () => Effect.succeed(current),
               remove: () => Effect.die("unused"),
             }),

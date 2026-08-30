@@ -250,6 +250,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         skill.transform((draft) =>
           callback({
             source: (source) => draft.source(Schema.decodeUnknownSync(SkillV2.Source)(source)),
+            disable: (name) => draft.disable(name),
             list: draft.list,
           }),
         ),

@@ -131,7 +131,8 @@ const layer = Layer.effect(
         }
       }
 
-      for (const item of yield* skill.all()) {
+      const disabledSkills = yield* skill.disabled()
+      for (const item of (yield* skill.all()).filter((item) => !disabledSkills.has(item.name))) {
         if (commands[item.name]) continue
         const dir = item.location === "<built-in>" ? undefined : path.dirname(item.location)
         commands[item.name] = {

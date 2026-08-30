@@ -46,7 +46,10 @@ const layer = Layer.effect(
       load: Effect.fn("SkillGuidance.load")(function* (selection) {
         const agent = selection.info
         if (!agent) return SystemContext.empty
-        const permitted = SkillV2.available(yield* skills.list(), agent)
+        const permitted = SkillV2.available(
+          SkillV2.active(yield* skills.list(), yield* skills.disabled()),
+          agent,
+        )
         if (permitted.length === 0 && PermissionV2.evaluate("skill", "*", agent.permissions).effect === "deny")
           return SystemContext.empty
         const available = permitted

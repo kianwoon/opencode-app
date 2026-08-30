@@ -3,6 +3,8 @@ import type { Hooks } from "./registration.js"
 
 export interface SkillDraft {
   source(source: SkillV2Source): void
+  /** Disable a skill by name; disabled skills stay listed but are never active. */
+  disable(name: string): void
   list(): readonly SkillV2Source[]
 }
 

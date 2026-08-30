@@ -19,10 +19,14 @@ describe("ConfigSkillPlugin.Plugin", () => {
     Effect.gen(function* () {
       const directory = AbsolutePath.make("/repo/packages/app")
       const sources: SkillV2.Source[] = []
+      const disabled = new Set<string>()
       const transform = Effect.fnUntraced(function* (update: (draft: SkillV2.Draft) => void | Effect.Effect<void>) {
         const result = update({
           source: (source) => {
             sources.push(source)
+          },
+          disable: (name) => {
+            disabled.add(name)
           },
           list: () => sources,
         })
@@ -75,6 +79,60 @@ describe("ConfigSkillPlugin.Plugin", () => {
         SkillV2.DirectorySource.make({ type: "directory", path: AbsolutePath.make("/opt/skills") }),
         SkillV2.UrlSource.make({ type: "url", url: "https://example.test/skills/" }),
       ])
+    }),
+  )
+
+  it.effect("records disabled skills from structured config documents", () =>
+    Effect.gen(function* () {
+      const directory = AbsolutePath.make("/repo/packages/app")
+      const sources: SkillV2.Source[] = []
+      const disabled = new Set<string>()
+      const transform = Effect.fnUntraced(function* (update: (draft: SkillV2.Draft) => void | Effect.Effect<void>) {
+        const result = update({
+          source: (source) => {
+            sources.push(source)
+          },
+          disable: (name) => {
+            disabled.add(name)
+          },
+          list: () => sources,
+        })
+        if (Effect.isEffect(result)) yield* result
+        const dispose = Effect.sync(() => {
+          sources.length = 0
+          disabled.clear()
+        })
+        yield* Effect.addFinalizer(() => dispose)
+        return { dispose }
+      })
+
+      yield* ConfigSkillPlugin.Plugin.effect(
+        host({
+          skill: { transform, reload: () => Effect.void },
+        }),
+      ).pipe(
+        Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home: "/home/test" })),
+        Effect.provideService(Location.Service, Location.Service.of(location({ directory }))),
+        Effect.provideService(
+          Config.Service,
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed([
+                new Config.Document({
+                  type: "document",
+                  info: decode({
+                    skills: {
+                      disabled_directories: ["~/.claude/skills"],
+                      disabled_skills: ["legacy-skill"],
+                    },
+                  }),
+                }),
+              ]),
+          }),
+        ),
+      )
+
+      expect(disabled).toEqual(new Set(["legacy-skill"]))
     }),
   )
 })
