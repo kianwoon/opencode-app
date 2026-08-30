@@ -9,6 +9,7 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { validateWorkflow, readySteps, propagateFailure, isComplete, workflowErrorMessage } from "./workflow/dag"
 import { verificationGate } from "./verification"
+import { assess } from "./effort"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
@@ -1451,6 +1452,7 @@ const layer = Layer.effect(
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+            Effect.orDie,
             Effect.provideService(Database.Service, database),
           )
 
@@ -1487,6 +1489,21 @@ const layer = Layer.effect(
               })
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+
+            // Effort controller phase 0 outcome: what the task actually cost,
+            // paired with the effort_assessment log at task start.
+            if (flags.experimentalEffortLog) {
+              const taskTools = msgs
+                .filter((m) => m.info.role === "assistant" && m.info.time.created >= lastUser.time.created)
+                .flatMap((m) => m.parts.filter((part): part is SessionV1.ToolPart => part.type === "tool"))
+              yield* Effect.logInfo("effort_outcome", {
+                "session.id": sessionID,
+                tools: taskTools.length,
+                steps: step,
+                total_tokens: lastFinished?.tokens.input ?? 0,
+                output_tokens: lastFinished?.tokens.output ?? 0,
+              })
+            }
 
             // Automatic verification gate: risk-gated single reviewer pass
             // per task. Runs before the session goes idle so findings land
@@ -1532,6 +1549,24 @@ const layer = Layer.effect(
               providerID: lastUser.model.providerID,
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
+
+          // Effort controller phase 0: log the predicted tier at task start.
+          // Paired with the effort_outcome log at task tail, this is the data
+          // collection for tuning future budget enforcement — no behavior change.
+          if (step === 1 && flags.experimentalEffortLog) {
+            const promptText = msgs
+              .filter((m) => m.info.role === "user" && m.info.id === lastUser.id)
+              .flatMap((m) => m.parts.filter((part): part is SessionV1.TextPart => part.type === "text"))
+              .map((part) => part.text)
+              .join(" ")
+            const signal = assess(promptText)
+            yield* Effect.logInfo("effort_assessment", {
+              "session.id": sessionID,
+              tier: signal.tier,
+              reasons: signal.reasons,
+              prompt_chars: promptText.length,
+            })
+          }
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
           const task = tasks.pop()

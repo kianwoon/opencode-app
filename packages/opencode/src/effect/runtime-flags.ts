@@ -55,6 +55,7 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
   // Note: workflows are ON by default (disable explicitly to turn off).
   experimentalWorkflows: boolDefaultOn("OPENCODE_EXPERIMENTAL_WORKFLOWS"),
   experimentalVerification: enabledByExperimental("OPENCODE_EXPERIMENTAL_VERIFICATION"),
+  experimentalEffortLog: enabledByExperimental("OPENCODE_EXPERIMENTAL_EFFORT_LOG"),
   experimentalEventSystem: enabledByExperimental("OPENCODE_EXPERIMENTAL_EVENT_SYSTEM"),
   experimentalWorkspaces: enabledByExperimental("OPENCODE_EXPERIMENTAL_WORKSPACES"),
   experimentalIconDiscovery: enabledByExperimental("OPENCODE_EXPERIMENTAL_ICON_DISCOVERY"),
