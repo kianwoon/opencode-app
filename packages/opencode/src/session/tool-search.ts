@@ -70,7 +70,9 @@ export interface Deferral {
 /**
  * Split visible MCP tools into inline vs deferred for this session/turn.
  * Deferral engages only when total definition bytes cross the threshold —
- * small setups keep today's behavior exactly.
+ * small setups keep today's behavior exactly. The threshold is a fraction of
+ * the context window (0 defers immediately, 1 never defers); values outside
+ * 0-1 fall back to the default.
  */
 export function plan(input: {
   sessionID: string
@@ -80,7 +82,8 @@ export function plan(input: {
   mcpConfig: Record<string, unknown>
 }): Deferral {
   const alwaysLoad = alwaysLoadServers(input.mcpConfig)
-  const threshold = input.threshold ?? DEFAULT_THRESHOLD
+  const raw = input.threshold
+  const threshold = raw !== undefined && raw >= 0 && raw <= 1 ? raw : DEFAULT_THRESHOLD
   const budget = input.contextLimit > 0 ? input.contextLimit * threshold : Number.POSITIVE_INFINITY
 
   let total = 0

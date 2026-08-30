@@ -399,6 +399,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools: visible,
     contextLimit: input.model.limit.context,
     mcpConfig: input.mcpConfig,
+    threshold: input.mcpConfig.experimental ? readThreshold(input.mcpConfig.experimental) : undefined,
   })
 
   for (const [key, entry] of Object.entries(deferral.inline)) {
@@ -540,6 +541,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
 
 function optionsAbort(options: ToolExecutionOptions): AbortSignal {
   return options.abortSignal ?? new AbortController().signal
+}
+
+/** Read `experimental.tool_search_threshold` from the raw config record. */
+function readThreshold(experimental: unknown): number | undefined {
+  if (typeof experimental !== "object" || experimental === null) return undefined
+  const value = (experimental as Record<string, unknown>).tool_search_threshold
+  return typeof value === "number" ? value : undefined
 }
 
 function toRecord(value: unknown) {

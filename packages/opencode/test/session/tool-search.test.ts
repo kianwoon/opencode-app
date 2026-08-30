@@ -90,10 +90,30 @@ describe("ToolSearch.plan", () => {
 
   test("promotion is per session", () => {
     const tools = fixtures()
-    ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 2_000, mcpConfig: CONFIG })
+    ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 3_000, threshold: 0, mcpConfig: CONFIG })
     ToolSearch.search({ sessionID: "s1", query: "create_pr", tools, mcpConfig: CONFIG })
-    const other = ToolSearch.plan({ sessionID: "s2", tools, contextLimit: 2_000, mcpConfig: CONFIG })
+    const other = ToolSearch.plan({ sessionID: "s2", tools, contextLimit: 3_000, threshold: 0, mcpConfig: CONFIG })
     expect(Object.keys(other.inline)).toEqual([])
+  })
+
+  test("threshold 0 defers immediately, 1 never defers", () => {
+    const tools = fixtures()
+    const deferNow = ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 200_000, threshold: 0, mcpConfig: CONFIG })
+    expect(Object.keys(deferNow.deferred)).toEqual(Object.keys(tools))
+    const never = ToolSearch.plan({ sessionID: "s2", tools, contextLimit: 0, threshold: 1, mcpConfig: CONFIG })
+    expect(Object.keys(never.inline)).toEqual(Object.keys(tools))
+  })
+
+  test("out-of-range thresholds fall back to the default", () => {
+    const tools = fixtures()
+    // 3 tools ≈ 279 bytes; default 10% of 2_000 = 200 bytes → defers.
+    for (const bad of [-1, 2, Number.NaN]) {
+      const result = ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 2_000, threshold: bad, mcpConfig: CONFIG })
+      expect(Object.keys(result.deferred).length).toBe(3)
+    }
+    // In-range 0.5 of 2_000 = 1_000 bytes → inline.
+    const ok = ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 2_000, threshold: 0.5, mcpConfig: CONFIG })
+    expect(Object.keys(ok.deferred)).toEqual([])
   })
 })
 
