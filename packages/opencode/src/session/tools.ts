@@ -10,6 +10,7 @@ import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { ToolSearch } from "./tool-search"
+import { ToolResultCache } from "./tool-result-cache"
 
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
@@ -111,7 +112,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
               { args },
             )
-            const result = yield* item.execute(args, ctx)
+            // Read-only result cache: hits skip only the canonical execution;
+            // plugin hooks, attachment re-wrap, and abort handling always run.
+            const cached = ToolResultCache.lookup(ctx.sessionID, item.id, args)
+            const result = cached ?? (yield* item.execute(args, ctx))
+            if (!cached) ToolResultCache.store(ctx.sessionID, item.id, args, result)
             const output = {
               ...result,
               attachments: result.attachments?.map((attachment) => ({
