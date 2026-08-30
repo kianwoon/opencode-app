@@ -45,7 +45,8 @@ const layer = Layer.effect(
       }),
     )
 
-    const record = (info: Parameters<(typeof JobRecord.ops)["record"]>[0]) => withDb.record(info).pipe(Effect.ignore, Effect.asVoid)
+    const record = (info: Parameters<(typeof JobRecord.ops)["record"]>[0]) =>
+      withDb.record(info).pipe(Effect.ignore, Effect.asVoid)
 
     const asRecord = (info: CoreBackgroundJob.Info): Parameters<(typeof JobRecord.ops)["record"]>[0] => ({
       id: info.id,

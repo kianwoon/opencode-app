@@ -136,6 +136,76 @@ it.live("headerTimeout is opt-in for non-OpenAI providers", () =>
   }),
 )
 
+it.live("idle guard raises ChunkStallError when the SSE body stalls", () =>
+  Effect.gen(function* () {
+    // Mirrors the 2026-08-30 silent-canyon stall: a provider stream that goes
+    // silent mid-body. The idle guard (explicit or defaulted) must raise the
+    // distinct ChunkStallError — never wait forever, never fire on healthy gaps.
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => stalledChunksServer({ after: 0, stall: 60_000 })),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            onError() {},
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          const error = yield* Effect.promise(async () => {
+            try {
+              for await (const part of result.fullStream) {
+                if (part.type === "error") return part.error
+              }
+            } catch (error) {
+              return error
+            }
+          })
+          expect(error).toBeInstanceOf(ProviderError.ChunkStallError)
+          expect((error as ProviderError.ChunkStallError).ms).toBeGreaterThan(0)
+        }),
+      { config: providerConfig(server.url, { timeout: 50 }) },
+    )
+  }),
+)
+
+it.live("timeout: false disables the default idle guard", () =>
+  Effect.gen(function* () {
+    // Explicit escape hatch: a 250ms inter-chunk gap must pass untouched even
+    // though the default idle guard (300s) would never fire here anyway — this
+    // proves the guard machinery is fully disarmed, not merely slow.
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        spacedChunksServer([
+          { delay: 0, chunk: "a" },
+          { delay: 250, chunk: "b" },
+        ]),
+      ),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          expect(yield* Effect.promise(() => result.text)).toBe("ab")
+        }),
+      { config: providerConfig(server.url, { timeout: false, headerTimeout: false }) },
+    )
+  }),
+)
+
 it.live("OpenAI Codex headerTimeout default can be disabled by config", () =>
   Effect.gen(function* () {
     yield* withAuthContent(
@@ -317,7 +387,10 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
 
 // Sends the first chunk immediately and the next after `after` ms, then keeps
 // the connection open (no [DONE]) so an idle-between-chunks guard can fire.
-async function stalledChunksServer(options: { after: number; stall: number }): Promise<{ server: Server; url: string }> {
+async function stalledChunksServer(options: {
+  after: number
+  stall: number
+}): Promise<{ server: Server; url: string }> {
   const server = createServer((_, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" })
     res.write('data: {"choices":[{"delta":{"content":"a"}}]}\n\n')
@@ -336,7 +409,9 @@ async function stalledChunksServer(options: { after: number; stall: number }): P
 // Streams chunks with gaps: chunk i arrives options[i].delay ms after the
 // previous one. Total body duration can exceed an idle `timeout` while still
 // delivering every chunk.
-async function spacedChunksServer(chunks: { delay: number; chunk: string }[]): Promise<{ server: Server; url: string }> {
+async function spacedChunksServer(
+  chunks: { delay: number; chunk: string }[],
+): Promise<{ server: Server; url: string }> {
   const server = createServer((_, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" })
     let elapsed = 0

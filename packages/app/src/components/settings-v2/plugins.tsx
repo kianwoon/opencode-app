@@ -54,7 +54,10 @@ export const SettingsPluginsV2: Component = () => {
   }
 
   const removePlugin = (name: string) => {
-    void savePlugins(plugins().filter((spec) => !pluginEqual(spec, name)), "settings.plugins.plugins.remove.failed")
+    void savePlugins(
+      plugins().filter((spec) => !pluginEqual(spec, name)),
+      "settings.plugins.plugins.remove.failed",
+    )
   }
 
   const addPlugin = async (spec: string) => {
@@ -143,7 +146,9 @@ const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props)
   // Start the native file picker in the server's global plugin folder when available.
   const defaultPluginDir = async () => {
     try {
-      const paths = await serverSdk().client.path.get().then((result) => result.data)
+      const paths = await serverSdk()
+        .client.path.get()
+        .then((result) => result.data)
       return paths?.config ? `${paths.config}/plugin` : undefined
     } catch {
       return undefined

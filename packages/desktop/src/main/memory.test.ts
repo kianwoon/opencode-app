@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  ACTION_BYTES,
-  peakWorkingSetBytes,
-  pressureLevel,
-  WARNING_BYTES,
-} from "./memory-threshold"
+import { ACTION_BYTES, peakWorkingSetBytes, pressureLevel, WARNING_BYTES } from "./memory-threshold"
 
 const KB = 1024
 

@@ -45,7 +45,14 @@ const chatParamsInput = (overrides: Record<string, unknown> = {}) => ({
   agent: "build",
   model: model(),
   provider: { source: "api" as const, info: {}, options: {} },
-  message: { id: "msg_1", sessionID: "ses_test", role: "user" as const, time: { created: 0 }, agent: "build", model: { providerID: "test", modelID: "test-model" } },
+  message: {
+    id: "msg_1",
+    sessionID: "ses_test",
+    role: "user" as const,
+    time: { created: 0 },
+    agent: "build",
+    model: { providerID: "test", modelID: "test-model" },
+  },
   ...overrides,
 })
 
@@ -74,13 +81,25 @@ async function resetState(sessionID = "ses_test") {
 describe("task effort router", () => {
   test("chat.params is a no-op before any escalation", async () => {
     await resetState()
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { reasoningEffort: "low" },
+    }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
     expect(output.options).toEqual({ reasoningEffort: "low" })
   })
 
   test("chat.params is a no-op when chat.message was never called", async () => {
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { reasoningEffort: "low" },
+    }
     await hooks["chat.params"]?.({ ...chatParamsInput(), sessionID: "ses_never" } as never, output as never)
     expect(output.options).toEqual({ reasoningEffort: "low" })
   })
@@ -88,7 +107,13 @@ describe("task effort router", () => {
   test("escalating merges the requested tier's variant options", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "medium", reason: "architecture change needs deeper analysis" })
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { reasoningEffort: "low" },
+    }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
     expect(output.options).toEqual({ reasoningEffort: "medium" })
   })
@@ -155,7 +180,10 @@ describe("task effort router", () => {
     expect(output.options).toEqual({ reasoningEffort: "high" })
 
     const system = { system: ["base"] }
-    await hooks["experimental.chat.system.transform"]?.({ sessionID: "ses_test", model: model() } as never, system as never)
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "ses_test", model: model() } as never,
+      system as never,
+    )
     expect(system.system[2]).toContain("Task risk notice")
   })
 
@@ -209,7 +237,13 @@ describe("task effort router", () => {
   test("never lowers a user-pinned higher effort", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "medium", reason: "escalate" })
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "high" } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { reasoningEffort: "high" },
+    }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
     expect(output.options).toEqual({ reasoningEffort: "high" })
   })
@@ -217,7 +251,13 @@ describe("task effort router", () => {
   test("detects user-pinned effort expressed as a thinking budget", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "medium", reason: "escalate" })
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { thinkingBudget: 32000 } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { thinkingBudget: 32000 },
+    }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
     expect(output.options).toEqual({ thinkingBudget: 32000 })
   })
@@ -225,7 +265,13 @@ describe("task effort router", () => {
   test("skips models that do not ship the requested tier", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "high", reason: "escalate" })
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { reasoningEffort: "low" },
+    }
     await hooks["chat.params"]?.(
       chatParamsInput({ model: model({ variants: { low: { reasoningEffort: "low" } } }) }) as never,
       output as never,
@@ -246,7 +292,13 @@ describe("task effort router", () => {
   test("treats super tiers (xhigh/max) as high when pinning is detected", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "medium", reason: "escalate" })
-    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "xhigh" } }
+    const output = {
+      temperature: 0.7,
+      topP: 1,
+      topK: 0,
+      maxOutputTokens: undefined,
+      options: { reasoningEffort: "xhigh" },
+    }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
     expect(output.options).toEqual({ reasoningEffort: "xhigh" })
   })
@@ -254,7 +306,10 @@ describe("task effort router", () => {
   test("system transform advertises the governor only for models with variants", async () => {
     await resetState()
     const withVariants = { system: ["base prompt"] }
-    await hooks["experimental.chat.system.transform"]?.({ sessionID: "ses_test", model: model() } as never, withVariants as never)
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "ses_test", model: model() } as never,
+      withVariants as never,
+    )
     expect(withVariants.system.length).toBe(2)
     expect(withVariants.system[1]).toContain("request_effort")
 

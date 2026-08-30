@@ -137,7 +137,10 @@ export function compactDescription(value: string | undefined) {
 
 /** Approximate context cost of a tool definition (description + JSON schema), in bytes. */
 export function definitionBytes(mcpTool: MCPToolDef) {
-  return Buffer.byteLength(mcpTool.description ?? "", "utf8") + Buffer.byteLength(JSON.stringify(mcpTool.inputSchema), "utf8")
+  return (
+    Buffer.byteLength(mcpTool.description ?? "", "utf8") +
+    Buffer.byteLength(JSON.stringify(mcpTool.inputSchema), "utf8")
+  )
 }
 
 /** One catalog entry: enough to decide relevance without loading the full schema. */
@@ -160,7 +163,10 @@ export interface ServerIndex {
  * plus server instructions. Never includes input schemas — that is the whole
  * point; full definitions stay deferred until tool_search promotes them.
  */
-export function index(defs: Record<string, { name: string; description?: string }>, serverInstructions: Record<string, string | undefined>): ServerIndex[] {
+export function index(
+  defs: Record<string, { name: string; description?: string }>,
+  serverInstructions: Record<string, string | undefined>,
+): ServerIndex[] {
   const byServer = new Map<string, ToolIndexEntry[]>()
   for (const [key, def] of Object.entries(defs)) {
     const server = key.slice(0, key.indexOf("_") > 0 ? key.indexOf("_") : undefined) || key
@@ -172,11 +178,13 @@ export function index(defs: Record<string, { name: string; description?: string 
     }
     byServer.set(server, [...(byServer.get(server) ?? []), entry])
   }
-  return [...byServer.entries()].toSorted(([a], [b]) => a.localeCompare(b)).map(([server, tools]) => ({
-    server,
-    instructions: serverInstructions[server],
-    tools,
-  }))
+  return [...byServer.entries()]
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([server, tools]) => ({
+      server,
+      instructions: serverInstructions[server],
+      tools,
+    }))
 }
 
 /** Render the index as the tool_search tool description: compact, scannable, schema-free. */

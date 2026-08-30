@@ -350,31 +350,25 @@ describe("layout workspace helpers", () => {
 
 describe("uniqueDisplayNames", () => {
   test("qualifies duplicate folder names with their parent", () => {
-    const projects = [
-      { worktree: "/Users/x/Downloads/opencode" },
-      { worktree: "/Users/x/.config/opencode" },
-    ]
+    const projects = [{ worktree: "/Users/x/Downloads/opencode" }, { worktree: "/Users/x/.config/opencode" }]
     expect(uniqueDisplayNames(projects)).toEqual(["opencode · Downloads", "opencode · .config"])
   })
 
   test("leaves unique names untouched", () => {
-    const projects = [
-      { worktree: "/Users/x/Downloads/opencode" },
-      { worktree: "/Users/x/Downloads/translator" },
-    ]
+    const projects = [{ worktree: "/Users/x/Downloads/opencode" }, { worktree: "/Users/x/Downloads/translator" }]
     expect(uniqueDisplayNames(projects)).toEqual(["opencode", "translator"])
   })
 
   test("prefers explicit project names for identity and falls back to worktree without parent", () => {
     expect(uniqueDisplayNames([{ name: "Custom", worktree: "/a/opencode" }])).toEqual(["Custom"])
-    expect(uniqueDisplayNames([{ worktree: "/opencode" }, { worktree: "/opencode/" }])).toEqual(["/opencode", "/opencode/"])
+    expect(uniqueDisplayNames([{ worktree: "/opencode" }, { worktree: "/opencode/" }])).toEqual([
+      "/opencode",
+      "/opencode/",
+    ])
   })
 
   test("displayNamesFor maps worktree to qualified name", () => {
-    const projects = [
-      { worktree: "/Users/x/Downloads/opencode" },
-      { worktree: "/Users/x/.config/opencode" },
-    ]
+    const projects = [{ worktree: "/Users/x/Downloads/opencode" }, { worktree: "/Users/x/.config/opencode" }]
     const names = displayNamesFor(projects)
     expect(names.get("/Users/x/Downloads/opencode")).toBe("opencode · Downloads")
     expect(names.get("/Users/x/.config/opencode")).toBe("opencode · .config")

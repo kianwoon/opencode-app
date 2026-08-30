@@ -125,7 +125,10 @@ function tokenize(text: string): string[] {
  * Applies the guard to an `LLMEvent` stream. Fails the stream with a
  * non-retryable `RepetitionLoopError` when the assistant text repeats.
  */
-export function guardStream<E>(stream: Stream.Stream<LLMEvent, E>, options: RepetitionGuardOptions = {}): Stream.Stream<LLMEvent, E | RepetitionLoopError> {
+export function guardStream<E>(
+  stream: Stream.Stream<LLMEvent, E>,
+  options: RepetitionGuardOptions = {},
+): Stream.Stream<LLMEvent, E | RepetitionLoopError> {
   const guard = new Guard(options)
   return Stream.mapEffect(stream, (event): Effect.Effect<LLMEvent, E | RepetitionLoopError> => {
     if (!LLMEvent.is.textDelta(event)) return succeed(event)

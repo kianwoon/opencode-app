@@ -2510,16 +2510,16 @@ it.instance(
       expect(workflowPart).toBeDefined()
 
       // Both steps ran as task-tool parts and settled completed.
-      const taskParts = msgs.flatMap((m) => m.parts).filter(
-        (part): part is CompletedToolPart =>
-          part.type === "tool" && part.tool === "task" && part.state.status === "completed",
-      )
+      const taskParts = msgs
+        .flatMap((m) => m.parts)
+        .filter(
+          (part): part is CompletedToolPart =>
+            part.type === "tool" && part.tool === "task" && part.state.status === "completed",
+        )
       expect(taskParts).toHaveLength(2)
 
       // The synthetic summary reports declaration-ordered statuses.
-      const summary = texts.find(
-        (p) => p.type === "text" && p.text.includes('Workflow "ship" finished'),
-      )
+      const summary = texts.find((p) => p.type === "text" && p.text.includes('Workflow "ship" finished'))
       expect(summary?.type === "text" && summary.text).toContain("- build: completed")
       expect(summary?.type === "text" && summary.text).toContain("- test: completed")
 
@@ -2685,13 +2685,15 @@ it.instance(
 
       // Step task parts carry workflow step metadata for UI/telemetry.
       const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
-      const stepParts = msgs.flatMap((m) => m.parts).filter(
-        (part) =>
-          part.type === "tool" &&
-          part.tool === "task" &&
-          part.state.status === "completed" &&
-          part.state.metadata?.workflow !== undefined,
-      )
+      const stepParts = msgs
+        .flatMap((m) => m.parts)
+        .filter(
+          (part) =>
+            part.type === "tool" &&
+            part.tool === "task" &&
+            part.state.status === "completed" &&
+            part.state.metadata?.workflow !== undefined,
+        )
       expect(stepParts).toHaveLength(2)
       const buildPart = stepParts.find(
         (p) => p.type === "tool" && p.state.status === "completed" && p.state.metadata?.workflow?.stepId === "build",
@@ -2779,9 +2781,7 @@ it.instance(
             {
               type: "workflow",
               title: "typo",
-              steps: [
-                { id: "build", prompt: "build it", description: "build", agent: "biuld", dependsOn: [] },
-              ],
+              steps: [{ id: "build", prompt: "build it", description: "build", agent: "biuld", dependsOn: [] }],
             },
           ],
         })

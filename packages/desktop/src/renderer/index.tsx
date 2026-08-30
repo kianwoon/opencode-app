@@ -336,7 +336,10 @@ window.api.onMenuCommand((id) => {
 })
 listenForDeepLinks()
 
-const desktopToastKeyToOptions: Record<string, { title: Parameters<typeof t>[0]; description: Parameters<typeof t>[0] }> = {
+const desktopToastKeyToOptions: Record<
+  string,
+  { title: Parameters<typeof t>[0]; description: Parameters<typeof t>[0] }
+> = {
   "memory.recovered": {
     title: "desktop.toast.memory.recovered.title",
     description: "desktop.toast.memory.recovered.description",

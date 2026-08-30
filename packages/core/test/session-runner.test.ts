@@ -484,16 +484,14 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
     // guarantees every delta was flushed ahead of the boundary events.
     type LiveDelta = EventV2.Payload<(typeof fixture)["delta"]>
     const liveEvents: LiveDelta[] = []
-    const collector = yield* events
-      .subscribe(fixture.delta)
-      .pipe(
-        Stream.runForEach((event) =>
-          Effect.sync(() => {
-            liveEvents.push(event)
-          }),
-        ),
-        Effect.forkScoped,
-      )
+    const collector = yield* events.subscribe(fixture.delta).pipe(
+      Stream.runForEach((event) =>
+        Effect.sync(() => {
+          liveEvents.push(event)
+        }),
+      ),
+      Effect.forkScoped,
+    )
     yield* Effect.yieldNow
     response = fixture.completeEvents
 

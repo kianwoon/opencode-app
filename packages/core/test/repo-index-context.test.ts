@@ -43,9 +43,7 @@ const build = (filesystem: Layer.Layer<FileSystem.Service>) =>
 const KEY = "core/repo-index"
 
 describe("RepoIndexContext", () => {
-  const grouped = build(
-    fsWith([file("README.md"), file("src/a.ts"), file("src/deep/b.ts")]),
-  )
+  const grouped = build(fsWith([file("README.md"), file("src/a.ts"), file("src/deep/b.ts")]))
   const empty = build(fsWith([]))
   const failing = build(failingFs)
 
@@ -104,9 +102,7 @@ describe("RepoIndexContext", () => {
     const stored = generation.snapshot[KEY]?.value
 
     // Same observation → Unchanged.
-    const same = await Effect.runPromise(
-      SystemContext.reconcile(RepoIndexContext.source(before), generation.snapshot),
-    )
+    const same = await Effect.runPromise(SystemContext.reconcile(RepoIndexContext.source(before), generation.snapshot))
     expect(same._tag).toBe("Unchanged")
 
     // Different observation → Updated with rendered map text.

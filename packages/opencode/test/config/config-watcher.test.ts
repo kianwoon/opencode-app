@@ -43,9 +43,7 @@ describe("config watcher", () => {
         yield* watcher.scan()
         expect(reloads.count).toBe(0)
       } finally {
-        yield* Effect.promise(() =>
-          fs.rm(dir, { recursive: true, force: true }).catch(() => {}),
-        )
+        yield* Effect.promise(() => fs.rm(dir, { recursive: true, force: true }).catch(() => {}))
       }
     }),
   )

@@ -85,9 +85,7 @@ export const Plugin = define({
             if (!entrypoint) return
 
             const mod = yield* Effect.promise(() => import(entrypoint))
-            const decoded = yield* Schema.decodeUnknownEffect(PluginModule)(mod).pipe(
-              Effect.option,
-            )
+            const decoded = yield* Schema.decodeUnknownEffect(PluginModule)(mod).pipe(Effect.option)
             if (decoded._tag === "None") {
               // V1-shaped plugin files (default export is a factory function or
               // a { server()/tui() } object) are handled by the legacy V1

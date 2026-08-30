@@ -56,9 +56,7 @@ test("keeps the caret right after a mention inserted mid-prompt", async ({ page 
   await suggestion.click()
   await page.waitForTimeout(100)
 
-  const text = await page.evaluate(
-    () => document.querySelector('[data-component="prompt-input"]')?.textContent ?? "",
-  )
+  const text = await page.evaluate(() => document.querySelector('[data-component="prompt-input"]')?.textContent ?? "")
   // "please " (7) + "@src/index.ts" (13) + " fix the bug" (12) = 33 chars
   expect(text).toBe("please @src/index.ts fix the bug")
   // The caret must sit right after the mention (7 + 13 + 1 trailing space = 21),

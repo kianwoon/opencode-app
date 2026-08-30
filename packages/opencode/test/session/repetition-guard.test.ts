@@ -21,15 +21,13 @@ describe("session.llm.repetition-guard.detectRepetition", () => {
   })
 
   test("detects a degenerate repetition loop", () => {
-    expect(RepetitionGuard.detectRepetition("Let me commit. Let me commit. Let me commit.")).toBe(
-      "Let me commit.",
-    )
+    expect(RepetitionGuard.detectRepetition("Let me commit. Let me commit. Let me commit.")).toBe("Let me commit.")
   })
 
   test("detects repetition across more than one sentence", () => {
-    expect(
-      RepetitionGuard.detectRepetition("I need to finish. Let me commit. Let me commit. Let me commit."),
-    ).toBe("Let me commit.")
+    expect(RepetitionGuard.detectRepetition("I need to finish. Let me commit. Let me commit. Let me commit.")).toBe(
+      "Let me commit.",
+    )
   })
 
   test("does not trigger for short repeated fragments", () => {
@@ -88,9 +86,7 @@ describe("session.llm.repetition-guard.guardStream", () => {
       LLMEvent.stepFinish({ index: 0, reason: "stop" }),
     ]
     const stream: Stream.Stream<LLMEvent, never> = Stream.fromIterable(events)
-    const collected = await Effect.runPromise(
-      RepetitionGuard.guardStream(stream).pipe(Stream.runCollect),
-    )
+    const collected = await Effect.runPromise(RepetitionGuard.guardStream(stream).pipe(Stream.runCollect))
     expect(collected.length).toBe(3)
   })
 
@@ -102,11 +98,7 @@ describe("session.llm.repetition-guard.guardStream", () => {
       delta("Let me commit. "),
     ]
     const stream: Stream.Stream<LLMEvent, never> = Stream.fromIterable(events)
-    const exit = await Effect.runPromise(
-      RepetitionGuard.guardStream(stream)
-        .pipe(Stream.runCollect)
-        .pipe(Effect.exit),
-    )
+    const exit = await Effect.runPromise(RepetitionGuard.guardStream(stream).pipe(Stream.runCollect).pipe(Effect.exit))
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
       const error = Cause.squash(exit.cause)

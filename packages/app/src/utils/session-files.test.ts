@@ -32,11 +32,7 @@ describe("sessionTouchedFiles", () => {
 
   test("skips assistant messages", () => {
     const messages = [
-      message(
-        "m1",
-        { diffs: [{ file: "src/a.ts", patch: "", additions: 1, deletions: 0 }] },
-        "assistant",
-      ),
+      message("m1", { diffs: [{ file: "src/a.ts", patch: "", additions: 1, deletions: 0 }] }, "assistant"),
     ]
     expect(sessionTouchedFiles(messages).size).toBe(0)
   })

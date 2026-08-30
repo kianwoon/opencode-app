@@ -35,8 +35,7 @@ const StepParams = Schema.Struct({
 const Parameters = Schema.Struct({
   title: Schema.String.annotate({ description: "Name of the workflow" }),
   steps: Schema.Array(StepParams).pipe(Schema.check(Schema.isNonEmpty())).annotate({
-    description:
-      "The pipeline steps. Each step runs as a subagent task; independent steps run in parallel.",
+    description: "The pipeline steps. Each step runs as a subagent task; independent steps run in parallel.",
   }),
 }).annotate({
   description:
@@ -71,10 +70,7 @@ export const WorkflowTool = Tool.define(
       description: DESCRIPTION_TEXT,
       parameters: Parameters,
       jsonSchema: ToolJsonSchema.fromSchema(Parameters),
-      execute: (
-        params: Schema.Schema.Type<typeof Parameters>,
-        ctx: Tool.Context,
-      ) =>
+      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           const ops = ctx.extra?.promptOps as WorkflowPromptOps | undefined
           if (!ops) return yield* Effect.fail(new Error("WorkflowTool requires promptOps in ctx.extra"))

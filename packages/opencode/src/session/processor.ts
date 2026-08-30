@@ -51,7 +51,9 @@ function logCacheHitRatio(
     "tokens.prompt": promptTokens,
     "cache.hit_ratio": Number(ratio.toFixed(3)),
   }
-  Effect.runFork(ratio < 0.5 ? Effect.logWarning("cache hit ratio low", fields) : Effect.logInfo("cache hit ratio", fields))
+  Effect.runFork(
+    ratio < 0.5 ? Effect.logWarning("cache hit ratio low", fields) : Effect.logInfo("cache hit ratio", fields),
+  )
 }
 
 export interface Handle {

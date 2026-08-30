@@ -17,7 +17,7 @@ const UPSTREAM = "origin"
 
 async function run() {
   const arg = process.argv[2]
-  const ref = arg === "--main" ? "dev" : arg ?? ""
+  const ref = arg === "--main" ? "dev" : (arg ?? "")
 
   // Fetch the real upstream ref (don't clobber any local tag with the same name).
   let target: string
@@ -87,7 +87,9 @@ async function run() {
     return
   }
 
-  console.log(`⚠️  ${trulyMissing.length} upstream commit(s) genuinely NOT applied${appliedCount ? ` (${appliedCount} already cherry-picked)` : ""}:`)
+  console.log(
+    `⚠️  ${trulyMissing.length} upstream commit(s) genuinely NOT applied${appliedCount ? ` (${appliedCount} already cherry-picked)` : ""}:`,
+  )
   console.log("")
   const relevant: string[] = []
   const other: string[] = []

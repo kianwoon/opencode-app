@@ -408,18 +408,16 @@ const layer = Layer.effect(
         })
       }
       const dir = path.dirname(info.location)
-      yield* fsys
-        .remove(dir, { recursive: true, force: true })
-        .pipe(
-          Effect.mapError(
-            (error) =>
-              new NotRemovableError({
-                name,
-                location: info.location,
-                reason: error instanceof Error ? error.message : String(error),
-              }),
-          ),
-        )
+      yield* fsys.remove(dir, { recursive: true, force: true }).pipe(
+        Effect.mapError(
+          (error) =>
+            new NotRemovableError({
+              name,
+              location: info.location,
+              reason: error instanceof Error ? error.message : String(error),
+            }),
+        ),
+      )
       yield* InstanceState.invalidate(state)
       yield* InstanceState.invalidate(discovered)
       yield* Effect.logInfo("skill removed", { name, dir })

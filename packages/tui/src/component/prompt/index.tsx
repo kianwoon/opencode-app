@@ -1126,17 +1126,17 @@ export function Prompt(props: PromptProps) {
           },
           { throwOnError: true },
         )
-          .catch((error) => {
-            // The server persists the message before running it, and the run
-            // may still fail after a re-drive attempt. The message is already
-            // in the timeline — say so instead of implying the send dropped it,
-            // which pushes users into resubmitting and duplicating the entry.
-            toast.show({
-              title: "Message saved, but the run failed",
-              message: errorMessage(error),
-              variant: "error",
-            })
+        .catch((error) => {
+          // The server persists the message before running it, and the run
+          // may still fail after a re-drive attempt. The message is already
+          // in the timeline — say so instead of implying the send dropped it,
+          // which pushes users into resubmitting and duplicating the entry.
+          toast.show({
+            title: "Message saved, but the run failed",
+            message: errorMessage(error),
+            variant: "error",
           })
+        })
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({

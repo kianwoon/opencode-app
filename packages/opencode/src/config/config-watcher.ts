@@ -36,8 +36,7 @@ const fingerprintOf = (stat: { mtime: Option.Option<Date>; size: FileSystem.Size
   size: stat.size,
 })
 
-const same = (a: Fingerprint | undefined, b: Fingerprint) =>
-  a !== undefined && a.mtime === b.mtime && a.size === b.size
+const same = (a: Fingerprint | undefined, b: Fingerprint) => a !== undefined && a.mtime === b.mtime && a.size === b.size
 
 export const layer = Layer.effect(
   Service,
@@ -62,9 +61,8 @@ export const layer = Layer.effect(
     const watchTargets = () => NAMES.map((name) => path.join(global.config, name))
 
     const statFile = (file: string) =>
-      Effect.map(
-        fs.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined))),
-        (stat) => (stat ? Option.some(fingerprintOf(stat)) : Option.none()),
+      Effect.map(fs.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined))), (stat) =>
+        stat ? Option.some(fingerprintOf(stat)) : Option.none(),
       )
 
     const detect = Effect.fn("ConfigWatcher.detect")(function* () {

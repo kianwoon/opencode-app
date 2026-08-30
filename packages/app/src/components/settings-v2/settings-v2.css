@@ -841,7 +841,8 @@ button.settings-v2-plugins-location:hover {
   white-space: nowrap;
 }
 
-[data-component="dialog-v2"]:has(> [data-slot="dialog-container"] > .settings-v2-dialog) [data-slot="dialog-container"] {
+[data-component="dialog-v2"]:has(> [data-slot="dialog-container"] > .settings-v2-dialog)
+  [data-slot="dialog-container"] {
   width: 80vw;
   height: 80vh;
 }

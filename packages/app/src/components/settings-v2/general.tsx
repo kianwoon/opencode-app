@@ -234,7 +234,9 @@ const FontSetting: Component<{
           appearance="inline"
           data-action={`${config().action}-weight`}
           options={fontWeightOptions}
-          current={fontWeightOptions.find((option) => option.value === String(current().weight)) ?? fontWeightOptions[1]}
+          current={
+            fontWeightOptions.find((option) => option.value === String(current().weight)) ?? fontWeightOptions[1]
+          }
           placement="bottom-end"
           gutter={6}
           value={(option) => option.value}

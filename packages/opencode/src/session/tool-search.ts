@@ -46,7 +46,12 @@ export function clear(sessionID: string) {
 export function alwaysLoadServers(mcpConfig: Record<string, unknown>): Set<string> {
   const names = new Set<string>()
   for (const [name, entry] of Object.entries(mcpConfig)) {
-    if (entry && typeof entry === "object" && "alwaysLoad" in entry && (entry as { alwaysLoad?: unknown }).alwaysLoad === true)
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "alwaysLoad" in entry &&
+      (entry as { alwaysLoad?: unknown }).alwaysLoad === true
+    )
       names.add(name)
   }
   return names

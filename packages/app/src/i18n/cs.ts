@@ -887,7 +887,8 @@ export const dict = {
   "sidebar.project.cleanupSessions": "Clean up old sessions",
   "sidebar.project.cleanupSessions.title": "Clean up old sessions",
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
-  "sidebar.project.cleanupSessions.description": "Old session data will be permanently deleted and cannot be recovered.",
+  "sidebar.project.cleanupSessions.description":
+    "Old session data will be permanently deleted and cannot be recovered.",
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Nejsou otevřeny žádné projekty",
   "sidebar.empty.description": "Chcete-li začít, otevřete projekt",
@@ -1130,10 +1131,12 @@ export const dict = {
   "settings.plugins.section.plugins": "Plugins",
   "settings.plugins.section.skills": "Skills",
   "settings.plugins.plugins.empty": "No plugins configured",
-  "settings.plugins.plugins.hint": "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
+  "settings.plugins.plugins.hint":
+    "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
   "settings.plugins.plugins.add.title": "Add plugin",
   "settings.plugins.plugins.add.browse": "Procházet…",
-  "settings.plugins.plugins.add.description": "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
+  "settings.plugins.plugins.add.description":
+    "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
   "settings.plugins.plugins.add.placeholder": "Package name or path",
   "settings.plugins.plugins.add.failed": "Failed to add plugin",
   "settings.plugins.plugins.remove.failed": "Failed to remove plugin",
@@ -1146,7 +1149,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.directories.title": "Složky dovedností",
-  "settings.plugins.skills.directories.hint": "Vypnutím složky vyloučíte její dovednosti z vyhledávání. Soubory zůstanou na disku.",
+  "settings.plugins.skills.directories.hint":
+    "Vypnutím složky vyloučíte její dovednosti z vyhledávání. Soubory zůstanou na disku.",
   "settings.plugins.skills.directories.toggle": "Přepnout složku dovedností {{directory}}",
   "settings.plugins.skills.directories.disabled": "Vypnuto",
   "settings.plugins.skills.directories.toggle.failed": "Nepodařilo se aktualizovat složky dovedností",

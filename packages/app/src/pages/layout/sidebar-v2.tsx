@@ -457,7 +457,13 @@ function RailAction(props: { icon: string; label: string; onClick: () => void })
   )
 }
 
-function RailProjectIcon(props: { project: LocalProject; name: string; active: boolean; unseen: number; onOpen: () => void }) {
+function RailProjectIcon(props: {
+  project: LocalProject
+  name: string
+  active: boolean
+  unseen: number
+  onOpen: () => void
+}) {
   return (
     <TooltipV2 placement="right" value={props.name}>
       <button
@@ -662,7 +668,9 @@ function ProjectSection(
   const allSessions = createMemo(() => sortedRootSessions(childStore()[0], Date.now()))
   const sessionTotal = createMemo(() => childStore()[0].sessionTotal)
   const [showAll, setShowAll] = createStore({ value: false })
-  const visibleSessions = createMemo(() => (showAll.value ? allSessions() : allSessions().slice(0, DEFAULT_SESSION_LIMIT)))
+  const visibleSessions = createMemo(() =>
+    showAll.value ? allSessions() : allSessions().slice(0, DEFAULT_SESSION_LIMIT),
+  )
   const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
   const showAllSessions = async () => {
     const [store, setStore] = childStore()
@@ -769,7 +777,10 @@ function ProjectSection(
       </div>
       <Show when={props.expanded}>
         <div class="flex min-w-0 flex-col gap-px pl-4">
-          <NewSessionRow onClick={() => props.onNewSession(props.project.worktree)} label={language.t("command.session.new")} />
+          <NewSessionRow
+            onClick={() => props.onNewSession(props.project.worktree)}
+            label={language.t("command.session.new")}
+          />
           <Show when={visibleSessions().length > 0 && serverKey()}>
             <For each={visibleSessions()}>
               {(session) => (
@@ -782,10 +793,16 @@ function ProjectSection(
               )}
             </For>
             <Show when={!showAll.value && hasMore()}>
-              <ShowAllSessionsRow onClick={() => void showAllSessions()} label={language.t("sidebar.project.viewAllSessions")} />
+              <ShowAllSessionsRow
+                onClick={() => void showAllSessions()}
+                label={language.t("sidebar.project.viewAllSessions")}
+              />
             </Show>
             <Show when={showAll.value}>
-              <ShowFewerSessionsRow onClick={showFewerSessions} label={language.t("sidebar.project.showFewerSessions")} />
+              <ShowFewerSessionsRow
+                onClick={showFewerSessions}
+                label={language.t("sidebar.project.showFewerSessions")}
+              />
             </Show>
           </Show>
         </div>
@@ -1011,7 +1028,10 @@ function DialogCleanupSessions(props: {
         <DialogTitle>{language.t("sidebar.project.cleanupSessions.title")}</DialogTitle>
       </DialogHeader>
       <DialogBody class="flex w-full flex-col gap-4 px-4 pt-4 pb-1">
-        <Show when={!staleCount.loading} fallback={<div class="h-5 w-24 rounded bg-v2-background-bg-layer-01 animate-pulse" />}>
+        <Show
+          when={!staleCount.loading}
+          fallback={<div class="h-5 w-24 rounded bg-v2-background-bg-layer-01 animate-pulse" />}
+        >
           <div class="text-v2-text-text-base [font-weight:440]">
             {language.t("sidebar.project.cleanupSessions.confirm", { count: count() })}
           </div>

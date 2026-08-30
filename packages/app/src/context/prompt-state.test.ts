@@ -67,8 +67,28 @@ describe("isPromptEqual", () => {
   })
 
   test("identical file parts are equal", () => {
-    const a = [{ type: "file" as const, content: "", path: "/src/index.ts", mime: "text/typescript", filename: "index.ts", start: 0, end: 0 }]
-    const b = [{ type: "file" as const, content: "", path: "/src/index.ts", mime: "text/typescript", filename: "index.ts", start: 0, end: 0 }]
+    const a = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/src/index.ts",
+        mime: "text/typescript",
+        filename: "index.ts",
+        start: 0,
+        end: 0,
+      },
+    ]
+    const b = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/src/index.ts",
+        mime: "text/typescript",
+        filename: "index.ts",
+        start: 0,
+        end: 0,
+      },
+    ]
     expect(isPromptEqual(a, b)).toBe(true)
   })
 
@@ -79,14 +99,50 @@ describe("isPromptEqual", () => {
   })
 
   test("file parts with different selections are not equal", () => {
-    const a = [{ type: "file" as const, content: "", path: "/a.ts", selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 }, start: 0, end: 0 }]
-    const b = [{ type: "file" as const, content: "", path: "/a.ts", selection: { startLine: 1, startChar: 0, endLine: 20, endChar: 0 }, start: 0, end: 0 }]
+    const a = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/a.ts",
+        selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 },
+        start: 0,
+        end: 0,
+      },
+    ]
+    const b = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/a.ts",
+        selection: { startLine: 1, startChar: 0, endLine: 20, endChar: 0 },
+        start: 0,
+        end: 0,
+      },
+    ]
     expect(isPromptEqual(a, b)).toBe(false)
   })
 
   test("file parts with same selection are equal", () => {
-    const a = [{ type: "file" as const, content: "", path: "/a.ts", selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 }, start: 0, end: 0 }]
-    const b = [{ type: "file" as const, content: "", path: "/a.ts", selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 }, start: 0, end: 0 }]
+    const a = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/a.ts",
+        selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 },
+        start: 0,
+        end: 0,
+      },
+    ]
+    const b = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/a.ts",
+        selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 },
+        start: 0,
+        end: 0,
+      },
+    ]
     expect(isPromptEqual(a, b)).toBe(true)
   })
 
@@ -97,7 +153,16 @@ describe("isPromptEqual", () => {
   })
 
   test("one with selection and one without are not equal", () => {
-    const a = [{ type: "file" as const, content: "", path: "/a.ts", selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 }, start: 0, end: 0 }]
+    const a = [
+      {
+        type: "file" as const,
+        content: "",
+        path: "/a.ts",
+        selection: { startLine: 1, startChar: 0, endLine: 10, endChar: 0 },
+        start: 0,
+        end: 0,
+      },
+    ]
     const b = [{ type: "file" as const, content: "", path: "/a.ts", start: 0, end: 0 }]
     expect(isPromptEqual(a, b)).toBe(false)
   })
@@ -205,7 +270,15 @@ describe("dirty", () => {
     createRoot((dispose) => {
       const prompt = createPromptState()
       prompt.set([
-        { type: "file", content: "", path: "/src/app.ts", mime: "text/typescript", filename: "app.ts", start: 0, end: 0 },
+        {
+          type: "file",
+          content: "",
+          path: "/src/app.ts",
+          mime: "text/typescript",
+          filename: "app.ts",
+          start: 0,
+          end: 0,
+        },
       ])
       expect(prompt.dirty()).toBe(true)
       dispose()

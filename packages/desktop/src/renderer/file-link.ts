@@ -36,5 +36,8 @@ function stripLocation(path: string) {
 }
 
 export function isFileHref(href: string) {
-  return pathFromFileHref(href) !== undefined && (/^file:/i.test(href.trim()) || href.trim().startsWith("/") || /^[a-zA-Z]:[\\/]/.test(href.trim()))
+  return (
+    pathFromFileHref(href) !== undefined &&
+    (/^file:/i.test(href.trim()) || href.trim().startsWith("/") || /^[a-zA-Z]:[\\/]/.test(href.trim()))
+  )
 }

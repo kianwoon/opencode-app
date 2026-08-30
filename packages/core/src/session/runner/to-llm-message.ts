@@ -19,7 +19,8 @@ import type { FileAttachment } from "../prompt"
  * paths); only the replayed context shrinks. 0 disables eviction entirely.
  */
 export const TOOL_RESULT_EVICT_AFTER_MS = 30 * 60 * 1000
-const TOOL_RESULT_EVICTED_TEXT = "[Tool result evicted from context: this output is no longer recent. Re-run the tool if you need its content again.]"
+const TOOL_RESULT_EVICTED_TEXT =
+  "[Tool result evicted from context: this output is no longer recent. Re-run the tool if you need its content again.]"
 
 const media = (file: FileAttachment): ContentPart => ({
   type: "media",
@@ -88,11 +89,7 @@ const toolResult = (
   }
 }
 
-const assistant = (
-  message: SessionMessage.Assistant,
-  model: Model,
-  evictBefore: number,
-) => {
+const assistant = (message: SessionMessage.Assistant, model: Model, evictBefore: number) => {
   const sameModel =
     String(message.model.providerID) === String(model.provider) && String(message.model.id) === String(model.id)
   const reuseProviderMetadata = sameModel && message.error === undefined
@@ -208,10 +205,7 @@ export const toLLMMessages = (
   evictAfter: number = TOOL_RESULT_EVICT_AFTER_MS,
 ) => {
   if (evictAfter <= 0) return messages.flatMap((message) => toLLMMessage(message, model, 0))
-  const newest = messages.reduce(
-    (latest, message) => Math.max(latest, DateTime.toEpochMillis(message.time.created)),
-    0,
-  )
+  const newest = messages.reduce((latest, message) => Math.max(latest, DateTime.toEpochMillis(message.time.created)), 0)
   const evictBefore = newest - evictAfter
   return messages.flatMap((message) => toLLMMessage(message, model, evictBefore))
 }

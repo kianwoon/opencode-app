@@ -56,13 +56,16 @@ describe("server session v2 delta fast path", () => {
   test("streams text deltas into fold state and legacy part in place", () => {
     const ctx = setup({ ses_1: session("ses_1") })
     ctx.store.remember(session("ses_1"))
-    ctx.store.set("session_message", "ses_1", [
-      { id: "msg_user", type: "user", text: "hello", time: { created: 1 } },
-    ])
+    ctx.store.set("session_message", "ses_1", [{ id: "msg_user", type: "user", text: "hello", time: { created: 1 } }])
     const apply = (input: object) => ctx.store.applyV2(input as OpenCodeEvent)
 
     apply(stepStarted("msg_a"))
-    apply({ ...base, id: "evt_text_start", type: "session.text.started", data: { sessionID: "ses_1", assistantMessageID: "msg_a", ordinal: 0 } })
+    apply({
+      ...base,
+      id: "evt_text_start",
+      type: "session.text.started",
+      data: { sessionID: "ses_1", assistantMessageID: "msg_a", ordinal: 0 },
+    })
     // First visible fragment falls back to the full path (normalize drops empty text parts).
     apply(textDelta("msg_a", 0, "wor"))
 
@@ -92,9 +95,7 @@ describe("server session v2 delta fast path", () => {
   test("streams tool input deltas as pending state with raw input", () => {
     const ctx = setup({ ses_1: session("ses_1") })
     ctx.store.remember(session("ses_1"))
-    ctx.store.set("session_message", "ses_1", [
-      { id: "msg_user", type: "user", text: "hello", time: { created: 1 } },
-    ])
+    ctx.store.set("session_message", "ses_1", [{ id: "msg_user", type: "user", text: "hello", time: { created: 1 } }])
     const apply = (input: object) => ctx.store.applyV2(input as OpenCodeEvent)
 
     apply(stepStarted("msg_a"))
@@ -128,9 +129,7 @@ describe("server session v2 delta fast path", () => {
   test("falls back to the full path for unknown targets and stays consistent", () => {
     const ctx = setup({ ses_1: session("ses_1") })
     ctx.store.remember(session("ses_1"))
-    ctx.store.set("session_message", "ses_1", [
-      { id: "msg_user", type: "user", text: "hello", time: { created: 1 } },
-    ])
+    ctx.store.set("session_message", "ses_1", [{ id: "msg_user", type: "user", text: "hello", time: { created: 1 } }])
     const apply = (input: object) => ctx.store.applyV2(input as OpenCodeEvent)
 
     // Delta for an assistant that was never seen: reducer ignores it; nothing crashes.
@@ -169,13 +168,16 @@ describe("server session v2 delta fast path", () => {
   test("structural events after fast-path deltas rebuild the index and stay correct", () => {
     const ctx = setup({ ses_1: session("ses_1") })
     ctx.store.remember(session("ses_1"))
-    ctx.store.set("session_message", "ses_1", [
-      { id: "msg_user", type: "user", text: "hello", time: { created: 1 } },
-    ])
+    ctx.store.set("session_message", "ses_1", [{ id: "msg_user", type: "user", text: "hello", time: { created: 1 } }])
     const apply = (input: object) => ctx.store.applyV2(input as OpenCodeEvent)
 
     apply(stepStarted("msg_a"))
-    apply({ ...base, id: "evt_text_start", type: "session.text.started", data: { sessionID: "ses_1", assistantMessageID: "msg_a", ordinal: 0 } })
+    apply({
+      ...base,
+      id: "evt_text_start",
+      type: "session.text.started",
+      data: { sessionID: "ses_1", assistantMessageID: "msg_a", ordinal: 0 },
+    })
     apply(textDelta("msg_a", 0, "hello"))
     apply(textDelta("msg_a", 0, " world"))
 
@@ -197,7 +199,12 @@ describe("server session v2 delta fast path", () => {
     })
 
     // Text delta after the structural change still lands on the right item.
-    apply({ ...base, id: "evt_text_start2", type: "session.text.started", data: { sessionID: "ses_1", assistantMessageID: "msg_a", ordinal: 1 } })
+    apply({
+      ...base,
+      id: "evt_text_start2",
+      type: "session.text.started",
+      data: { sessionID: "ses_1", assistantMessageID: "msg_a", ordinal: 1 },
+    })
     apply(textDelta("msg_a", 1, "after"))
     expect(ctx.store.data.part.msg_a!.map((part) => [part.type, part.id, (part as { text?: string }).text])).toEqual([
       ["tool", "call_9", undefined],

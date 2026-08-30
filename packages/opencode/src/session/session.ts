@@ -501,7 +501,8 @@ const layer: Layer.Layer<
     // Legacy live-only part deltas are merged before publish; every other
     // event from this service flushes pending fragments first so ordering
     // with full-value part updates is preserved.
-    const publish = <D extends EventV2.Definition>(definition: D, data: EventV2.Data<D>) => events.publish(definition, data)
+    const publish = <D extends EventV2.Definition>(definition: D, data: EventV2.Data<D>) =>
+      events.publish(definition, data)
     const legacyDeltaCoalescer = createDeltaCoalescer<string>({
       publish: (key, fragment) => {
         const [sessionID, messageID, partID, field] = key.split("|")
@@ -902,7 +903,10 @@ const layer: Layer.Layer<
       field: string
       delta: string
     }) {
-      yield* legacyDeltaCoalescer.append(`${input.sessionID}|${input.messageID}|${input.partID}|${input.field}`, input.delta)
+      yield* legacyDeltaCoalescer.append(
+        `${input.sessionID}|${input.messageID}|${input.partID}|${input.field}`,
+        input.delta,
+      )
     })
 
     /** Finds the first message matching the predicate, searching newest-first. */

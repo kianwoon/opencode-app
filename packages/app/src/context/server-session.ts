@@ -981,9 +981,7 @@ export function createServerSession(
 
     const kind = event.type === "session.reasoning.delta" ? ("reasoning" as const) : ("text" as const)
     const ordinal = props.ordinal ?? 0
-    const contentIndex = index[kind === "text" ? "textOrdinals" : "reasoningOrdinals"].get(
-      `${message.id}:${ordinal}`,
-    )
+    const contentIndex = index[kind === "text" ? "textOrdinals" : "reasoningOrdinals"].get(`${message.id}:${ordinal}`)
     if (contentIndex === undefined) return false
     const content = message.content[contentIndex]
     if (!content || content.type !== kind) return false
@@ -1040,8 +1038,7 @@ export function createServerSession(
     // same final content as reconcile() at O(touched + delta-length).
     setData(
       produce((draft) => {
-        const map = (draft as { session_message: Record<string, SessionMessageInfo[] | undefined> })
-          .session_message
+        const map = (draft as { session_message: Record<string, SessionMessageInfo[] | undefined> }).session_message
         const current = map[reduction.sessionID]
         if (!current) {
           map[reduction.sessionID] = reduction.messages.slice()
@@ -1117,7 +1114,8 @@ export function createServerSession(
             const ctx = contextForMessageAt(reduction.messages, messageIndex.get(base)!)
             const one = normalizeMessage(reduction.sessionID, shell, ctx)
             for (const m of one.messages) {
-              if (touched.has(m.id)) apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: m } })
+              if (touched.has(m.id))
+                apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: m } })
             }
             for (const [mid, parts] of one.parts) {
               if (!touched.has(mid)) continue
@@ -1129,7 +1127,8 @@ export function createServerSession(
         const ctx = contextForMessageAt(reduction.messages, messageIndex.get(messageID) ?? 0)
         const one = normalizeMessage(reduction.sessionID, message, ctx)
         for (const m of one.messages) {
-          if (touched.has(m.id)) apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: m } })
+          if (touched.has(m.id))
+            apply({ type: "message.updated", properties: { sessionID: reduction.sessionID, info: m } })
         }
         for (const [mid, parts] of one.parts) {
           if (!touched.has(mid)) continue
@@ -1150,7 +1149,10 @@ export function createServerSession(
     }
   }
 
-  const findParent = (source: readonly SessionMessageInfo[], message: SessionMessageInfo): SessionMessageInfo | undefined => {
+  const findParent = (
+    source: readonly SessionMessageInfo[],
+    message: SessionMessageInfo,
+  ): SessionMessageInfo | undefined => {
     // Walk backwards from the message's position looking for the most
     // recent user/synthetic-with-description anchor (the parent's parentID
     // is set to that anchor's id; mirrors the full normalize's parentID

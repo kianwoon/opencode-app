@@ -62,7 +62,16 @@ describe("messages.transform", () => {
       })
       yield* effectPlugin.effect(host)
 
-      const draft = [{ type: "assistant", id: "a1", agent: "build", model: {}, time: { created: 0 }, content: [{ type: "text", id: "t", text: "x" }] }] as any
+      const draft = [
+        {
+          type: "assistant",
+          id: "a1",
+          agent: "build",
+          model: {},
+          time: { created: 0 },
+          content: [{ type: "text", id: "t", text: "x" }],
+        },
+      ] as any
       yield* messages.invoke(draft)
       expect(draft[0].content.length).toBe(0)
     }),

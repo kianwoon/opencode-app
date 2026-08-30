@@ -29,6 +29,7 @@ verification around every turn. All enhancements are implemented in-process
 ## Unique Features
 
 ### ⚡ Workflow DAG Engine (default ON)
+
 Multi-step pipelines as parallel subagent graphs. The model declares steps and
 dependencies with the `workflow` tool; the engine runs independent steps
 concurrently (event-driven, concurrency-capped), skips dependents of failed
@@ -44,6 +45,7 @@ User: "run lint and tests in parallel, then commit if both pass"
 ```
 
 ### 🧠 Task Assessor + Effort Governor
+
 Every task boundary is profiled by cheap heuristics (complexity, risk domains —
 zero LLM cost). Complex tasks **start** at medium reasoning effort,
 complex+risky at high — no wasted turns discovering difficulty. The model can
@@ -51,6 +53,7 @@ still escalate via a `request_effort` tool (monotonic, capped). Never lowers a
 user-pinned effort. Risky tasks get a "verify blast radius" system notice.
 
 ### 🗜️ Context Optimizer (KV-cache-aware pruning)
+
 Compresses the conversation before each request **without wrecking the
 provider cache**: under budget it is a strict no-op (byte-identical prefix =
 max cache hits); over budget it prunes the minimum needed, nearest the
@@ -58,30 +61,35 @@ protected tail. Reasoning is always stripped; token estimation is CJK-aware;
 live telemetry tracks hit rate and tokens saved (~90% hit rate in daily use).
 
 ### 🪟 Context Governor
+
 Token-efficient turns for the runner: per-agent context budgets for
 compaction, per-agent tool-catalog visibility (trim schema overhead), and a
 repo-index system context source that surfaces repository structure through
 the same delta-updated, epoch-persisted pipeline as other context.
 
 ### ✅ Verification Gate (opt-in)
+
 After a task finishes, a pure risk detector (sensitive paths, destructive
 prompts, broad refactors) can trigger **one reviewer subagent pass** whose
 findings are injected back before the session goes idle. Enable with
 `OPENCODE_EXPERIMENTAL_VERIFICATION=true`.
 
 ### ⏰ Followup Delivery (V2 sessions)
+
 Durably admitted prompts with a delivery time: `delivery: "followup"` +
 `deliverAt` keeps the input pending until its time passes, then promotes it at
 the idle boundary. The execution scheduler wakes the session when it is due;
 the database stays the source of truth.
 
 ### 💾 Durable Background Job Records
+
 Background job lifecycle transitions persist best-effort to a `background_job`
 table (never breaks live work). Restarts sweep stale "running" rows to
 cancelled ("interrupted by restart"); `list`/`get` merge live entries over
 recorded history.
 
 ### 🔎 Honest Failure Semantics
+
 Aborts are classified as aborts (not mystery `UnknownError`s), user-initiated
 subagent cancels report "Subagent cancelled", and early stream teardowns emit
 diagnosable telemetry instead of failing silently.
@@ -131,11 +139,11 @@ handles orchestration/delivery/durability. No external meta-harness.
 
 ## Feature Flags
 
-| Flag | Default | Controls |
-|---|---|---|
-| `OPENCODE_EXPERIMENTAL_WORKFLOWS` | on | Workflow DAG engine |
-| `OPENCODE_EXPERIMENTAL_VERIFICATION` | off | Automatic reviewer gate |
-| `experimental.workflow_concurrency` | 4 | Parallel workflow steps |
+| Flag                                 | Default | Controls                |
+| ------------------------------------ | ------- | ----------------------- |
+| `OPENCODE_EXPERIMENTAL_WORKFLOWS`    | on      | Workflow DAG engine     |
+| `OPENCODE_EXPERIMENTAL_VERIFICATION` | off     | Automatic reviewer gate |
+| `experimental.workflow_concurrency`  | 4       | Parallel workflow steps |
 
 ## Releases (macOS Apple Silicon)
 
@@ -144,10 +152,10 @@ Fork releases are published on the
 prod-channel desktop app whose embedded server channel is machine-verified
 before publishing:
 
-| Release | Highlights |
-|---|---|
-| [v1.18.25-fork.3](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.3) | Context governor, abort handling |
-| [v1.18.25-fork.2](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.2) | Review hardening, honest cancel reporting |
+| Release                                                                                  | Highlights                                                              |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [v1.18.25-fork.3](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.3) | Context governor, abort handling                                        |
+| [v1.18.25-fork.2](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.2) | Review hardening, honest cancel reporting                               |
 | [v1.18.25-fork.1](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.1) | Workflow engine, effort governor, context optimizer, Phase 3 durability |
 
 The full plan and rationale live in
@@ -214,4 +222,4 @@ documented in [harness-enhancement-plan.md](./harness-enhancement-plan.md).
 **Upstream community:** [Discord](https://discord.gg/opencode) |
 [X.com](https://x.com/opencode)
 
-*This fork is not built by the OpenCode team and is not affiliated with them.*
+_This fork is not built by the OpenCode team and is not affiliated with them._

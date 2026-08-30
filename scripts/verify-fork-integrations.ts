@@ -88,7 +88,8 @@ const CHECKS: Array<{ label: string; check: () => boolean | Promise<boolean> }> 
   },
   {
     label: "auto-updater disabled for local builds",
-    check: () => grep("packages/desktop/package.json", "autoUpdater") || grep("packages/desktop/src/main/updater.ts", "disabled"),
+    check: () =>
+      grep("packages/desktop/package.json", "autoUpdater") || grep("packages/desktop/src/main/updater.ts", "disabled"),
   },
   {
     label: "channel propagation in prebuild",
@@ -110,7 +111,9 @@ const CHECKS: Array<{ label: string; check: () => boolean | Promise<boolean> }> 
   },
   {
     label: "MCP retry on transient spawn failures",
-    check: () => grep("packages/opencode/src/mcp/client.ts", "spawn.*retry") || grep("packages/opencode/src/mcp/client.ts", "retry"),
+    check: () =>
+      grep("packages/opencode/src/mcp/client.ts", "spawn.*retry") ||
+      grep("packages/opencode/src/mcp/client.ts", "retry"),
   },
   {
     label: "dedupe permission requests (Chinese)",
@@ -136,7 +139,9 @@ const CHECKS: Array<{ label: string; check: () => boolean | Promise<boolean> }> 
   },
   {
     label: "PowerShell command encoding",
-    check: () => grep("packages/opencode/src/shell/shell.ts", "PowerShell") || grep("packages/opencode/src/shell/shell.ts", "powershell"),
+    check: () =>
+      grep("packages/opencode/src/shell/shell.ts", "PowerShell") ||
+      grep("packages/opencode/src/shell/shell.ts", "powershell"),
   },
   {
     label: "keep shell tail on oversized lines",

@@ -360,7 +360,11 @@ describe("ProviderTransform.options - openrouter routing", () => {
 
   test("does not apply openrouter routing to other providers", () => {
     const result = ProviderTransform.options({
-      model: { ...model, providerID: ProviderV2.ID.make("custom"), api: { ...model.api, npm: "@ai-sdk/openai-compatible" } },
+      model: {
+        ...model,
+        providerID: ProviderV2.ID.make("custom"),
+        api: { ...model.api, npm: "@ai-sdk/openai-compatible" },
+      },
       sessionID,
       providerOptions: { routing: { sort: "throughput" } },
     })

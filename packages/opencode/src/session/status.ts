@@ -34,9 +34,7 @@ const layer = Layer.effect(
         // Remove when Bun ships an idle-driven GC controller natively
         // (https://github.com/oven-sh/bun/pull/36638).
         let timer: ReturnType<typeof setTimeout> | undefined
-        yield* Effect.addFinalizer(() =>
-          timer === undefined ? Effect.void : Effect.sync(() => clearTimeout(timer)),
-        )
+        yield* Effect.addFinalizer(() => (timer === undefined ? Effect.void : Effect.sync(() => clearTimeout(timer))))
         const onIdle = (idle: boolean) => {
           if (typeof Bun === "undefined") return
           if (timer !== undefined) clearTimeout(timer)

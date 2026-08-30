@@ -60,7 +60,12 @@ describe("v2 delta fast path benchmark", () => {
       ...base,
       id: "evt_step",
       type: "session.step.started",
-      data: { sessionID: "ses_1", assistantMessageID: "msg_live", agent: "build", model: { id: "model", providerID: "provider" } },
+      data: {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_live",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+      },
     } as never)
     store.applyV2({
       ...base,
@@ -99,8 +104,8 @@ describe("v2 delta fast path benchmark", () => {
     const perDeltaUs = ((after - before) / COUNT) * 1000
     console.log(`per-delta: ${perDeltaUs.toFixed(1)}us (${COUNT} deltas, ${(after - before).toFixed(0)}ms total)`)
     expect(store.data.part.msg_live?.[0]).toMatchObject({ type: "text" })
-    expect(store.data.part.msg_live?.[0]?.type === "text" ? store.data.part.msg_live[0].text.length : 0).toBeGreaterThan(
-      COUNT * 5,
-    )
+    expect(
+      store.data.part.msg_live?.[0]?.type === "text" ? store.data.part.msg_live[0].text.length : 0,
+    ).toBeGreaterThan(COUNT * 5)
   })
 })

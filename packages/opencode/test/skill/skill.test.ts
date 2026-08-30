@@ -263,9 +263,9 @@ description: A skill the user turned off.
               expect(all["off-skill"]).toBeDefined()
               expect(all["enabled-skill"]).toBeDefined()
 
-                            expect(yield* skill.disabled()).toEqual(new Set(["off-skill"]))
+              expect(yield* skill.disabled()).toEqual(new Set(["off-skill"]))
               expect((yield* skill.available()).map((s) => s.name)).toEqual(["customize-opencode", "enabled-skill"])
-              expect((yield* skill.get("off-skill"))).toBeUndefined()
+              expect(yield* skill.get("off-skill")).toBeUndefined()
               const error = yield* Effect.flip(skill.require("off-skill"))
               expect(error._tag).toBe("Skill.NotFoundError")
               expect(yield* skill.require("enabled-skill")).toBeDefined()
@@ -734,7 +734,9 @@ description: A skill that will be removed.
           expect(removed.name).toBe("removable-skill")
 
           expect(yield* skill.get("removable-skill")).toBeUndefined()
-          const stat = yield* Effect.promise(() => fs.stat(path.join(dir, ".opencode", "skill", "removable-skill")).catch(() => undefined))
+          const stat = yield* Effect.promise(() =>
+            fs.stat(path.join(dir, ".opencode", "skill", "removable-skill")).catch(() => undefined),
+          )
           expect(stat).toBeUndefined()
         }),
       { git: true },

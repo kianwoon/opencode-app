@@ -85,28 +85,32 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       delta,
     })
   })
-  const publishReasoningDelta = Effect.fnUntraced(
-    function* (assistantMessageID: string, reasoningID: string, delta: string) {
-      yield* events.publish(SessionEvent.Reasoning.Delta, {
-        sessionID: input.sessionID,
-        assistantMessageID: assistantMessageID as SessionMessage.ID,
-        timestamp: yield* timestamp,
-        reasoningID,
-        delta,
-      })
-    },
-  )
-  const publishToolInputDelta = Effect.fnUntraced(
-    function* (assistantMessageID: string, callID: string, delta: string) {
-      yield* events.publish(SessionEvent.Tool.Input.Delta, {
-        sessionID: input.sessionID,
-        timestamp: yield* timestamp,
-        assistantMessageID: assistantMessageID as SessionMessage.ID,
-        callID,
-        delta,
-      })
-    },
-  )
+  const publishReasoningDelta = Effect.fnUntraced(function* (
+    assistantMessageID: string,
+    reasoningID: string,
+    delta: string,
+  ) {
+    yield* events.publish(SessionEvent.Reasoning.Delta, {
+      sessionID: input.sessionID,
+      assistantMessageID: assistantMessageID as SessionMessage.ID,
+      timestamp: yield* timestamp,
+      reasoningID,
+      delta,
+    })
+  })
+  const publishToolInputDelta = Effect.fnUntraced(function* (
+    assistantMessageID: string,
+    callID: string,
+    delta: string,
+  ) {
+    yield* events.publish(SessionEvent.Tool.Input.Delta, {
+      sessionID: input.sessionID,
+      timestamp: yield* timestamp,
+      assistantMessageID: assistantMessageID as SessionMessage.ID,
+      callID,
+      delta,
+    })
+  })
   const coalescer = createDeltaCoalescer<string>({
     publish: (key, fragment) => {
       const [kind, messageID, target] = key.split("|")

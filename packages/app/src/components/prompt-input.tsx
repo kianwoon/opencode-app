@@ -1580,9 +1580,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 "padding-bottom": space,
                 // Inline styles so the message font wins the cascade over
                 // composite utilities like .text-14-regular.
-                "font-family": messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()),
+                "font-family": messageFontFamily(
+                  settings.appearance.messageFont(),
+                  settings.appearance.messageFontWeight(),
+                ),
                 "font-weight": String(settings.appearance.messageFontWeight()),
-                color: fontColor(settings.appearance.messageFontColorLight(), settings.appearance.messageFontColorDark()) || undefined,
+                color:
+                  fontColor(settings.appearance.messageFontColorLight(), settings.appearance.messageFontColorDark()) ||
+                  undefined,
               }}
             />
             <div
@@ -1591,9 +1596,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               style={{
                 "padding-bottom": space,
                 display: prompt.dirty() || composingText() ? "none" : undefined,
-                "font-family": messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()),
+                "font-family": messageFontFamily(
+                  settings.appearance.messageFont(),
+                  settings.appearance.messageFontWeight(),
+                ),
                 "font-weight": String(settings.appearance.messageFontWeight()),
-                color: fontColor(settings.appearance.messageFontColorLight(), settings.appearance.messageFontColorDark()) || undefined,
+                color:
+                  fontColor(settings.appearance.messageFontColorLight(), settings.appearance.messageFontColorDark()) ||
+                  undefined,
               }}
             >
               {placeholder()}

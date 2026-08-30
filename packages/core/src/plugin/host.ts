@@ -19,9 +19,7 @@ import { State } from "../state"
 const mutable = <T>(value: T) => value as DeepMutable<T>
 
 export interface MessagesTransform {
-  readonly register: (
-    callback: (messages: unknown[]) => void,
-  ) => Effect.Effect<State.Registration, never, Scope.Scope>
+  readonly register: (callback: (messages: unknown[]) => void) => Effect.Effect<State.Registration, never, Scope.Scope>
   readonly invoke: (messages: unknown[]) => Effect.Effect<void>
 }
 
@@ -49,10 +47,7 @@ export const makeMessagesTransform = (): MessagesTransform => {
   }
 }
 
-export const make = Effect.fn("PluginHost.make")(function* (
-  plugin: PluginV2.Interface,
-  messages?: MessagesTransform,
-) {
+export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Interface, messages?: MessagesTransform) {
   const messagesRegistry = messages ?? makeMessagesTransform()
   const agents = yield* AgentV2.Service
   const aisdk = yield* AISDK.Service
@@ -137,7 +132,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
       transform: commands.transform,
     },
     integration: {
-      reload: integration.reload,      connection: {
+      reload: integration.reload,
+      connection: {
         active: (id) => integration.connection.active(Integration.ID.make(id)),
         resolve: (connection) =>
           integration.connection.resolve(
@@ -226,8 +222,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         ),
     },
     messages: {
-      transform: (callback) =>
-        messagesRegistry.register((draft) => callback(draft as never)),
+      transform: (callback) => messagesRegistry.register((draft) => callback(draft as never)),
     },
     plugin: {
       add: (input) => plugin.add(PluginV2.ID.make(input.id), input.effect),

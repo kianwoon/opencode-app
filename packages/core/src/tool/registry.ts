@@ -21,7 +21,10 @@ export type ExecuteInput = {
 }
 
 export interface Interface {
-  readonly materialize: (permissions?: PermissionV2.Ruleset, options?: MaterializeOptions) => Effect.Effect<Materialization>
+  readonly materialize: (
+    permissions?: PermissionV2.Ruleset,
+    options?: MaterializeOptions,
+  ) => Effect.Effect<Materialization>
   /** Internal registration capability exposed publicly only through Tools.Service. */
   readonly register: (tools: Readonly<Record<string, AnyTool>>) => Effect.Effect<void, RegistrationError, Scope.Scope>
 }
@@ -118,9 +121,9 @@ const registryLayer = Layer.effect(
           if (whollyDisabled(permission(registration.tool, name), permissions)) registrations.delete(name)
         // Hidden tools stay executable through settle; only the advertised
         // definition is removed (catalog visibility, not authorization).
-        const definitions = Array.from(registrations, ([name, registration]) => definition(name, registration.tool)).filter(
-          (item) => !options?.hidden?.has(item.name),
-        )
+        const definitions = Array.from(registrations, ([name, registration]) =>
+          definition(name, registration.tool),
+        ).filter((item) => !options?.hidden?.has(item.name))
         return {
           definitions,
           settle: (input) => {

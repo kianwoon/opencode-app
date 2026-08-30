@@ -1613,10 +1613,7 @@ test("official deepseek models route through @ai-sdk/deepseek with toggle+effort
         id: "deepseek-v4-flash",
         name: "DeepSeek V4 Flash",
         reasoning: true,
-        reasoning_options: [
-          { type: "toggle" },
-          { type: "effort", values: ["high", "max"] },
-        ],
+        reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["high", "max"] }],
         interleaved: { field: "reasoning_content" },
         tool_call: true,
         temperature: true,
@@ -1635,7 +1632,6 @@ test("official deepseek models route through @ai-sdk/deepseek with toggle+effort
   expect(model.variants?.none).toEqual({ thinking: { type: "disabled" } })
   expect(model.variants?.high).toEqual({ thinking: { type: "enabled" }, reasoningEffort: "high" })
 })
-
 
 it.instance("model variants are generated for reasoning models", () =>
   Effect.gen(function* () {

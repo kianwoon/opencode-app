@@ -86,7 +86,8 @@ export function verificationGate(input: VerificationInput): VerificationVerdict 
   if (riskyPath) return { review: true, reason: `modified a risk-sensitive path (matched "${riskyPath}")` }
 
   const riskyPrompt = RISKY_PROMPT_HINTS.find((hint) => lowerPrompt.includes(hint))
-  if (riskyPrompt) return { review: true, reason: `task involves a destructive operation (matched "${riskyPrompt.trim()}")` }
+  if (riskyPrompt)
+    return { review: true, reason: `task involves a destructive operation (matched "${riskyPrompt.trim()}")` }
 
   const breadthHits = BREADTH_PROMPT_HINTS.filter((hint) => lowerPrompt.includes(hint)).length
   const mutatedCount = input.tools.filter((t) => MUTATION_TOOLS.has(t.tool)).length

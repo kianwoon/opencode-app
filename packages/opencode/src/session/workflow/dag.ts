@@ -24,7 +24,6 @@ type StepLike = { readonly id: string; readonly dependsOn: readonly string[] }
 /** A step that also names its executing agent (workflow admission needs it). */
 type StepWithAgent = StepLike & { readonly agent: string }
 
-
 /** Validated graph: every step id is known, unique, and referenced ids exist. */
 export interface ValidatedDag<S extends StepLike = WorkflowStepInput> {
   readonly steps: readonly S[]
@@ -61,8 +60,7 @@ export function validateWorkflow<S extends StepWithAgent>(
   knownAgents?: ReadonlySet<string>,
 ): ValidatedDag<S> | WorkflowAdmissionError {
   if (steps.length === 0) return { _tag: "empty-steps" }
-  if (steps.length > MAX_WORKFLOW_STEPS)
-    return { _tag: "too-many-steps", count: steps.length, max: MAX_WORKFLOW_STEPS }
+  if (steps.length > MAX_WORKFLOW_STEPS) return { _tag: "too-many-steps", count: steps.length, max: MAX_WORKFLOW_STEPS }
   if (knownAgents) {
     for (const step of steps) {
       if (!knownAgents.has(step.agent)) return { _tag: "unknown-agent", stepId: step.id, agent: step.agent }
@@ -167,9 +165,7 @@ export function readySteps<S extends StepLike>(
 ): readonly S[] {
   return steps.filter(
     (s) =>
-      !completed.has(s.id) &&
-      !skipped.has(s.id) &&
-      s.dependsOn.every((dep) => completed.has(dep) || skipped.has(dep)),
+      !completed.has(s.id) && !skipped.has(s.id) && s.dependsOn.every((dep) => completed.has(dep) || skipped.has(dep)),
   )
 }
 

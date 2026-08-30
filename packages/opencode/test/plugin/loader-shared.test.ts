@@ -108,9 +108,11 @@ describe("plugin.loader.shared", () => {
         const writePlugin = async (version: string) => {
           await Bun.write(
             file,
-            [`await Bun.write(${JSON.stringify(mark)}, ${JSON.stringify(version)})`, "export default async () => ({})", ""].join(
-              "\n",
-            ),
+            [
+              `await Bun.write(${JSON.stringify(mark)}, ${JSON.stringify(version)})`,
+              "export default async () => ({})",
+              "",
+            ].join("\n"),
           )
         }
         await writePlugin("v1")

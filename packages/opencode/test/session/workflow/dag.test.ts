@@ -96,7 +96,11 @@ describe("workflow dag", () => {
     // Nothing done → only build is ready.
     expect(readySteps(dag.steps, new Set(), new Set()).map((s) => s.id)).toEqual(["build"])
     // build done → test and lint ready (parallel).
-    expect(readySteps(dag.steps, new Set(["build"]), new Set()).map((s) => s.id).sort()).toEqual(["lint", "test"])
+    expect(
+      readySteps(dag.steps, new Set(["build"]), new Set())
+        .map((s) => s.id)
+        .sort(),
+    ).toEqual(["lint", "test"])
     // build + test + lint done → publish ready.
     expect(readySteps(dag.steps, new Set(["build", "test", "lint"]), new Set()).map((s) => s.id)).toEqual(["publish"])
   })
@@ -135,7 +139,7 @@ describe("workflow admission (validateWorkflow)", () => {
   test("rejects empty step lists", () => {
     const result = validateWorkflow([])
     expect("_tag" in result && result._tag === "empty-steps").toBe(true)
-    expect(workflowErrorMessage("t", { _tag: "empty-steps" })).toContain('has no steps')
+    expect(workflowErrorMessage("t", { _tag: "empty-steps" })).toContain("has no steps")
   })
 
   test("rejects graphs over the step cap with the count in the message", () => {

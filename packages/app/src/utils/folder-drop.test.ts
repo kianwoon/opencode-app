@@ -7,7 +7,9 @@ function fakeFile(args: { type?: string; path?: string } = {}) {
   return { file, path: args.path }
 }
 
-function dropEvent(items: Array<{ kind: string; entry?: { isDirectory: boolean } | null; file?: ReturnType<typeof fakeFile> }>) {
+function dropEvent(
+  items: Array<{ kind: string; entry?: { isDirectory: boolean } | null; file?: ReturnType<typeof fakeFile> }>,
+) {
   return {
     preventDefault: () => {},
     stopPropagation: () => {},

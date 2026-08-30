@@ -202,12 +202,15 @@ export const TaskEffortRouterPlugin = (async () => {
   return {
     "chat.message": async (input, output) => {
       // New user message = new task boundary: re-assess and reset effort.
-      const text = output.parts
-        .flatMap((part) => (part.type === "text" ? [part.text] : []))
-        .join(" ")
+      const text = output.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(" ")
       const profile = assess(text)
       trackSession(input.sessionID)
-      state.set(input.sessionID, { escalated: undefined, baseline: profile.baseline, escalations: 0, risky: profile.risky })
+      state.set(input.sessionID, {
+        escalated: undefined,
+        baseline: profile.baseline,
+        escalations: 0,
+        risky: profile.risky,
+      })
     },
 
     "chat.params": async (input, output) => {
@@ -258,10 +261,7 @@ export const TaskEffortRouterPlugin = (async () => {
         description:
           "Request higher reasoning effort for this task. Call ONLY when the work is clearly harder than expected and needs deeper reasoning. Effort is monotonic (never decreases) and capped per task.",
         args: {
-          level: tool.schema
-            .enum(["medium", "high"])
-            .optional()
-            .describe("Target effort level. Defaults to high."),
+          level: tool.schema.enum(["medium", "high"]).optional().describe("Target effort level. Defaults to high."),
           reason: tool.schema.string().describe("One short sentence: why deeper reasoning is needed."),
         },
         execute: async (args, ctx) => {

@@ -34,6 +34,14 @@ import { ProviderError } from "./error"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
+// Default idle guard for providers that configure no timeout at all. Without
+// it, a provider that silently stops sending SSE chunks (observed: z.ai GLM
+// behind a gateway, 15-minute silent stall on a ~200k-token turn) parks the
+// session until a manual abort. The value only ever fires on a *gap* between
+// chunks (or missing headers), never on total turn duration, so long healthy
+// reasoning turns are unaffected.
+export const DEFAULT_IDLE_TIMEOUT = 300_000
+
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
@@ -44,7 +52,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
     async pull(ctrl) {
       const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
         const id = setTimeout(() => {
-          const err = new ProviderError.ResponseStreamError("SSE read timed out")
+          const err = new ProviderError.ChunkStallError(ms)
           ctl.abort(err)
           void reader.cancel(err)
           reject(err)
@@ -89,6 +97,49 @@ function timeoutController(ms: number) {
     signal: ctl.signal,
     clear: () => clearTimeout(id),
   }
+}
+
+export type TimeoutOptions = {
+  timeout?: number | string | false
+  chunkTimeout?: number | false
+  headerTimeout?: number | false
+}
+
+/**
+ * Resolves the effective idle guard per phase. All guards are IDLE-based:
+ * they never limit total request duration, only header arrival and gaps
+ * between streamed chunks.
+ *
+ * When no timeout is configured at all, DEFAULT_IDLE_TIMEOUT applies so a
+ * silently-stalled provider stream cannot park a session forever. Escape
+ * hatches (each phase independently):
+ *   timeout: false      — disables both phases entirely
+ *   chunkTimeout: false — disables the chunk-gap guard only
+ *   headerTimeout: false— disables the headers guard only
+ * Explicit phase timeouts always win for their phase.
+ */
+export function resolveIdleTimeouts(options: TimeoutOptions) {
+  const idleMs =
+    options.timeout === false
+      ? undefined
+      : typeof options.timeout === "number" && options.timeout > 0
+        ? options.timeout
+        : typeof options.timeout === "string" && options.timeout !== "" && Number(options.timeout) > 0
+          ? Number(options.timeout)
+          : DEFAULT_IDLE_TIMEOUT
+  const chunkMs =
+    options.chunkTimeout === false
+      ? undefined
+      : typeof options.chunkTimeout === "number" && options.chunkTimeout > 0
+        ? options.chunkTimeout
+        : idleMs
+  const headerMs =
+    options.headerTimeout === false
+      ? undefined
+      : typeof options.headerTimeout === "number" && options.headerTimeout > 0
+        ? options.headerTimeout
+        : idleMs
+  return { chunkMs, headerMs }
 }
 
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
@@ -1867,7 +1918,6 @@ const layer = Layer.effect(
         const requestTimeout = options["timeout"]
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
-
         // Some providers (observed: z.ai GLM) serve implicit-prefix-cache reads
         // per connection: a pooled keep-alive socket reads a cache snapshot
         // frozen at connection establishment, so a long-lived socket parked in
@@ -1888,20 +1938,11 @@ const layer = Layer.effect(
           // the headers phase and, unless explicit chunkTimeout/headerTimeout
           // override it, to gaps between SSE chunks. Explicit phase timeouts
           // always win for their phase.
-          const idleMs =
-            typeof requestTimeout === "number" && requestTimeout > 0
-              ? requestTimeout
-              : typeof requestTimeout === "string" && requestTimeout !== "" && Number(requestTimeout) > 0
-                ? Number(requestTimeout)
-                : undefined
-          const effectiveChunkMs =
-            typeof chunkTimeout === "number" && chunkTimeout > 0 ? chunkTimeout : idleMs
-          const effectiveHeaderMs =
-            headerTimeout === false
-              ? undefined
-              : typeof headerTimeout === "number" && headerTimeout > 0
-                ? headerTimeout
-                : idleMs
+          const { chunkMs: effectiveChunkMs, headerMs: effectiveHeaderMs } = resolveIdleTimeouts({
+            timeout: requestTimeout,
+            chunkTimeout,
+            headerTimeout,
+          })
           const chunkAbortCtl = effectiveChunkMs ? new AbortController() : undefined
           const headerTimeoutCtl = effectiveHeaderMs ? timeoutController(effectiveHeaderMs) : undefined
           const signals: AbortSignal[] = []
@@ -1913,13 +1954,14 @@ const layer = Layer.effect(
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
-          const res = await (freshConnection
-            ? fetchFreshConnection(input, opts as RequestInit)
-            : fetchFn(input, {
-                ...opts,
-                // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-                timeout: false,
-              })
+          const res = await (
+            freshConnection
+              ? fetchFreshConnection(input, opts as RequestInit)
+              : fetchFn(input, {
+                  ...opts,
+                  // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
+                  timeout: false,
+                })
           ).finally(() => headerTimeoutCtl?.clear())
 
           if (!chunkAbortCtl || !effectiveChunkMs) return res

@@ -695,12 +695,16 @@ export function fromError(
         { cause: e },
       ).toObject()
     case e instanceof ProviderError.ResponseStreamError:
+      // ChunkStallError (idle-guard abort) must be retried: a silent stall is
+      // a transient provider-side condition. Bounded by RETRY_MAX_RETRIES in
+      // the retry schedule, so a persistently-stalled provider still gives up.
       return new APIError(
         {
           message: e.message,
           isRetryable: true,
           metadata: {
             code: e.name,
+            ...(e instanceof ProviderError.ChunkStallError ? { stallIdleMs: String(e.ms) } : {}),
           },
         },
         { cause: e },

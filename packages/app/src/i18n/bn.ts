@@ -881,7 +881,8 @@ export const dict: Record<string, string> = {
   "sidebar.project.cleanupSessions": "Clean up old sessions",
   "sidebar.project.cleanupSessions.title": "Clean up old sessions",
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
-  "sidebar.project.cleanupSessions.description": "Old session data will be permanently deleted and cannot be recovered.",
+  "sidebar.project.cleanupSessions.description":
+    "Old session data will be permanently deleted and cannot be recovered.",
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "কোনো প্রকল্প খোলা নেই",
   "sidebar.empty.description": "শুরু করতে একটি প্রকল্প খুলুন",
@@ -1119,10 +1120,12 @@ export const dict: Record<string, string> = {
   "settings.plugins.section.plugins": "Plugins",
   "settings.plugins.section.skills": "Skills",
   "settings.plugins.plugins.empty": "No plugins configured",
-  "settings.plugins.plugins.hint": "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
+  "settings.plugins.plugins.hint":
+    "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
   "settings.plugins.plugins.add.title": "Add plugin",
   "settings.plugins.plugins.add.browse": "ব্রাউজ…",
-  "settings.plugins.plugins.add.description": "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
+  "settings.plugins.plugins.add.description":
+    "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
   "settings.plugins.plugins.add.placeholder": "Package name or path",
   "settings.plugins.plugins.add.failed": "Failed to add plugin",
   "settings.plugins.plugins.remove.failed": "Failed to remove plugin",
@@ -1135,7 +1138,8 @@ export const dict: Record<string, string> = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.directories.title": "স্কিল ডিরেক্টরি",
-  "settings.plugins.skills.directories.hint": "একটি ডিরেক্টরি বন্ধ করলে তার স্কিলগুলি আবিষ্কার থেকে বাদ পড়ে। ফাইলগুলি ডিস্কে থেকে যায়।",
+  "settings.plugins.skills.directories.hint":
+    "একটি ডিরেক্টরি বন্ধ করলে তার স্কিলগুলি আবিষ্কার থেকে বাদ পড়ে। ফাইলগুলি ডিস্কে থেকে যায়।",
   "settings.plugins.skills.directories.toggle": "স্কিল ডিরেক্টরি {{directory}} টগল করুন",
   "settings.plugins.skills.directories.disabled": "বন্ধ",
   "settings.plugins.skills.directories.toggle.failed": "স্কিল ডিরেক্টরি আপডেট করতে ব্যর্থ",

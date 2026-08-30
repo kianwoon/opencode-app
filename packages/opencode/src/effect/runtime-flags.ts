@@ -4,7 +4,10 @@ import { ConfigService } from "@/effect/config-service"
 const bool = (name: string) => Config.boolean(name).pipe(Config.withDefault(false))
 /** A boolean flag that is ON unless explicitly disabled via env. */
 const boolDefaultOn = (name: string) =>
-  Config.boolean(name).pipe(Config.withDefault(true), Config.map((value) => value !== false))
+  Config.boolean(name).pipe(
+    Config.withDefault(true),
+    Config.map((value) => value !== false),
+  )
 const positiveInteger = (name: string) =>
   Config.number(name).pipe(
     Config.map((value) => (Number.isInteger(value) && value > 0 ? value : undefined)),

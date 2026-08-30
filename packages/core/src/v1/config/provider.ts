@@ -100,10 +100,12 @@ export const Info = Schema.Struct({
         }),
         timeout: Schema.optional(
           Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
-            description: "Timeout in milliseconds for full requests to this provider. Set to false to disable timeout.",
+            description:
+              "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 300000 when unset; set to false to disable the idle guards entirely.",
           }),
         ).annotate({
-          description: "Timeout in milliseconds for full requests to this provider. Set to false to disable timeout.",
+          description:
+            "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 300000 when unset; set to false to disable the idle guards entirely.",
         }),
         headerTimeout: Schema.optional(
           Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
@@ -114,9 +116,14 @@ export const Info = Schema.Struct({
           description:
             "Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.",
         }),
-        chunkTimeout: Schema.optional(PositiveInt).annotate({
+        chunkTimeout: Schema.optional(
+          Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
+            description:
+              "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (300000 when unset); set to false to disable the chunk-gap guard.",
+          }),
+        ).annotate({
           description:
-            "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
+            "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (300000 when unset); set to false to disable the chunk-gap guard.",
         }),
       }),
       [Schema.Record(Schema.String, Schema.Any)],

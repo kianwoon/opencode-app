@@ -59,7 +59,11 @@ export function touchCachedMarkdown(key: string, value: MarkdownCacheEntry) {
   cache.delete(first)
 }
 
-export async function preloadMarkdown(text: string, cacheKey: string, parser: { parse(text: string): string | Promise<string> }) {
+export async function preloadMarkdown(
+  text: string,
+  cacheKey: string,
+  parser: { parse(text: string): string | Promise<string> },
+) {
   await Promise.all(
     project(undefined, text, false).blocks.map(async (block, index) => {
       if (block.mode === "code") return

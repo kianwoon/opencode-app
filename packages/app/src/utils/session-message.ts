@@ -136,10 +136,7 @@ export type NormalizeContext = {
  * without walking messages before it. Mirrors the running state of
  * `normalizeSessionMessages` at that position.
  */
-export function contextForMessageAt(
-  source: readonly SessionMessageInfo[],
-  index: number,
-): NormalizeContext {
+export function contextForMessageAt(source: readonly SessionMessageInfo[], index: number): NormalizeContext {
   let agent = ""
   let model: { id: string; providerID: string; variant?: string } = emptyModel
   let parentID: string | undefined
@@ -303,10 +300,7 @@ export function sessionMessagePartID(messageID: string, type: "text" | "reasonin
   return `${messageID}:${type}:${ordinal}`
 }
 
-export function streamingToolState(
-  name: string,
-  raw: string,
-): Extract<ToolPart["state"], { status: "pending" }> {
+export function streamingToolState(name: string, raw: string): Extract<ToolPart["state"], { status: "pending" }> {
   const value = Option.getOrUndefined(decodeToolInput(raw))
   return { status: "pending", input: normalizeToolInput(name, record(value) ? value : {}), raw }
 }

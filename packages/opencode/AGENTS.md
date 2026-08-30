@@ -12,11 +12,23 @@
   `headerTimeout` override it, gaps between SSE chunks. Explicit phase timeouts always win
   for their phase. NEVER reintroduce a hard total-time timeout on provider fetch — long
   reasoning turns legitimately run for many minutes.
+- **Default ON (2026-08-30)**: when no timeout options are configured, `DEFAULT_IDLE_TIMEOUT`
+  (300s) applies to BOTH phases via `resolveIdleTimeouts` — so a provider stream that goes
+  silently silent mid-turn (observed: z.ai GLM gateway parked silent-canyon 15 minutes with
+  zero log lines) is aborted and retried instead of hanging until manual cancel. Escape
+  hatches, per phase: `timeout: false` (both), `chunkTimeout: false` (chunk guard only),
+  `headerTimeout: false` (headers guard only).
+- Stalls raise `ProviderError.ChunkStallError` (subclass of `ResponseStreamError`, carries
+  `ms`), mapped to a RETRYABLE `APIError` with `metadata.code = "ProviderChunkStallError"`
+  in `MessageV2.fromError` — bounded by the normal retry schedule (5 attempts, backoff).
+  The AI SDK `onError` handler in src/session/llm.ts logs stalls as WARN (not ERROR) with
+  `stallIdleMs`. `console.warn` does NOT reach opencode.log — only Effect loggers do.
 - Diagnostic: pair `message=process ... messageID=X` log lines (start vs error timestamps);
   an exact repeated delta across aborts = a config/code timer, not infra.
 - Acceptance guard: test/provider/header-timeout.test.ts ("timeout does not abort a healthy
   SSE stream mid-body", "timeout aborts when response headers never arrive", "timeout acts
-  as idle guard between SSE chunks").
+  as idle guard between SSE chunks", "timeout: false disables the default idle guard") +
+  test/provider/idle-timeout.test.ts (resolver defaults and escape hatches).
 
 ## Idle-GC hook (Bun) — remove when Bun ships oven-sh/bun#36638
 
@@ -77,24 +89,24 @@
   cache — only a bare path + query busts it. `PluginLoader.load` therefore suffixes file
   plugin entries with `?mtime=<ms>` (via `bustFileEntry`) so edited plugin code re-evaluates
   across reloads. npm plugin entries keep their stable URL (their versioned install dir
-   already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
-   "re-evaluates edited file plugin code across instance reload".
+  already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
+  "re-evaluates edited file plugin code across instance reload".
 
- ## Plugin loader must be Node-compatible (desktop sidecar)
+## Plugin loader must be Node-compatible (desktop sidecar)
 
- - The desktop app runs its server as a **Node.js sidecar**
-   (`utilityProcess.fork` of `sidecar.js`), NOT on Bun. The CLI runs on Bun.
-   Any plugin-loading path that touches a Bun-only global (`Bun.file`, `Bun.$`, …)
-   crashes the sidecar with `ReferenceError: Bun is undefined`.
- - `PluginLoader.bustFileEntry` used `Bun.file(file).stat()` — so in the app **every
-   file-based plugin silently failed to load** while the CLI loaded them fine. The
-   failure is published as a **session error event (TUI toast), never a log line**,
-   so `opencode.log` showed nothing and the regression stayed hidden.
- - Rule: plugin load/resolve paths must use `node:fs/promises` (or other Node APIs),
-   never `Bun.*`. Acceptance guard: `bun test test/plugin/loader-shared.test.ts` +
-   a manual sidecar smoke test (the CLI alone cannot catch this — it runs on Bun).
+- The desktop app runs its server as a **Node.js sidecar**
+  (`utilityProcess.fork` of `sidecar.js`), NOT on Bun. The CLI runs on Bun.
+  Any plugin-loading path that touches a Bun-only global (`Bun.file`, `Bun.$`, …)
+  crashes the sidecar with `ReferenceError: Bun is undefined`.
+- `PluginLoader.bustFileEntry` used `Bun.file(file).stat()` — so in the app **every
+  file-based plugin silently failed to load** while the CLI loaded them fine. The
+  failure is published as a **session error event (TUI toast), never a log line**,
+  so `opencode.log` showed nothing and the regression stayed hidden.
+- Rule: plugin load/resolve paths must use `node:fs/promises` (or other Node APIs),
+  never `Bun.*`. Acceptance guard: `bun test test/plugin/loader-shared.test.ts` +
+  a manual sidecar smoke test (the CLI alone cannot catch this — it runs on Bun).
 
- ## Workflow/DAG engine gotchas
+## Workflow/DAG engine gotchas
 
 - The `workflow` tool executes inside the session loop's own tool pass. It must admit its
   `WorkflowPart` with `noReply: true` via `ops.prompt(...)`; calling with a loop would wait

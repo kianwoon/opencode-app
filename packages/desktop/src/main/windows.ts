@@ -486,7 +486,9 @@ function wireZoom(win: BrowserWindow) {
     // Keyboard Ctrl+= / Cmd+= is routed through the app menu accelerators
     // (view.zoomIn / view.zoomOut), which step by ZOOM_STEP too. A programmatic
     // setZoomFactor does not re-emit zoom-changed, so there is no feedback loop.
-    win.webContents.setZoomFactor(clampZoom(win.webContents.getZoomFactor() + (zoomDirection === "in" ? ZOOM_STEP : -ZOOM_STEP)))
+    win.webContents.setZoomFactor(
+      clampZoom(win.webContents.getZoomFactor() + (zoomDirection === "in" ? ZOOM_STEP : -ZOOM_STEP)),
+    )
     updateZoom(win)
   })
 }

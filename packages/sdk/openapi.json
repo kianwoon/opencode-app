@@ -2850,6 +2850,154 @@
         ]
       }
     },
+    "/skill/directories": {
+      "get": {
+        "tags": ["instance"],
+        "operationId": "app.skill.directories",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill source directories with enabled state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["path", "enabled"],
+                    "additionalProperties": false
+                  },
+                  "description": "Skill source directories with enabled state"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List the directories skills are discovered from and whether each is currently enabled in config.",
+        "summary": "List skill directories",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.skill.directories({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/skill/{name}": {
+      "delete": {
+        "tags": ["instance"],
+        "operationId": "app.skill.remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "location": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["name", "location"],
+                  "additionalProperties": false,
+                  "description": "Removed skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SkillRemoveError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SkillRemoveError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Delete a file-backed skill by removing its SKILL.md directory.",
+        "summary": "Remove skill",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.skill.remove({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/lsp": {
       "get": {
         "tags": ["instance"],
@@ -6342,6 +6490,9 @@
                         },
                         {
                           "$ref": "#/components/schemas/SubtaskPartInput"
+                        },
+                        {
+                          "$ref": "#/components/schemas/WorkflowPartInput"
                         }
                       ]
                     }
@@ -7224,6 +7375,9 @@
                         },
                         {
                           "$ref": "#/components/schemas/SubtaskPartInput"
+                        },
+                        {
+                          "$ref": "#/components/schemas/WorkflowPartInput"
                         }
                       ]
                     }
@@ -10599,7 +10753,7 @@
                   },
                   "delivery": {
                     "type": "string",
-                    "enum": ["steer", "queue"]
+                    "enum": ["steer", "queue", "followup"]
                   },
                   "resume": {
                     "type": "boolean"
@@ -13763,6 +13917,190 @@
         ]
       }
     },
+    "/api/skill/directories": {
+      "get": {
+        "tags": ["skills"],
+        "operationId": "v2.skill.directories",
+        "parameters": [
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "directory": {
+                  "type": "string"
+                },
+                "workspace": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "required": false,
+            "style": "deepObject",
+            "explode": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "location": {
+                      "$ref": "#/components/schemas/LocationInfo"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SkillDirectory"
+                      }
+                    }
+                  },
+                  "required": ["location", "data"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List the directories skills are discovered from and whether each is currently enabled in config.",
+        "summary": "List skill directories",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.skill.directories({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/api/skill/{name}": {
+      "delete": {
+        "tags": ["skills"],
+        "operationId": "v2.skill.remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "directory": {
+                  "type": "string"
+                },
+                "workspace": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "required": false,
+            "style": "deepObject",
+            "explode": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "location": {
+                      "$ref": "#/components/schemas/LocationInfo"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SkillRemoved"
+                    }
+                  },
+                  "required": ["location", "data"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SkillNotRemovableError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SkillNotRemovableError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SkillNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillNotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Delete a file-backed skill by removing its SKILL.md directory.",
+        "summary": "Remove skill",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.skill.remove({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/api/event": {
       "get": {
         "tags": ["events"],
@@ -16488,6 +16826,82 @@
         "required": ["id", "sessionID", "messageID", "type", "prompt", "description", "agent"],
         "additionalProperties": false
       },
+      "WorkflowStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              }
+            },
+            "required": ["providerID", "modelID"],
+            "additionalProperties": false
+          },
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "prompt", "description", "agent", "dependsOn"],
+        "additionalProperties": false
+      },
+      "WorkflowPart": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^prt"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "messageID": {
+            "type": "string",
+            "pattern": "^msg"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["workflow"]
+          },
+          "title": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStep"
+            }
+          },
+          "plannedBy": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "sessionID", "messageID", "type", "title", "steps"],
+        "additionalProperties": false
+      },
       "ReasoningPart": {
         "type": "object",
         "properties": {
@@ -17152,6 +17566,9 @@
           },
           {
             "$ref": "#/components/schemas/SubtaskPart"
+          },
+          {
+            "$ref": "#/components/schemas/WorkflowPart"
           },
           {
             "$ref": "#/components/schemas/ReasoningPart"
@@ -17845,7 +18262,11 @@
                       },
                       "delivery": {
                         "type": "string",
-                        "enum": ["steer", "queue"]
+                        "enum": ["steer", "queue", "followup"]
+                      },
+                      "deliverAt": {
+                        "type": "integer",
+                        "minimum": 0
                       }
                     },
                     "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -17885,7 +18306,11 @@
                       },
                       "delivery": {
                         "type": "string",
-                        "enum": ["steer", "queue"]
+                        "enum": ["steer", "queue", "followup"]
+                      },
+                      "deliverAt": {
+                        "type": "integer",
+                        "minimum": 0
                       }
                     },
                     "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -20767,7 +21192,7 @@
                     "enum": [false]
                   }
                 ],
-                "description": "Timeout in milliseconds for full requests to this provider. Set to false to disable timeout."
+                "description": "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 300000 when unset; set to false to disable the idle guards entirely."
               },
               "headerTimeout": {
                 "anyOf": [
@@ -20783,8 +21208,17 @@
                 "description": "Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout."
               },
               "chunkTimeout": {
-                "type": "integer",
-                "exclusiveMinimum": 0
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  {
+                    "type": "boolean",
+                    "enum": [false]
+                  }
+                ],
+                "description": "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (300000 when unset); set to false to disable the chunk-gap guard."
               }
             },
             "additionalProperties": {}
@@ -21002,6 +21436,9 @@
           "timeout": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "alwaysLoad": {
+            "type": "boolean"
           }
         },
         "required": ["type", "command"],
@@ -21066,6 +21503,9 @@
           "timeout": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "alwaysLoad": {
+            "type": "boolean"
           }
         },
         "required": ["type", "url"],
@@ -21159,6 +21599,18 @@
                 }
               },
               "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "disabled_directories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "disabled_skills": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -21541,6 +21993,13 @@
                 "type": "boolean"
               },
               "mcp_timeout": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "tool_search_threshold": {
+                "type": "number"
+              },
+              "workflow_concurrency": {
                 "type": "integer",
                 "exclusiveMinimum": 0
               },
@@ -22568,6 +23027,27 @@
         "required": ["name", "mode", "permission", "options"],
         "additionalProperties": false
       },
+      "SkillRemoveError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["Skill.NotFoundError", "Skill.NotRemovableError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
       "LSPStatus": {
         "type": "object",
         "properties": {
@@ -23228,6 +23708,74 @@
         "required": ["type", "prompt", "description", "agent"],
         "additionalProperties": false
       },
+      "WorkflowStepInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              }
+            },
+            "required": ["providerID", "modelID"],
+            "additionalProperties": false
+          },
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "prompt", "description", "agent", "dependsOn"],
+        "additionalProperties": false
+      },
+      "WorkflowPartInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^prt"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["workflow"]
+          },
+          "title": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepInput"
+            }
+          },
+          "plannedBy": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "title", "steps"],
+        "additionalProperties": false
+      },
       "SessionBusyError": {
         "type": "object",
         "properties": {
@@ -23805,6 +24353,66 @@
           }
         },
         "required": ["_tag", "providerID", "message"],
+        "additionalProperties": false
+      },
+      "SkillDirectory": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path", "enabled"],
+        "additionalProperties": false
+      },
+      "SkillRemoved": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "location"],
+        "additionalProperties": false
+      },
+      "SkillNotFoundError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["SkillNotFoundError"]
+          },
+          "skill": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "skill", "message"],
+        "additionalProperties": false
+      },
+      "SkillNotRemovableError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["SkillNotRemovableError"]
+          },
+          "skill": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "skill", "message"],
         "additionalProperties": false
       },
       "OutputFormat1": {
@@ -25486,7 +26094,11 @@
                   },
                   "delivery": {
                     "type": "string",
-                    "enum": ["steer", "queue"]
+                    "enum": ["steer", "queue", "followup"]
+                  },
+                  "deliverAt": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -25547,7 +26159,11 @@
                   },
                   "delivery": {
                     "type": "string",
-                    "enum": ["steer", "queue"]
+                    "enum": ["steer", "queue", "followup"]
+                  },
+                  "deliverAt": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -27230,6 +27846,16 @@
           },
           "permissions": {
             "$ref": "#/components/schemas/PermissionV2Ruleset"
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "budget": {
+            "type": "integer",
+            "exclusiveMinimum": 0
           }
         },
         "required": ["id", "request", "mode", "hidden", "permissions"],
@@ -27358,10 +27984,14 @@
           },
           "delivery": {
             "type": "string",
-            "enum": ["steer", "queue"]
+            "enum": ["steer", "queue", "followup"]
           },
           "timeCreated": {
             "type": "number"
+          },
+          "deliverAt": {
+            "type": "integer",
+            "minimum": 0
           },
           "promotedSeq": {
             "type": "integer",
@@ -28200,7 +28830,11 @@
               },
               "delivery": {
                 "type": "string",
-                "enum": ["steer", "queue"]
+                "enum": ["steer", "queue", "followup"]
+              },
+              "deliverAt": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -28262,7 +28896,11 @@
               },
               "delivery": {
                 "type": "string",
-                "enum": ["steer", "queue"]
+                "enum": ["steer", "queue", "followup"]
+              },
+              "deliverAt": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -34256,7 +34894,11 @@
               },
               "delivery": {
                 "type": "string",
-                "enum": ["steer", "queue"]
+                "enum": ["steer", "queue", "followup"]
+              },
+              "deliverAt": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],
@@ -34296,7 +34938,11 @@
               },
               "delivery": {
                 "type": "string",
-                "enum": ["steer", "queue"]
+                "enum": ["steer", "queue", "followup"]
+              },
+              "deliverAt": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "prompt", "delivery"],

@@ -7,13 +7,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
-import {
-  validateWorkflow,
-  readySteps,
-  propagateFailure,
-  isComplete,
-  workflowErrorMessage,
-} from "./workflow/dag"
+import { validateWorkflow, readySteps, propagateFailure, isComplete, workflowErrorMessage } from "./workflow/dag"
 import { verificationGate } from "./verification"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
@@ -261,7 +255,6 @@ const layer = Layer.effect(
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
     })
-
 
     /**
      * Run one subagent task (a `subtask` part or a workflow step) through the
@@ -802,8 +795,6 @@ const layer = Layer.effect(
         synthetic: true,
       } satisfies SessionV1.TextPart)
     })
-
-
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
       return yield* Effect.uninterruptibleMask((restore) =>

@@ -280,8 +280,15 @@ const live: Layer.Layer<
         type: "ai-sdk" as const,
         result: streamText({
           onError(error) {
+            // Stalls get their own WARN: the ChunkStallError identity survives
+            // wrapping, and a stall is a diagnosable provider health event, not
+            // a generic stream failure.
+            const stall =
+              error?.error instanceof Error && error.error.name === "ProviderChunkStallError"
+                ? (error.error as { ms?: number }).ms
+                : undefined
             bridge.fork(
-              Effect.logError("stream error", {
+              (stall !== undefined ? Effect.logWarning : Effect.logError)("stream error", {
                 providerID: input.model.providerID,
                 modelID: input.model.id,
                 "session.id": input.sessionID,
@@ -289,6 +296,7 @@ const live: Layer.Layer<
                 agent: input.agent.name,
                 mode: input.agent.mode,
                 error,
+                ...(stall !== undefined ? { stallIdleMs: stall } : {}),
               }),
             )
           },

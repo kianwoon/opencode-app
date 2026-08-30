@@ -64,7 +64,9 @@ export const render = (paths: ReadonlyArray<string>) => {
   return [
     summary,
     ...lines,
-    ...(truncated ? [`  ... ${paths.length - rendered} more paths not listed; use search tools for anything unlisted`] : []),
+    ...(truncated
+      ? [`  ... ${paths.length - rendered} more paths not listed; use search tools for anything unlisted`]
+      : []),
   ].join("\n")
 }
 
@@ -86,9 +88,7 @@ const layer = Layer.effectDiscard(
     const location = yield* Location.Service
 
     const observe = Effect.fn("RepoIndexContext.observe")(function* () {
-      const entries = yield* filesystem
-        .glob({ pattern: "**/*", limit: MAX_ENTRIES })
-        .pipe(Effect.option)
+      const entries = yield* filesystem.glob({ pattern: "**/*", limit: MAX_ENTRIES }).pipe(Effect.option)
       if (entries._tag === "None") return SystemContext.unavailable
       return entries.value
         .filter((entry) => entry.type === "file")

@@ -509,27 +509,22 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     const init = yield* Tool.init(yield* ToolSearchTool)
     tools[init.id] = tool({
       description: [init.description, deferral.catalog].filter(Boolean).join("\n\n"),
-      inputSchema: jsonSchema(
-        ProviderTransform.schema(input.model, ToolJsonSchema.fromTool({ ...init, id: init.id })),
-      ),
+      inputSchema: jsonSchema(ProviderTransform.schema(input.model, ToolJsonSchema.fromTool({ ...init, id: init.id }))),
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
             const ctx = context(args, opts)
-            return yield* init.execute(
-              args as { query: string },
-              {
-                sessionID: ctx.sessionID,
-                abort: optionsAbort(opts),
-                messageID: input.processor.message.id,
-                agent: input.agent.name,
-                callID: opts.toolCallId,
-                extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
-                messages: input.messages,
-                metadata: () => Effect.void,
-                ask: () => Effect.void,
-              },
-            )
+            return yield* init.execute(args as { query: string }, {
+              sessionID: ctx.sessionID,
+              abort: optionsAbort(opts),
+              messageID: input.processor.message.id,
+              agent: input.agent.name,
+              callID: opts.toolCallId,
+              extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
+              messages: input.messages,
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            })
           }),
         )
       },

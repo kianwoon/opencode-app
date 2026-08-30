@@ -285,8 +285,10 @@ describe("normalizeMessage + contextForMessageAt", () => {
     for (let i = 0; i < source.length; i++) {
       const m = source[i]!
       if (m.type === "agent-switched") runningAgent = (m as { agent: string }).agent
-      else if (m.type === "model-switched") runningModel = (m as { model: { id: string; providerID: string; variant?: string } }).model
-      else if (m.type === "user" || (m.type === "synthetic" && (m as { description?: string }).description?.trim())) runningParent = m.id
+      else if (m.type === "model-switched")
+        runningModel = (m as { model: { id: string; providerID: string; variant?: string } }).model
+      else if (m.type === "user" || (m.type === "synthetic" && (m as { description?: string }).description?.trim()))
+        runningParent = m.id
       else if (m.type === "shell") runningParent = undefined
       else if (m.type === "assistant") {
         runningAgent = m.agent
@@ -330,7 +332,14 @@ describe("normalizeMessage + contextForMessageAt", () => {
       { id: "a", type: "agent-switched", agent: "build", time: { created: 1 } } as never,
       { id: "m", type: "model-switched", model: { id: "m", providerID: "p" }, time: { created: 2 } } as never,
       { id: "u", type: "user", text: "hi", time: { created: 3 } } as never,
-      { id: "as", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 4 }, content: [] } as never,
+      {
+        id: "as",
+        type: "assistant",
+        agent: "build",
+        model: { id: "m", providerID: "p" },
+        time: { created: 4 },
+        content: [],
+      } as never,
     ] as never
 
     // Equivalent to walking normalizeSessionMessages and capturing the
@@ -342,8 +351,10 @@ describe("normalizeMessage + contextForMessageAt", () => {
       for (let j = 0; j < i; j++) {
         const m = source[j]!
         if (m.type === "agent-switched") agent = (m as { agent: string }).agent
-        else if (m.type === "model-switched") model = (m as { model: { id: string; providerID: string; variant?: string } }).model
-        else if (m.type === "user" || (m.type === "synthetic" && (m as { description?: string }).description?.trim())) parentID = m.id
+        else if (m.type === "model-switched")
+          model = (m as { model: { id: string; providerID: string; variant?: string } }).model
+        else if (m.type === "user" || (m.type === "synthetic" && (m as { description?: string }).description?.trim()))
+          parentID = m.id
         else if (m.type === "shell") parentID = undefined
         else if (m.type === "assistant") {
           agent = m.agent

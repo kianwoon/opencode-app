@@ -475,10 +475,7 @@ function ModelSelectorPopoverV2View(props: {
                   {(group) => (
                     <MenuV2.Group>
                       <MenuV2.GroupLabel class="sticky top-0 z-10 gap-1.5 bg-v2-background-bg-layer-01 px-3">
-                        <ProviderIcon
-                          id={group.items[0].provider.id}
-                          class="size-3 shrink-0 text-v2-icon-icon-muted"
-                        />
+                        <ProviderIcon id={group.items[0].provider.id} class="size-3 shrink-0 text-v2-icon-icon-muted" />
                         <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
                       </MenuV2.GroupLabel>
                       <MenuV2.RadioGroup value={props.current()}>

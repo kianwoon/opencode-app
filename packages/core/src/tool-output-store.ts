@@ -191,15 +191,16 @@ const layer = Layer.effect(
           : text.map((item) => item.text).join("")
       // Collapse repeated-line runs before measuring so deduplication can keep
       // output under the limit instead of spilling to a managed file.
-      const compacted =
-        text.length > 0 && outputLimits.collapseRepeats ? collapseRepeats(contextual) : contextual
+      const compacted = text.length > 0 && outputLimits.collapseRepeats ? collapseRepeats(contextual) : contextual
       const withinLimits =
-        lineCount(compacted) <= outputLimits.maxLines &&
-        Buffer.byteLength(compacted, "utf-8") <= outputLimits.maxBytes
+        lineCount(compacted) <= outputLimits.maxLines && Buffer.byteLength(compacted, "utf-8") <= outputLimits.maxBytes
       if (withinLimits && compacted === contextual) return { output: input.output, outputPaths: [] }
       if (withinLimits)
         return {
-          output: { structured: input.output.structured, content: [{ type: "text" as const, text: compacted }, ...media] },
+          output: {
+            structured: input.output.structured,
+            content: [{ type: "text" as const, text: compacted }, ...media],
+          },
           outputPaths: [],
         }
 

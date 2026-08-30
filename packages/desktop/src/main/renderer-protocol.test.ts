@@ -18,8 +18,7 @@ async function writeAsset(root: string, name: string, body: string | Uint8Array)
   await writeFile(file, body)
 }
 
-const htmlRequest = (path: string, headers?: Record<string, string>) =>
-  new Request(`oc://renderer${path}`, { headers })
+const htmlRequest = (path: string, headers?: Record<string, string>) => new Request(`oc://renderer${path}`, { headers })
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -124,10 +123,7 @@ describe("renderer protocol", () => {
     test("serves a byte range with 206 and content-range", async () => {
       const root = await tempRoot()
       await writeAsset(root, "assets/blob.bin", "0123456789")
-      const response = await serveRendererAsset(
-        htmlRequest("/assets/blob.bin", { range: "bytes=2-5" }),
-        root,
-      )
+      const response = await serveRendererAsset(htmlRequest("/assets/blob.bin", { range: "bytes=2-5" }), root)
       expect(response.status).toBe(206)
       expect(response.headers.get("content-range")).toBe("bytes 2-5/10")
       expect(response.headers.get("content-length")).toBe("4")

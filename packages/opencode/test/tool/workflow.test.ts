@@ -182,9 +182,7 @@ describe("workflow tool", () => {
         expect(Exit.isSuccess(exit)).toBe(false)
         if (Exit.isFailure(exit)) {
           const defect = Cause.squash(exit.cause)
-          expect(defect instanceof Error ? defect.message : String(defect)).toContain(
-            "has 65 steps; the maximum is 64",
-          )
+          expect(defect instanceof Error ? defect.message : String(defect)).toContain("has 65 steps; the maximum is 64")
         }
       }),
     {

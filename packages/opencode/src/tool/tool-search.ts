@@ -44,9 +44,7 @@ export const ToolSearchTool = Tool.define(
           metadata: { promoted: result.keys },
           output:
             SessionToolSearch.formatResults({ tools: all, keys: result.keys }) +
-            (result.keys.length > 0
-              ? "\n\nThese tools are now loaded and callable for the rest of this session."
-              : ""),
+            (result.keys.length > 0 ? "\n\nThese tools are now loaded and callable for the rest of this session." : ""),
         } satisfies Tool.ExecuteResult<{ promoted: string[] }>
       }),
     }

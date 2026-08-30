@@ -13,10 +13,24 @@ export class HeaderTimeoutError extends Error {
 }
 
 export class ResponseStreamError extends Error {
-  public override readonly name = "ProviderResponseStreamError"
+  // Widened so subclasses (ChunkStallError) can override the identity while
+  // remaining instances of this class for instanceof-based handling.
+  public override readonly name: string = "ProviderResponseStreamError"
 
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
+  }
+}
+
+// Distinct subclass so stall-vs-other stream failures are diagnosable from the
+// error alone (the 2026-08-30 silent-canyon stall produced zero log evidence).
+// Still a ResponseStreamError, so existing instanceof handling (retryable
+// APIError mapping) keeps working.
+export class ChunkStallError extends ResponseStreamError {
+  public override readonly name = "ProviderChunkStallError"
+
+  constructor(public readonly ms: number) {
+    super(`No SSE chunk received for ${ms}ms; the stream stalled and was aborted`)
   }
 }
 

@@ -901,7 +901,8 @@ export const dict = {
   "sidebar.project.cleanupSessions": "Clean up old sessions",
   "sidebar.project.cleanupSessions.title": "Clean up old sessions",
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
-  "sidebar.project.cleanupSessions.description": "Old session data will be permanently deleted and cannot be recovered.",
+  "sidebar.project.cleanupSessions.description":
+    "Old session data will be permanently deleted and cannot be recovered.",
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Açık proje yok",
   "sidebar.empty.description": "Başlamak için bir proje açın",
@@ -1126,10 +1127,12 @@ export const dict = {
   "settings.plugins.section.plugins": "Plugins",
   "settings.plugins.section.skills": "Skills",
   "settings.plugins.plugins.empty": "No plugins configured",
-  "settings.plugins.plugins.hint": "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
+  "settings.plugins.plugins.hint":
+    "Plugins are installed from npm packages or local paths listed in the plugin array of your opencode.json config.",
   "settings.plugins.plugins.add.title": "Add plugin",
   "settings.plugins.plugins.add.browse": "Gözat…",
-  "settings.plugins.plugins.add.description": "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
+  "settings.plugins.plugins.add.description":
+    "Enter an npm package name, a local path (file://), or a GitHub shorthand.",
   "settings.plugins.plugins.add.placeholder": "Package name or path",
   "settings.plugins.plugins.add.failed": "Failed to add plugin",
   "settings.plugins.plugins.remove.failed": "Failed to remove plugin",
@@ -1142,7 +1145,8 @@ export const dict = {
   "settings.plugins.skills.count.other": "{{count}} skills",
   "settings.plugins.skills.search.placeholder": "Search skills",
   "settings.plugins.skills.directories.title": "Beceri dizinleri",
-  "settings.plugins.skills.directories.hint": "Bir dizini kapatmak, becerilerini keşfetmenin dışında tutar. Dosyalar diskte kalır.",
+  "settings.plugins.skills.directories.hint":
+    "Bir dizini kapatmak, becerilerini keşfetmenin dışında tutar. Dosyalar diskte kalır.",
   "settings.plugins.skills.directories.toggle": "{{directory}} beceri dizinini aç/kapat",
   "settings.plugins.skills.directories.disabled": "Kapalı",
   "settings.plugins.skills.directories.toggle.failed": "Beceri dizinleri güncellenemedi",

@@ -1124,11 +1124,12 @@ export default function LegacyLayout(props: ParentProps) {
         return
       }
       const saved = Math.max(0, before - after)
-      const savedLabel = saved >= 1_073_741_824
-        ? `${(saved / 1_073_741_824).toFixed(1)} GB`
-        : saved >= 1_048_576
-          ? `${(saved / 1_048_576).toFixed(1)} MB`
-          : `${(saved / 1024).toFixed(0)} KB`
+      const savedLabel =
+        saved >= 1_073_741_824
+          ? `${(saved / 1_073_741_824).toFixed(1)} GB`
+          : saved >= 1_048_576
+            ? `${(saved / 1_048_576).toFixed(1)} MB`
+            : `${(saved / 1024).toFixed(0)} KB`
       showToast({
         title: language.t("sidebar.vacuum.done"),
         description: language.t("sidebar.vacuum.saved", { saved: savedLabel }),

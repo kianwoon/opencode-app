@@ -879,7 +879,8 @@ export const dict = {
   "sidebar.project.cleanupSessions": "Clean up old sessions",
   "sidebar.project.cleanupSessions.title": "Clean up old sessions",
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
-  "sidebar.project.cleanupSessions.description": "Old session data will be permanently deleted and cannot be recovered.",
+  "sidebar.project.cleanupSessions.description":
+    "Old session data will be permanently deleted and cannot be recovered.",
   "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "没有打开的项目",
   "sidebar.empty.description": "打开一个项目以开始使用",

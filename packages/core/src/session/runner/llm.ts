@@ -110,8 +110,7 @@ const layer = Layer.effect(
     const documents = yield* config.entries()
     const compaction = SessionCompaction.make({ events, llm, config: documents })
     const toolOutputConfig = documents.reduce(
-      (result, entry) =>
-        entry.type === "document" ? { ...result, ...(entry.info.tool_output ?? {}) } : result,
+      (result, entry) => (entry.type === "document" ? { ...result, ...(entry.info.tool_output ?? {}) } : result),
       {} as { evict_results_ms?: number },
     )
     const evictResultsMs = toolOutputConfig.evict_results_ms ?? TOOL_RESULT_EVICT_AFTER_MS
@@ -231,7 +230,9 @@ const layer = Layer.effect(
       // from the model's definitions but remain executable (visibility, not
       // authorization — permissions still gate every settlement).
       const hiddenTools = new Set(
-        Object.entries(agent.info?.tools ?? {}).filter(([, visible]) => !visible).map(([name]) => name),
+        Object.entries(agent.info?.tools ?? {})
+          .filter(([, visible]) => !visible)
+          .map(([name]) => name),
       )
       const toolMaterialization = isLastStep
         ? undefined

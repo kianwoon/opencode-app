@@ -309,10 +309,7 @@ function normalizeMessages(
   // Deepseek requires all assistant messages to have reasoning on them.
   // The dedicated @ai-sdk/deepseek provider already injects reasoning_content
   // on assistant messages, so only apply this for the openai-compatible path.
-  if (
-    model.api.id.toLowerCase().includes("deepseek") &&
-    model.api.npm !== "@ai-sdk/deepseek"
-  ) {
+  if (model.api.id.toLowerCase().includes("deepseek") && model.api.npm !== "@ai-sdk/deepseek") {
     msgs = msgs.map((msg) => {
       if (msg.role !== "assistant") return msg
       if (Array.isArray(msg.content)) {

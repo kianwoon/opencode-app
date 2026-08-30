@@ -262,7 +262,11 @@ export const make = (dependencies: Dependencies) => {
     const context = effective(input)
     if (context === undefined) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
-    const projected = estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools })
+    const projected = estimate({
+      system: input.request.system,
+      messages: input.request.messages,
+      tools: input.request.tools,
+    })
     const budget = context * config.trigger
     const hardLimit = context - Math.max(output, config.buffer)
     // Compact at the configured fraction of the window before it is nearly full,

@@ -61,7 +61,9 @@ namespace triggerHarness {
     route: OpenAIChat.route.with({ limits: { context: 10_000, output: 100 } }),
   })
 
-  export const makeCompaction = async (compaction: Partial<{ auto: boolean; trigger: number; buffer: number }> = {}) => {
+  export const makeCompaction = async (
+    compaction: Partial<{ auto: boolean; trigger: number; buffer: number }> = {},
+  ) => {
     const documents: Config.Document[] = [
       new Config.Document({
         type: "document",
@@ -88,7 +90,9 @@ namespace triggerHarness {
     return { compaction: compactionService, model }
   }
 
-  export const request = (messages: number): { entries: { seq: number; message: SessionMessage.Message }[]; request: LLMRequest } => {
+  export const request = (
+    messages: number,
+  ): { entries: { seq: number; message: SessionMessage.Message }[]; request: LLMRequest } => {
     const created = DateTime.makeUnsafe(0)
     // History that overflows the default keep budget so a summary head exists.
     const entries = Array.from({ length: 100 }, (_, index) => ({
@@ -116,27 +120,39 @@ test("compaction waits for the hard limit when no trigger fraction is configured
   const harness = await triggerHarness.makeCompaction({ buffer: 200 })
   // Hard limit ≈ 9.8k tokens; measured ≈ 151 tokens per filler message.
   const below = triggerHarness.request(55) // ≈ 8.3k tokens estimated
-  expect(await Effect.runPromise(harness.compaction.compactIfNeeded({ ...below, sessionID: "ses_x" as never, model: harness.model }))).toBe(false)
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...below, sessionID: "ses_x" as never, model: harness.model }),
+    ),
+  ).toBe(false)
   const above = triggerHarness.request(80) // ≈ 11.2k tokens estimated
-  expect(await Effect.runPromise(harness.compaction.compactIfNeeded({ ...above, sessionID: "ses_x" as never, model: harness.model }))).toBe(true)
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...above, sessionID: "ses_x" as never, model: harness.model }),
+    ),
+  ).toBe(true)
 })
 
 test("configured trigger fraction compacts proactively before the hard limit", async () => {
   const harness = await triggerHarness.makeCompaction({ trigger: 0.5, buffer: 200 })
   // 10k context * 0.5 = 5k token budget.
   const below = triggerHarness.request(25) // ≈ 3.8k tokens
-  expect(await Effect.runPromise(harness.compaction.compactIfNeeded({ ...below, sessionID: "ses_x" as never, model: harness.model }))).toBe(false)
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...below, sessionID: "ses_x" as never, model: harness.model }),
+    ),
+  ).toBe(false)
   const above = triggerHarness.request(40) // ≈ 6k tokens
-  expect(await Effect.runPromise(harness.compaction.compactIfNeeded({ ...above, sessionID: "ses_x" as never, model: harness.model }))).toBe(true)
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...above, sessionID: "ses_x" as never, model: harness.model }),
+    ),
+  ).toBe(true)
 })
 
 test("trigger rejects out-of-range fractions at config validation", () => {
-  expect(
-    () => new ConfigCompaction.Info({ trigger: 5 }),
-  ).toThrow()
-  expect(
-    () => new ConfigCompaction.Info({ trigger: 0.01 }),
-  ).toThrow()
+  expect(() => new ConfigCompaction.Info({ trigger: 5 })).toThrow()
+  expect(() => new ConfigCompaction.Info({ trigger: 0.01 })).toThrow()
 })
 
 test("agent budget shrinks the effective compaction window", async () => {
@@ -146,13 +162,23 @@ test("agent budget shrinks the effective compaction window", async () => {
   const withinBudget = triggerHarness.request(25) // ≈ 3.8k tokens
   expect(
     await Effect.runPromise(
-      harness.compaction.compactIfNeeded({ ...withinBudget, sessionID: "ses_x" as never, model: harness.model, budget: 5_000 }),
+      harness.compaction.compactIfNeeded({
+        ...withinBudget,
+        sessionID: "ses_x" as never,
+        model: harness.model,
+        budget: 5_000,
+      }),
     ),
   ).toBe(false)
   const overBudget = triggerHarness.request(45) // ≈ 6.8k tokens
   expect(
     await Effect.runPromise(
-      harness.compaction.compactIfNeeded({ ...overBudget, sessionID: "ses_x" as never, model: harness.model, budget: 5_000 }),
+      harness.compaction.compactIfNeeded({
+        ...overBudget,
+        sessionID: "ses_x" as never,
+        model: harness.model,
+        budget: 5_000,
+      }),
     ),
   ).toBe(true)
 })

@@ -149,7 +149,11 @@ describe("ToolOutputStore", () => {
       Effect.gen(function* () {
         const line = "waiting for lock to release....."
         const text = Array.from({ length: 500 }, () => line).join("\n")
-        const result = yield* store.bound({ sessionID, toolCallID: "call-repeat", output: { structured: {}, content: [{ type: "text", text }] } })
+        const result = yield* store.bound({
+          sessionID,
+          toolCallID: "call-repeat",
+          output: { structured: {}, content: [{ type: "text", text }] },
+        })
         expect(result.outputPaths).toHaveLength(0)
         if (result.output.content[0]?.type !== "text") throw new Error("expected text")
         const preview = result.output.content[0].text
@@ -165,7 +169,11 @@ describe("ToolOutputStore", () => {
         const short = "ok"
         const long = "this line is long enough to matter"
         const text = [short, short, short, long, long, long].join("\n")
-        const result = yield* store.bound({ sessionID, toolCallID: "call-repeat-small", output: { structured: {}, content: [{ type: "text", text }] } })
+        const result = yield* store.bound({
+          sessionID,
+          toolCallID: "call-repeat-small",
+          output: { structured: {}, content: [{ type: "text", text }] },
+        })
         if (result.output.content[0]?.type !== "text") throw new Error("expected text")
         expect(result.output.content[0].text).toBe(text)
       }),
@@ -259,7 +267,11 @@ describe("ToolOutputStore", () => {
         Effect.gen(function* () {
           const line = "streaming chunk delivered....."
           const text = Array.from({ length: 10 }, () => line).join("\n")
-          const result = yield* store.bound({ sessionID, toolCallID: "call-default", output: { structured: {}, content: [{ type: "text", text }] } })
+          const result = yield* store.bound({
+            sessionID,
+            toolCallID: "call-default",
+            output: { structured: {}, content: [{ type: "text", text }] },
+          })
           if (result.output.content[0]?.type !== "text") throw new Error("expected text")
           expect(result.output.content[0].text).toContain("[repeated line omitted]")
         }),
@@ -273,7 +285,11 @@ describe("ToolOutputStore", () => {
         Effect.gen(function* () {
           const line = "streaming chunk delivered....."
           const text = Array.from({ length: 10 }, () => line).join("\n")
-          const result = yield* store.bound({ sessionID, toolCallID: "call-legacy", output: { structured: {}, content: [{ type: "text", text }] } })
+          const result = yield* store.bound({
+            sessionID,
+            toolCallID: "call-legacy",
+            output: { structured: {}, content: [{ type: "text", text }] },
+          })
           expect(result.outputPaths).toHaveLength(0)
           expect(result.output).toEqual({ structured: {}, content: [{ type: "text", text }] })
         }),

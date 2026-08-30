@@ -16,7 +16,16 @@ const session = (id: string): Session => ({
 const base = { created: 1, location: { directory: "/repo" } }
 
 const seedEvents = (id: string) => [
-  { ...base, id: `a_${id}`, type: "session.input.admitted" as const, data: { sessionID: "ses_1", inputID: id, input: { type: "user" as const, delivery: "steer" as const, data: { text: "hi" } } } },
+  {
+    ...base,
+    id: `a_${id}`,
+    type: "session.input.admitted" as const,
+    data: {
+      sessionID: "ses_1",
+      inputID: id,
+      input: { type: "user" as const, delivery: "steer" as const, data: { text: "hi" } },
+    },
+  },
   { ...base, id: `p_${id}`, type: "session.input.promoted" as const, data: { sessionID: "ses_1", inputID: id } },
   {
     ...base,
@@ -24,33 +33,87 @@ const seedEvents = (id: string) => [
     type: "session.step.started" as const,
     data: { sessionID: "ses_1", assistantMessageID: id, agent: "build", model: { id: "m", providerID: "p" } },
   },
-  { ...base, id: `ts_${id}`, type: "session.text.started" as const, data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0 } },
-  { ...base, id: `td_${id}`, type: "session.text.delta" as const, data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0, delta: "x" } },
-  { ...base, id: `te_${id}`, type: "session.text.ended" as const, data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0, text: "x" } },
+  {
+    ...base,
+    id: `ts_${id}`,
+    type: "session.text.started" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0 },
+  },
+  {
+    ...base,
+    id: `td_${id}`,
+    type: "session.text.delta" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0, delta: "x" },
+  },
+  {
+    ...base,
+    id: `te_${id}`,
+    type: "session.text.ended" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0, text: "x" },
+  },
   {
     ...base,
     id: `sd_${id}`,
     type: "session.step.ended" as const,
-    data: { sessionID: "ses_1", assistantMessageID: id, finish: "stop" as const, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    data: {
+      sessionID: "ses_1",
+      assistantMessageID: id,
+      finish: "stop" as const,
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
   },
 ]
 
 const buildLiveEvents = (id: string) => [
-  { ...base, id: `lts_${id}`, type: "session.text.started" as const, data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0 } },
-  { ...base, id: `lte_${id}`, type: "session.text.ended" as const, data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0, text: "answer" } },
-  { ...base, id: `lts_${id}_1`, type: "session.tool.input.started" as const, data: { sessionID: "ses_1", assistantMessageID: id, callID: "c1", name: "bash" } },
-  { ...base, id: `ltc_${id}`, type: "session.tool.called" as const, data: { sessionID: "ses_1", assistantMessageID: id, callID: "c1", input: {}, executed: true } },
+  {
+    ...base,
+    id: `lts_${id}`,
+    type: "session.text.started" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0 },
+  },
+  {
+    ...base,
+    id: `lte_${id}`,
+    type: "session.text.ended" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, ordinal: 0, text: "answer" },
+  },
+  {
+    ...base,
+    id: `lts_${id}_1`,
+    type: "session.tool.input.started" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, callID: "c1", name: "bash" },
+  },
+  {
+    ...base,
+    id: `ltc_${id}`,
+    type: "session.tool.called" as const,
+    data: { sessionID: "ses_1", assistantMessageID: id, callID: "c1", input: {}, executed: true },
+  },
   {
     ...base,
     id: `ltsx_${id}`,
     type: "session.tool.success" as const,
-    data: { sessionID: "ses_1", assistantMessageID: id, callID: "c1", metadata: {}, content: [{ type: "text" as const, text: "ok" }], executed: true },
+    data: {
+      sessionID: "ses_1",
+      assistantMessageID: id,
+      callID: "c1",
+      metadata: {},
+      content: [{ type: "text" as const, text: "ok" }],
+      executed: true,
+    },
   },
   {
     ...base,
     id: `lse_${id}`,
     type: "session.step.ended" as const,
-    data: { sessionID: "ses_1", assistantMessageID: id, finish: "stop" as const, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    data: {
+      sessionID: "ses_1",
+      assistantMessageID: id,
+      finish: "stop" as const,
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
   },
 ]
 

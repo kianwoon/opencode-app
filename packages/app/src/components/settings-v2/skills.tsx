@@ -32,8 +32,7 @@ type SkillDirectory = {
   count: number
 }
 
-const builtinSkill = (skill: SkillItem) =>
-  skill.location === "<built-in>" || skill.location.startsWith("/builtin/")
+const builtinSkill = (skill: SkillItem) => skill.location === "<built-in>" || skill.location.startsWith("/builtin/")
 
 // The parent directory of a skill's SKILL.md folder: strip "<root>/<name>/SKILL.md"
 // down to <root> with plain string math (no node:path in the renderer bundle).
@@ -275,9 +274,7 @@ export const SettingsSkillsV2: Component<{ directory: Accessor<string | undefine
                     )}
                   </For>
                 </SettingsListV2>
-                <p class="settings-v2-plugins-hint">
-                  {language.t("settings.plugins.skills.directories.hint")}
-                </p>
+                <p class="settings-v2-plugins-hint">{language.t("settings.plugins.skills.directories.hint")}</p>
               </div>
             </Show>
             <SkillsList
@@ -364,8 +361,7 @@ const SkillsList: Component<{
     const items = [...props.skills].sort((a, b) => a.name.localeCompare(b.name))
     if (!query) return items
     return items.filter(
-      (skill) =>
-        skill.name.toLowerCase().includes(query) || (skill.description ?? "").toLowerCase().includes(query),
+      (skill) => skill.name.toLowerCase().includes(query) || (skill.description ?? "").toLowerCase().includes(query),
     )
   })
 

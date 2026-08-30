@@ -352,8 +352,7 @@ function setPromptInputV2Cursor(editor: HTMLDivElement, position: number) {
   let node = editor.firstChild
   while (node) {
     const isText = node.nodeType === Node.TEXT_NODE
-    const isMention =
-      node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).dataset.mention !== undefined
+    const isMention = node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).dataset.mention !== undefined
     const length = isText
       ? (node.textContent ?? "").replace(/\u200B/g, "").length
       : isMention

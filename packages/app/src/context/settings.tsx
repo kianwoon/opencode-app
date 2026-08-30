@@ -429,10 +429,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       const root = document.documentElement
       const uiWeight = weight(store.appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight)
       const codeWeight = weight(store.appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight)
-      const terminalWeight = weight(
-        store.appearance?.terminalFontWeight,
-        defaultSettings.appearance.terminalFontWeight,
-      )
+      const terminalWeight = weight(store.appearance?.terminalFontWeight, defaultSettings.appearance.terminalFontWeight)
       const sans = sansFontFamily(store.appearance?.sans, uiWeight)
       root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono, codeWeight))
       root.style.setProperty("--font-family-sans", sans)
@@ -442,14 +439,8 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       root.style.setProperty("--font-family-sans--font-weight", String(uiWeight))
       root.style.setProperty("--font-family-mono--font-weight", String(codeWeight))
       root.style.setProperty("--font-family-terminal--font-weight", String(terminalWeight))
-      const messageWeight = weight(
-        store.appearance?.messageFontWeight,
-        defaultSettings.appearance.messageFontWeight,
-      )
-      root.style.setProperty(
-        "--font-family-message",
-        messageFontFamily(store.appearance?.message, messageWeight),
-      )
+      const messageWeight = weight(store.appearance?.messageFontWeight, defaultSettings.appearance.messageFontWeight)
+      root.style.setProperty("--font-family-message", messageFontFamily(store.appearance?.message, messageWeight))
       root.style.setProperty("--font-family-message--font-weight", String(messageWeight))
       // Font colors are resolved by the browser per color scheme via light-dark(),
       // falling back to the themed text color when the user leaves a value empty.
@@ -609,17 +600,11 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
         },
-        uiFontWeight: withFallback(
-          () => store.appearance?.uiFontWeight,
-          defaultSettings.appearance.uiFontWeight,
-        ),
+        uiFontWeight: withFallback(() => store.appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight),
         setUIFontWeight(value: number) {
           setStore("appearance", "uiFontWeight", value)
         },
-        codeFontWeight: withFallback(
-          () => store.appearance?.codeFontWeight,
-          defaultSettings.appearance.codeFontWeight,
-        ),
+        codeFontWeight: withFallback(() => store.appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight),
         setCodeFontWeight(value: number) {
           setStore("appearance", "codeFontWeight", value)
         },

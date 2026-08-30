@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  isComplete,
-  propagateFailure,
-  readySteps,
-  validateDag,
-} from "../../../src/session/workflow/dag"
+import { isComplete, propagateFailure, readySteps, validateDag } from "../../../src/session/workflow/dag"
 import type { WorkflowStep } from "@opencode-ai/core/v1/session"
 
 /**

@@ -1372,7 +1372,6 @@ describe("server session", () => {
     })
 
     store.optimistic.add({ sessionID: "child", message, parts: [optimistic] })
-
   })
 
   test("preserves removals during history prepend", async () => {

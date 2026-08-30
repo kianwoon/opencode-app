@@ -11,11 +11,7 @@ export const rendererHost = "renderer"
 
 // Diagnostics only. Dynamically imported so the electron-log module graph
 // (and Electron itself) stays out of unit tests.
-const log = async (
-  message: string,
-  extra: Record<string, unknown>,
-  level: "info" | "warn" | "error" = "info",
-) => {
+const log = async (message: string, extra: Record<string, unknown>, level: "info" | "warn" | "error" = "info") => {
   try {
     const { write } = await import("./logging")
     write("protocol", message, extra, level)

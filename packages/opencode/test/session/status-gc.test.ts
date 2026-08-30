@@ -56,59 +56,60 @@ it.live(
   20_000,
 )
 
-it.live("busy activity cancels the scheduled idle GC", () =>
-  Effect.gen(function* () {
-    const status = yield* SessionStatus.Service
+it.live(
+  "busy activity cancels the scheduled idle GC",
+  () =>
+    Effect.gen(function* () {
+      const status = yield* SessionStatus.Service
 
-    const calls: string[] = []
-    const original = Bun.gc
-    ;(Bun as unknown as { gc: (force?: boolean) => void }).gc = (force?: boolean) => {
-      calls.push(force ? "full-sync" : "full-async")
-    }
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        ;(Bun as unknown as { gc: typeof Bun.gc }).gc = original
-      }),
-    )
+      const calls: string[] = []
+      const original = Bun.gc
+      ;(Bun as unknown as { gc: (force?: boolean) => void }).gc = (force?: boolean) => {
+        calls.push(force ? "full-sync" : "full-async")
+      }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          ;(Bun as unknown as { gc: typeof Bun.gc }).gc = original
+        }),
+      )
 
-    yield* provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        yield* status.set(sid, { type: "busy" })
-        yield* status.set(sid, { type: "idle" })
-        // New work arrives inside the debounce window.
-        yield* Effect.sleep(200)
-        yield* status.set(sid, { type: "busy" })
-        yield* Effect.sleep(5_300)
-        yield* status.set(sid, { type: "idle" })
-        yield* Effect.sleep(5_300)
-      }),
-    )
+      yield* provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          yield* status.set(sid, { type: "busy" })
+          yield* status.set(sid, { type: "idle" })
+          // New work arrives inside the debounce window.
+          yield* Effect.sleep(200)
+          yield* status.set(sid, { type: "busy" })
+          yield* Effect.sleep(5_300)
+          yield* status.set(sid, { type: "idle" })
+          yield* Effect.sleep(5_300)
+        }),
+      )
 
-    // Canceled during the busy window, fired once for the final idle —
-    // never during busy.
-    expect(calls).toEqual(["full-async"])
-  }),
+      // Canceled during the busy window, fired once for the final idle —
+      // never during busy.
+      expect(calls).toEqual(["full-async"])
+    }),
   20_000,
 )
 
 test("set/list/get track busy sessions", async () => {
-  const layer = LayerNode.compile(
-    LayerNode.group([EventV2Bridge.node, SessionStatus.node, CrossSpawnSpawner.node]),
-  )
+  const layer = LayerNode.compile(LayerNode.group([EventV2Bridge.node, SessionStatus.node, CrossSpawnSpawner.node]))
   const runtime = ManagedRuntime.make(layer)
   await runtime.runPromise(
-    Effect.scoped(provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const status = yield* SessionStatus.Service
-        yield* status.set(sid, { type: "busy" })
-        expect((yield* status.get(sid)).type).toBe("busy")
-        expect((yield* status.list()).size).toBe(1)
-        yield* status.set(sid, { type: "idle" })
-        expect((yield* status.get(sid)).type).toBe("idle")
-        expect((yield* status.list()).size).toBe(0)
-      }),
-    )),
+    Effect.scoped(
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const status = yield* SessionStatus.Service
+          yield* status.set(sid, { type: "busy" })
+          expect((yield* status.get(sid)).type).toBe("busy")
+          expect((yield* status.list()).size).toBe(1)
+          yield* status.set(sid, { type: "idle" })
+          expect((yield* status.get(sid)).type).toBe("idle")
+          expect((yield* status.list()).size).toBe(0)
+        }),
+      ),
+    ),
   )
   await runtime.dispose()
 })
-
