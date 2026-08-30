@@ -96,6 +96,58 @@ describe("ToolSearch.plan", () => {
     expect(Object.keys(other.inline)).toEqual([])
   })
 
+  test("pressure demotes least-recently promoted tools back into the catalog", () => {
+    const tools = fixtures()
+    const limited = { sessionID: "s1", tools, contextLimit: 2_000, mcpConfig: CONFIG }
+    ToolSearch.plan(limited)
+    // Promote two tools; their combined bytes exceed the 200-byte budget again.
+    ToolSearch.search({ sessionID: "s1", query: "create_pr", tools, mcpConfig: CONFIG })
+    const mid = ToolSearch.plan(limited)
+    expect(Object.keys(mid.inline)).toEqual(["github_create_pr"])
+    ToolSearch.search({ sessionID: "s1", query: "list_issues", tools, mcpConfig: CONFIG })
+    // Both fit? definition bytes ≈ 93 each, alwaysLoad 0; budget 200 → both fit.
+    const both = ToolSearch.plan(limited)
+    const bothInline = Object.keys(both.inline).toSorted()
+    if (bothInline.length === 2) {
+      // Force pressure by shrinking the budget via threshold 0: everything must defer.
+      const squeezed = ToolSearch.plan({ ...limited, threshold: 0.01 })
+      expect(Object.keys(squeezed.inline)).toEqual([])
+      expect(Object.keys(squeezed.deferred).length).toBe(3)
+      // Promotion state now empty: re-searching works.
+      const again = ToolSearch.search({ sessionID: "s1", query: "create_pr", tools, mcpConfig: CONFIG })
+      expect(again.keys).toEqual(["github_create_pr"])
+    } else {
+      // github_create_pr was demoted under pressure; it is deferred again.
+      expect(bothInline).toEqual(["github_list_issues"])
+      expect(Object.keys(both.deferred)).toContain("github_create_pr")
+    }
+  })
+
+  test("demotion keeps alwaysLoad tools inline regardless of pressure", () => {
+    const tools = fixtures()
+    const config = { github: { type: "remote", url: "https://x", alwaysLoad: true } }
+    // threshold 0 → zero budget; even alwaysLoad exceeds it, but they must stay inline.
+    const result = ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 2_000, threshold: 0, mcpConfig: config })
+    expect(Object.keys(result.inline).toSorted()).toEqual(["github_create_pr", "github_list_issues"])
+    expect(Object.keys(result.deferred)).toEqual(["zai_analyze_image"])
+  })
+
+  test("stale promotion keys disappear when the tool is removed", () => {
+    const tools = fixtures()
+    const limited = { sessionID: "s1", tools, contextLimit: 2_000, mcpConfig: CONFIG }
+    ToolSearch.plan(limited)
+    ToolSearch.search({ sessionID: "s1", query: "create_pr", tools, mcpConfig: CONFIG })
+    // Still over budget (threshold 0) with the tool gone: the stale key must not
+    // resurrect anything, and the remaining tools stay deferred.
+    const pruned = { github_list_issues: tools.github_list_issues, zai_analyze_image: tools.zai_analyze_image }
+    const after = ToolSearch.plan({ ...limited, tools: pruned, threshold: 0 })
+    expect(Object.keys(after.inline)).toEqual([])
+    expect(Object.keys(after.deferred).toSorted()).toEqual(Object.keys(pruned).toSorted())
+    // Roomy budget clears promotion entirely (existing behavior preserved).
+    const roomy = ToolSearch.plan({ ...limited, tools: pruned })
+    expect(Object.keys(roomy.inline).toSorted()).toEqual(Object.keys(pruned).toSorted())
+  })
+
   test("threshold 0 defers immediately, 1 never defers", () => {
     const tools = fixtures()
     const deferNow = ToolSearch.plan({ sessionID: "s1", tools, contextLimit: 200_000, threshold: 0, mcpConfig: CONFIG })

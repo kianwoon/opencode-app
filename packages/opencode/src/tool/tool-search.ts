@@ -13,7 +13,7 @@ export const Parameters = Schema.Struct({
   }),
 })
 
-const DESCRIPTION = `Search and load deferred MCP tools. When a session has many MCP tools, their full definitions are not loaded into context; only the catalog in this description is. Call this tool with a query matching a tool's name or purpose to load its full definition and make it callable for the rest of the session.`
+const DESCRIPTION = `Search and load deferred MCP tools. When a session has many MCP tools, their full definitions are not loaded into context; only the catalog in this description is. Call this tool with a query matching a tool's name or purpose to load its full definition and make it callable for the session. Loaded tools may be unloaded again if context pressure rises; search again to reload them.`
 
 /**
  * Deferred-MCP tool search. Registered only when deferral is active (see
@@ -44,7 +44,9 @@ export const ToolSearchTool = Tool.define(
           metadata: { promoted: result.keys },
           output:
             SessionToolSearch.formatResults({ tools: all, keys: result.keys }) +
-            (result.keys.length > 0 ? "\n\nThese tools are now loaded and callable for the rest of this session." : ""),
+            (result.keys.length > 0
+              ? "\n\nThese tools are now loaded and callable for the session. They may be unloaded again if context pressure rises; search again to reload them."
+              : ""),
         } satisfies Tool.ExecuteResult<{ promoted: string[] }>
       }),
     }

@@ -10,21 +10,23 @@ import { McpCatalog } from "@/mcp/catalog"
  * promote full definitions on demand through the `tool_search` tool.
  *
  * Promotion state is per session: once the model surfaces a tool via
- * `tool_search`, it stays in the tools array for the rest of that session.
- * `alwaysLoad` servers bypass deferral entirely. All inputs are explicit —
- * this module holds no service dependencies.
+ * `tool_search`, it stays in the tools array while context allows. When
+ * accumulated promotions would re-exceed the deferral threshold, the
+ * least-recently promoted tools are demoted back into the catalog and can be
+ * re-found with another search. `alwaysLoad` servers bypass deferral entirely.
+ * All inputs are explicit — this module holds no service dependencies.
  */
 
 /** Default threshold: defer when definitions exceed this fraction of the context window (CC's `auto` = 10%). */
 export const DEFAULT_THRESHOLD = 0.1
 
-/** Per-session set of MCP tool keys promoted out of the deferred catalog. */
-const promoted = new Map<string, Set<string>>()
+/** Per-session map of MCP tool keys promoted out of the deferred catalog → promotion time (ms). */
+const promoted = new Map<string, Map<string, number>>()
 
 /** Bound on tracked sessions; promotion state is cheap but sessions can be long-lived. */
 const MAX_TRACKED_SESSIONS = 1_000
 
-function promotedFor(sessionID: string): Set<string> {
+function promotedFor(sessionID: string): Map<string, number> {
   const existing = promoted.get(sessionID)
   if (existing) return existing
   if (promoted.size >= MAX_TRACKED_SESSIONS) {
@@ -32,7 +34,7 @@ function promotedFor(sessionID: string): Set<string> {
     const oldest = promoted.keys().next().value
     if (oldest !== undefined) promoted.delete(oldest)
   }
-  const fresh = new Set<string>()
+  const fresh = new Map<string, number>()
   promoted.set(sessionID, fresh)
   return fresh
 }
@@ -103,6 +105,29 @@ export function plan(input: {
   const promotedSet = promotedFor(input.sessionID)
   const inline: Record<string, MCP.McpTool> = {}
   const deferred: Record<string, MCP.McpTool> = {}
+
+  // Promotion is sticky but not unbounded: when accumulated promotions would
+  // push inline bytes back over the threshold, demote the least-recently
+  // promoted tools (they return to the deferred catalog and can be re-found
+  // with another tool_search). alwaysLoad tools are never demoted.
+  const alwaysLoadBytes = Object.entries(input.tools)
+    .filter(([key]) => alwaysLoad.has(serverOf(key)))
+    .reduce((sum, [, entry]) => sum + McpCatalog.definitionBytes(entry.def), 0)
+  const promotions = Object.entries(input.tools)
+    .filter(([key]) => promotedSet.has(key) && !alwaysLoad.has(serverOf(key)))
+    .map(([key, entry]): [string, number] => [key, McpCatalog.definitionBytes(entry.def)])
+    // Map preserves insertion order; a touched key keeps its original slot, so
+    // sort explicitly by promotion time to get true LRU order.
+    .sort((a, b) => (promotedSet.get(a[0]) ?? 0) - (promotedSet.get(b[0]) ?? 0))
+  let promotedBytes = promotions.reduce((sum, [, bytes]) => sum + bytes, 0)
+  for (const [key] of promotions) {
+    if (alwaysLoadBytes + promotedBytes <= budget) break
+    promotedSet.delete(key)
+  }
+  for (const key of [...promotedSet.keys()]) {
+    if (!input.tools[key]) promotedSet.delete(key)
+  }
+
   for (const [key, entry] of Object.entries(input.tools)) {
     if (alwaysLoad.has(serverOf(key)) || promotedSet.has(key)) inline[key] = entry
     else deferred[key] = entry
@@ -140,7 +165,8 @@ export function search(input: {
     else if (`${key} ${entry.def.name} ${entry.def.description ?? ""}`.toLowerCase().includes(needle)) fuzzy.push(key)
   }
   const keys = exact.length > 0 ? exact : fuzzy
-  for (const key of keys) promotedSet.add(key)
+  const now = Date.now()
+  for (const key of keys) promotedSet.set(key, now)
   return { keys }
 }
 
