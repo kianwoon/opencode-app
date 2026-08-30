@@ -226,16 +226,15 @@ export const SettingsSkillsV2: Component<{ directory: Accessor<string | undefine
   return (
     <>
       <div class="settings-v2-tab-header">
-        <h2 class="settings-v2-tab-title">{language.t("settings.skills.title")}</h2>
+        <h2 class="settings-v2-tab-title">
+          {language.t("settings.skills.title")}
+          <Show when={count() !== undefined}>
+            <span class="settings-v2-plugins-count">{language.plural("settings.plugins.skills.count", count()!)}</span>
+          </Show>
+        </h2>
       </div>
       <div class="settings-v2-tab-body settings-v2-plugins">
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">
-            {language.t("settings.plugins.section.skills")}
-            <Show when={count() !== undefined}>
-              <span class="settings-v2-plugins-count">{language.plural("settings.plugins.skills.count", count()!)}</span>
-            </Show>
-          </h3>
           <Show
             when={!skills.loading}
             fallback={

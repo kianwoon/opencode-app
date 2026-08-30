@@ -67,18 +67,17 @@ export const SettingsPluginsV2: Component = () => {
   return (
     <>
       <div class="settings-v2-tab-header">
-        <h2 class="settings-v2-tab-title">{language.t("settings.plugins.title")}</h2>
+        <h2 class="settings-v2-tab-title">
+          {language.t("settings.plugins.title")}
+          <Show when={plugins().length > 0}>
+            <span class="settings-v2-plugins-count">
+              {language.plural("settings.plugins.plugins.count", plugins().length)}
+            </span>
+          </Show>
+        </h2>
       </div>
       <div class="settings-v2-tab-body settings-v2-plugins">
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">
-            {language.t("settings.plugins.section.plugins")}
-            <Show when={plugins().length > 0}>
-              <span class="settings-v2-plugins-count">
-                {language.plural("settings.plugins.plugins.count", plugins().length)}
-              </span>
-            </Show>
-          </h3>
           <SettingsListV2>
             <Show
               when={plugins().length > 0}
