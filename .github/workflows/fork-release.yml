@@ -1,0 +1,38 @@
+name: fork-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish a release for (e.g. v1.19.14)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update release for pushed tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Creating release for $TAG_NAME"
+            gh release create "$TAG_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG_NAME" \
+              --generate-notes
+          else
+            echo "Release for $TAG_NAME already exists, skipping"
+          fi
