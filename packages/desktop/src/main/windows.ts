@@ -4,9 +4,9 @@ import type { DesktopTheme } from "@opencode-ai/ui/theme/types"
 import oc2ThemeJson from "../../../ui/src/theme/themes/oc-2.json"
 import { randomUUID } from "node:crypto"
 import { rmSync } from "node:fs"
-import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol, shell } from "electron"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { app, BrowserWindow, dialog, nativeImage, nativeTheme, protocol, shell } from "electron"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import type { TitlebarTheme } from "../preload/types"
 import { exportDebugLogs, write as writeLog } from "./logging"
 import { getStore, removeStoreFile } from "./store"
@@ -16,11 +16,9 @@ import { nativeT } from "./native-translations"
 import { createWindowRegistry } from "./window-registry"
 import { safeWindowURL } from "./window-state"
 import { resolveExternalURL, resolveLocalFilePath } from "./external-url"
+import { registerRendererProtocol, rendererHost, rendererProtocol } from "./renderer-protocol"
 
 const root = dirname(fileURLToPath(import.meta.url))
-const rendererRoot = join(root, "../renderer")
-const rendererProtocol = "oc"
-const rendererHost = "renderer"
 const clipboardWritePermission = "clipboard-sanitized-write"
 const notificationPermission = "notifications"
 const rendererPermissions = new Set([clipboardWritePermission, notificationPermission])
@@ -213,7 +211,6 @@ export function createMainWindow(id: string = randomUUID()) {
   allowRendererPermissions(win)
   wireWindowRecovery(win, id)
   wireNavigationPolicy(win)
-
   win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
     const { requestHeaders } = details
     upsertKeyValue(requestHeaders, "Access-Control-Allow-Origin", ["*"])
@@ -292,49 +289,6 @@ function windowStateFile(id: string) {
 // the per-window renderer store this window persists its tabs into.
 function windowDataFile(id: string) {
   return `opencode.window.${id.replace(/[^a-zA-Z0-9._-]/g, "-")}.dat`
-}
-
-export function registerRendererProtocol() {
-  if (protocol.isProtocolHandled(rendererProtocol)) return
-
-  protocol.handle(rendererProtocol, async (request) => {
-    const url = new URL(request.url)
-    if (url.host !== rendererHost) {
-      writeLog("protocol", "rejected host", { url: request.url }, "warn")
-      return new Response("Not found", { status: 404 })
-    }
-
-    const file = resolve(rendererRoot, `.${decodeURIComponent(url.pathname)}`)
-    const rel = relative(rendererRoot, file)
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      writeLog("protocol", "rejected path", { url: request.url, file }, "warn")
-      return new Response("Not found", { status: 404 })
-    }
-
-    try {
-      const range = request.headers.get("range")
-      const response = await net.fetch(pathToFileURL(file).toString(), {
-        headers: range ? { range } : undefined,
-      })
-      if (response.status >= 400) {
-        writeLog(
-          "protocol",
-          "fetch failed",
-          {
-            url: request.url,
-            file,
-            status: response.status,
-            statusText: response.statusText,
-          },
-          "error",
-        )
-      }
-      return addDocumentPolicy(response, file)
-    } catch (error) {
-      writeLog("protocol", "fetch error", { url: request.url, file, error }, "error")
-      return new Response("Not found", { status: 404 })
-    }
-  })
 }
 
 function loadWindow(win: BrowserWindow, html: string) {
@@ -484,13 +438,6 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   win.webContents.on("preload-error", (_event, preloadPath, error) => {
     writeLog("preload", "preload error", { window: name, preloadPath, error }, "error")
   })
-}
-
-function addDocumentPolicy(response: Response, file: string) {
-  if (!file.toLowerCase().endsWith(".html")) return response
-  const headers = new Headers(response.headers)
-  headers.set(documentPolicyHeader, jsCallStacksDocumentPolicy)
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
 
 function allowRendererPermissions(win: BrowserWindow) {

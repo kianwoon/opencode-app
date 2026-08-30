@@ -5,8 +5,8 @@ import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
+import { app, BrowserWindow, protocol } from "electron"
 import type { Event } from "electron"
-import { app, BrowserWindow } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -35,13 +35,13 @@ import { setupAutoUpdater, showUpdaterDialog } from "./updater"
 import { safeWebContentsURL } from "./window-state"
 import {
   getLastFocusedWindow,
-  registerRendererProtocol,
   setRelaunchHandler,
   setAppQuitting,
   setBackgroundColor,
   setDockIcon,
   restoreMainWindows,
 } from "./windows"
+import { registerRendererProtocol } from "./renderer-protocol"
 import { createWslServersController } from "./wsl/servers"
 import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
@@ -285,7 +285,7 @@ const main = Effect.gen(function* () {
     ),
   )
   app.setAsDefaultProtocolClient("opencode")
-  registerRendererProtocol()
+  registerRendererProtocol(protocol)
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)
   const menuDeps = {
