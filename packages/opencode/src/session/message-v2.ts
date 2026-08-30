@@ -29,6 +29,7 @@ import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
@@ -521,7 +522,22 @@ export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: Ses
 })
 
 export function filterCompacted(msgs: Iterable<WithParts>) {
-  const result = [] as WithParts[]
+  return filterCompactedSkeleton(msgs).selected
+}
+
+/**
+ * Compaction boundary decision over message metadata only — no tool/text parts needed.
+ *
+ * The reorder keeps: [compaction user message, summary assistant message] then the
+ * retained tail (tail_start_id..compaction) then everything after the compaction.
+ * Only `info` fields and `type: "compaction"` part markers influence the result, so
+ * the same logic runs against cheap skeletons before hydrating full part rows.
+ * Element type is preserved so callers can pass either full rows or skeletons.
+ */
+type Skeleton = { info: Info; parts: { type: unknown; tail_start_id?: MessageID }[] }
+
+function filterCompactedSkeleton<T extends Skeleton>(msgs: Iterable<T>) {
+  const result = [] as T[]
   const completed = new Set<string>()
   let retain: MessageID | undefined
   for (const msg of msgs) {
@@ -531,7 +547,7 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
       continue
     }
     if (msg.info.role === "user" && completed.has(msg.info.id)) {
-      const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
+      const part = msg.parts.find((item) => item.type === "compaction")
       if (!part) continue
       if (!part.tail_start_id) break
       retain = part.tail_start_id
@@ -547,12 +563,10 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   const compactionIndex = result.findLastIndex(
     (msg) =>
       msg.info.role === "user" &&
-      msg.parts.some((item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined),
+      msg.parts.some((item) => item.type === "compaction" && item.tail_start_id !== undefined),
   )
   const compaction = result[compactionIndex]
-  const part = compaction?.parts.find(
-    (item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined,
-  )
+  const part = compaction?.parts.find((item) => item.type === "compaction" && item.tail_start_id !== undefined)
   const summaryIndex = compaction
     ? result.findIndex(
         (msg, index) =>
@@ -565,18 +579,84 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
       )
     : -1
   const tailIndex = part?.tail_start_id ? result.findIndex((msg) => msg.info.id === part.tail_start_id) : -1
-  if (tailIndex >= 0 && tailIndex < compactionIndex && summaryIndex > compactionIndex) {
-    return [
-      ...result.slice(compactionIndex, summaryIndex + 1),
-      ...result.slice(tailIndex, compactionIndex),
-      ...result.slice(summaryIndex + 1),
-    ]
-  }
-  return result
+  const selected =
+    tailIndex >= 0 && tailIndex < compactionIndex && summaryIndex > compactionIndex
+      ? [
+          ...result.slice(compactionIndex, summaryIndex + 1),
+          ...result.slice(tailIndex, compactionIndex),
+          ...result.slice(summaryIndex + 1),
+        ]
+      : result
+  return { selected, all: result }
 }
 
-export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
-  return filterCompacted(yield* stream(sessionID))
+/**
+ * Prompt-loop context path: decide the compaction boundary over message metadata
+ * (cheap rows) plus compaction part markers (rare rows read via json_extract), then
+ * hydrate full parts only for the retained messages. Long sessions no longer pull
+ * every historical tool/text part into memory just to discard most of it.
+ */
+export const filterCompactedEffect = Effect.fn("MessageV2.filterCompacted")(function* (sessionID: SessionID) {
+  const { db } = yield* Database.Service
+  const rows = yield* db
+    .select()
+    .from(MessageTable)
+    .where(eq(MessageTable.session_id, sessionID))
+    .orderBy(MessageTable.time_created, MessageTable.id)
+    .all()
+    .pipe(Effect.orDie)
+  if (rows.length === 0) {
+    yield* db
+      .select({ id: SessionTable.id })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(
+        Effect.flatMap((row) =>
+          row ? Effect.void : Effect.fail(new NotFoundError({ message: `Session not found: ${sessionID}` })),
+        ),
+      )
+  }
+
+  // Compaction markers live in rare part rows; fetch them without hydrating payloads.
+  const compactionRows = rows.length
+    ? yield* db
+        .select({ message_id: PartTable.message_id, tail: sql<string | null>`json_extract(${PartTable.data}, '$.tail_start_id')` })
+        .from(PartTable)
+        .where(
+          and(
+            inArray(PartTable.message_id, rows.map((row) => row.id)),
+            sql`json_extract(${PartTable.data}, '$.type') = 'compaction'`,
+          ),
+        )
+        .all()
+        .pipe(Effect.orDie)
+    : []
+  const compactionByMessage = new Map<string, Pick<CompactionPart, "type" | "tail_start_id">[]>()
+  for (const row of compactionRows) {
+    const list = compactionByMessage.get(row.message_id)
+    const marker: Pick<CompactionPart, "type" | "tail_start_id"> = {
+      type: "compaction" as const,
+      tail_start_id: (row.tail ?? undefined) as MessageID | undefined,
+    }
+    if (list) list.push(marker)
+    else compactionByMessage.set(row.message_id, [marker])
+  }
+
+  const skeleton = rows.map((row) => ({
+    info: info(row),
+    parts: compactionByMessage.get(row.id) ?? [],
+  }))
+  // filterCompactedSkeleton consumes newest-first input (mirroring MessageV2.stream)
+  // and returns model-consumption order: [compaction, summary, ...tail, ...after].
+  const { selected } = filterCompactedSkeleton(skeleton.toReversed())
+  if (selected.length === 0) return []
+  const rowById = new Map(rows.map((row) => [row.id, row]))
+  const keptRows = selected.flatMap((entry) => {
+    const row = rowById.get(entry.info.id)
+    return row ? [row] : []
+  })
+  return yield* hydrate(db, keptRows)
 })
 
 // filterCompacted reorders messages for model consumption
