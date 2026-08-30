@@ -1773,7 +1773,7 @@ export type ProviderConfig = {
     enterpriseUrl?: string
     setCacheKey?: boolean
     /**
-     * Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 300000 when unset; set to false to disable the idle guards entirely.
+     * Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 180000 when unset; set to false to disable the idle guards entirely.
      */
     timeout?: number | false
     /**
@@ -1781,7 +1781,7 @@ export type ProviderConfig = {
      */
     headerTimeout?: number | false
     /**
-     * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (300000 when unset); set to false to disable the chunk-gap guard.
+     * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (180000 when unset); set to false to disable the chunk-gap guard.
      */
     chunkTimeout?: number | false
     [key: string]: unknown | string | boolean | number | false | number | false | number | false | undefined

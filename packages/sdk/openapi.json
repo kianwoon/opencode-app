@@ -21192,7 +21192,7 @@
                     "enum": [false]
                   }
                 ],
-                "description": "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 300000 when unset; set to false to disable the idle guards entirely."
+                "description": "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 180000 when unset; set to false to disable the idle guards entirely."
               },
               "headerTimeout": {
                 "anyOf": [
@@ -21218,7 +21218,7 @@
                     "enum": [false]
                   }
                 ],
-                "description": "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (300000 when unset); set to false to disable the chunk-gap guard."
+                "description": "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (180000 when unset); set to false to disable the chunk-gap guard."
               }
             },
             "additionalProperties": {}

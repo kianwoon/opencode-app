@@ -40,7 +40,7 @@ const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 // session until a manual abort. The value only ever fires on a *gap* between
 // chunks (or missing headers), never on total turn duration, so long healthy
 // reasoning turns are unaffected.
-export const DEFAULT_IDLE_TIMEOUT = 300_000
+export const DEFAULT_IDLE_TIMEOUT = 180_000
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res

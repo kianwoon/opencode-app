@@ -13,7 +13,7 @@
   for their phase. NEVER reintroduce a hard total-time timeout on provider fetch — long
   reasoning turns legitimately run for many minutes.
 - **Default ON (2026-08-30)**: when no timeout options are configured, `DEFAULT_IDLE_TIMEOUT`
-  (300s) applies to BOTH phases via `resolveIdleTimeouts` — so a provider stream that goes
+  (180s) applies to BOTH phases via `resolveIdleTimeouts` — so a provider stream that goes
   silently silent mid-turn (observed: z.ai GLM gateway parked silent-canyon 15 minutes with
   zero log lines) is aborted and retried instead of hanging until manual cancel. Escape
   hatches, per phase: `timeout: false` (both), `chunkTimeout: false` (chunk guard only),
