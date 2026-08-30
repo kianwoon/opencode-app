@@ -9,6 +9,7 @@ import { Tool } from "@/tool/tool"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
+import { ToolSearch } from "./tool-search"
 
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
@@ -46,6 +47,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
+  /** Raw `cfg.mcp` record, read by the caller for tool-search `alwaysLoad` lookups. */
+  mcpConfig: Record<string, unknown>
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -387,7 +390,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
 
   if (flags.experimentalCodeMode) return tools
 
-  for (const [key, entry] of Object.entries(yield* mcp.tools())) {
+  const visible = Permission.visibleTools(
+    yield* mcp.tools(),
+    Permission.merge(input.agent.permission, input.session.permission ?? []),
+  )
+  const deferral = ToolSearch.plan({
+    sessionID: input.session.id,
+    tools: visible,
+    contextLimit: input.model.limit.context,
+    mcpConfig: input.mcpConfig,
+  })
+
+  for (const [key, entry] of Object.entries(deferral.inline)) {
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
     const execute = item.execute
     if (!execute) continue
@@ -489,8 +503,44 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[key] = item
   }
 
+  if (deferral.deferred) {
+    const { ToolSearchTool } = yield* Effect.promise(() => import("@/tool/tool-search"))
+    const init = yield* Tool.init(yield* ToolSearchTool)
+    tools[init.id] = tool({
+      description: [init.description, deferral.catalog].filter(Boolean).join("\n\n"),
+      inputSchema: jsonSchema(
+        ProviderTransform.schema(input.model, ToolJsonSchema.fromTool({ ...init, id: init.id })),
+      ),
+      execute(args, opts) {
+        return run.promise(
+          Effect.gen(function* () {
+            const ctx = context(args, opts)
+            return yield* init.execute(
+              args as { query: string },
+              {
+                sessionID: ctx.sessionID,
+                abort: optionsAbort(opts),
+                messageID: input.processor.message.id,
+                agent: input.agent.name,
+                callID: opts.toolCallId,
+                extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
+                messages: input.messages,
+                metadata: () => Effect.void,
+                ask: () => Effect.void,
+              },
+            )
+          }),
+        )
+      },
+    })
+  }
+
   return tools
 })
+
+function optionsAbort(options: ToolExecutionOptions): AbortSignal {
+  return options.abortSignal ?? new AbortController().signal
+}
 
 function toRecord(value: unknown) {
   if (isRecord(value)) return value

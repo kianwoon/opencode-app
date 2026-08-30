@@ -1632,6 +1632,7 @@ const layer = Layer.effect(
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
+            const cfg = yield* config.get()
 
             const tools = yield* SessionTools.resolve({
               agent,
@@ -1641,6 +1642,7 @@ const layer = Layer.effect(
               bypassAgentCheck,
               messages: msgs,
               promptOps,
+              mcpConfig: (cfg.mcp ?? {}) as Record<string, unknown>,
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),
@@ -1648,6 +1650,8 @@ const layer = Layer.effect(
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
               Effect.provideService(RuntimeFlags.Service, flags),
+              Effect.provideService(Agent.Service, agents),
+              Effect.provideService(Config.Service, config),
             )
 
             if (lastUser.format?.type === "json_schema") {

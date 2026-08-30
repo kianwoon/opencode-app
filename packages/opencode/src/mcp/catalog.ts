@@ -118,6 +118,78 @@ export const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "_")
 
 export const toolName = (clientName: string, name: string) => sanitize(clientName) + "_" + sanitize(name)
 
+/** Tool and server instructions are truncated at this size before entering context (matches Claude Code). */
+export const DESCRIPTION_MAX_BYTES = 2_048
+
+function truncateUtf8(value: string, maxBytes: number) {
+  const bytes = Buffer.from(value, "utf8")
+  if (bytes.length <= maxBytes) return value
+  let cut = maxBytes
+  // Never split a multi-byte UTF-8 sequence: back off to a code-point boundary.
+  while (cut > 0 && (bytes[cut]! & 0xc0) === 0x80) cut -= 1
+  return bytes.subarray(0, cut).toString("utf8").trimEnd() + "…"
+}
+
+/** Compact description safe to load into context; critical details live at the start. */
+export function compactDescription(value: string | undefined) {
+  return truncateUtf8(value ?? "", DESCRIPTION_MAX_BYTES)
+}
+
+/** Approximate context cost of a tool definition (description + JSON schema), in bytes. */
+export function definitionBytes(mcpTool: MCPToolDef) {
+  return Buffer.byteLength(mcpTool.description ?? "", "utf8") + Buffer.byteLength(JSON.stringify(mcpTool.inputSchema), "utf8")
+}
+
+/** One catalog entry: enough to decide relevance without loading the full schema. */
+export interface ToolIndexEntry {
+  /** Namespaced key used by session tools (`server_tool`). */
+  key: string
+  server: string
+  tool: string
+  description: string
+}
+
+export interface ServerIndex {
+  server: string
+  instructions?: string
+  tools: ToolIndexEntry[]
+}
+
+/**
+ * Build a compact catalog index: names + truncated descriptions per server,
+ * plus server instructions. Never includes input schemas — that is the whole
+ * point; full definitions stay deferred until tool_search promotes them.
+ */
+export function index(defs: Record<string, { name: string; description?: string }>, serverInstructions: Record<string, string | undefined>): ServerIndex[] {
+  const byServer = new Map<string, ToolIndexEntry[]>()
+  for (const [key, def] of Object.entries(defs)) {
+    const server = key.slice(0, key.indexOf("_") > 0 ? key.indexOf("_") : undefined) || key
+    const entry: ToolIndexEntry = {
+      key,
+      server,
+      tool: def.name,
+      description: compactDescription(def.description),
+    }
+    byServer.set(server, [...(byServer.get(server) ?? []), entry])
+  }
+  return [...byServer.entries()].toSorted(([a], [b]) => a.localeCompare(b)).map(([server, tools]) => ({
+    server,
+    instructions: serverInstructions[server],
+    tools,
+  }))
+}
+
+/** Render the index as the tool_search tool description: compact, scannable, schema-free. */
+export function describeIndex(index: ServerIndex[]): string {
+  return index
+    .map((server) => {
+      const lines = server.tools.map((tool) => `  - ${tool.tool}: ${tool.description}`)
+      const head = server.instructions ? [`## ${server.server}`, server.instructions] : [`## ${server.server}`]
+      return [...head, ...lines].join("\n")
+    })
+    .join("\n\n")
+}
+
 export function prompts(client: Client, timeout?: number) {
   if (!client.getServerCapabilities()?.prompts) return Promise.resolve([])
   return paginate(
