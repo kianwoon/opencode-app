@@ -35,6 +35,40 @@ describe("Npm.sanitize", () => {
   })
 })
 
+describe("Npm.resolveEntryPoint", () => {
+  test("resolves the package main file, never the package directory", async () => {
+    // Regression: the Node branch passed the package DIRECTORY to
+    // import.meta.resolve, which returned the directory URL and made the
+    // later import() fail with "Directory import is not supported"
+    // (observed with @zenobius/opencode-skillful in the desktop Node sidecar).
+    await using tmp = await tmpdir()
+    await fs.mkdir(path.join(tmp.path, "acme"))
+    await fs.mkdir(path.join(tmp.path, "acme", "dist"))
+    await writePackage(path.join(tmp.path, "acme"), { name: "acme", main: "dist/index.js" })
+    await Bun.write(path.join(tmp.path, "acme", "dist", "index.js"), "export const acme = true\n")
+
+    const entry = Npm.resolveEntryPoint("acme", path.join(tmp.path, "acme"))
+    expect(entry.entrypoint).toBeDefined()
+    expect(entry.entrypoint!.endsWith("dist/index.js")).toBe(true)
+  })
+
+  test("resolves through an ESM-only exports map", async () => {
+    await using tmp = await tmpdir()
+    await fs.mkdir(path.join(tmp.path, "esm-only"))
+    await fs.mkdir(path.join(tmp.path, "esm-only", "dist"))
+    await writePackage(path.join(tmp.path, "esm-only"), {
+      name: "esm-only",
+      type: "module",
+      exports: { ".": { import: "./dist/index.js" } },
+    })
+    await Bun.write(path.join(tmp.path, "esm-only", "dist", "index.js"), "export const esm = true\n")
+
+    const entry = Npm.resolveEntryPoint("esm-only", path.join(tmp.path, "esm-only"))
+    expect(entry.entrypoint).toBeDefined()
+    expect(entry.entrypoint!.endsWith("dist/index.js")).toBe(true)
+  })
+})
+
 describe("Npm.add", () => {
   test("reifies when package cache directory exists without the package installed", async () => {
     await using tmp = await tmpdir()

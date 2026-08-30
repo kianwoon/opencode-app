@@ -1,6 +1,8 @@
 export * as Npm from "./npm"
 
 import path from "path"
+import fs from "fs"
+import { pathToFileURL } from "url"
 import npa from "npm-package-arg"
 import { Effect, Schema, Context, Layer, Option, FileSystem } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
@@ -47,10 +49,49 @@ export function sanitize(pkg: string) {
   return Array.from(pkg, (char) => (illegal.has(char) || char.charCodeAt(0) < 32 ? "_" : char)).join("")
 }
 
-const resolveEntryPoint = (name: string, dir: string): EntryPoint => {
+export function resolveEntryPoint(name: string, dir: string): EntryPoint {
   let entrypoint: string | undefined
   try {
-    entrypoint = typeof Bun !== "undefined" ? import.meta.resolve(name, dir) : import.meta.resolve(dir)
+    // Resolve the installed package's own main entry relative to its
+    // package.json. Never resolve the bare package NAME (hits a same-named
+    // package in Bun's global cache instead of this installed copy) and never
+    // resolve the DIRECTORY itself (import.meta.resolve returns the directory
+    // URL verbatim, and a later import() of it fails with "Directory import is
+    // not supported" — observed with @zenobius/opencode-skillful in the
+    // desktop Node sidecar).
+    type PackageJson = { main?: unknown; exports?: unknown }
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as PackageJson
+    // Entry target: exports["."] (string or import/default condition) wins,
+    // then "main", then the index.js fallback.
+    const exportsDot =
+      pkgJson.exports && typeof pkgJson.exports === "object" && !Array.isArray(pkgJson.exports)
+        ? (pkgJson.exports as Record<string, unknown>)["."]
+        : undefined
+    const target = (() => {
+      if (typeof exportsDot === "string") return exportsDot
+      if (exportsDot && typeof exportsDot === "object") {
+        const conditions = exportsDot as Record<string, unknown>
+        for (const condition of ["import", "default", "require"]) {
+          const value = conditions[condition]
+          if (typeof value === "string") return value
+        }
+      }
+      if (typeof pkgJson.main === "string" && pkgJson.main.trim()) return pkgJson.main.trim()
+      return "index.js"
+    })()
+    const parent = pathToFileURL(path.join(dir, "package.json")).href
+    if (typeof Bun !== "undefined") {
+      entrypoint = import.meta.resolve(`./${target}`, parent)
+    } else {
+      try {
+        // require.resolve honors package.json "main"/"exports" without
+        // executing the module; exotic export shapes fall back to
+        // import.meta.resolve with the package dir as parent.
+        entrypoint = pathToFileURL(require.resolve(`./${target}`, { paths: [dir] })).href
+      } catch {
+        entrypoint = import.meta.resolve(`./${target}`, parent)
+      }
+    }
   } catch {
     entrypoint = undefined
   }

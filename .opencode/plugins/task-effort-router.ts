@@ -8,4 +8,6 @@
  * Requires the plugin in plugin-lib/ to be tracked in the repo — do not delete it.
  */
 
-export { TaskEffortRouterPlugin as default } from "../plugin-lib/task-effort-router"
+// The .ts extension is required: the desktop sidecar imports plugins with
+// Node's ESM type-stripping, which does not do extensionless resolution.
+export { TaskEffortRouterPlugin as default } from "../plugin-lib/task-effort-router.ts"
