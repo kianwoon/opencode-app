@@ -23,6 +23,8 @@ import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { PluginPtyEnvironment } from "@/plugin/pty-environment"
 import { InstanceStore } from "@/project/instance-store"
+import { TaskScheduler } from "@/task/scheduler"
+import { Task } from "@opencode-ai/core/task"
 import { Project } from "@/project/project"
 import { Vcs } from "@/project/vcs"
 import { ProviderAuth } from "@/provider/auth"
@@ -92,6 +94,7 @@ import { instanceHandlers } from "./handlers/instance"
 import { mcpHandlers } from "./handlers/mcp"
 import { permissionHandlers } from "./handlers/permission"
 import { projectHandlers } from "./handlers/project"
+import { taskHandlers } from "./handlers/task"
 import { projectCopyHandlers } from "./handlers/project-copy"
 import { providerHandlers } from "./handlers/provider"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
@@ -166,6 +169,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     providerHandlers,
     sessionHandlers,
     syncHandlers,
+    taskHandlers,
     tuiHandlers,
     workspaceHandlers,
   ]),
@@ -261,12 +265,15 @@ const app = LayerNode.group([
   ShareNext.node,
   SessionShare.node,
   InstanceStore.node,
+  Task.node,
+  TaskScheduler.node,
   httpClient,
   EventV2.node,
   ProjectV2.node,
   ProjectCopy.node,
   PtyTicket.node,
 ])
+
 
 export function createRoutes(
   corsOptions?: CorsOptions,

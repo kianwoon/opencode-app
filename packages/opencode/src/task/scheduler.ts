@@ -7,7 +7,7 @@ import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionPrompt } from "@/session/prompt"
 import { InstanceStore } from "@/project/instance-store"
-import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Cron } from "./cron"
 
 /** How often the scheduler wakes to claim due tasks. */
@@ -135,7 +135,7 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeGlobalNode({
+export const node = LayerNode.make({
   service: Service,
   layer,
   deps: [Task.node, Session.node, SessionStatus.node, SessionPrompt.node, InstanceStore.node],
