@@ -9,7 +9,7 @@
 </p>
 
 <p align="center"><b>The AI coding agent, upgraded into an AI harness.</b></p>
-<p align="center">A fork of <a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a> with a built-in harness layer: task-aware effort routing, cache-safe context control, workflow orchestration, verification gates, and durable runtime state.</p>
+<p align="center">A fork of <a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a> with a built-in harness layer: scheduled tasks, runaway-loop and stall guards, task-aware effort routing, cache-safe context control, workflow orchestration, verification gates, and durable runtime state.</p>
 
 <p align="center">
   <a href="https://github.com/kianwoon/opencode-app/releases"><img alt="Latest fork release" src="https://img.shields.io/github/v/release/kianwoon/opencode-app?style=flat-square&label=fork%20release" /></a>
@@ -27,6 +27,41 @@ verification around every turn. All enhancements are implemented in-process
 (no external meta-harness), staying upstream-mergeable.
 
 ## Unique Features
+
+### ⏰ Scheduled Tasks (default ON)
+
+Cron-scheduled sessions that run without you. Tasks are declared with a 5-field
+cron expression (or `daily`/`hourly`/… presets) plus a prompt; the scheduler
+fires them on time, claims due rows durably, and skips (or queues behind) a
+session that is already busy. The model can create tasks itself with the
+`schedule_task` tool, and the sidebar's Tasks section manages them.
+
+```text
+User: "review open PRs every weekday at 9am"
+  → schedule_task  cron: "0 9 * * 1-5", prompt: "review open PRs, summarize risks"
+  → scheduler fires on time → fresh session runs the prompt → run history kept
+```
+
+### 🛑 Runaway Loop Guards (default ON)
+
+Two layers stop degenerate sessions without killing healthy long work:
+
+- **Step bound** — every agent is capped at 1000 provider turns (per-agent
+  `steps` config wins). Near the cap the tools are physically removed and a
+  wrap-up prompt injected, so the session salvages itself with a final answer
+  instead of erroring mid-work.
+- **Turn-fingerprint interceptor** — identical consecutive turns are detected
+  by content hash: 3 identical turns inject a visible warning, 6 strip tools
+  and force a wrap-up, 10 hard-stop the loop with a persisted error.
+
+### 🛡️ Idle Stall Guard (default ON, 180s)
+
+Provider streams that go silent mid-turn are aborted after 180s of
+no bytes — but strictly idle-based: **no total-time limit ever applies**, so
+long healthy reasoning turns cannot be interrupted. Stalls raise a distinct
+`ChunkStallError`, are retried with backoff by the normal bounded schedule,
+and log a WARN with the stall duration. Per-phase escape hatches:
+`timeout: false`, `chunkTimeout: false`, `headerTimeout: false`.
 
 ### ⚡ Workflow DAG Engine (default ON)
 
@@ -94,56 +129,87 @@ Aborts are classified as aborts (not mystery `UnknownError`s), user-initiated
 subagent cancels report "Subagent cancelled", and early stream teardowns emit
 diagnosable telemetry instead of failing silently.
 
+### 🚀 Performance Pass
+
+Context- and IO-efficiency work that keeps turns fast as sessions grow:
+
+- **Read-only tool result cache** — repeated read-only calls in a session skip
+  canonical execution entirely.
+- **Watcher dirty-set staging** — file snapshots stage from watcher dirty sets
+  instead of full rescans.
+- **Post-compaction hydration boundary** — only retained messages hydrate
+  after compaction, not the whole history.
+- **tool_search demotion** — promoted tool definitions demote again under
+  context pressure, keeping the catalog lean.
+
 ---
 
 ## Harness Architecture
 
+The harness wraps every turn in four concentric stages — assessment, context
+control, orchestration, and verification — over durable runtime state, and a
+reliability shell around the provider stream itself.
+
 ```text
-                     ┌──────────────────────────────────────────┐
-                     │            HARNESS CONTROL PLANE         │
-                     │                                          │
-   user task ──────▶ │  Task Assessor ──▶ effort/risk profile   │
-                     │        │                                 │
-                     │        ▼                                 │
-                     │  Effort Governor   request_effort ▲      │
-                     │  (pre-escalate)    (model escalates)│     │
-                     │        │                            │     │
-                     │        ▼                            │     │
-                     │  Context Engine                     │     │
-                     │  ├─ Context Optimizer (prune)       │     │
-                     │  ├─ Context Governor (budgets)      │     │
-                     │  └─ System Context (deltas+epochs)  │     │
-                     │        │                            │     │
-                     │        ▼                            │     │
-                     │  Orchestrator ──────────────────────┘     │
-                     │  ├─ single loop (simple tasks)            │
-                     │  └─ workflow DAG (parallel subagents)     │
-                     │        │                                 │
-                     │        ▼                                 │
-                     │  Verification Gate ──▶ reviewer pass     │
-                     │        │                                 │
-                     │        ▼                                 │
-                     │  Durable State (inputs, jobs, events)    │
-                     └───────────────────┬──────────────────────┘
-                                         │
-                        single provider turn (LLM.stream)
-                                         │
-                                         ▼
-                              providers / tools / MCP
+                        ┌────────────────────────────────────────────────┐
+                        │            HARNESS CONTROL PLANE               │
+                        │                                                │
+   user task ─────────▶ │  Task Assessor ──▶ effort/risk profile         │
+                        │        │                                       │
+                        │        ▼                                       │
+                        │  Effort Governor    request_effort ▲           │
+                        │  (pre-escalate)     (model escalates)│         │
+                        │        │                             │         │
+                        │        ▼                             │         │
+                        │  Context Engine                      │         │
+                        │  ├─ Context Optimizer (prune)        │         │
+                        │  ├─ Context Governor (budgets)       │         │
+                        │  └─ System Context (deltas+epochs)   │         │
+                        │        │                             │         │
+                        │        ▼                             │         │
+                        │  Orchestrator ───────────────────────┘         │
+                        │  ├─ single loop (simple tasks)                 │
+                        │  ├─ workflow DAG (parallel subagents)          │
+                        │  └─ Loop Guards (step bound + fingerprints)    │
+                        │        │                                       │
+                        │        ▼                                       │
+                        │  Verification Gate ──▶ reviewer pass           │
+                        │        │                                       │
+                        │        ▼                                       │
+                        │  Durable State                                 │
+                        │  ├─ inputs, jobs, events                       │
+                        │  └─ Task Scheduler (cron → sessions)           │
+                        └───────────────────┬────────────────────────────┘
+                                            │
+                           single provider turn (LLM.stream)
+                                            │
+                          ┌─────────────────▼──────────────────┐
+                          │  RELIABILITY SHELL (per stream)    │
+                          │  ├─ idle stall guard (180s, no     │
+                          │  │   total-time limit)             │
+                          │  ├─ ChunkStallError → retry+backoff│
+                          │  └─ repetition-loop guard          │
+                          └─────────────────┬──────────────────┘
+                                            │
+                                            ▼
+                                 providers / tools / MCP
 ```
 
 Every element is in-process: plugins handle assessment/effort/pruning, core
-handles orchestration/delivery/durability. No external meta-harness.
+handles orchestration/delivery/durability/scheduling. No external
+meta-harness.
 
 ---
 
 ## Feature Flags
 
-| Flag                                 | Default | Controls                |
-| ------------------------------------ | ------- | ----------------------- |
-| `OPENCODE_EXPERIMENTAL_WORKFLOWS`    | on      | Workflow DAG engine     |
-| `OPENCODE_EXPERIMENTAL_VERIFICATION` | off     | Automatic reviewer gate |
-| `experimental.workflow_concurrency`  | 4       | Parallel workflow steps |
+| Flag                                 | Default | Controls                      |
+| ------------------------------------ | ------- | ----------------------------- |
+| `OPENCODE_EXPERIMENTAL_WORKFLOWS`    | on      | Workflow DAG engine           |
+| `OPENCODE_EXPERIMENTAL_VERIFICATION` | off     | Automatic reviewer gate       |
+| `experimental.workflow_concurrency`  | 4       | Parallel workflow steps       |
+| per-agent `steps` config             | 1000    | Max provider turns per agent  |
+| `timeout` / `chunkTimeout` / `headerTimeout` | 180000 | Provider idle stall guard (ms; `false` disables a phase) |
 
 ## Releases (macOS Apple Silicon)
 
@@ -154,6 +220,8 @@ before publishing:
 
 | Release                                                                                  | Highlights                                                              |
 | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [v1.18.25-fork.5](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.5) | Scheduled tasks, runaway loop guards, performance pass                  |
+| [v1.18.25-fork.4](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.4) | Idle stall guard (default ON), plugin loading fixes                     |
 | [v1.18.25-fork.3](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.3) | Context governor, abort handling                                        |
 | [v1.18.25-fork.2](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.2) | Review hardening, honest cancel reporting                               |
 | [v1.18.25-fork.1](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.1) | Workflow engine, effort governor, context optimizer, Phase 3 durability |
