@@ -1653,6 +1653,7 @@ const layer = Layer.effect(
             Effect.provideService(FSUtil.Service, fsys),
             Effect.provideService(Session.Service, sessions),
             Effect.provideService(TodoService, todos),
+            Effect.provideService(Instruction.Service, instruction),
           )
 
           const msg: SessionV1.Assistant = {
@@ -1753,26 +1754,35 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, workflowGuidance, modelMsgs] = yield* Effect.all([
-              sys.skills(agent),
-              sys.environment(model),
-              // A transient FS error while reading instruction files must not kill
-              // the prompt loop; degrade to whatever loaded and keep going.
-              instruction.system().pipe(
-                Effect.catch((error) =>
-                  Effect.logError("failed to load instruction files", { error }).pipe(Effect.as([] as string[])),
+            const [skills, env, instructions, mcpInstructions, workflowGuidance, rulePaths, modelMsgs] =
+              yield* Effect.all([
+                sys.skills(agent),
+                sys.environment(model),
+                // A transient FS error while reading instruction files must not kill
+                // the prompt loop; degrade to whatever loaded and keep going.
+                instruction.system().pipe(
+                  Effect.catch((error) =>
+                    Effect.logError("failed to load instruction files", { error }).pipe(Effect.as([] as string[])),
+                  ),
                 ),
-              ),
-              sys.mcp(agent, session.permission),
-              sys.workflow(agent),
-              MessageV2.toModelMessagesEffect(msgs, model),
-            ])
+                sys.mcp(agent, session.permission),
+                sys.workflow(agent),
+                instruction.systemPaths().pipe(
+                  Effect.map((paths) => Array.from(paths)),
+                  Effect.catch(() => Effect.succeed([] as string[])),
+                ),
+                MessageV2.toModelMessagesEffect(msgs, model),
+              ])
+            // Rule-enforcement anchor must stay the LAST system entry so the
+            // binding-rules block sits at the model's recency position.
+            const ruleAnchor = yield* sys.rules(rulePaths)
             const system = [
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
               ...(workflowGuidance ? [workflowGuidance] : []),
+              ...(ruleAnchor ? [ruleAnchor] : []),
             ]
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({

@@ -135,6 +135,25 @@ describe("session.system", () => {
     }),
   )
 
+  it.effect("rules anchor renders a binding block listing rule files, or undefined without rules", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+
+      const anchor = yield* prompt.rules(["/proj/AGENTS.md", "/home/.config/opencode/AGENTS.md"])
+      expect(anchor).toBeDefined()
+      expect(anchor).toContain("<rule_enforcement>")
+      expect(anchor).toContain("BINDING RULES")
+      expect(anchor).toContain("NO exceptions")
+      expect(anchor).toContain("Rule files in effect (2)")
+      expect(anchor).toContain("/proj/AGENTS.md")
+      expect(anchor).toContain("/home/.config/opencode/AGENTS.md")
+      expect(anchor).toEndWith("</rule_enforcement>")
+
+      const empty = yield* prompt.rules([])
+      expect(empty).toBeUndefined()
+    }),
+  )
+
   it.effect("MCP output includes connected server instructions", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

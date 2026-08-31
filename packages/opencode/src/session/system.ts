@@ -54,6 +54,7 @@ export interface Interface {
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
   readonly workflow: (agent: Agent.Info) => Effect.Effect<string | undefined>
+  readonly rules: (paths: string[]) => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -164,6 +165,25 @@ const layer = Layer.effect(
           "pipeline stages, multi-repo changes, etc.",
           "If NO — the request is simple, single-step, or sequential by nature: do not",
           "use the workflow tool, use regular tools or the task tool directly.",
+        ].join("\n")
+      }),
+
+      // Strict rule-enforcement anchor, rendered as the LAST system entry every
+      // step. Rules listed only at the top of a long system prompt lose
+      // attention over a session; the recency position keeps them binding.
+      // Content is stable across steps (only the file list), preserving
+      // provider prompt-cache hits on the rest of the prefix.
+      rules: Effect.fn("SystemPrompt.rules")(function* (paths: string[]) {
+        if (paths.length === 0) return
+        return [
+          "<rule_enforcement>",
+          "The instruction files listed in this system prompt are BINDING RULES that apply to every action you take in this session.",
+          "Obey every rule they contain, with NO exceptions, regardless of task complexity, time pressure, or model capability.",
+          "Rules you must not skip: read the relevant AGENTS.md guidance before working in an unfamiliar area; follow stated style, naming, testing, and verification requirements; honor permission, safety, and scope constraints.",
+          "Before you finish a turn, check your work against these rules. If you cannot satisfy a rule, say so explicitly instead of silently deviating.",
+          `Rule files in effect (${paths.length}):`,
+          ...paths.map((p) => `  - ${p}`),
+          "</rule_enforcement>",
         ].join("\n")
       }),
     })

@@ -5,6 +5,7 @@ import { Agent } from "@/agent/agent"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Instruction } from "./instruction"
 import { PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
@@ -31,6 +32,32 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   // turns). The reminder is a synthetic part, so it never persists as user
   // content and never reaches the transcript.
   const items = yield* todos.get(input.session.id)
+
+  // Per-turn rule adherence: the binding-rules anchor lives at the end of the
+  // system prompt, but attention decays as a long conversation accumulates, so
+  // re-assert obedience at the user-turn position every turn. Synthetic part,
+  // never persisted. No-op when no instruction files are in effect.
+  const ruleCount = yield* (yield* Instruction.Service)
+    .systemPaths()
+    .pipe(
+      Effect.map((paths) => paths.size),
+      Effect.catch(() => Effect.succeed(0)),
+    )
+  if (ruleCount > 0) {
+    userMessage.parts.push({
+      id: PartID.ascending(),
+      messageID: userMessage.info.id,
+      sessionID: userMessage.info.sessionID,
+      type: "text",
+      text: [
+        "<system-reminder>",
+        "Rule adherence check: the instruction files in this session are BINDING. Re-check your plan and output against every stated rule before acting; honor style, testing, permission, safety, and scope constraints with no exceptions. If you cannot satisfy a rule, say so explicitly instead of silently deviating.",
+        "</system-reminder>",
+      ].join("\n"),
+      synthetic: true,
+    })
+  }
+
   if (items.some((item) => item.status !== "completed")) {
     const list = items
       .map((item) => {
