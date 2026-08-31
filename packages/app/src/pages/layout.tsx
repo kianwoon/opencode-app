@@ -83,6 +83,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { SidebarTasks } from "./layout/sidebar-tasks"
 
 export default function LegacyLayout(props: ParentProps) {
   const serverSDK = useServerSDK()
@@ -2158,6 +2159,14 @@ export default function LegacyLayout(props: ParentProps) {
                   </DropdownMenu>
                 </div>
               </div>
+
+              <Show when={server.current} keyed>
+                {(conn) => (
+                  <Show when={worktree()} keyed>
+                    {(dir) => <SidebarTasks server={conn} directory={dir} />}
+                  </Show>
+                )}
+              </Show>
 
               <div class="flex-1 min-h-0 flex flex-col">
                 <Show

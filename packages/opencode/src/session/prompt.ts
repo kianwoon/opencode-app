@@ -67,6 +67,14 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
+// Safety wall for runaway agentic loops. Agents without an explicit `steps`
+// config previously ran unbounded (`Infinity`), so a model that keeps ending
+// turns with tool calls could loop for hours burning millions of tokens.
+const DEFAULT_MAX_STEPS = 1000
+// Grace steps granted after the soft max-steps wall for the model to produce
+// its text-only summary. If it still calls tools past the grace window, the
+// loop is force-broken with an error instead of continuing forever.
+const MAX_STEPS_GRACE = 5
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
   "image/gif",
@@ -101,6 +109,30 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
   // They are not pending work and must not trigger an assistant-prefill request.
   return part.state.status === "error" && part.state.metadata?.interrupted === true
+}
+
+// Repetition interceptor: a model that keeps producing (near-)identical turns
+// is stuck, exactly like the ses_fabcb2a43ffeeJobwWmhG19PDi incident where the
+// agent circulated the same typecheck error 28 times over 2 hours until a
+// human interrupted. Escalate the same way a human does: warn at
+// REPETITION_WARN, take the tools away and demand a wrap-up at
+// REPETITION_WRAPUP, and force-break at REPETITION_BREAK.
+const REPETITION_WARN = 3
+const REPETITION_WRAPUP = 6
+const REPETITION_BREAK = 10
+
+// Fingerprint one completed assistant turn from its persisted parts: text
+// content, every tool name+input, and the finish reason. Identical turns
+// produce identical fingerprints; reordered tool calls still match.
+function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
+  const items: string[] = []
+  for (const part of parts) {
+    if (part.type === "text") items.push(`text:${part.text}`)
+    else if (part.type === "tool") items.push(`tool:${part.tool}:${JSON.stringify(part.state.input ?? null)}`)
+    else if (part.type === "reasoning") items.push(`reason:${part.text}`)
+  }
+  items.push(`finish:${finish ?? ""}`)
+  return items.sort().join("\n")
 }
 
 export interface Interface {
@@ -1445,6 +1477,9 @@ const layer = Layer.effect(
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
+        let repeatKey: string | undefined
+        let repeatCount = 0
+        let forceWrapUp = false
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1610,8 +1645,9 @@ const layer = Layer.effect(
             yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
             throw error
           }
-          const maxSteps = agent.steps ?? Infinity
+          const maxSteps = agent.steps ?? DEFAULT_MAX_STEPS
           const isLastStep = step >= maxSteps
+          const isPastGrace = step >= maxSteps + MAX_STEPS_GRACE
           msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
             Effect.provideService(RuntimeFlags.Service, flags),
             Effect.provideService(FSUtil.Service, fsys),
@@ -1689,6 +1725,29 @@ const layer = Layer.effect(
               })
             }
 
+            const format = lastUser.format ?? { type: "text" as const }
+
+            // Soft wall: once the step budget is exhausted — or the model is
+            // repeating itself — physically strip tools for this turn so the
+            // injected MAX_STEPS_PROMPT is true: the model's only move is to
+            // emit its final text summary, which exits the loop through the
+            // normal finish path and salvages the session (summary recorded,
+            // todos intact). Keep the structured output tool when the user
+            // requested a json_schema response, since that call IS the final
+            // answer.
+            const wrapUp = isLastStep || forceWrapUp
+            let turnTools = tools
+            if (wrapUp) {
+              const keep =
+                format.type === "json_schema"
+                  ? (name: string) => name === "StructuredOutput"
+                  : (name: string) => name === "invalid"
+              turnTools = Object.fromEntries(Object.entries(tools).filter(([name]) => keep(name)))
+              if (format.type === "json_schema" && !turnTools["StructuredOutput"]) {
+                turnTools["StructuredOutput"] = tools["StructuredOutput"]
+              }
+            }
+
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
@@ -1709,7 +1768,6 @@ const layer = Layer.effect(
               ...(skills ? [skills] : []),
               ...(workflowGuidance ? [workflowGuidance] : []),
             ]
-            const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
               user: lastUser,
@@ -1720,9 +1778,18 @@ const layer = Layer.effect(
               system,
               messages: [
                 ...modelMsgs,
-                ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
+                ...(wrapUp
+                  ? [
+                      {
+                        role: "assistant" as const,
+                        content: forceWrapUp
+                          ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have produced the same response ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
+                          : MAX_STEPS_PROMPT,
+                      },
+                    ]
+                  : []),
               ],
-              tools,
+              tools: turnTools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
             })
@@ -1768,6 +1835,86 @@ const layer = Layer.effect(
                 overflow: !handle.message.finish,
               })
             }
+
+            // Repetition interceptor: fingerprint the turn that just
+            // completed and count consecutive identical turns. A model
+            // repeating the exact same work is stuck — escalate like a human
+            // would: warn it, then take its tools away, then force-break.
+            const fingerprint = turnFingerprint(
+              yield* MessageV2.parts(handle.message.id).pipe(Effect.provideService(Database.Service, database)),
+              handle.message.finish,
+            )
+            if (fingerprint === repeatKey) repeatCount++
+            else {
+              repeatKey = fingerprint
+              repeatCount = 1
+            }
+            if (repeatCount >= REPETITION_BREAK) {
+              handle.message.error = new SessionV1.MaxStepsError({
+                message: `Agent "${agent.name}" repeated the same response ${repeatCount} times without making progress. The run was stopped automatically. Re-run with a more specific prompt, or increase the agent's "steps" config if the repetition is expected.`,
+                steps: step,
+              }).toObject()
+              yield* sessions.updateMessage(handle.message)
+              yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+              yield* Effect.logWarning("loop force-break after repeated identical turns", {
+                "session.id": sessionID,
+                step,
+                repeatCount,
+              })
+              return "break" as const
+            }
+            if (repeatCount >= REPETITION_WRAPUP) {
+              forceWrapUp = true
+              yield* Effect.logWarning("loop repeating identical turns, forcing wrap-up", {
+                "session.id": sessionID,
+                step,
+                repeatCount,
+              })
+            } else if (repeatCount === REPETITION_WARN) {
+              // Visible nudge in the transcript AND a steer to the model on
+              // its next turn — the automated version of a human typing "you
+              // keep repeating the same thing".
+              const warnPart: SessionV1.TextPart = {
+                id: PartID.ascending(),
+                sessionID,
+                messageID: handle.message.id,
+                type: "text",
+                text: `You have now produced the identical response ${repeatCount} times in a row (same tool calls and arguments). You are stuck in a loop. Stop repeating: either change your approach substantially, or produce your final answer and stop calling tools.`,
+                time: { start: Date.now() },
+              }
+              yield* sessions.updatePart(warnPart)
+              yield* sessions.updateMessage(handle.message)
+              yield* Effect.logWarning("loop repeating identical turns, warning agent", {
+                "session.id": sessionID,
+                step,
+                repeatCount,
+              })
+            }
+
+            // Backstop: the model was told at the soft wall to stop calling
+            // tools and summarize, and its tools were physically removed, but
+            // it still has not produced a final response after the grace
+            // window. Force-break so the loop can never run unbounded
+            // (see ses_fabcb2a43ffeeJobwWmhG19PDi: 531 steps / 2 hours before
+            // a manual cancel). This is the last resort after salvage failed;
+            // a normal finish still exits via the regular path above.
+            if (isPastGrace && !finished) {
+              handle.message.error = new SessionV1.MaxStepsError({
+                message: `Agent "${agent.name}" reached the maximum of ${maxSteps} steps${
+                  MAX_STEPS_GRACE > 0 ? ` (+${MAX_STEPS_GRACE} grace steps)` : ""
+                } without producing a final response. The run was stopped automatically. Increase the agent's "steps" config to allow longer runs.`,
+                steps: maxSteps,
+              }).toObject()
+              yield* sessions.updateMessage(handle.message)
+              yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+              yield* Effect.logWarning("loop force-break at max steps", {
+                "session.id": sessionID,
+                step,
+                maxSteps,
+              })
+              return "break" as const
+            }
+
             return "continue" as const
           }).pipe(
             Effect.ensuring(instruction.clear(handle.message.id)),

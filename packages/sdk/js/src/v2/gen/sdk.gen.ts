@@ -236,6 +236,22 @@ import type {
   SyncStartResponses,
   SyncStealErrors,
   SyncStealResponses,
+  TaskCreateErrors,
+  TaskCreateInput,
+  TaskCreateResponses,
+  TaskGetErrors,
+  TaskGetResponses,
+  TaskListErrors,
+  TaskListResponses,
+  TaskRemoveErrors,
+  TaskRemoveResponses,
+  TaskRunErrors,
+  TaskRunResponses,
+  TaskRunsErrors,
+  TaskRunsResponses,
+  TaskUpdateErrors,
+  TaskUpdateInput,
+  TaskUpdateResponses,
   TextPartInput,
   ToolIdsErrors,
   ToolIdsResponses,
@@ -4652,6 +4668,242 @@ export class Sync extends HeyApiClient {
   }
 }
 
+export class Task extends HeyApiClient {
+  /**
+   * List scheduled tasks
+   *
+   * Get every scheduled task known to the scheduler.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<TaskListResponses, TaskListErrors, ThrowOnError>({
+      url: "/task",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Create a scheduled task
+   *
+   * Create a scheduled task from a prompt and a cron expression or preset.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      taskCreateInput?: TaskCreateInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "taskCreateInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<TaskCreateResponses, TaskCreateErrors, ThrowOnError>({
+      url: "/task",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List task runs
+   *
+   * Get the recorded runs of a scheduled task, newest first.
+   */
+  public runs<ThrowOnError extends boolean = false>(
+    parameters: {
+      taskID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<TaskRunsResponses, TaskRunsErrors, ThrowOnError>({
+      url: "/task/{taskID}/runs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete a scheduled task
+   *
+   * Delete a scheduled task and its recorded runs.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      taskID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<TaskRemoveResponses, TaskRemoveErrors, ThrowOnError>({
+      url: "/task/{taskID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get a scheduled task
+   *
+   * Retrieve a single scheduled task by ID.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      taskID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<TaskGetResponses, TaskGetErrors, ThrowOnError>({
+      url: "/task/{taskID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update a scheduled task
+   *
+   * Update a task's title, prompt, cron, enabled flag, session binding, or directory.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      taskID: string
+      directory?: string
+      workspace?: string
+      taskUpdateInput?: TaskUpdateInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "taskUpdateInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<TaskUpdateResponses, TaskUpdateErrors, ThrowOnError>({
+      url: "/task/{taskID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Run a task now
+   *
+   * Fire a scheduled task immediately, outside its schedule.
+   */
+  public run<ThrowOnError extends boolean = false>(
+    parameters: {
+      taskID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<TaskRunResponses, TaskRunErrors, ThrowOnError>({
+      url: "/task/{taskID}/run",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Control extends HeyApiClient {
   /**
    * Get next TUI request
@@ -7338,6 +7590,11 @@ export class OpencodeClient extends HeyApiClient {
   private _sync?: Sync
   get sync(): Sync {
     return (this._sync ??= new Sync({ client: this.client }))
+  }
+
+  private _task?: Task
+  get task(): Task {
+    return (this._task ??= new Task({ client: this.client }))
   }
 
   private _tui?: Tui
