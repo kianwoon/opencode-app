@@ -359,9 +359,13 @@ Instructions here.
           expect(list.length).toBe(1)
           const item = list.find((x) => x.name === "manual-skill")
           expect(item).toBeDefined()
+          // Raw record keeps description undefined; rendering substitutes a
+          // fallback so the agent still knows the skill exists.
           expect(item!.description).toBeUndefined()
-          expect(Skill.fmt(list, { verbose: false })).toBe("No skills are currently available.")
-          expect(Skill.fmt(list, { verbose: true })).toBe("No skills are currently available.")
+          expect(Skill.fmt(list, { verbose: false })).toBe(
+            "## Available Skills\n- **manual-skill**: (no description provided)",
+          )
+          expect(Skill.fmt(list, { verbose: true })).toContain("(no description provided)")
         }),
       { git: true },
     ),

@@ -145,6 +145,10 @@ const add = Effect.fnUntraced(function* (state: State, match: string, events: Ev
   }
 
   state.dirs.add(path.dirname(match))
+  // Deterministic precedence: last scan wins. Discovery scans global sources
+  // first, then project, then config paths/urls; the built-in skill registers
+  // before disk discovery. Net precedence (most specific wins):
+  // config urls/paths > project > global > built-in.
   state.skills[md.data.name] = {
     name: md.data.name,
     description: md.data.description,
@@ -281,12 +285,22 @@ const loadSkills = Effect.fnUntraced(function* (
   discovered: DiscoveryState,
   events: EventV2Bridge.Service["Service"],
 ) {
+  const before = Object.keys(state.skills).length
   yield* Effect.forEach(discovered.matches, (match) => add(state, match, events), {
     concurrency: "unbounded",
     discard: true,
   })
 
-  yield* Effect.logInfo("init", { count: Object.keys(state.skills).length })
+  // Discovery summary so silent filtering is visible: skills dropped for a
+  // missing description or lost to duplicate-name overwrite never reach the
+  // model's skill list otherwise.
+  const loaded = Object.keys(state.skills).length - before
+  yield* Effect.logInfo("skill discovery complete", {
+    sources: discovered.sources.length,
+    matches: discovered.matches.length,
+    loaded,
+    dirs: discovered.dirs.length,
+  })
 })
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Skill") {}
@@ -358,8 +372,21 @@ const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       const disabledSet = yield* disabled()
       const available = activeNames(s, disabledSet)
-      if (disabledSet.has(name) || !s.skills[name]) return yield* new NotFoundError({ name, available })
-      return s.skills[name]
+      if (disabledSet.has(name) || !s.skills[name]) {
+        // Rescan once before failing: a SKILL.md added mid-session is invisible
+        // to the instance-cached discovery, and this is the exact moment the
+        // model just tried to load it.
+        yield* InstanceState.invalidate(state)
+        yield* InstanceState.invalidate(discovered)
+        const fresh = yield* InstanceState.get(state)
+        const found = fresh.skills[name]
+        if (!found || disabledSet.has(name)) {
+          const retryAvailable = activeNames(fresh, disabledSet)
+          return yield* new NotFoundError({ name, available: retryAvailable })
+        }
+        yield* Effect.logInfo("skill discovered on retry", { name })
+      }
+      return s.skills[name] ?? (yield* InstanceState.get(state)).skills[name]!
     })
 
     const all = Effect.fn("Skill.all")(function* () {
@@ -429,7 +456,12 @@ const layer = Layer.effect(
 )
 
 export function fmt(list: Info[], opts: { verbose: boolean }) {
-  const described = list.filter((skill) => skill.description !== undefined)
+  // Skills without a description are still surfaced with a fallback so the
+  // agent knows they exist; dropping them entirely hides them from the model.
+  const described = list.map((skill) => ({
+    ...skill,
+    description: skill.description ?? "(no description provided)",
+  }))
   if (described.length === 0) return "No skills are currently available."
   if (opts.verbose) {
     return [

@@ -83,6 +83,10 @@ const layer = Layer.effect(
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
+            // Early salience pointer: the skills list sits far below after all
+            // instruction files; this stable one-liner keeps it discoverable
+            // without moving the list itself (which would hurt prompt cache).
+            `Note: available skills are listed near the end of this system prompt; load one with the skill tool when a task matches.`,
           ].join("\n"),
           references.length === 0
             ? undefined
@@ -112,10 +116,10 @@ const layer = Layer.effect(
 
         return [
           "Skills provide specialized instructions and workflows for specific tasks.",
-          "Use the skill tool to load a skill when a task matches its description.",
           // the agents seem to ingest the information about skills a bit better if we present a more verbose
           // version of them here and a less verbose version in tool description, rather than vice versa.
           Skill.fmt(list, { verbose: true }),
+          "Before starting a multi-step task, scan the skills above: if a task matches a skill description, load it with the skill tool before improvising.",
         ].join("\n")
       }),
 

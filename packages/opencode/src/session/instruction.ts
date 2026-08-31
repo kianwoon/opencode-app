@@ -89,7 +89,12 @@ const layer: Layer.Layer<
     })
 
     const read = Effect.fnUntraced(function* (filepath: string) {
-      return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
+      const content = yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (content === undefined) {
+        yield* Effect.logWarning("instruction file unreadable", { path: filepath })
+        return ""
+      }
+      return content
     })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
@@ -176,10 +181,35 @@ const layer: Layer.Layer<
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
-      return [
+      const loaded = [
+        ...(paths.size + urls.length > 0
+          ? [
+              // Precedence preamble: makes conflict resolution explicit when
+              // global, project, and package-level guides disagree.
+              [
+                "The following instruction files apply to this project.",
+                "They are listed in ascending order of specificity: global, then project root, then package-level guides.",
+                "On conflict, the most specific instruction wins.",
+              ].join("\n"),
+            ]
+          : []),
         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
       ]
+
+      // Loading summary so gaps are visible: a skipped or unreadable rule file
+      // would otherwise silently shrink the instruction surface.
+      const bytes = files.reduce((sum, file) => sum + file.length, 0)
+      yield* Effect.logInfo("instruction files loaded", {
+        count: loaded.length,
+        discovered: paths.size + urls.length,
+        files: Array.from(paths).length,
+        urls: urls.length,
+        bytes,
+        paths: Array.from(paths),
+      })
+
+      return loaded
     })
 
     const find = Effect.fn("Instruction.find")(function* (dir: string) {

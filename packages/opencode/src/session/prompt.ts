@@ -1756,7 +1756,13 @@ const layer = Layer.effect(
             const [skills, env, instructions, mcpInstructions, workflowGuidance, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
+              // A transient FS error while reading instruction files must not kill
+              // the prompt loop; degrade to whatever loaded and keep going.
+              instruction.system().pipe(
+                Effect.catch((error) =>
+                  Effect.logError("failed to load instruction files", { error }).pipe(Effect.as([] as string[])),
+                ),
+              ),
               sys.mcp(agent, session.permission),
               sys.workflow(agent),
               MessageV2.toModelMessagesEffect(msgs, model),

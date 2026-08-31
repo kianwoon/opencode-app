@@ -128,7 +128,10 @@ describe("session.system", () => {
       expect(alpha).toBeGreaterThan(-1)
       expect(middle).toBeGreaterThan(alpha)
       expect(zeta).toBeGreaterThan(middle)
-      expect(output).not.toContain("manual-skill")
+      // Description-less skills are surfaced with a fallback description
+      // instead of being dropped silently.
+      expect(output).toContain("manual-skill")
+      expect(output).toContain("(no description provided)")
     }),
   )
 
