@@ -131,6 +131,7 @@ function rank(effort: Effort): number {
 function normalize(value: unknown): Effort | undefined {
   if (typeof value !== "string") return undefined
   const lower = value.toLowerCase()
+  if (lower === "none" || lower === "off") return "minimal"
   if (SUPER_TIERS.has(lower)) return "high"
   return LADDER.find((tier) => tier === lower)
 }
@@ -198,6 +199,38 @@ function escalate(sessionID: string, requested: Effort): { granted: Effort; chan
   return { granted: requested, changed: true, note: `reasoning effort raised to ${requested}` }
 }
 
+/**
+ * Resolve the wire-level variant options for a tier on this model. Models
+ * disagree about which tiers exist (GLM ships low/high/max, MiniMax none/
+ * thinking, others the full ladder), so an exact hit is preferred and the
+ * request otherwise falls back to the nearest rung the model actually ships:
+ * baselines resolve DOWN (a cheap task should never pay more than its tier),
+ * and when the model ships nothing at or below the tier, to its cheapest
+ * available tier — expressing "run cheap" beats dropping the opinion and
+ * letting the provider default decide. Escalations resolve UP only: an
+ * escalation must genuinely deepen reasoning or it is a lie to the model.
+ * Resolving down below the pinned effort is still prevented by the caller.
+ */
+function variantFor(model: unknown, tier: Effort, direction: "down" | "up") {
+  const variants = variantsOf(model)
+  if (!variants) return undefined
+  const exact = variants[tier]
+  if (exact) return exact
+  const shipped = LADDER.filter((candidate) => variants[candidate]).map((candidate) => ({ candidate, rank: rank(candidate) }))
+  if (shipped.length === 0) return undefined
+  const start = rank(tier)
+  const inDirection = shipped
+    .filter(({ rank: r }) => (direction === "down" ? r <= start : r >= start))
+    .sort((a, b) => (direction === "down" ? b.rank - a.rank : a.rank - b.rank))
+  const nearest = inDirection[0]
+  if (nearest) return variants[nearest.candidate]
+  if (direction === "down") {
+    const cheapest = shipped.sort((a, b) => a.rank - b.rank)[0]
+    return variants[cheapest.candidate]
+  }
+  return undefined
+}
+
 export const TaskEffortRouterPlugin = (async () => {
   return {
     "chat.message": async (input, output) => {
@@ -218,20 +251,24 @@ export const TaskEffortRouterPlugin = (async () => {
       if (input.model.capabilities.reasoning === false) return
       const entry = state.get(input.sessionID)
       if (!entry) return
+      // The effective rung is the higher of the assessed baseline and the
+      // model's escalation. `undefined` means the governor has no opinion
+      // for this task and the request options must pass through untouched.
       const tier = effective(entry)
-      // No assessment and no escalation: the governor has no opinion —
-      // the request options pass through untouched (model defaults win).
       if (!tier) return
 
       // Only raise: if the effective options already pin an effort at or above
-      // the tier (user selection / agent config), leave them alone.
-      if (rank(pinnedEffort(output.options) ?? "minimal") >= rank(tier)) return
+      // the tier (user selection / agent config), leave them alone. Unpinned
+      // options have no opinion, so even a `minimal` baseline may apply.
+      const pinned = pinnedEffort(output.options)
+      if (pinned && rank(pinned) >= rank(tier)) return
 
-      const variant = variantsOf(input.model)?.[tier]
-      if (!variant) {
-        // Model doesn't ship this tier — skip rather than guess provider params.
-        return
-      }
+      // Baselines resolve to the cheapest tier at or below the assessed rung;
+      // escalations to the deepest tier at or above it. Skips only when the
+      // model ships no usable tier in that direction at all.
+      const fromEscalation = entry.escalated !== undefined && rank(entry.escalated) >= rank(entry.baseline ?? "low")
+      const variant = variantFor(input.model, tier, fromEscalation ? "up" : "down")
+      if (!variant) return
       // The tier's thinking params win over whatever variant the user had
       // selected; everything else in `output.options` is preserved.
       output.options = { ...output.options, ...variant }

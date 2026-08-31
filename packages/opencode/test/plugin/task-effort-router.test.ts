@@ -187,7 +187,7 @@ describe("task effort router", () => {
     expect(system.system[2]).toContain("Task risk notice")
   })
 
-  test("minimal baseline defers to model defaults when the model lacks the tier", async () => {
+  test("minimal baseline applies the model's cheapest shipped tier", async () => {
     await hooks["chat.message"]?.(
       { sessionID: "ses_test" },
       {
@@ -203,11 +203,12 @@ describe("task effort router", () => {
         ] as never,
       },
     )
-    // Model ships only low/medium/high — no `minimal` tier exists, so the
-    // governor has no wire-level way to express its opinion and must no-op.
+    // The model ships low/medium/high and has no `minimal` tier. The governor
+    // still expresses its "run cheap" opinion by applying the cheapest tier
+    // the model does ship, instead of deferring to the provider default.
     const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
-    expect(output.options).toEqual({})
+    expect(output.options).toEqual({ reasoningEffort: "low" })
   })
 
   test("request_effort above an assessed baseline still escalates", async () => {
@@ -277,6 +278,77 @@ describe("task effort router", () => {
       output as never,
     )
     expect(output.options).toEqual({ reasoningEffort: "low" })
+  })
+
+  test("glm-shaped model (low/high/max): simple baseline applies the cheapest shipped tier", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "fix typo in comment",
+          },
+        ] as never,
+      },
+    )
+    const glm = model({
+      variants: {
+        low: { reasoningEffort: "low" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      },
+    })
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput({ model: glm }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "low" })
+  })
+
+  test("glm-shaped model (low/high/max): medium escalation resolves up to high", async () => {
+    await resetState()
+    await requestEffort("ses_test", { level: "medium", reason: "harder than expected" })
+    const glm = model({
+      variants: {
+        low: { reasoningEffort: "low" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      },
+    })
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput({ model: glm }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "high" })
+  })
+
+  test("minimal baseline never lowers a user-pinned effort on a glm-shaped model", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "fix typo in comment",
+          },
+        ] as never,
+      },
+    )
+    const glm = model({
+      variants: {
+        low: { reasoningEffort: "low" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      },
+    })
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "high" } }
+    await hooks["chat.params"]?.(chatParamsInput({ model: glm }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "high" })
   })
 
   test("skips non-reasoning models", async () => {
