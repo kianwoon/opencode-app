@@ -1,3 +1,3 @@
-export * as Cron from "./cron"
+import { Cron as CoreCron } from "@opencode-ai/core/task/cron"
 
-export { Cron } from "@opencode-ai/core/task/cron"
+export const Cron = CoreCron
