@@ -90,12 +90,14 @@ export interface UpdateInput extends Schema.Schema.Type<typeof UpdateInput> {}
 
 const Updated = define({
   type: "task.updated",
+  durable: { version: 1, aggregate: "taskID" },
   schema: {
     task: Info,
   },
 })
 const Removed = define({
   type: "task.removed",
+  durable: { version: 1, aggregate: "taskID" },
   schema: {
     taskID: ID,
   },
