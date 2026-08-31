@@ -151,48 +151,46 @@ control, orchestration, and verification — over durable runtime state, and a
 reliability shell around the provider stream itself.
 
 ```text
-                        ┌────────────────────────────────────────────────┐
-                        │            HARNESS CONTROL PLANE               │
-                        │                                                │
-   user task ─────────▶ │  Task Assessor ──▶ effort/risk profile         │
-                        │        │                                       │
-                        │        ▼                                       │
-                        │  Effort Governor    request_effort ▲           │
-                        │  (pre-escalate)     (model escalates)│         │
-                        │        │                             │         │
-                        │        ▼                             │         │
-                        │  Context Engine                      │         │
-                        │  ├─ Context Optimizer (prune)        │         │
-                        │  ├─ Context Governor (budgets)       │         │
-                        │  └─ System Context (deltas+epochs)   │         │
-                        │        │                             │         │
-                        │        ▼                             │         │
-                        │  Orchestrator ───────────────────────┘         │
-                        │  ├─ single loop (simple tasks)                 │
-                        │  ├─ workflow DAG (parallel subagents)          │
-                        │  └─ Loop Guards (step bound + fingerprints)    │
-                        │        │                                       │
-                        │        ▼                                       │
-                        │  Verification Gate ──▶ reviewer pass           │
-                        │        │                                       │
-                        │        ▼                                       │
-                        │  Durable State                                 │
-                        │  ├─ inputs, jobs, events                       │
-                        │  └─ Task Scheduler (cron → sessions)           │
-                        └───────────────────┬────────────────────────────┘
-                                            │
-                           single provider turn (LLM.stream)
-                                            │
-                          ┌─────────────────▼──────────────────┐
-                          │  RELIABILITY SHELL (per stream)    │
-                          │  ├─ idle stall guard (180s, no     │
-                          │  │   total-time limit)             │
-                          │  ├─ ChunkStallError → retry+backoff│
-                          │  └─ repetition-loop guard          │
-                          └─────────────────┬──────────────────┘
-                                            │
-                                            ▼
-                                 providers / tools / MCP
+┌─────────────────────────────────────────────────────────┐
+│                  HARNESS CONTROL PLANE                  │
+│                                                         │
+│user task --> Task Assessor --> effort/risk profile      │
+│      │                                                  │
+│      v                                                  │
+│Effort Governor  <-- request_effort (model escalates)    │
+│      │                                                  │
+│      v                                                  │
+│Context Engine                                           │
+│├─ Context Optimizer (prune)                             │
+│├─ Context Governor (budgets)                            │
+│└─ System Context (deltas + epochs)                      │
+│      │                                                  │
+│      v                                                  │
+│Orchestrator                                             │
+│├─ single loop (simple tasks)                            │
+│├─ workflow DAG (parallel subagents)                     │
+│└─ Loop Guards (step bound + turn fingerprints)          │
+│      │                                                  │
+│      v                                                  │
+│Verification Gate --> reviewer pass (opt-in)             │
+│      │                                                  │
+│      v                                                  │
+│Durable State                                            │
+│├─ inputs / jobs / events                                │
+│└─ Task Scheduler (cron --> sessions)                    │
+└──────┬──────────────────────────────────────────────────┘
+       │
+    single provider turn (LLM.stream)
+       v
+┌────────────────────────────────────────────────────────┐
+│RELIABILITY SHELL (per stream)                          │
+│├─ idle stall guard (180s idle, no total-time limit)    │
+│├─ ChunkStallError --> bounded retry + backoff          │
+│└─ repetition-loop guard                                │
+└──────┬─────────────────────────────────────────────────┘
+       │
+       v
+    providers / tools / MCP
 ```
 
 Every element is in-process: plugins handle assessment/effort/pruning, core
