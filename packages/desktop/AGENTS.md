@@ -15,6 +15,17 @@
 
 ## Packaging a production desktop build
 
+- **"Build" means the app the user actually runs — verify the artifact BEFORE building.**
+  This repo produces TWO production artifacts that are easy to confuse: the CLI/server
+  binary (`packages/opencode` → `~/.opencode/bin/opencode`, `--version` shows
+  `0.0.0-prod-*`) and the desktop app bundle (`packages/desktop/dist/mac-arm64/OpenCode.app`
+  with the server embedded in `Resources/app.asar` → `out/main/chunks/node-*.js`). The
+  running desktop app NEVER loads `~/.opencode/bin/opencode`; it runs its own baked-in
+  server bundle inside app.asar. Before any "create a build / production copy" request,
+  run `ps aux | grep -i opencode` and identify which artifact the user is actually running.
+  (Costed hours on 2026-08-31: the CLI binary was rebuilt and installed while the user
+  meant the desktop app, and three rounds of "where is my build" followed before the
+  process table was finally checked. A rebuilt CLI binary does NOT update the app.)
 - **`package:mac` does NOT run `prebuild`/`build` automatically.** It packages whatever is already in `out/`. Running it alone silently bundles a stale server with the wrong channel.
 - The channel is baked into the server bundle by `prebuild` (via `OPENCODE_CHANNEL`), which runs `../opencode/script/build-node.ts`. The channel determines the app's database: prod → `opencode.db`, otherwise → `opencode-<channel>.db`.
 - To produce a **correct production copy**, propagate the channel through the whole chain (both steps, in order):
