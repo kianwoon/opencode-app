@@ -31,6 +31,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { shouldOpenSessionInBackground } from "../home-session-open"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import { makeFolderDrop } from "@/utils/folder-drop"
+import { SidebarTasksV2 } from "./sidebar-tasks-v2"
 
 const SIDEBAR_RAIL_WIDTH = 44
 const SIDEBAR_PANEL_WIDTH = 264
@@ -777,6 +778,9 @@ function ProjectSection(
       </div>
       <Show when={props.expanded}>
         <div class="flex min-w-0 flex-col gap-px pl-4">
+          <Show when={props.currentServer()} keyed>
+            {(conn) => <SidebarTasksV2 server={conn} directory={props.project.worktree} />}
+          </Show>
           <NewSessionRow
             onClick={() => props.onNewSession(props.project.worktree)}
             label={language.t("command.session.new")}
