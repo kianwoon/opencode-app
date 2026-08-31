@@ -185,11 +185,13 @@ const layer: Layer.Layer<
         ...(paths.size + urls.length > 0
           ? [
               // Precedence preamble: makes conflict resolution explicit when
-              // global, project, and package-level guides disagree.
+              // global, project, and package-level guides disagree. Global
+              // rules are inherited by every project and outrank local rules.
               [
                 "The following instruction files apply to this project.",
-                "They are listed in ascending order of specificity: global, then project root, then package-level guides.",
-                "On conflict, the most specific instruction wins.",
+                "Every project inherits the global rules; project-level rules extend them.",
+                "They are listed global-first: global, then project root, then package-level guides.",
+                "On conflict, the global rules ALWAYS take precedence over project-level rules.",
               ].join("\n"),
             ]
           : []),

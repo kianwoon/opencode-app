@@ -95,6 +95,10 @@ describe("SystemContextBuiltIns", () => {
           `  Platform: ${process.platform}`,
           "</env>",
           "",
+          "Every project inherits the global rules; project-level rules extend them.",
+          "",
+          "Instructions are listed global-first. On conflict, the global rules ALWAYS take precedence over project-level rules.",
+          "",
           `Instructions from: ${instructionFile}\nBe precise.`,
         ].join("\n"),
       )

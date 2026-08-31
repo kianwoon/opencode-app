@@ -179,6 +179,7 @@ const layer = Layer.effect(
           "<rule_enforcement>",
           "The instruction files listed in this system prompt are BINDING RULES that apply to every action you take in this session.",
           "Obey every rule they contain, with NO exceptions, regardless of task complexity, time pressure, or model capability.",
+          "Every project inherits the global rules, and global rules ALWAYS outrank project-level rules on conflict; project rules add constraints on top and may only be stricter, never more permissive.",
           "Rules you must not skip: read the relevant AGENTS.md guidance before working in an unfamiliar area; follow stated style, naming, testing, and verification requirements; honor permission, safety, and scope constraints.",
           "Before you finish a turn, check your work against these rules. If you cannot satisfy a rule, say so explicitly instead of silently deviating.",
           `Rule files in effect (${paths.length}):`,

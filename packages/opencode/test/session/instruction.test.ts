@@ -228,7 +228,7 @@ describe("Instruction.system", () => {
         const rules = yield* svc.system()
         // Precedence preamble + the two instruction files.
         expect(rules).toHaveLength(3)
-        expect(rules[0]).toContain("most specific instruction wins")
+        expect(rules[0]).toContain("global rules ALWAYS take precedence over project-level rules")
         expect(rules[1]).toBe(`Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`)
         expect(rules[2]).toBe(`Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`)
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))

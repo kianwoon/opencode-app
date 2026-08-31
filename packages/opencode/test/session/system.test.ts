@@ -144,6 +144,7 @@ describe("session.system", () => {
       expect(anchor).toContain("<rule_enforcement>")
       expect(anchor).toContain("BINDING RULES")
       expect(anchor).toContain("NO exceptions")
+      expect(anchor).toContain("global rules ALWAYS outrank project-level rules")
       expect(anchor).toContain("Rule files in effect (2)")
       expect(anchor).toContain("/proj/AGENTS.md")
       expect(anchor).toContain("/home/.config/opencode/AGENTS.md")

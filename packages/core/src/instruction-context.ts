@@ -97,5 +97,9 @@ export const node = makeLocationNode({
 })
 
 function render(files: ReadonlyArray<File>) {
-  return files.map((file) => `Instructions from: ${file.path}\n${file.content}`).join("\n\n")
+  return [
+    "Every project inherits the global rules; project-level rules extend them.",
+    "Instructions are listed global-first. On conflict, the global rules ALWAYS take precedence over project-level rules.",
+    ...files.map((file) => `Instructions from: ${file.path}\n${file.content}`),
+  ].join("\n\n")
 }
