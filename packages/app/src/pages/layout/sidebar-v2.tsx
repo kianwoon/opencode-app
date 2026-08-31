@@ -763,17 +763,6 @@ function ProjectSection(
               </MenuV2.Content>
             </MenuV2.Portal>
           </MenuV2>
-          <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value={language.t("command.session.new")}>
-            <IconButtonV2
-              type="button"
-              data-action="sidebar-v2-project-new-session"
-              variant="ghost-muted"
-              size="small"
-              icon={<IconV2 name="edit" />}
-              aria-label={language.t("command.session.new")}
-              onClick={() => props.onNewSession(props.project.worktree)}
-            />
-          </TooltipV2>
         </div>
       </div>
       <Show when={props.expanded}>
@@ -781,12 +770,7 @@ function ProjectSection(
           <Show when={props.currentServer()} keyed>
             {(conn) => <SidebarTasksV2 server={conn} directory={props.project.worktree} />}
           </Show>
-          <NewSessionRow
-            onClick={() => props.onNewSession(props.project.worktree)}
-            label={language.t("command.session.new")}
-          />
-          <Show when={visibleSessions().length > 0 && serverKey()}>
-            <For each={visibleSessions()}>
+          <Show when={visibleSessions().length > 0 && serverKey()}>            <For each={visibleSessions()}>
               {(session) => (
                 <SessionRow
                   session={session}
