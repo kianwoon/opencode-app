@@ -93,6 +93,7 @@ const Updated = define({
   type: "task.updated",
   durable: { version: 1, aggregate: "taskID" },
   schema: {
+    taskID: ID,
     task: Info,
   },
 })
