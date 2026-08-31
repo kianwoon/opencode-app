@@ -150,47 +150,27 @@ The harness wraps every turn in four concentric stages — assessment, context
 control, orchestration, and verification — over durable runtime state, and a
 reliability shell around the provider stream itself.
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│                  HARNESS CONTROL PLANE                  │
-│                                                         │
-│user task --> Task Assessor --> effort/risk profile      │
-│      │                                                  │
-│      v                                                  │
-│Effort Governor  <-- request_effort (model escalates)    │
-│      │                                                  │
-│      v                                                  │
-│Context Engine                                           │
-│├─ Context Optimizer (prune)                             │
-│├─ Context Governor (budgets)                            │
-│└─ System Context (deltas + epochs)                      │
-│      │                                                  │
-│      v                                                  │
-│Orchestrator                                             │
-│├─ single loop (simple tasks)                            │
-│├─ workflow DAG (parallel subagents)                     │
-│└─ Loop Guards (step bound + turn fingerprints)          │
-│      │                                                  │
-│      v                                                  │
-│Verification Gate --> reviewer pass (opt-in)             │
-│      │                                                  │
-│      v                                                  │
-│Durable State                                            │
-│├─ inputs / jobs / events                                │
-│└─ Task Scheduler (cron --> sessions)                    │
-└──────┬──────────────────────────────────────────────────┘
-       │
-    single provider turn (LLM.stream)
-       v
-┌────────────────────────────────────────────────────────┐
-│RELIABILITY SHELL (per stream)                          │
-│├─ idle stall guard (180s idle, no total-time limit)    │
-│├─ ChunkStallError --> bounded retry + backoff          │
-│└─ repetition-loop guard                                │
-└──────┬─────────────────────────────────────────────────┘
-       │
-       v
-    providers / tools / MCP
+```mermaid
+flowchart TB
+    task(["user task"]) --> assessor["Task Assessor"]
+    assessor --> profile["effort / risk profile"]
+    profile --> governor["Effort Governor (pre-escalate)"]
+    model["model"] -.->|"request_effort (model escalates)"| governor
+    governor --> ctx["Context Engine<br/>• Context Optimizer (prune)<br/>• Context Governor (budgets)<br/>• System Context (deltas + epochs)"]
+    ctx --> orch["Orchestrator<br/>• single loop (simple tasks)<br/>• workflow DAG (parallel subagents)<br/>• Loop Guards (step bound + turn fingerprints)"]
+    orch --> verify["Verification Gate<br/>reviewer pass (opt-in)"]
+    verify --> state[("Durable State<br/>• inputs / jobs / events<br/>• Task Scheduler (cron → sessions)")]
+
+    orch ==>|"single provider turn (LLM.stream)"| shell
+
+    subgraph shell["RELIABILITY SHELL (per stream)"]
+        direction LR
+        idle["idle stall guard<br/>180s idle, no total-time limit"]
+        chunk["ChunkStallError<br/>bounded retry + backoff"]
+        rep["repetition-loop guard"]
+    end
+
+    shell --> providers["providers / tools / MCP"]
 ```
 
 Every element is in-process: plugins handle assessment/effort/pruning, core
