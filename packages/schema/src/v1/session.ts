@@ -35,6 +35,11 @@ const namedError = <Name extends string, Fields extends Schema.Struct.Fields>(na
 
 export const OutputLengthError = namedError("MessageOutputLengthError", {})
 
+export const MaxStepsError = namedError("MessageMaxStepsError", {
+  message: Schema.String,
+  steps: NonNegativeInt,
+})
+
 export const AuthError = namedError("ProviderAuthError", {
   providerID: Schema.String,
   message: Schema.String,
@@ -386,6 +391,7 @@ const AssistantErrorSchema = Schema.Union([
   AuthError.EffectSchema,
   namedError("UnknownError", { message: Schema.String, ref: Schema.optional(Schema.String) }).EffectSchema,
   OutputLengthError.EffectSchema,
+  MaxStepsError.EffectSchema,
   AbortedError.EffectSchema,
   StructuredOutputError.EffectSchema,
   ContextOverflowError.EffectSchema,

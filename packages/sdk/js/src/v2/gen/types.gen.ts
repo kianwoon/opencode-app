@@ -68,6 +68,8 @@ export type Event =
   | EventQuestionV2Replied
   | EventQuestionV2Rejected
   | EventTodoUpdated
+  | EventTaskUpdated
+  | EventTaskRemoved
   | EventLspUpdated
   | EventPermissionAsked
   | EventPermissionReplied
@@ -284,6 +286,14 @@ export type MessageOutputLengthError = {
   }
 }
 
+export type MessageMaxStepsError = {
+  name: "MessageMaxStepsError"
+  data: {
+    message: string
+    steps: number
+  }
+}
+
 export type MessageAbortedError = {
   name: "MessageAbortedError"
   data: {
@@ -342,6 +352,7 @@ export type AssistantMessage = {
     | ProviderAuthError
     | UnknownError
     | MessageOutputLengthError
+    | MessageMaxStepsError
     | MessageAbortedError
     | StructuredOutputError
     | ContextOverflowError
@@ -668,6 +679,40 @@ export type Todo = {
    * Priority level of the task: high, medium, low
    */
   priority: string
+}
+
+export type Task = {
+  id: string
+  /**
+   * Human-readable task name
+   */
+  title: string
+  prompt: TaskPrompt
+  /**
+   * Cron expression (5-field) or one of the named presets: yearly, monthly, weekly, daily, hourly, minutely
+   */
+  cron: string
+  /**
+   * Whether the scheduler should fire this task
+   */
+  enabled: boolean
+  sessionID?: string
+  /**
+   * Working directory the bound session runs in
+   */
+  directory: string
+  next_run_at?: number
+  last_run_at?: number
+  /**
+   * Fires skipped because no process was awake at the scheduled time
+   */
+  missed_runs: number
+  /**
+   * Total fires recorded, including skipped runs
+   */
+  run_count: number
+  time_created: number
+  time_updated: number
 }
 
 export type SessionStatus =
@@ -1218,6 +1263,7 @@ export type GlobalEvent = {
             | ProviderAuthError
             | UnknownError
             | MessageOutputLengthError
+            | MessageMaxStepsError
             | MessageAbortedError
             | StructuredOutputError
             | ContextOverflowError
@@ -1364,6 +1410,21 @@ export type GlobalEvent = {
         properties: {
           sessionID: string
           todos: Array<Todo>
+        }
+      }
+    | {
+        id: string
+        type: "task.updated"
+        properties: {
+          taskID: string
+          task: Task
+        }
+      }
+    | {
+        id: string
+        type: "task.removed"
+        properties: {
+          taskID: string
         }
       }
     | {
@@ -1636,6 +1697,8 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertStaged
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
+    | SyncEventTaskUpdated
+    | SyncEventTaskRemoved
 }
 
 /**
@@ -2601,6 +2664,12 @@ export type SessionBusyError = {
   message: string
 }
 
+export type TaskNotFoundError = {
+  _tag: "TaskNotFoundError"
+  taskID: string
+  message: string
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -2916,6 +2985,8 @@ export type V2Event =
   | QuestionV2Replied
   | QuestionV2Rejected
   | TodoUpdated
+  | TaskUpdated
+  | TaskRemoved
   | LspUpdated
   | PermissionAsked
   | PermissionReplied
@@ -3161,6 +3232,13 @@ export type QuestionV2Tool = {
 }
 
 export type QuestionV2Answer = Array<string>
+
+export type TaskPrompt = {
+  /**
+   * Prompt text submitted to the session on each fire
+   */
+  text: string
+}
 
 export type ProjectVcs = "git"
 
@@ -3823,6 +3901,35 @@ export type SyncEventSessionNextRevertCommitted = {
   }
 }
 
+export type SyncEventTaskUpdated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "task.updated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      taskID: string
+      task: Task
+    }
+  }
+}
+
+export type SyncEventTaskRemoved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "task.removed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      taskID: string
+    }
+  }
+}
+
 export type ConfigV2ReferenceGit = {
   repository: string
   branch?: string
@@ -3852,6 +3959,34 @@ export type ProjectDirectories = Array<{
 export type PtyTicketConnectToken = {
   ticket: string
   expires_in: number
+}
+
+export type TaskRun = {
+  id: string
+  taskID: string
+  sessionID: string
+  status: "running" | "completed" | "failed" | "skipped"
+  started_at: number
+  ended_at?: number
+  error?: string
+}
+
+export type TaskCreateInput = {
+  title: string
+  prompt: TaskPrompt
+  cron: string
+  directory: string
+  enabled?: boolean
+  sessionID?: string
+}
+
+export type TaskUpdateInput = {
+  title?: string
+  prompt?: TaskPrompt
+  cron?: string
+  enabled?: boolean
+  directory?: string
+  sessionID?: string
 }
 
 export type WorkspaceEventConnectionStatus = {
@@ -5357,6 +5492,7 @@ export type SessionError = {
       | ProviderAuthError
       | UnknownError
       | MessageOutputLengthError
+      | MessageMaxStepsError
       | MessageAbortedError
       | StructuredOutputError
       | ContextOverflowError
@@ -5673,6 +5809,41 @@ export type TodoUpdated = {
   data: {
     sessionID: string
     todos: Array<Todo>
+  }
+}
+
+export type TaskUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "task.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    taskID: string
+    task: Task
+  }
+}
+
+export type TaskRemoved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "task.removed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    taskID: string
   }
 }
 
@@ -6682,6 +6853,7 @@ export type EventSessionError = {
       | ProviderAuthError
       | UnknownError
       | MessageOutputLengthError
+      | MessageMaxStepsError
       | MessageAbortedError
       | StructuredOutputError
       | ContextOverflowError
@@ -6845,6 +7017,23 @@ export type EventTodoUpdated = {
   properties: {
     sessionID: string
     todos: Array<Todo>
+  }
+}
+
+export type EventTaskUpdated = {
+  id: string
+  type: "task.updated"
+  properties: {
+    taskID: string
+    task: Task
+  }
+}
+
+export type EventTaskRemoved = {
+  id: string
+  type: "task.removed"
+  properties: {
+    taskID: string
   }
 }
 
@@ -10614,6 +10803,228 @@ export type SyncHistoryListResponses = {
 }
 
 export type SyncHistoryListResponse = SyncHistoryListResponses[keyof SyncHistoryListResponses]
+
+export type TaskListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task"
+}
+
+export type TaskListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type TaskListError = TaskListErrors[keyof TaskListErrors]
+
+export type TaskListResponses = {
+  /**
+   * List of scheduled tasks
+   */
+  200: Array<Task>
+}
+
+export type TaskListResponse = TaskListResponses[keyof TaskListResponses]
+
+export type TaskCreateData = {
+  body?: TaskCreateInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task"
+}
+
+export type TaskCreateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type TaskCreateError = TaskCreateErrors[keyof TaskCreateErrors]
+
+export type TaskCreateResponses = {
+  /**
+   * Created task
+   */
+  200: Task
+}
+
+export type TaskCreateResponse = TaskCreateResponses[keyof TaskCreateResponses]
+
+export type TaskRunsData = {
+  body?: never
+  path: {
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task/{taskID}/runs"
+}
+
+export type TaskRunsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type TaskRunsError = TaskRunsErrors[keyof TaskRunsErrors]
+
+export type TaskRunsResponses = {
+  /**
+   * Run history for the task, newest first
+   */
+  200: Array<TaskRun>
+}
+
+export type TaskRunsResponse = TaskRunsResponses[keyof TaskRunsResponses]
+
+export type TaskRemoveData = {
+  body?: never
+  path: {
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task/{taskID}"
+}
+
+export type TaskRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * TaskNotFoundError
+   */
+  404: TaskNotFoundError
+}
+
+export type TaskRemoveError = TaskRemoveErrors[keyof TaskRemoveErrors]
+
+export type TaskRemoveResponses = {
+  /**
+   * Task removed
+   */
+  200: boolean
+}
+
+export type TaskRemoveResponse = TaskRemoveResponses[keyof TaskRemoveResponses]
+
+export type TaskGetData = {
+  body?: never
+  path: {
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task/{taskID}"
+}
+
+export type TaskGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * TaskNotFoundError
+   */
+  404: TaskNotFoundError
+}
+
+export type TaskGetError = TaskGetErrors[keyof TaskGetErrors]
+
+export type TaskGetResponses = {
+  /**
+   * Task information
+   */
+  200: Task
+}
+
+export type TaskGetResponse = TaskGetResponses[keyof TaskGetResponses]
+
+export type TaskUpdateData = {
+  body?: TaskUpdateInput
+  path: {
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task/{taskID}"
+}
+
+export type TaskUpdateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * TaskNotFoundError
+   */
+  404: TaskNotFoundError
+}
+
+export type TaskUpdateError = TaskUpdateErrors[keyof TaskUpdateErrors]
+
+export type TaskUpdateResponses = {
+  /**
+   * Updated task information
+   */
+  200: Task
+}
+
+export type TaskUpdateResponse = TaskUpdateResponses[keyof TaskUpdateResponses]
+
+export type TaskRunData = {
+  body?: never
+  path: {
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/task/{taskID}/run"
+}
+
+export type TaskRunErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * TaskNotFoundError
+   */
+  404: TaskNotFoundError
+}
+
+export type TaskRunError = TaskRunErrors[keyof TaskRunErrors]
+
+export type TaskRunResponses = {
+  /**
+   * Task fired
+   */
+  200: boolean
+}
+
+export type TaskRunResponse = TaskRunResponses[keyof TaskRunResponses]
 
 export type TuiAppendPromptData = {
   body?: {

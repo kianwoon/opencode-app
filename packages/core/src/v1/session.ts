@@ -46,6 +46,10 @@ export {
 } from "@opencode-ai/schema/session-v1"
 
 export const OutputLengthError = NamedError.create("MessageOutputLengthError", {})
+export const MaxStepsError = NamedError.create("MessageMaxStepsError", {
+  message: Schema.String,
+  steps: NonNegativeInt,
+})
 export const AuthError = NamedError.create("ProviderAuthError", { providerID: Schema.String, message: Schema.String })
 export const AbortedError = NamedError.create("MessageAbortedError", { message: Schema.String })
 export const StructuredOutputError = NamedError.create("StructuredOutputError", {
