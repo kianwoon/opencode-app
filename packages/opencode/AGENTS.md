@@ -81,6 +81,41 @@
   request body via `providerOptions["<provider-id>"]` (see `ProviderTransform.providerOptions`
   dot-split key resolution). Acceptance guard: test/session/repetition-guard.test.ts.
 
+## Runaway agentic loop: bounded steps + tool-less wall + turn-fingerprint interceptor
+
+- The prompt loop (`runLoop` in src/session/prompt.ts) previously used `agent.steps ?? Infinity`,
+  so any agent without an explicit `steps` config could loop forever. Observed live:
+  `ses_fabcb2a43ffeeJobwWmhG19PDi` ran 531 steps / ~2h / 75M input tokens re-trying the same
+  failing typecheck until manual cancel. A model that keeps ending turns with tool-call
+  finishes is legal per every loop exit condition, so only a step bound can stop it.
+- **Default ON (2026-08-31)**: `DEFAULT_MAX_STEPS = 1000` replaces `Infinity`. Per-agent
+  `steps` config still wins. Two-stage defense, salvage-first:
+  1. **Soft wall** at `step >= maxSteps`: inject `MAX_STEPS_PROMPT` AND physically strip the
+     turn's tools (keep only `StructuredOutput` for `json_schema` format, or `invalid`).
+     The old code injected the prompt but STILL passed the full tool list — the prompt lied
+     ("tools are disabled") and the model kept calling tools. NEVER let a "capability removed"
+     instruction reach the model while the capability is still attached to the request.
+     With tools genuinely gone, the model's only move is the wrap-up text, which exits via
+     the normal finish path → summary recorded, todos intact (session salvaged, not killed).
+  2. **Grace + backstop**: `MAX_STEPS_GRACE = 5` tool-less turns absorb provider misbehavior
+     (finish `unknown`, empty). Past grace AND turn not finished → persist
+     `SessionV1.MaxStepsError` ("MessageMaxStepsError" — added to the schema v1 error union
+     and SDK v2 types) on the message, publish `Session.Event.Error`, log WARN
+     "loop force-break at max steps", break. The backstop must check `!finished` so a normal
+     text finish during grace is never falsely errored.
+- **Turn-fingerprint repetition interceptor** (loop-level, complements the per-message
+  `DOOM_LOOP_THRESHOLD` permission check in processor.ts): `turnFingerprint` hashes a turn's
+  text/tool-name+input/reasoning parts + finish. 3 identical turns → visible warn TextPart
+  persisted + WARN log (mirrors a human interruption); 6 → `forceWrapUp` (tools stripped +
+  explicit "produce your final answer now" appended); 10 → `MaxStepsError` + break.
+- Contract change rule: adding an error name means schema union (`packages/schema/src/v1/session.ts`)
+  + core facade (`packages/core/src/v1/session.ts`) + SDK regen (`bun ./script/build.ts` in
+  packages/sdk/js — note `bun run generate` alone does NOT rebuild `dist/`, which
+  packages/opencode resolves through the workspace symlink) + `bun run generate` in
+  packages/client. Miss one and typecheck breaks in share-next.ts / SDK consumers.
+- Acceptance guard: `bun typecheck` in packages/opencode, schema, core, sdk/js, client;
+  test/session/schema-decoding.test.ts (decodes the new error name).
+
 ## Config reload gotchas
 
 - "Reload configs" (global dispose, SIGUSR2, config-update) drops the TTL-infinity global
