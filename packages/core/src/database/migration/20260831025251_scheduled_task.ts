@@ -19,8 +19,7 @@ export default {
           \`missed_runs\` integer DEFAULT 0 NOT NULL,
           \`run_count\` integer DEFAULT 0 NOT NULL,
           \`time_created\` integer NOT NULL,
-          \`time_updated\` integer NOT NULL,
-          CONSTRAINT \`task_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE SET NULL
+          \`time_updated\` integer NOT NULL
         );
       `)
       yield* tx.run(`CREATE INDEX \`task_next_run_idx\` ON \`task\` (\`next_run_at\`);`)

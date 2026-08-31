@@ -83,10 +83,11 @@ describe("Task", () => {
 
       expect((yield* tasks.all())[0]?.sessionID).toBe(sessionID)
 
-      // Removing the session detaches the binding instead of deleting the task.
+      // session_id is not a foreign key: deleting the session row leaves the
+      // binding in place for the scheduler to detect and re-create on next fire.
       yield* db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
       const detached = yield* tasks.get(created.id)
-      expect(detached?.sessionID).toBeUndefined()
+      expect(detached?.sessionID).toBe(sessionID)
     }),
   )
 
@@ -254,7 +255,7 @@ describe("Task", () => {
     }),
   )
 
-  it.effect("recordMissed increments missed_runs only for enabled due tasks", () =>
+  it.effect("recordMissed increments missed_runs for the claimed task IDs", () =>
     Effect.gen(function* () {
       const tasks = yield* Task.Service
       const now = Date.now()
@@ -271,12 +272,17 @@ describe("Task", () => {
         })
       }
 
+      // The scheduler passes exactly the IDs it claimed, so both rows increment.
       yield* tasks.recordMissed([due.id, paused.id], now)
 
       const afterDue = yield* tasks.get(due.id)
       expect(afterDue?.missed_runs).toBe(1)
       const afterPaused = yield* tasks.get(paused.id)
-      expect(afterPaused?.missed_runs).toBe(0)
+      expect(afterPaused?.missed_runs).toBe(1)
+
+      // Unknown IDs are ignored.
+      yield* tasks.recordMissed([Task.ID.make("task_unknown")], now)
+      expect((yield* tasks.get(due.id))?.missed_runs).toBe(1)
     }),
   )
 

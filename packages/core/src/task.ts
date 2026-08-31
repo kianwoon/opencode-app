@@ -1,6 +1,6 @@
 export * as Task from "./task"
 
-import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Task } from "@opencode-ai/schema/task"
 import { AbsolutePath } from "@opencode-ai/schema/schema"
@@ -95,6 +95,8 @@ export interface Interface {
   }) => Effect.Effect<void>
   /** Increments the missed-fire counter for tasks that were due while no process was awake. */
   readonly recordMissed: (ids: ID[], now: number) => Effect.Effect<void>
+  /** Sets the next fire time for a task without consuming a run. */
+  readonly reschedule: (id: ID, next_run_at: number, now: number) => Effect.Effect<Task.Info | undefined>
   /** Returns recent runs for a task, newest first. */
   readonly runs: (id: ID, limit?: number) => Effect.Effect<Task.Run[]>
   /** Returns the claimed run for a task, if any. Used by the scheduler to detect restarts. */
@@ -110,7 +112,9 @@ const layer = Layer.effect(
     const events = yield* EventV2.Service
 
     const publishUpdated = (task: Task.Info) =>
-      events.publish(Event.Updated, { task }, { location: { directory: task.directory } }).pipe(Effect.asVoid)
+      events
+        .publish(Event.Updated, { taskID: task.id, task }, { location: { directory: task.directory } })
+        .pipe(Effect.asVoid)
 
     const publishRemoved = (id: ID, directory: Task.Info["directory"]) =>
       events.publish(Event.Removed, { taskID: id }, { location: { directory } }).pipe(Effect.asVoid)
@@ -148,7 +152,7 @@ const layer = Layer.effect(
         prompt: updates.prompt?.text ?? current.prompt.text,
         cron: updates.cron ?? current.cron,
         enabled: updates.enabled ?? current.enabled,
-        session_id: current.sessionID,
+        session_id: updates.sessionID ?? current.sessionID,
         directory: updates.directory ?? current.directory,
         next_run_at: null,
         last_run_at: current.last_run_at ?? null,
@@ -270,18 +274,28 @@ const layer = Layer.effect(
 
     const recordMissed = Effect.fn("Task.recordMissed")(function* (ids: ID[], now: number) {
       if (ids.length === 0) return
+      // Callers pass IDs they already claimed, so filter by ID only: claimDue
+      // clears next_run_at, and the claimed rows are precisely the missed ones.
       yield* db
         .update(TaskTable)
         .set({ missed_runs: sql`${TaskTable.missed_runs} + 1`, time_updated: now })
-        .where(
-          and(
-            eq(TaskTable.enabled, true),
-            isNotNull(TaskTable.next_run_at),
-            lte(TaskTable.next_run_at, now),
-          ),
-        )
+        .where(inArray(TaskTable.id, ids))
         .run()
         .pipe(Effect.orDie)
+    })
+
+    const reschedule = Effect.fn("Task.reschedule")(function* (id: ID, next_run_at: number, now: number) {
+      const row = yield* db
+        .update(TaskTable)
+        .set({ next_run_at, time_updated: now })
+        .where(eq(TaskTable.id, id))
+        .returning()
+        .get()
+        .pipe(Effect.orDie)
+      if (!row) return undefined
+      const task = fromRow(row)
+      yield* publishUpdated(task)
+      return task
     })
 
     const runs = Effect.fn("Task.runs")(function* (id: ID, limit = 50) {
@@ -313,6 +327,7 @@ const layer = Layer.effect(
       startRun,
       finishRun,
       recordMissed,
+      reschedule,
       runs,
       pendingRuns,
     })

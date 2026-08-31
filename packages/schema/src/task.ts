@@ -86,6 +86,9 @@ export const UpdateInput = Schema.Struct({
   cron: optional(Schema.String),
   enabled: optional(Schema.Boolean),
   directory: optional(AbsolutePath),
+  sessionID: optional(SessionID).annotate({
+    description: "Bind the task to a session; set on first fire when the task lazily creates one",
+  }),
 }).annotate({ identifier: "Task.UpdateInput" })
 export interface UpdateInput extends Schema.Schema.Type<typeof UpdateInput> {}
 

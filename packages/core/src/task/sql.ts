@@ -1,8 +1,10 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { Timestamps } from "../database/schema.sql"
-import { SessionTable } from "../session/sql"
 import type { Task } from "@opencode-ai/schema/task"
 
+// session_id is deliberately not a foreign key: V2 sessions are event-sourced and
+// the projector may populate the session table after a task binds one, and a task
+// must stay readable even if its bound session was hard-deleted.
 export const TaskTable = sqliteTable(
   "task",
   {
@@ -11,9 +13,7 @@ export const TaskTable = sqliteTable(
     prompt: text().notNull(),
     cron: text().notNull(),
     enabled: integer({ mode: "boolean" }).notNull().default(true),
-    session_id: text()
-      .$type<Task.Info["sessionID"]>()
-      .references(() => SessionTable.id, { onDelete: "set null" }),
+    session_id: text().$type<Task.Info["sessionID"]>(),
     directory: text().notNull(),
     next_run_at: integer(),
     last_run_at: integer(),
