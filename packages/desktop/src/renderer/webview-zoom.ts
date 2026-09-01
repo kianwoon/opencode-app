@@ -54,6 +54,13 @@ void window.api.getPinchZoomEnabled().then((enabled) => {
   pinchZoomEnabled = enabled
 })
 
+// Sync with the window's actual zoom factor so the first zoomIn/zoomOut step
+// is relative to the current level, not the hardcoded default of 1.
+void window.api.getZoomFactor().then((factor) => {
+  requestedZoom = clamp(factor)
+  setWebviewZoom(requestedZoom)
+})
+
 window.api.onPinchZoomEnabledChanged((enabled) => {
   pinchZoomEnabled = enabled
   resetWheelPinch()
