@@ -399,4 +399,96 @@ describe("task effort router", () => {
     const again = await requestEffort("ses_test", { level: "medium", reason: "regress request" })
     expect(again).toContain("already at high")
   })
+
+  test("short imperative prompts get a minimal baseline without any keyword", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "let's enhance it",
+          },
+        ] as never,
+      },
+    )
+    // No simple/complex/risky keyword fired, but the prompt is a ≤10-word
+    // imperative with zero signal — start lean instead of deferring.
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "low" })
+  })
+
+  test("longer prompts without hints still defer to the provider default", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "Please take a careful look at how the session loop currently schedules its work and summarize the control flow for me with a detailed explanation of each stage",
+          },
+        ] as never,
+      },
+    )
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
+    expect(output.options).toEqual({})
+  })
+
+  test("assess decisions are logged to the JSONL observability file", async () => {
+    const { mkdtemp } = await import("node:fs/promises")
+    const { tmpdir } = await import("node:os")
+    const { join } = await import("node:path")
+    const dir = await mkdtemp(join(tmpdir(), "effort-log-"))
+    const previous = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = dir
+
+    try {
+      await hooks["chat.message"]?.(
+        { sessionID: "ses_log" },
+        {
+          message: {} as never,
+          parts: [
+            {
+              type: "text",
+              id: "p1",
+              sessionID: "ses_log",
+              messageID: "msg_1",
+              text: "fix typo in comment",
+            },
+          ] as never,
+        },
+      )
+      const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+      await hooks["chat.params"]?.(
+        chatParamsInput({ sessionID: "ses_log" }) as never,
+        output as never,
+      )
+      // The append is fire-and-forget; poll the file into existence.
+      const logPath = join(dir, "opencode", "effort-router.jsonl")
+      let lines: string[] = []
+      for (let i = 0; i < 50 && lines.length < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        const file = Bun.file(logPath)
+        if (!(await file.exists())) continue
+        lines = (await file.text()).trim().split("\n")
+      }
+      const assess = lines.map((line) => JSON.parse(line)).find((e) => e.event === "assess")
+      expect(assess).toMatchObject({ sessionID: "ses_log", baseline: "minimal", risky: false })
+      const apply = lines.map((line) => JSON.parse(line)).find((e) => e.event === "apply")
+      expect(apply).toMatchObject({ sessionID: "ses_log", tier: "minimal", resolved: "down" })
+    } finally {
+      if (previous === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previous
+    }
+  })
 })

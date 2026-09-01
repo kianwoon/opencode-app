@@ -83,8 +83,28 @@ const RISKY_HINTS = [
   "encrypt",
 ]
 
-/** Simple-task signals: mechanical one-liners that never need deep reasoning. */
-const SIMPLE_HINTS = ["typo", "rename", "comment", "spell", "docs", "format"]
+/**
+ * Best-effort JSONL observability so firings can be counted directly instead
+ * of inferred from token distributions. One line per decision:
+ * `{ts, event, sessionID, ...}`. Never throws — logging must not break the
+ * request pipeline, and a missing/unwritable XDG dir degrades to silence.
+ * Node built-ins load via dynamic import (desktop-sidecar safe).
+ */
+const dataRoot = () => process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`
+
+function log(event: string, fields: Record<string, unknown>) {
+  const line = JSON.stringify({ ts: Date.now(), event, ...fields }) + "\n"
+  void (async () => {
+    try {
+      const { appendFile, mkdir } = await import("node:fs/promises")
+      const dir = `${dataRoot()}/opencode`
+      await mkdir(dir, { recursive: true })
+      await appendFile(`${dir}/effort-router.jsonl`, line)
+    } catch {
+      // Observability is best-effort by design.
+    }
+  })()
+}
 
 /**
  * Heuristic profile of a task from its text. Cheap on purpose — the exact
@@ -97,12 +117,14 @@ function assess(text: string | undefined): { baseline: Effort | undefined; risky
   const words = lower.split(/\s+/).filter(Boolean).length
   const risky = RISKY_HINTS.some((hint) => lower.includes(hint))
   const complexHits = COMPLEX_HINTS.filter((hint) => lower.includes(hint)).length
-  const simpleHits = SIMPLE_HINTS.filter((hint) => lower.includes(hint)).length
   const complex = complexHits >= 2 || (complexHits >= 1 && words > 40) || (complexHits >= 1 && risky)
-  const simple = simpleHits >= 1 && complexHits === 0 && !risky && words <= 12
   if (complex && risky) return { baseline: "high", risky }
   if (complex) return { baseline: "medium", risky }
-  if (simple) return { baseline: "minimal", risky }
+  // Short imperative prompts with zero signal ("run tests", "commit this",
+  // "let's enhance it") are the most common task shape and were previously
+  // left at the provider default. Start lean: the escalation path recovers
+  // the rare hard ones.
+  if (!risky && words <= 10) return { baseline: "minimal", risky }
   return { baseline: undefined, risky }
 }
 
@@ -182,10 +204,12 @@ function escalate(sessionID: string, requested: Effort): { granted: Effort; chan
 
   if (rank(requested) <= rank(current)) {
     state.set(sessionID, entry)
+    log("escalate", { sessionID, granted: current, changed: false, requested })
     return { granted: current, changed: false, note: `already at ${current} or above` }
   }
   if (entry.escalations >= MAX_ESCALATIONS_PER_TASK) {
     state.set(sessionID, entry)
+    log("escalate", { sessionID, granted: current, changed: false, requested, reason: "budget-exhausted" })
     return {
       granted: current,
       changed: false,
@@ -196,6 +220,7 @@ function escalate(sessionID: string, requested: Effort): { granted: Effort; chan
   entry.escalated = requested
   entry.escalations += 1
   state.set(sessionID, entry)
+  log("escalate", { sessionID, granted: requested, changed: true, requested })
   return { granted: requested, changed: true, note: `reasoning effort raised to ${requested}` }
 }
 
@@ -238,6 +263,12 @@ export const TaskEffortRouterPlugin = (async () => {
       const text = output.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(" ")
       const profile = assess(text)
       trackSession(input.sessionID)
+      log("assess", {
+        sessionID: input.sessionID,
+        baseline: profile.baseline,
+        risky: profile.risky,
+        words: text ? text.trim().split(/\s+/).filter(Boolean).length : 0,
+      })
       state.set(input.sessionID, {
         escalated: undefined,
         baseline: profile.baseline,
@@ -255,23 +286,40 @@ export const TaskEffortRouterPlugin = (async () => {
       // model's escalation. `undefined` means the governor has no opinion
       // for this task and the request options must pass through untouched.
       const tier = effective(entry)
-      if (!tier) return
+      if (!tier) {
+        log("skip", { sessionID: input.sessionID, reason: "no-opinion" })
+        return
+      }
 
       // Only raise: if the effective options already pin an effort at or above
       // the tier (user selection / agent config), leave them alone. Unpinned
       // options have no opinion, so even a `minimal` baseline may apply.
       const pinned = pinnedEffort(output.options)
-      if (pinned && rank(pinned) >= rank(tier)) return
+      if (pinned && rank(pinned) >= rank(tier)) {
+        log("skip", { sessionID: input.sessionID, reason: "pinned", tier, pinned })
+        return
+      }
 
       // Baselines resolve to the cheapest tier at or below the assessed rung;
       // escalations to the deepest tier at or above it. Skips only when the
       // model ships no usable tier in that direction at all.
       const fromEscalation = entry.escalated !== undefined && rank(entry.escalated) >= rank(entry.baseline ?? "low")
       const variant = variantFor(input.model, tier, fromEscalation ? "up" : "down")
-      if (!variant) return
+      if (!variant) {
+        log("skip", { sessionID: input.sessionID, reason: "no-variant", tier })
+        return
+      }
       // The tier's thinking params win over whatever variant the user had
       // selected; everything else in `output.options` is preserved.
       output.options = { ...output.options, ...variant }
+      log("apply", {
+        sessionID: input.sessionID,
+        tier,
+        resolved: fromEscalation ? "up" : "down",
+        escalated: entry.escalated,
+        baseline: entry.baseline,
+        options: variant,
+      })
     },
 
     "experimental.chat.system.transform": async (input, output) => {
