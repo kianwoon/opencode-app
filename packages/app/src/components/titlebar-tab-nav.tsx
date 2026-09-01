@@ -448,7 +448,7 @@ function SessionStatusDot(props: { color: "running" | "pending" }) {
   return (
     <span class="flex size-4 items-center justify-center">
       <span
-        class="size-1.5 rounded-full animate-status-blink"
+        class="size-3 rounded-full animate-status-blink"
         classList={{
           "bg-[var(--v2-red-600)]": props.color === "running",
           "bg-[var(--v2-blue-600)]": props.color === "pending",

@@ -965,7 +965,7 @@ function SessionStatusIcon(props: {
           // The status-blink animation (fast opacity 0.15 -> 1) makes the dot
           // visibly blink so the user notices the session is running.
           <span class="flex size-4 items-center justify-center">
-            <span class="size-1.5 rounded-full bg-[var(--v2-red-600)] animate-status-blink" />
+            <span class="size-3 rounded-full bg-[var(--v2-red-600)] animate-status-blink" />
           </span>
         }
       >
@@ -975,7 +975,7 @@ function SessionStatusIcon(props: {
             // Session is waiting for the user (permission request or question):
             // blue blinking dot so the user notices it needs their input.
             <span class="flex size-4 items-center justify-center">
-              <span class="size-1.5 rounded-full bg-[var(--v2-blue-600)] animate-status-blink" />
+              <span class="size-3 rounded-full bg-[var(--v2-blue-600)] animate-status-blink" />
             </span>
           }
         >
