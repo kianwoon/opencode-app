@@ -78,3 +78,10 @@ Core workflow:
 2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
 3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
 4. Re-snapshot after page changes
+
+## Titlebar tab strip gotchas
+
+- Tab display order vs store order: `TitlebarTabStrip` renders `displayTabs()` (running/busy session tabs pinned rightmost), NOT the persisted store order from `useTabs()`. The persisted tabs store (`opencode.window.browser.dat:tabs` in localStorage) keeps open order; drag-reorder maps through `displayTabs`, so keep that mapping intact when touching ordering logic.
+- A session tab's running state is read per-server: find the connection via `ServerConnection.key(item) === tab.server` in `global.servers.list()`, then `global.ensureServerCtx(conn).sync.session.data.session_working(tab.sessionId)`. `session_working` = `session_status[id]?.type !== "idle"`.
+- Testing busy tabs WITHOUT a real model run: the app bootstraps `session_status` from GET `/session/status` (global-sync/bootstrap.ts), so a Playwright `context.route("**/session/status*")` returning a StatusMap `{ "<sessionID>": {"type":"busy"} }` + page.reload is the reliable stub. There is NO server-side event publish endpoint (POST /event and POST /api/event return the SPA fallback HTML — they are GET-only SSE streams), and Playwright `route.fulfill` cannot stream infinite SSE, so SSE-injection does NOT work. Wire shape (packages/schema/src/session-status-event.ts): `{type:"idle"} | {type:"busy"} | {type:"retry",attempt,message,...}`.
+- Session tab routes: `/server/:serverKey/session/:id` where serverKey is the BASE64 of the server URL (`btoa("http://localhost:4096")`), not URL-encoding. Navigating there adds the tab (session.tsx ResolvedTargetSessionRoute effect). Tab slot selector: `[data-titlebar-tab-slot]` with `data-tab-key` = `server + "\n" + href` — match tabs by `dataset.tabKey.includes(sessionId)`.
