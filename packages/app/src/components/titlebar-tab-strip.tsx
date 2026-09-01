@@ -225,7 +225,22 @@ export function TitlebarTabStrip(props: {
   let listRef!: HTMLDivElement
   let resizeFrame: number | undefined
   const [visibility, setVisibility] = createStore<Record<string, boolean>>({})
-  const visibleTabs = createMemo(() => props.tabs.filter((tab) => tab.type === "draft" || visibility[tabKey(tab)]))
+  // Display order only: running (busy) sessions pin to the right end of the
+  // strip; everything else keeps the open/drag order. The persisted tab store
+  // order is untouched, so manual drag-reorder still works among idle tabs.
+  const displayTabs = createMemo(() => {
+    const running = new Set(
+      props.tabs.flatMap((tab) => {
+        if (tab.type !== "session") return []
+        const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+        return conn && global.ensureServerCtx(conn).sync.session.data.session_working(tab.sessionId)
+          ? [tabKey(tab)]
+          : []
+      }),
+    )
+    return [...props.tabs.filter((tab) => !running.has(tabKey(tab))), ...props.tabs.filter((tab) => running.has(tabKey(tab)))]
+  })
+  const visibleTabs = createMemo(() => displayTabs().filter((tab) => tab.type === "draft" || visibility[tabKey(tab)]))
   const visibleTabIds = () => visibleTabs().map(tabKey)
 
   command.register("titlebar-tab-cycle", () => [
@@ -333,7 +348,7 @@ export function TitlebarTabStrip(props: {
           }}
         >
           <div data-titlebar-tab-list class="flex w-full min-w-0 flex-row items-center" ref={listRef}>
-            <For each={props.tabs}>
+            <For each={displayTabs()}>
               {(tab) => {
                 const id = tabKey(tab)
                 let ref!: HTMLDivElement
