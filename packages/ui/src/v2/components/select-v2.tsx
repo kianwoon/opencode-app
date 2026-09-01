@@ -2,6 +2,16 @@ import { Select as Kobalte } from "@kobalte/core/select"
 import { Show, createMemo, onCleanup, splitProps, type ComponentProps, type JSX } from "solid-js"
 import "./select-v2.css"
 
+/**
+ * Grace window that swallows a trigger pointerdown right after the menu closes.
+ * Kobalte's DismissableLayer teardown races a rapid re-click (the second click of
+ * a double-click): the click is consumed as an outside-dismiss or leaves the body
+ * stuck with pointer-events: none, so the dropdown appears dead. See the
+ * DismissableLayer/layerStack internals in @kobalte/core 0.13.x (not fixed upstream
+ * as of 0.13.13).
+ */
+const CLOSE_REENTRY_GRACE_MS = 200
+
 function groupOptions<T>(options: T[], groupBy?: (x: T) => string): { category: string; options: T[] }[] {
   if (!groupBy) {
     return [{ category: "", options }]
@@ -92,6 +102,8 @@ export function SelectV2<T>(props: SelectV2Props<T>) {
 
   const state: { key?: string; cleanup?: void | (() => void) } = {}
 
+  let closedAt = 0
+
   const stop = () => {
     state.cleanup?.()
     state.cleanup = undefined
@@ -170,7 +182,10 @@ export function SelectV2<T>(props: SelectV2Props<T>) {
       }}
       onOpenChange={(open) => {
         local.onOpenChange?.(open)
-        if (!open) stop()
+        if (!open) {
+          closedAt = Date.now()
+          stop()
+        }
       }}
     >
       <Kobalte.Trigger
@@ -181,6 +196,16 @@ export function SelectV2<T>(props: SelectV2Props<T>) {
         data-numeric={local.numeric ? "" : undefined}
         disabled={local.disabled}
         data-disabled={local.disabled ? "" : undefined}
+        onPointerDown={(e) => {
+          // Swallow the re-click that lands while a just-closed menu is still
+          // tearing down; letting it through desyncs Kobalte's dismiss state.
+          if (Date.now() - closedAt < CLOSE_REENTRY_GRACE_MS) {
+            e.stopPropagation()
+            e.preventDefault()
+            return
+          }
+          closedAt = 0
+        }}
         classList={{
           ...local.classList,
           [local.class ?? ""]: !!local.class,
@@ -200,7 +225,34 @@ export function SelectV2<T>(props: SelectV2Props<T>) {
         </span>
       </Kobalte.Trigger>
       <Kobalte.Portal>
-        <Kobalte.Content data-component="menu-v2-content" data-slot="select-v2-content">
+        <Kobalte.Content
+          data-component="menu-v2-content"
+          data-slot="select-v2-content"
+          onFocusOutside={(e) => {
+            // The select listbox uses virtual focus: it never takes real DOM
+            // focus, so document.activeElement legitimately stays on the owning
+            // dialog (or trigger) while the menu is open. Kobalte's
+            // DismissableLayer therefore sees a focusin outside the menu right
+            // after mount and instantly dismisses it — observed as the settings
+            // theme select going dead after one theme change until the whole
+            // dialog is remounted (focus lands on the dialog content, not the
+            // menu). Non-modal selects must never dismiss on focus-outside;
+            // pointer-down-outside and Escape still dismiss as usual.
+            e.preventDefault()
+          }}
+          ref={(el: HTMLElement) => {
+            // Belt-and-braces: if the close race above still leaves body stuck
+            // with pointer-events: none after this layer is gone, unstick it.
+            onCleanup(() => {
+              queueMicrotask(() => {
+                if (document.body.style.pointerEvents !== "none") return
+                if (document.querySelector("[data-kb-top-layer]")) return
+                document.body.style.pointerEvents = ""
+                if (document.body.style.length === 0) document.body.removeAttribute("style")
+              })
+            })
+          }}
+        >
           <Kobalte.Listbox data-slot="select-v2-listbox" />
         </Kobalte.Content>
       </Kobalte.Portal>
