@@ -123,12 +123,7 @@ export async function handler(
       : createKeyRateLimiter(modelInfo.id, modelInfo.rateLimit, zenApiKey, input.request)
     await rateLimiter?.check()
     const authInfo = await authenticate(modelInfo, zenApiKey)
-    if (
-      authInfo &&
-      opts.modelList === "lite" &&
-      requiresGoTrainingConsent(modelInfo.id) &&
-      !authInfo.allowTraining
-    )
+    if (authInfo && opts.modelList === "lite" && requiresGoTrainingConsent(modelInfo.id) && !authInfo.allowTraining)
       throw new DataPolicyError(
         t("zen.api.error.trainingNotAllowed", {
           consoleGoUrl: `https://opencode.ai/workspace/${authInfo.workspaceID}/go`,
