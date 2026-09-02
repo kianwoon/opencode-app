@@ -14,7 +14,7 @@ import { useGlobal, type ServerCtx } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { useTabs } from "@/context/tabs"
-import { createTabPromptState } from "@/context/prompt"
+import { createTabPromptState, type PromptSession } from "@/context/prompt"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { showToast } from "@/utils/toast"
 import { canStartTabDrag, isTabCloseTarget } from "./titlebar-tab-gesture"
@@ -221,24 +221,37 @@ export function TitlebarTabStrip(props: {
   const global = useGlobal()
   const language = useLanguage()
   const command = useCommand()
+  const tabs = useTabs()
   let scrollRef!: HTMLDivElement
   let listRef!: HTMLDivElement
   let resizeFrame: number | undefined
   const [visibility, setVisibility] = createStore<Record<string, boolean>>({})
-  // Display order only: running (busy) sessions pin to the right end of the
-  // strip; everything else keeps the open/drag order. The persisted tab store
-  // order is untouched, so manual drag-reorder still works among idle tabs.
+  // Display order only: sessions with an unsent composed message sit between
+  // the idle tabs and the running (busy) sessions, which pin to the right end
+  // of the strip; everything else keeps the open/drag order. The persisted tab
+  // store order is untouched, so manual drag-reorder still works among idle
+  // tabs.
   const displayTabs = createMemo(() => {
-    const running = new Set(
-      props.tabs.flatMap((tab) => {
-        if (tab.type !== "session") return []
-        const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
-        return conn && global.ensureServerCtx(conn).sync.session.data.session_working(tab.sessionId)
-          ? [tabKey(tab)]
-          : []
-      }),
-    )
-    return [...props.tabs.filter((tab) => !running.has(tabKey(tab))), ...props.tabs.filter((tab) => running.has(tabKey(tab)))]
+    const running = new Set<string>()
+    const drafted = new Set<string>()
+    for (const tab of props.tabs) {
+      if (tab.type !== "session") continue
+      const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+      if (!conn) continue
+      const ctx = global.ensureServerCtx(conn)
+      if (ctx.sync.session.data.session_working(tab.sessionId)) {
+        running.add(tabKey(tab))
+        continue
+      }
+      const prompt = tabs.stateValue<PromptSession>(tab, "prompt")
+      if (prompt?.dirty()) drafted.add(tabKey(tab))
+    }
+    const rest = props.tabs.filter((tab) => !running.has(tabKey(tab)) && !drafted.has(tabKey(tab)))
+    return [
+      ...rest,
+      ...props.tabs.filter((tab) => drafted.has(tabKey(tab))),
+      ...props.tabs.filter((tab) => running.has(tabKey(tab))),
+    ]
   })
   const visibleTabs = createMemo(() => displayTabs().filter((tab) => tab.type === "draft" || visibility[tabKey(tab)]))
   const visibleTabIds = () => visibleTabs().map(tabKey)
