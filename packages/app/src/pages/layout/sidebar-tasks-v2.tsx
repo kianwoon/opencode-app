@@ -50,7 +50,13 @@ export function SidebarTasksV2(props: { server: ServerConnectionType.Any; direct
     dialog.show(() => <DialogNewTask server={props.server} directory={props.directory} onCreated={invalidate} />)
   }
 
+  // Hide the whole section while there are nothing to show — an empty
+  // "No scheduled tasks" block just wastes sidebar space. Creation stays
+  // available via the project 3-dots menu.
+  const hasTasks = () => !!query.data?.length
+
   return (
+    <Show when={hasTasks()}>
     <div class="flex flex-col" data-component="sidebar-v2-tasks">
       <div class="flex h-9 items-center gap-1 px-2">
         <button
@@ -102,6 +108,7 @@ export function SidebarTasksV2(props: { server: ServerConnectionType.Any; direct
         </div>
       </Show>
     </div>
+    </Show>
   )
 
   function TaskRow(props: { task: TaskInfo }) {

@@ -32,6 +32,7 @@ import { shouldOpenSessionInBackground } from "../home-session-open"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import { makeFolderDrop } from "@/utils/folder-drop"
 import { SidebarTasksV2 } from "./sidebar-tasks-v2"
+import { DialogNewTask } from "@/components/dialog-new-task"
 
 const SIDEBAR_RAIL_WIDTH = 44
 const SIDEBAR_PANEL_WIDTH = 264
@@ -656,6 +657,7 @@ function ProjectSection(
 ) {
   const language = useLanguage()
   const global = useGlobal()
+  const dialog = useDialog()
   const serverSync = useServerSync()
   const notification = useNotification()
   const [menuOpen, setMenuOpen] = createStore({ open: false })
@@ -749,6 +751,17 @@ function ProjectSection(
               <MenuV2.Content>
                 <MenuV2.Item onSelect={() => props.onNewSession(props.project.worktree)}>
                   {language.t("command.session.new")}
+                </MenuV2.Item>
+                <MenuV2.Item
+                  onSelect={() => {
+                    const conn = props.currentServer()
+                    if (!conn) return
+                    dialog.show(() => (
+                      <DialogNewTask server={conn} directory={props.project.worktree} />
+                    ))
+                  }}
+                >
+                  {language.t("sidebar.tasks.new")}
                 </MenuV2.Item>
                 <MenuV2.Item onSelect={() => props.onEditProject(props.project)}>
                   {language.t("dialog.project.edit.title")}
