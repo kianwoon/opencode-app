@@ -55,6 +55,7 @@ export interface Settings {
     terminalFontColorLight: string
     terminalFontColorDark: string
     message: string
+    messageWidth: number
     messageFontWeight: number
     messageFontColorLight: string
     messageFontColorDark: string
@@ -279,6 +280,7 @@ const defaultSettings: Settings = {
     terminalFontColorLight: "",
     terminalFontColorDark: "",
     message: "",
+    messageWidth: 64,
     messageFontWeight: 400,
     messageFontColorLight: "",
     messageFontColorDark: "",
@@ -442,6 +444,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       const messageWeight = weight(store.appearance?.messageFontWeight, defaultSettings.appearance.messageFontWeight)
       root.style.setProperty("--font-family-message", messageFontFamily(store.appearance?.message, messageWeight))
       root.style.setProperty("--font-family-message--font-weight", String(messageWeight))
+      // The user-message bubble is capped with min(N%, var(...ch)); an empty
+      // string restores the CSS fallback so the cap stays theme-controlled.
+      const messageWidth = store.appearance?.messageWidth
+      root.style.setProperty(
+        "--message-width-ch",
+        typeof messageWidth === "number" && messageWidth > 0 ? `${messageWidth}ch` : "",
+      )
       // Font colors are resolved by the browser per color scheme via light-dark(),
       // falling back to the themed text color when the user leaves a value empty.
       root.style.setProperty(
@@ -660,6 +669,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         messageFont: withFallback(() => store.appearance?.message, defaultSettings.appearance.message),
         setMessageFont(value: string) {
           setStore("appearance", "message", value.trim() ? value : "")
+        },
+        messageWidth: withFallback(() => store.appearance?.messageWidth, defaultSettings.appearance.messageWidth),
+        setMessageWidth(value: number) {
+          setStore("appearance", "messageWidth", value)
         },
         messageFontWeight: withFallback(
           () => store.appearance?.messageFontWeight,

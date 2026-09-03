@@ -274,6 +274,19 @@ export const SettingsGeneral: Component = () => {
     { value: "700", label: language.t("settings.general.row.fontWeight.bold") },
   ])
 
+  const messageWidthOptions = createMemo(() =>
+    [
+      { value: "64", label: language.t("settings.general.row.messageWidth.option.default") },
+      { value: "76", label: language.t("settings.general.row.messageWidth.option.wide") },
+      { value: "88", label: language.t("settings.general.row.messageWidth.option.wider") },
+      { value: "102", label: language.t("settings.general.row.messageWidth.option.full") },
+      { value: "128", label: language.t("settings.general.row.messageWidth.option.max") },
+    ].map((option) => ({
+      ...option,
+      label: `${option.label} (${option.value}ch)`,
+    })),
+  )
+
   const fontWeightSelectProps = (current: () => number, set: (value: number) => void) => ({
     options: fontWeightOptions(),
     current: fontWeightOptions().find((o) => o.value === String(current())) ?? fontWeightOptions()[1],
@@ -719,6 +732,28 @@ export const SettingsGeneral: Component = () => {
               colorDark={settings.appearance.messageFontColorDark()}
               setColorLight={settings.appearance.setMessageFontColorLight}
               setColorDark={settings.appearance.setMessageFontColorDark}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.messageWidth.title")}
+          description={language.t("settings.general.row.messageWidth.description")}
+        >
+          <div class="w-full sm:w-[220px]">
+            <Select
+              data-action="settings-message-width"
+              options={messageWidthOptions()}
+              current={
+                messageWidthOptions().find((o) => o.value === String(settings.appearance.messageWidth())) ??
+                messageWidthOptions()[0]
+              }
+              value={(o) => o.value}
+              label={(o) => o.label}
+              onSelect={(option) => option && settings.appearance.setMessageWidth(Number(option.value))}
+              variant="secondary"
+              size="small"
+              triggerVariant="settings"
             />
           </div>
         </SettingsRow>

@@ -126,7 +126,8 @@
 
   [data-slot="user-message-body"] {
     width: fit-content;
-    max-width: min(82%, 64ch);
+    /* Width cap is user-configurable via --message-width-ch (Settings → Appearance). */
+    max-width: min(82%, var(--message-width-ch, 64ch));
     margin-inline-start: auto;
     display: flex;
     flex-direction: column;
