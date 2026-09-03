@@ -370,9 +370,10 @@ export const TaskEffortRouterPlugin = (async () => {
         return
       }
 
-      // Only raise: if the effective options already pin an effort at or above
-      // the tier (user selection / agent config), leave them alone. Unpinned
-      // options have no opinion, so even a `minimal` baseline may apply.
+      // The pin is a FLOOR, not a ceiling: the user's selected effort sets the
+      // minimum, but the governor must still be able to raise above it when a
+      // task assesses complex or the model escalates. Never lower a pin;
+      // always raise past one.
       const pinned = pinnedEffort(output.options)
       if (pinned && rank(pinned) >= rank(tier)) {
         logSkip({ reason: "pinned", tier, pinned })
@@ -382,8 +383,13 @@ export const TaskEffortRouterPlugin = (async () => {
       // Baselines resolve to the cheapest tier at or below the assessed rung;
       // escalations to the deepest tier at or above it. Skips only when the
       // model ships no usable tier in that direction at all.
+      // When the assessed tier sits ABOVE the user's pin, resolve UP instead:
+      // the pin is a floor, and a task judged more complex than the pin must
+      // not collapse back down onto it (e.g. medium assessed on a pin of low
+      // resolves to high on models that ship low/high/max).
       const fromEscalation = entry.escalated !== undefined && rank(entry.escalated) >= rank(entry.baseline ?? "low")
-      const variant = variantFor(input.model, tier, fromEscalation ? "up" : "down")
+      const abovePin = pinned !== undefined && rank(tier) > rank(pinned)
+      const variant = variantFor(input.model, tier, fromEscalation || abovePin ? "up" : "down")
       if (!variant) {
         logSkip({ reason: "no-variant", tier })
         return

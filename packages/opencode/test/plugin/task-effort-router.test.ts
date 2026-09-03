@@ -351,6 +351,64 @@ describe("task effort router", () => {
     expect(output.options).toEqual({ reasoningEffort: "high" })
   })
 
+  test("a pin is a floor: complex task raises above a pinned low on glm-shaped models", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "Refactor the provider module and redesign the session loop across the codebase",
+          },
+        ] as never,
+      },
+    )
+    // GLM ships low/high/max (no medium). Assessed medium + pinned low must
+    // resolve UP to high, not collapse back down onto the pin.
+    const glm = model({
+      variants: {
+        low: { reasoningEffort: "low" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      },
+    })
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    await hooks["chat.params"]?.(chatParamsInput({ model: glm }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "high" })
+  })
+
+  test("a pin is a floor: simple task never lowers a pinned low", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_test" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_test",
+            messageID: "msg_1",
+            text: "let's enhance it",
+          },
+        ] as never,
+      },
+    )
+    const glm = model({
+      variants: {
+        low: { reasoningEffort: "low" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      },
+    })
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: { reasoningEffort: "low" } }
+    await hooks["chat.params"]?.(chatParamsInput({ model: glm }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "low" })
+  })
+
   test("skips non-reasoning models", async () => {
     await resetState()
     await requestEffort("ses_test", { level: "high", reason: "escalate" })
