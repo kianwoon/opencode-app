@@ -491,4 +491,121 @@ describe("task effort router", () => {
       else process.env.XDG_DATA_HOME = previous
     }
   })
+
+  test("duplicate chat.message fires are deduped within the window", async () => {
+    await resetState()
+    const fire = () =>
+      hooks["chat.message"]?.(
+        { sessionID: "ses_dupe" },
+        {
+          message: {} as never,
+          parts: [
+            {
+              type: "text",
+              id: "p1",
+              sessionID: "ses_dupe",
+              messageID: "msg_1",
+              text: "Refactor the provider module and redesign the session loop across the codebase",
+            },
+          ] as never,
+        },
+      )
+    await fire()
+    await fire()
+    // The second identical fire must not reset governor state: escalation
+    // granted before the duplicate still applies afterwards.
+    const first = await requestEffort("ses_dupe", { level: "high", reason: "hard task" })
+    await fire()
+    expect(first).toContain("raised to high")
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput({ sessionID: "ses_dupe" }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "high" })
+  })
+
+  test("a genuinely new message after the dedup window re-assesses", async () => {
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_new" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p1",
+            sessionID: "ses_new",
+            messageID: "msg_1",
+            text: "fix typo in comment",
+          },
+        ] as never,
+      },
+    )
+    // Different text = a new task boundary even within the window.
+    await hooks["chat.message"]?.(
+      { sessionID: "ses_new" },
+      {
+        message: {} as never,
+        parts: [
+          {
+            type: "text",
+            id: "p2",
+            sessionID: "ses_new",
+            messageID: "msg_2",
+            text: "Refactor the provider module and redesign the session loop across the codebase",
+          },
+        ] as never,
+      },
+    )
+    const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+    await hooks["chat.params"]?.(chatParamsInput({ sessionID: "ses_new" }) as never, output as never)
+    expect(output.options).toEqual({ reasoningEffort: "medium" })
+  })
+
+  test("skip is logged once per task, not once per provider turn", async () => {
+    const { mkdtemp } = await import("node:fs/promises")
+    const { tmpdir } = await import("node:os")
+    const { join } = await import("node:path")
+    const dir = await mkdtemp(join(tmpdir(), "effort-log-"))
+    const previous = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = dir
+
+    try {
+      await hooks["chat.message"]?.(
+        { sessionID: "ses_amp" },
+        { message: {} as never, parts: [] as never },
+      )
+      const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+      // Three provider turns for the same task: only one skip line expected.
+      for (let i = 0; i < 3; i++) {
+        await hooks["chat.params"]?.(chatParamsInput({ sessionID: "ses_amp" }) as never, output as never)
+      }
+      const logPath = join(dir, "opencode", "effort-router.jsonl")
+      let lines: string[] = []
+      for (let i = 0; i < 50 && lines.length < 1; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        const file = Bun.file(logPath)
+        if (!(await file.exists())) continue
+        lines = (await file.text()).trim().split("\n")
+      }
+      const skips = lines.map((line) => JSON.parse(line)).filter((e) => e.event === "skip")
+      expect(skips).toHaveLength(1)
+      expect(skips[0]).toMatchObject({ sessionID: "ses_amp", reason: "no-opinion" })
+    } finally {
+      if (previous === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previous
+    }
+  })
+
+  test("empty and whitespace-only messages get no opinion", async () => {
+    for (const text of ["", "   "]) {
+      await hooks["chat.message"]?.(
+        { sessionID: "ses_empty" },
+        {
+          message: {} as never,
+          parts: [{ type: "text", id: "p1", sessionID: "ses_empty", messageID: "msg_1", text }] as never,
+        },
+      )
+      const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
+      await hooks["chat.params"]?.(chatParamsInput({ sessionID: "ses_empty" }) as never, output as never)
+      expect(output.options).toEqual({})
+    }
+  })
 })

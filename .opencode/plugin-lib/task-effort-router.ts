@@ -42,6 +42,12 @@ type State = {
   escalations: number
   /** True when the task text matched a risk-sensitive domain. */
   risky: boolean
+  /** Provider turns seen for the current task (chat.params call count). */
+  turns: number
+  /** Whether a skip was already logged for the current task. */
+  skipLogged: boolean
+  /** Last assessed message fingerprint, for chat.message double-fire dedup. */
+  lastMessage?: { text: string; ts: number }
 }
 
 /** Heuristic complexity hints: architecture-scale or investigation-shaped work. */
@@ -89,8 +95,32 @@ const RISKY_HINTS = [
  * `{ts, event, sessionID, ...}`. Never throws — logging must not break the
  * request pipeline, and a missing/unwritable XDG dir degrades to silence.
  * Node built-ins load via dynamic import (desktop-sidecar safe).
+ *
+ * Rotation: when the file crosses MAX_LOG_BYTES it is truncated from the
+ * front (newest lines kept) so long-running installs stay bounded. Checked
+ * at most once per rotation interval of appends.
  */
 const dataRoot = () => process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`
+
+const MAX_LOG_BYTES = 4 * 1024 * 1024
+const ROTATION_CHECK_EVERY = 500
+
+let appendsSinceCheck = 0
+
+async function rotateIfNeeded(fs: typeof import("node:fs/promises"), file: string) {
+  appendsSinceCheck += 1
+  if (appendsSinceCheck < ROTATION_CHECK_EVERY) return
+  appendsSinceCheck = 0
+  const stat = await fs.stat(file).catch(() => undefined)
+  if (!stat || stat.size < MAX_LOG_BYTES) return
+  const raw = await fs.readFile(file, "utf8").catch(() => "")
+  const lines = raw.split("\n").filter(Boolean)
+  // Keep roughly the newest half; drop partial first line risk by keeping
+  // whole lines only.
+  const keep = lines.slice(Math.floor(lines.length / 2))
+  if (keep.length === lines.length) return
+  await fs.writeFile(file, keep.join("\n") + "\n")
+}
 
 function log(event: string, fields: Record<string, unknown>) {
   const line = JSON.stringify({ ts: Date.now(), event, ...fields }) + "\n"
@@ -98,13 +128,18 @@ function log(event: string, fields: Record<string, unknown>) {
     try {
       const { appendFile, mkdir } = await import("node:fs/promises")
       const dir = `${dataRoot()}/opencode`
+      const file = `${dir}/effort-router.jsonl`
       await mkdir(dir, { recursive: true })
-      await appendFile(`${dir}/effort-router.jsonl`, line)
+      await appendFile(file, line)
+      await rotateIfNeeded(await import("node:fs/promises"), file)
     } catch {
       // Observability is best-effort by design.
     }
   })()
 }
+
+/** Max words for an unhinted imperative prompt to still count as minimal. */
+const MINIMAL_WORDS = 12
 
 /**
  * Heuristic profile of a task from its text. Cheap on purpose — the exact
@@ -112,9 +147,11 @@ function log(event: string, fields: Record<string, unknown>) {
  * complexity hints plus length gate pre-escalation.
  */
 function assess(text: string | undefined): { baseline: Effort | undefined; risky: boolean } {
-  if (!text) return { baseline: undefined, risky: false }
+  // Empty or whitespace-only text (attachments-only messages, blank fires)
+  // carries no signal: no opinion rather than a minimal baseline.
+  const words = text?.trim().split(/\s+/).filter(Boolean).length ?? 0
+  if (!text || words === 0) return { baseline: undefined, risky: false }
   const lower = text.toLowerCase()
-  const words = lower.split(/\s+/).filter(Boolean).length
   const risky = RISKY_HINTS.some((hint) => lower.includes(hint))
   const complexHits = COMPLEX_HINTS.filter((hint) => lower.includes(hint)).length
   const complex = complexHits >= 2 || (complexHits >= 1 && words > 40) || (complexHits >= 1 && risky)
@@ -124,7 +161,7 @@ function assess(text: string | undefined): { baseline: Effort | undefined; risky
   // "let's enhance it") are the most common task shape and were previously
   // left at the provider default. Start lean: the escalation path recovers
   // the rare hard ones.
-  if (!risky && words <= 10) return { baseline: "minimal", risky }
+  if (!risky && words <= MINIMAL_WORDS) return { baseline: "minimal", risky }
   return { baseline: undefined, risky }
 }
 
@@ -136,9 +173,19 @@ const state = new Map<string, State>()
 /** Bounded session map: long-lived processes must not grow it without limit. */
 const MAX_SESSIONS = 1_000
 
+/** Window in which an identical chat.message fire is treated as a duplicate. */
+const DEDUP_WINDOW_MS = 2_000
+
 function trackSession(sessionID: string) {
   state.delete(sessionID)
-  state.set(sessionID, { escalated: undefined, baseline: undefined, escalations: 0, risky: false })
+  state.set(sessionID, {
+    escalated: undefined,
+    baseline: undefined,
+    escalations: 0,
+    risky: false,
+    turns: 0,
+    skipLogged: false,
+  })
   if (state.size > MAX_SESSIONS) {
     // Map preserves insertion order — evict the oldest session.
     const oldest = state.keys().next().value
@@ -198,7 +245,14 @@ function effective(entry: State): Effort | undefined {
 }
 
 function escalate(sessionID: string, requested: Effort): { granted: Effort; changed: boolean; note: string } {
-  const entry = state.get(sessionID) ?? { escalated: undefined, baseline: undefined, escalations: 0, risky: false }
+  const entry = state.get(sessionID) ?? {
+    escalated: undefined,
+    baseline: undefined,
+    escalations: 0,
+    risky: false,
+    turns: 0,
+    skipLogged: false,
+  }
   const baseline = entry.baseline ?? "low"
   const current = entry.escalated && rank(entry.escalated) >= rank(baseline) ? entry.escalated : baseline
 
@@ -261,19 +315,35 @@ export const TaskEffortRouterPlugin = (async () => {
     "chat.message": async (input, output) => {
       // New user message = new task boundary: re-assess and reset effort.
       const text = output.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(" ")
+      const now = Date.now()
+      // Some flows fire chat.message twice for one user message (observed:
+      // 26 of 122 real assessments were exact duplicates). Re-assessing is
+      // harmless but doubles work and pollutes the log — dedupe identical
+      // text within a short window.
+      const previous = state.get(input.sessionID)
+      const duplicate =
+        text.length > 0 &&
+        previous?.lastMessage !== undefined &&
+        previous.lastMessage.text === text &&
+        now - previous.lastMessage.ts <= DEDUP_WINDOW_MS
+      if (duplicate) return
+
       const profile = assess(text)
       trackSession(input.sessionID)
-      log("assess", {
-        sessionID: input.sessionID,
-        baseline: profile.baseline,
-        risky: profile.risky,
-        words: text ? text.trim().split(/\s+/).filter(Boolean).length : 0,
-      })
       state.set(input.sessionID, {
         escalated: undefined,
         baseline: profile.baseline,
         escalations: 0,
         risky: profile.risky,
+        turns: 0,
+        skipLogged: false,
+        lastMessage: { text, ts: now },
+      })
+      log("assess", {
+        sessionID: input.sessionID,
+        baseline: profile.baseline,
+        risky: profile.risky,
+        words: text ? text.trim().split(/\s+/).filter(Boolean).length : 0,
       })
     },
 
@@ -282,12 +352,21 @@ export const TaskEffortRouterPlugin = (async () => {
       if (input.model.capabilities.reasoning === false) return
       const entry = state.get(input.sessionID)
       if (!entry) return
+      entry.turns += 1
+      // Log skip outcomes once per task, not once per provider turn: a task
+      // that runs 300 turns would otherwise write 300 identical lines.
+      const logSkip = (fields: Record<string, unknown>) => {
+        if (!entry.skipLogged) {
+          entry.skipLogged = true
+          log("skip", { sessionID: input.sessionID, ...fields })
+        }
+      }
       // The effective rung is the higher of the assessed baseline and the
       // model's escalation. `undefined` means the governor has no opinion
       // for this task and the request options must pass through untouched.
       const tier = effective(entry)
       if (!tier) {
-        log("skip", { sessionID: input.sessionID, reason: "no-opinion" })
+        logSkip({ reason: "no-opinion" })
         return
       }
 
@@ -296,7 +375,7 @@ export const TaskEffortRouterPlugin = (async () => {
       // options have no opinion, so even a `minimal` baseline may apply.
       const pinned = pinnedEffort(output.options)
       if (pinned && rank(pinned) >= rank(tier)) {
-        log("skip", { sessionID: input.sessionID, reason: "pinned", tier, pinned })
+        logSkip({ reason: "pinned", tier, pinned })
         return
       }
 
@@ -306,7 +385,7 @@ export const TaskEffortRouterPlugin = (async () => {
       const fromEscalation = entry.escalated !== undefined && rank(entry.escalated) >= rank(entry.baseline ?? "low")
       const variant = variantFor(input.model, tier, fromEscalation ? "up" : "down")
       if (!variant) {
-        log("skip", { sessionID: input.sessionID, reason: "no-variant", tier })
+        logSkip({ reason: "no-variant", tier })
         return
       }
       // The tier's thinking params win over whatever variant the user had
@@ -314,6 +393,7 @@ export const TaskEffortRouterPlugin = (async () => {
       output.options = { ...output.options, ...variant }
       log("apply", {
         sessionID: input.sessionID,
+        turn: entry.turns,
         tier,
         resolved: fromEscalation ? "up" : "down",
         escalated: entry.escalated,
