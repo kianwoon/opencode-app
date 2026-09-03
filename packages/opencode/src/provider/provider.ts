@@ -54,7 +54,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
         const id = setTimeout(() => {
           const err = new ProviderError.ChunkStallError(ms)
           ctl.abort(err)
-          void reader.cancel(err)
+          reader.cancel(err).catch(() => {})
           reject(err)
         }, ms)
 
