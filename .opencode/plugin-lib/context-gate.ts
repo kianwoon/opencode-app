@@ -388,7 +388,7 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
   return hooks
 }
 
-export * as ContextGate from "./context-gate"
+export * as ContextGate from "./context-gate.ts"
 
 // Default-export the PluginModule shape (server()) so the loader takes the v1
 // path. Without it, the legacy fallback treats every exported function in this
