@@ -48,6 +48,12 @@ export interface GateConfig {
   scopingEnabled: boolean
   /** Extra path substrings treated as pinned. */
   pinnedPaths: string[]
+  /**
+   * Path substrings that override the pin-by-default rule for sections
+   * with no package scope (root guides, remote URLs). Matching sections
+   * become evictable: withheld until session activity mentions the path.
+   */
+  evictablePaths: string[]
 }
 
 const DEFAULTS: GateConfig = {
@@ -55,6 +61,7 @@ const DEFAULTS: GateConfig = {
   sectionWarnTokens: 8_000,
   scopingEnabled: true,
   pinnedPaths: [],
+  evictablePaths: [],
 }
 
 const CONFIG_PATHS = () => {
@@ -80,6 +87,7 @@ function loadConfig(): GateConfig {
         if (typeof parsed.sectionWarnTokens === "number") configCache!.sectionWarnTokens = parsed.sectionWarnTokens
         if (typeof parsed.scopingEnabled === "boolean") configCache!.scopingEnabled = parsed.scopingEnabled
         if (Array.isArray(parsed.pinnedPaths)) configCache!.pinnedPaths = parsed.pinnedPaths
+        if (Array.isArray(parsed.evictablePaths)) configCache!.evictablePaths = parsed.evictablePaths
         break
       }
     } catch {
@@ -142,6 +150,18 @@ export interface Section {
 const HEADER_RE = /^Instructions from: (.+)$/gm
 
 /**
+ * A header line is only a real section boundary if its payload looks like a
+ * path or URL. Instruction content that QUOTES the header format (docs,
+ * examples like "Instructions from: /some/path") must not split a section.
+ */
+function looksLikeHeaderPath(payload: string): boolean {
+  if (/^https?:\/\//.test(payload)) return true
+  // Absolute or ~-rooted file path with an extension (instruction files are
+  // .md/.mdx/.txt; section content rarely matches this shape at line start).
+  return /^(~\/|\/[\w.@+-]+\/)/.test(payload) && /\.(md|mdx|txt|mdc)\b/i.test(payload)
+}
+
+/**
  * Split the joined system block into the prologue (everything before the
  * first `Instructions from:` header) and one section per header. Inverse of
  * core's concatenation in instruction.ts (`Instructions from: ${path}\n${content}`).
@@ -149,9 +169,11 @@ const HEADER_RE = /^Instructions from: (.+)$/gm
 export function parseSections(systemBlock: string): { prologue: string; sections: Section[] } {
   const headers: { path: string; start: number; textStart: number; end: number }[] = []
   for (const match of systemBlock.matchAll(HEADER_RE)) {
+    const payload = match[1]!.trim()
+    if (!looksLikeHeaderPath(payload)) continue
     const idx = match.index ?? 0
     headers.push({
-      path: match[1]!.trim(),
+      path: payload,
       start: idx,
       textStart: idx + match[0].length + 1,
       end: systemBlock.length,
@@ -184,11 +206,16 @@ const PINNED_SUFFIXES = [
   "/.claude/CLAUDE.md",
 ]
 
-function isPinnedPath(path: string, extra: string[]): boolean {
+function isPinnedPath(path: string, extra: string[] = [], evictable: string[] = []): boolean {
+  if (evictable.some((p) => path.includes(p))) return false
   if (extra.some((p) => path.includes(p))) return true
   if (path.includes(`/.opencode/`)) return true
   if (path.includes(`${process.env.HOME}/.claude/`)) return true
   return PINNED_SUFFIXES.some((suffix) => path.endsWith(suffix))
+}
+
+function isEvictablePath(path: string, evictable: string[] = []): boolean {
+  return evictable.some((p) => path.includes(p))
 }
 
 /** Package directory (e.g. "packages/llm") a path belongs to, if any. */
@@ -213,8 +240,10 @@ export interface GateDecision {
  * - Prologue always kept (agent prompt, environment, appended notices).
  * - Sections with no path-derivable scope (root guides) are pinned by
  *   default: dropping project root rules would surprise the user.
+ *   `evictablePaths` overrides the pin per path: those sections are kept
+ *   only while session activity mentions the path (word-boundary match).
  * - Scoped (package) sections are kept only when active; evicted by
- *   ascending token count when the budget is exceeded. Pinned sections
+ *   descending token count when the budget is exceeded. Pinned sections
  *   are never evicted — the budget floor is the pinned set.
  */
 export function applyGate(
@@ -238,12 +267,19 @@ export function applyGate(
   const pinned: Section[] = []
   const scoped: { section: Section; active: boolean }[] = []
   for (const section of sections) {
+    const path = section.path ?? ""
     const scope = section.path ? packageScopeOf(section.path) : undefined
-    if (!scope || isPinnedPath(section.path!, config.pinnedPaths)) {
-      pinned.push(section)
+    if (scope && !isPinnedPath(path, config.pinnedPaths, config.evictablePaths)) {
+      scoped.push({ section, active: activeScopes.has(scope) })
       continue
     }
-    scoped.push({ section, active: activeScopes.has(scope) })
+    if (!scope && isEvictablePath(path, config.evictablePaths)) {
+      // Root-level or remote section explicitly marked evictable: keep only
+      // while the session's activity mentions its path.
+      scoped.push({ section, active: activeScopes.has(path) })
+      continue
+    }
+    pinned.push(section)
   }
 
   const keptScoped = scoped.filter((s) => s.active)
@@ -252,19 +288,16 @@ export function applyGate(
   // Budget: if pinned + active sections still exceed the cap, evict active
   // sections largest-first. Pinned sections are never evicted.
   const kept = [...pinned]
-  const evicted: Section[] = []
   let budget = config.maxSystemTokens - tokensOf(prologue) - pinned.reduce((sum, s) => sum + tokensOf(s.text), 0)
   for (const { section } of [...keptScoped].sort((a, b) => tokensOf(b.section.text) - tokensOf(a.section.text))) {
     const t = tokensOf(section.text)
-    if (t <= budget || pinned.length === sections.length) {
+    if (t <= budget) {
       kept.push(section)
       budget -= t
-    } else {
-      evicted.push(section)
     }
   }
 
-  const dropped = [...droppedScoped.map((s) => s.section), ...evicted]
+  const dropped = [...droppedScoped.map((s) => s.section), ...keptScoped.filter((s) => !kept.includes(s.section)).map((s) => s.section)]
   const ordered = sections.filter((s) => kept.includes(s))
   let output = joinSections(prologue, ordered)
   if (dropped.length > 0) {
@@ -295,6 +328,10 @@ interface SessionActivity {
 const activity = new Map<string, SessionActivity>()
 const MAX_SESSIONS = 1_000
 
+const SCOPE_RE = /(packages\/[^/\s"'`)]+)\//g
+
+let evictablePathsCache: string[] | undefined
+
 function recordActivity(sessionID: string, text: string) {
   let entry = activity.get(sessionID)
   if (!entry) {
@@ -305,22 +342,43 @@ function recordActivity(sessionID: string, text: string) {
     entry = { scopes: new Set() }
     activity.set(sessionID, entry)
   }
-  for (const match of text.matchAll(/(packages\/[^/\s"'`)]+)\//g)) {
+  for (const match of text.matchAll(SCOPE_RE)) {
     entry.scopes.add(match[1]!)
   }
+  // Exact-path mentions unlock evictable root/remote sections; word
+  // boundaries stop "packages/llm/AGENTS.md" from unlocking
+  // "...packages/llm-extra/...". Scanned on args+title+output so e.g. a
+  // subagent summary citing a guide path unlocks it.
+  for (const p of evictablePathsCache ?? []) {
+    if (p && new RegExp(`(^|[^\\w.-])${escapeRegExp(p)}([^\\w.-]|$)`).test(text)) {
+      entry.scopes.add(p)
+    }
+  }
+}
+
+function escapeRegExp(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 // ---------------------------------------------------------------------------
 // Memoization: stable output within a turn keeps the provider cache warm.
-// Key = session + activity fingerprint + section lengths + config.
+// Key = session + activity fingerprint + per-section content hash + config.
+// Content hash (not length): a same-length AGENTS.md edit must NOT serve
+// stale gated text.
 // ---------------------------------------------------------------------------
 
 const memo = new Map<string, string>()
 const MAX_MEMO = 200
 
+function hashOf(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
 function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sections: Section[], config: GateConfig) {
   const shape = sections
-    .map((s) => `${s.path}:${s.text.length}`)
+    .map((s) => `${s.path}:${hashOf(s.text)}`)
     .join("|")
   return [
     sessionID,
@@ -329,6 +387,8 @@ function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sect
     shape,
     config.maxSystemTokens,
     String(config.scopingEnabled),
+    config.pinnedPaths.join(">"),
+    config.evictablePaths.join(">"),
   ].join("#")
 }
 
@@ -338,54 +398,80 @@ function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sect
 
 export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (input) => {
   const config = loadConfig()
+  evictablePathsCache = config.evictablePaths
 
   const hooks: Hooks = {
     "tool.execute.after": async (hookInput, hookOutput) => {
       try {
-        const text = JSON.stringify(hookInput.args ?? {})
-        recordActivity(hookInput.sessionID, text + " " + (hookOutput?.title ?? ""))
+        const text =
+          JSON.stringify(hookInput.args ?? {}) +
+          " " +
+          (hookOutput?.title ?? "") +
+          " " +
+          String(hookOutput?.output ?? "").slice(0, 2_000)
+        recordActivity(hookInput.sessionID, text)
       } catch {
         // Activity tracking must never break tool execution.
       }
     },
 
     "experimental.chat.system.transform": async (hookInput, output) => {
-      const sessionID = hookInput.sessionID
-      if (!sessionID || output.system.length === 0) return
-
-      // Gate only the header block (system[0]); later entries are plugin
-      // appends and the rule anchor — small, deliberate, and order-sensitive.
-      const block = output.system[0]!
-      const { prologue, sections } = parseSections(block)
-      if (sections.length === 0) return
-
-      const scopes = activity.get(sessionID)?.scopes ?? new Set<string>()
-      const decision = applyGate(prologue, sections, scopes, config)
-
-      const key = memoKey(sessionID, decision, sections, config)
-      const cached = memo.get(key)
-      if (cached !== undefined) {
-        output.system[0] = cached
-        return
+      try {
+        await gateSystem(hookInput, output)
+      } catch (error) {
+        // The transform hook runs inside the LLM request: a thrown error
+        // here would fail the whole provider call. Gate must fail open.
+        log("gate-error", { sessionID: hookInput.sessionID, message: String(error) })
       }
-
-      output.system[0] = decision.output
-      if (memo.size >= MAX_MEMO) memo.delete(memo.keys().next().value!)
-      memo.set(key, decision.output)
-
-      log("gate", {
-        sessionID,
-        sections: sections.length,
-        kept: decision.kept.length,
-        dropped: decision.dropped.length,
-        tokensBefore: decision.tokensBefore,
-        tokensAfter: decision.tokensAfter,
-        activeScopes: Array.from(scopes),
-      })
     },
   }
 
   return hooks
+}
+
+async function gateSystem(
+  hookInput: Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[0],
+  output: Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[1],
+) {
+  const sessionID = hookInput.sessionID
+  if (!sessionID || output.system.length === 0) return
+
+  // Gate only the header block (system[0]); later entries are plugin
+  // appends and the rule anchor — small, deliberate, and order-sensitive.
+  const block = output.system[0]!
+  const { prologue, sections } = parseSections(block)
+  if (sections.length === 0) {
+    // Fail-open signal: if core's header format ever changes, the gate
+    // silently no-ops. Oversize here is the only symptom — surface it.
+    const oversized = tokensOf(block) > (loadConfig().maxSystemTokens ?? 0)
+    if (oversized) log("gate-blind", { sessionID, tokens: tokensOf(block) })
+    return
+  }
+
+  const config = loadConfig()
+  const scopes = activity.get(sessionID)?.scopes ?? new Set<string>()
+  const decision = applyGate(prologue, sections, scopes, config)
+
+  const key = memoKey(sessionID, decision, sections, config)
+  const cached = memo.get(key)
+  if (cached !== undefined) {
+    output.system[0] = cached
+    return
+  }
+
+  output.system[0] = decision.output
+  if (memo.size >= MAX_MEMO) memo.delete(memo.keys().next().value!)
+  memo.set(key, decision.output)
+
+  log("gate", {
+    sessionID,
+    sections: sections.length,
+    kept: decision.kept.length,
+    dropped: decision.dropped.length,
+    tokensBefore: decision.tokensBefore,
+    tokensAfter: decision.tokensAfter,
+    activeScopes: Array.from(scopes),
+  })
 }
 
 export * as ContextGate from "./context-gate.ts"

@@ -19,6 +19,7 @@ const CONFIG: GateConfig = {
   sectionWarnTokens: 8_000,
   scopingEnabled: true,
   pinnedPaths: [],
+  evictablePaths: [],
 }
 
 function section(path: string, words: number): Section {
@@ -48,6 +49,22 @@ describe("parseSections", () => {
     const { prologue, sections } = parseSections("just a prompt")
     expect(prologue).toBe("just a prompt")
     expect(sections).toHaveLength(0)
+  })
+
+  test("quoted 'Instructions from:' text without a path-like payload does not split sections", () => {
+    const block = joinedSystem([
+      ["/repo/packages/llm/AGENTS.md", 20],
+    ])
+    const injected = `${block}\nInstructions from: /some/path\nquoted example content`
+    const { sections } = parseSections(injected)
+    expect(sections).toHaveLength(1)
+    expect(sections[0]!.path).toBe("/repo/packages/llm/AGENTS.md")
+  })
+
+  test("real-looking nested path header still splits", () => {
+    const block = `${joinedSystem([["/repo/packages/llm/AGENTS.md", 5]])}\nInstructions from: /repo/packages/ui/AGENTS.md\nui rules here`
+    const { sections } = parseSections(block)
+    expect(sections).toHaveLength(2)
   })
 })
 
@@ -135,6 +152,32 @@ describe("applyGate", () => {
     expect(decision.kept).toHaveLength(1)
     expect(decision.dropped).toHaveLength(0)
   })
+
+  test("evictablePaths overrides pinning — withheld until activity mentions the path", () => {
+    const cfg: GateConfig = { ...CONFIG, evictablePaths: ["remote-rules"] }
+    const { prologue, sections } = parseSections(
+      joinedSystem([
+        ["https://example.com/remote-rules.md", 100],
+      ]),
+    )
+    const inactive = applyGate(prologue, sections, new Set(), cfg)
+    expect(inactive.kept).toHaveLength(0)
+    expect(inactive.dropped).toHaveLength(1)
+
+    const active = applyGate(prologue, sections, new Set(["https://example.com/remote-rules.md"]), cfg)
+    expect(active.kept).toHaveLength(1)
+    expect(active.dropped).toHaveLength(0)
+  })
+
+  test("evictable non-scoped section stays pinned when not in evictablePaths", () => {
+    const { prologue, sections } = parseSections(
+      joinedSystem([
+        ["https://example.com/team-guide.md", 100],
+      ]),
+    )
+    const decision = applyGate(prologue, sections, new Set(), CONFIG)
+    expect(decision.kept).toHaveLength(1)
+  })
 })
 
 describe("plugin hook", () => {
@@ -196,5 +239,35 @@ describe("plugin hook", () => {
     const system = ["Instructions from: /x/packages/llm/AGENTS.md\nwords"]
     await hooks["experimental.chat.system.transform"]!({ model }, { system })
     expect(system[0]).toContain("packages/llm/AGENTS.md")
+  })
+
+  test("tool OUTPUT text citing a path unlocks that scope (subagent summaries)", async () => {
+    const sessionID = "ses_output_unlock"
+    const block = joinedSystem([
+      ["/repo/packages/llm/AGENTS.md", 100],
+      ["/repo/packages/ui/AGENTS.md", 100],
+    ])
+    const before = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: before })
+    expect(before[0]).not.toContain("packages/ui/AGENTS.md")
+
+    await hooks["tool.execute.after"]!(
+      { tool: "task", sessionID, callID: "c2", args: { prompt: "review ui components" } },
+      { title: "ui review", output: "explored /repo/packages/ui/src and found 3 issues", metadata: {} },
+    )
+
+    const after = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
+    expect(after[0]).toContain("packages/ui/AGENTS.md")
+  })
+
+  test("hook error fails open — transform still returns usable system text", async () => {
+    const sessionID = "ses_failopen"
+    // Force a throw inside recordActivity's text path by passing unserializable args —
+    // but tool.execute.after already guards; instead break the system block shape.
+    const system = [undefined as unknown as string, "rest"]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system })
+    // Must not throw; system entries remain as-is (gate skipped on bad input).
+    expect(system[1]).toBe("rest")
   })
 })
