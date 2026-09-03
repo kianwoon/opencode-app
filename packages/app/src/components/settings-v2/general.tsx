@@ -79,6 +79,13 @@ const fontSettings = {
     colorDark: "setMessageColorDark",
   },
 } as const
+const messageWidthOptions = [
+  { value: "64", label: "settings.general.row.messageWidth.option.default" },
+  { value: "76", label: "settings.general.row.messageWidth.option.wide" },
+  { value: "88", label: "settings.general.row.messageWidth.option.wider" },
+  { value: "102", label: "settings.general.row.messageWidth.option.full" },
+  { value: "128", label: "settings.general.row.messageWidth.option.max" },
+]
 const soundSettings = {
   agent: {
     action: "settings-sounds-agent",
@@ -201,6 +208,26 @@ const AppearanceSection: Component<{ controller: AppearanceSettingsController }>
         <FontSetting kind="code" fonts={props.controller.fonts} />
         <FontSetting kind="terminal" fonts={props.controller.fonts} />
         <FontSetting kind="message" fonts={props.controller.fonts} />
+
+        <SettingsRowV2
+          title={language.t("settings.general.row.messageWidth.title")}
+          description={language.t("settings.general.row.messageWidth.description")}
+        >
+          <SelectV2
+            appearance="inline"
+            data-action="settings-message-width"
+            options={messageWidthOptions}
+            current={
+              messageWidthOptions.find((option) => option.value === props.controller.messageWidth.current()) ??
+              messageWidthOptions[0]
+            }
+            placement="bottom-end"
+            gutter={6}
+            value={(option) => option.value}
+            label={(option) => `${language.t(option.label)} (${option.value}ch)`}
+            onSelect={(option) => option && props.controller.messageWidth.select(option.value)}
+          />
+        </SettingsRowV2>
       </SettingsListV2>
     </div>
   )

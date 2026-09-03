@@ -141,6 +141,10 @@ export function createAppearanceSettingsController() {
       setMessageColorLight: (value: string) => settings.appearance.setMessageFontColorLight(value),
       setMessageColorDark: (value: string) => settings.appearance.setMessageFontColorDark(value),
     },
+    messageWidth: {
+      current: createMemo(() => String(settings.appearance.messageWidth())),
+      select: (value: string) => settings.appearance.setMessageWidth(Number(value)),
+    },
   }
 }
 
