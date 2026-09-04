@@ -7,12 +7,14 @@ import { createEffect, getOwner, onCleanup, startTransition } from "solid-js"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
+import { pathKey } from "@/utils/path-key"
 import { SessionTabsRemovedDetail } from "@/components/titlebar-session-events"
 import { sessionHref } from "@/utils/session-route"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
 import { createDraftPromptSession, type PromptModel } from "./prompt-state"
 import { migrateTabs } from "./tab-migration"
+import { projectSessionIDs } from "./project-tabs"
 
 export type SessionTab = {
   type: "session"
@@ -294,6 +296,41 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         if (recent.key && removed.includes(recent.key)) setRecentKey(undefined)
         for (const draftID of drafts) removeDraftPersisted(draftID)
         if (server.key === key) navigate("/")
+      },
+      // Closes every title-bar tab belonging to a closed project: session tabs
+      // whose session directory is one of the project's directories, plus draft
+      // tabs opened against those directories. `sessionDirectory` resolves a
+      // session tab's directory when the persisted info cache misses.
+      removeProjectTabs(input: {
+        server: ServerConnection.Key
+        directories: string[]
+        sessionDirectory: (sessionId: string) => string | undefined
+      }) {
+        const sessionIDs = projectSessionIDs(store, input.server, input.directories, (sessionId) => {
+          const cached = info[`${input.server}\n${sessionHref(input.server, sessionId)}`]?.directory
+          return cached ?? input.sessionDirectory(sessionId)
+        })
+        actions.removeDraftsForDirectories(input.directories)
+        if (sessionIDs.length > 0)
+          actions.removeSessions({ server: input.server, directory: input.directories[0] ?? "", sessionIDs })
+      },
+      // Removes draft tabs (plus their persisted prompt state) whose directory
+      // belongs to one of the given directories. Session tabs for a closed
+      // project go through removeSessions instead.
+      removeDraftsForDirectories(directories: string[]) {
+        const keys = new Set(directories.map(pathKey))
+        const drafts = store.flatMap((tab) =>
+          tab.type === "draft" && keys.has(pathKey(tab.directory)) ? [tab.draftID] : [],
+        )
+        if (drafts.length === 0) return
+        const removed = store.filter(
+          (tab) => tab.type === "draft" && keys.has(pathKey(tab.directory)),
+        ).map(tabKey)
+        setStore((tabs) => tabs.filter((tab) => tab.type !== "draft" || !keys.has(pathKey(tab.directory))))
+        for (const key of removed) memory.remove(key)
+        for (const key of removed) removeInfo(key)
+        if (recent.key && removed.includes(recent.key)) setRecentKey(undefined)
+        for (const draftID of drafts) removeDraftPersisted(draftID)
       },
       removeSessions: (input: SessionTabsRemovedDetail) => {
         const targetServer = input.server ?? server.key

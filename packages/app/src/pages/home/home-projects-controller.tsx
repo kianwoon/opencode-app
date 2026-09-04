@@ -7,6 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePlatform } from "@/context/platform"
 import { ServerConnection } from "@/context/server"
+import { useTabs } from "@/context/tabs"
 import { closeHomeProject, errorMessage, homeProjectDirectories } from "@/pages/layout/helpers"
 import { Persist, persisted } from "@/utils/persist"
 import { showToast } from "@/utils/toast"
@@ -21,6 +22,7 @@ export function createHomeProjectsController(home: HomeController) {
   const dialog = useDialog()
   const language = useLanguage()
   const notification = useNotification()
+  const tabs = useTabs()
   const openSettings = useSettingsCommand()
   const serverManagement = useServerManagementController({ navigateOnAdd: false })
   const [_state, setState, _, ready] = persisted(
@@ -96,12 +98,18 @@ export function createHomeProjectsController(home: HomeController) {
         })
       },
       close: (conn: ServerConnection.Any, directory: string) => {
-        const next = closeHomeProject(
-          home.selection.value(),
-          ServerConnection.key(conn),
-          home.server.context(conn).projects,
-          directory,
-        )
+        const key = ServerConnection.key(conn)
+        const serverCtx = home.server.context(conn)
+        // Closing a project also closes its title-bar tabs.
+        const project = serverCtx.projects.list().find((item) => item.worktree === directory)
+        if (project) {
+          tabs.removeProjectTabs({
+            server: key,
+            directories: [project.worktree, ...(project.sandboxes ?? [])],
+            sessionDirectory: (sessionId) => serverCtx.sync.session.peek(sessionId)?.directory,
+          })
+        }
+        const next = closeHomeProject(home.selection.value(), key, serverCtx.projects, directory)
         if (next) home.selection.set(next)
       },
       move: (conn: ServerConnection.Any, worktree: string, index: number) => {

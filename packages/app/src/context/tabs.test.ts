@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createRoot, getOwner, onCleanup } from "solid-js"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
+import { projectSessionIDs } from "./project-tabs"
 import type { SessionTab, Tab } from "./tabs"
 import { migrateTabs } from "./tab-migration"
 import type { ServerConnection } from "./server"
@@ -121,5 +122,45 @@ describe("closed tab stack", () => {
     expect(nextTabAfterClose(tabs, 1, false)).toBeUndefined()
     expect(nextTabAfterClose(tabs, 1, true)).toEqual(sessionTab("c"))
     expect(nextTabAfterClose([sessionTab("a")], 0, true)).toBeNull()
+  })
+})
+
+describe("project session tab matching", () => {
+  test("matches sessions whose directory is a project directory", () => {
+    const tabs: Tab[] = [sessionTab("/repo/a"), sessionTab("/other")]
+    const ids = projectSessionIDs(tabs, server, ["/repo"], (id) => (id === "/repo/a" ? "/repo" : "/other"))
+
+    expect(ids).toEqual(["/repo/a"])
+  })
+
+  test("matches sandbox directories and normalizes trailing slashes", () => {
+    const tabs: Tab[] = [sessionTab("sandbox"), sessionTab("trailing")]
+    const ids = projectSessionIDs(
+      tabs,
+      server,
+      ["/repo", "/repo/sandbox"],
+      (id) => (id === "sandbox" ? "/repo/sandbox/" : "/repo/"),
+    )
+
+    expect(ids).toEqual(["sandbox", "trailing"])
+  })
+
+  test("ignores other servers and draft tabs", () => {
+    const otherServer = "local\nhttp://localhost:9999" as ServerConnection.Key
+    const tabs: Tab[] = [
+      sessionTab("local-session"),
+      { type: "session", server: otherServer, sessionId: "remote-session" },
+      { type: "draft", draftID: "d1", server, directory: "/repo" },
+    ]
+    const ids = projectSessionIDs(tabs, server, ["/repo"], () => "/repo")
+
+    expect(ids).toEqual(["local-session"])
+  })
+
+  test("drops sessions without a resolvable directory", () => {
+    const tabs: Tab[] = [sessionTab("known"), sessionTab("unknown")]
+    const ids = projectSessionIDs(tabs, server, ["/repo"], (id) => (id === "known" ? "/repo" : undefined))
+
+    expect(ids).toEqual(["known"])
   })
 })

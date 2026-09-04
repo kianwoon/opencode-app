@@ -270,6 +270,15 @@ export function NewSidebar() {
   const closeProject = (directory: string) => {
     const conn = currentServer()
     if (!conn) return
+    // Closing a project also closes its title-bar tabs.
+    const project = global.ensureServerCtx(conn).projects.list().find((item) => pathKey(item.worktree) === pathKey(directory))
+    if (project) {
+      tabs.removeProjectTabs({
+        server: ServerConnection.key(conn),
+        directories: [project.worktree, ...(project.sandboxes ?? [])],
+        sessionDirectory: (sessionId) => sync().session.peek(sessionId)?.directory,
+      })
+    }
     global.ensureServerCtx(conn).projects.close(directory)
   }
 

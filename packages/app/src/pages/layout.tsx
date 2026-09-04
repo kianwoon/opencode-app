@@ -59,6 +59,7 @@ import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { makeFolderDrop } from "@/utils/folder-drop"
 import { ServerConnection, useServer } from "@/context/server"
+import { useTabs } from "@/context/tabs"
 import { useLanguage, type Locale } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
 import {
@@ -115,6 +116,7 @@ export default function LegacyLayout(props: ParentProps) {
   const pickDirectory = useDirectoryPicker()
   const settings = useSettings()
   const server = useServer()
+  const tabs = useTabs()
   const notification = useNotification()
   const permission = usePermission()
   const navigate = useNavigate()
@@ -1368,6 +1370,9 @@ export default function LegacyLayout(props: ParentProps) {
     const active = pathKey(currentProject()?.worktree ?? "") === key
     if (index === -1) return
 
+    const project = list[index]
+    closeProjectTabs(project)
+
     if (!active) {
       layout.projects.close(directory)
       return
@@ -1388,6 +1393,16 @@ export default function LegacyLayout(props: ParentProps) {
     })
   }
 
+  // Closing a project also closes its title-bar tabs: session tabs whose
+  // session directory belongs to the project (root or a sandbox/workspace),
+  // and draft tabs opened against those directories.
+  function closeProjectTabs(project: LocalProject) {
+    tabs.removeProjectTabs({
+      server: server.key,
+      directories: [project.worktree, ...(project.sandboxes ?? [])],
+      sessionDirectory: (sessionId) => serverSync().session.peek(sessionId)?.directory,
+    })
+  }
   function toggleProjectWorkspaces(project: LocalProject) {
     const enabled = layout.sidebar.workspaces(project.worktree)()
     if (enabled) {
