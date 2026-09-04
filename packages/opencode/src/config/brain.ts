@@ -19,9 +19,20 @@ export function expand(config: ConfigV1.Info) {
         ? {
             edit: "deny",
             bash: "deny",
-            task: { "*": "deny", explorer: "allow", implementer: "allow", reviewer: "allow" },
+            task: { "*": "deny", explorer: "allow", implementer: "allow", reviewer: "allow", guru: "allow" },
           }
         : {},
+    }
+  } else {
+    // agent/*.md entries exist without a model (single-source-truth change):
+    // fill absent fields only, never overwrite user-set values.
+    if (!agent.brain.model && brain.model) agent.brain.model = brain.model
+    if (strict && (!agent.brain.permission || Object.keys(agent.brain.permission).length === 0)) {
+      agent.brain.permission = {
+        edit: "deny",
+        bash: "deny",
+        task: { "*": "deny", explorer: "allow", implementer: "allow", reviewer: "allow", guru: "allow" },
+      }
     }
   }
 
@@ -29,12 +40,20 @@ export function expand(config: ConfigV1.Info) {
     ["explorer", brain.hands_model],
     ["implementer", brain.hands_model],
     ["reviewer", brain.reviewer_model],
+    ["guru", brain.guru_model],
   ] as const) {
-    if (agent[name]) continue
-    agent[name] = {
-      mode: "subagent",
-      ...(model ? { model } : {}),
-      permission: strict ? { task: "deny" } : {},
+    const entry = agent[name]
+    if (!entry) {
+      agent[name] = {
+        mode: "subagent",
+        ...(model ? { model } : {}),
+        permission: strict ? { task: "deny" } : {},
+      }
+      continue
     }
+    if (!entry.model && model) entry.model = model
+    if (!strict) continue
+    entry.permission ??= {}
+    if (entry.permission.task === undefined) entry.permission.task = "deny"
   }
 }

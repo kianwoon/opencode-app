@@ -12,6 +12,9 @@ export const Info = Schema.Struct({
   reviewer_model: Schema.optional(Schema.String).annotate({
     description: "Model to use for review in the format of provider/model",
   }),
+  guru_model: Schema.optional(Schema.String).annotate({
+    description: "Smartest model for guru advisor in provider/model format (cost opt-in, one-shot guidance only)",
+  }),
   enforcement: Schema.optional(Schema.Literals(["strict", "advisory"])).annotate({
     description:
       "Control brain enforcement behavior: 'strict' blocks on failed checks, 'advisory' only warns without blocking. Strict enforcement permissions take precedence over global `permission` for the generated agents.",

@@ -13,6 +13,7 @@ import path from "path"
 import { Account } from "../../src/account/account"
 import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
+import { ConfigBrain } from "../../src/config/brain"
 import { ConfigParse } from "../../src/config/parse"
 import { Env } from "../../src/env"
 import { InstanceRuntime } from "../../src/project/instance-runtime"
@@ -136,6 +137,7 @@ describe("brain config expansion", () => {
         model: "anthropic/brain",
         hands_model: "anthropic/hands",
         reviewer_model: "anthropic/reviewer",
+        guru_model: "anthropic/guru",
         enforcement: "strict",
       },
     }).pipe(
@@ -147,7 +149,13 @@ describe("brain config expansion", () => {
             permission: {
               edit: "deny",
               bash: "deny",
-              task: { "*": "deny", explorer: "allow", implementer: "allow", reviewer: "allow" },
+              task: {
+                "*": "deny",
+                explorer: "allow",
+                implementer: "allow",
+                reviewer: "allow",
+                guru: "allow",
+              },
             },
           })
           for (const name of ["explorer", "implementer"] as const) {
@@ -160,6 +168,11 @@ describe("brain config expansion", () => {
           expect(config.agent?.reviewer).toMatchObject({
             mode: "subagent",
             model: "anthropic/reviewer",
+            permission: { task: "deny" },
+          })
+          expect(config.agent?.guru).toMatchObject({
+            mode: "subagent",
+            model: "anthropic/guru",
             permission: { task: "deny" },
           })
         }),
@@ -227,6 +240,27 @@ describe("brain config expansion", () => {
     ),
   )
 
+  it.instance("absent guru_model leaves agent.guru unset (falls back to parent model)", () =>
+    load({ brain: { model: "anthropic/brain", enforcement: "strict" } }).pipe(
+      Effect.tap((config) =>
+        Effect.sync(() => {
+          expect(config.agent?.guru).toMatchObject({ mode: "subagent" })
+          expect(config.agent?.guru?.model).toBeUndefined()
+          expect(config.agent?.brain?.permission).toMatchObject({
+            task: {
+              "*": "deny",
+              explorer: "allow",
+              implementer: "allow",
+              reviewer: "allow",
+              guru: "allow",
+            },
+          })
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  )
+
   it.instance("user-defined agent entries win over generated ones", () =>
     load({
       brain: {
@@ -246,7 +280,8 @@ describe("brain config expansion", () => {
           expect(config.agent?.brain?.permission).not.toHaveProperty("task")
           expect(config.agent?.explorer).toMatchObject({ model: "user/explorer" })
           expect(config.agent?.explorer?.mode).toBeUndefined()
-          expect(config.agent?.explorer?.permission).toEqual({})
+          // strict fills the absent task permission even on user-defined entries
+          expect(config.agent?.explorer?.permission).toEqual({ task: "deny" })
           expect(config.agent?.implementer).toMatchObject({ mode: "subagent", model: "anthropic/hands" })
           expect(config.agent?.reviewer).toMatchObject({ mode: "subagent", model: "anthropic/reviewer" })
         }),
@@ -254,4 +289,28 @@ describe("brain config expansion", () => {
       Effect.asVoid,
     ),
   )
+
+  test("md-defined agent without model gets hands_model filled", () => {
+    const config = ConfigParse.schema(
+      ConfigV1.Info,
+      {
+        brain: { hands_model: "anthropic/hands" },
+        agent: { implementer: { mode: "subagent" } },
+      },
+      "test",
+    )
+    ConfigBrain.expand(config)
+    expect(config.agent?.implementer).toMatchObject({ mode: "subagent", model: "anthropic/hands" })
+
+    const userSet = ConfigParse.schema(
+      ConfigV1.Info,
+      {
+        brain: { hands_model: "anthropic/hands" },
+        agent: { implementer: { mode: "subagent", model: "user/hands" } },
+      },
+      "test",
+    )
+    ConfigBrain.expand(userSet)
+    expect(userSet.agent?.implementer?.model).toBe("user/hands")
+  })
 })

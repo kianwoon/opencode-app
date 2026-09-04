@@ -50,7 +50,7 @@ function normalize(value: unknown): unknown {
   return schema
 }
 
-const MODEL_REF_KEYS = new Set(["model", "small_model", "hands_model", "reviewer_model"])
+const MODEL_REF_KEYS = new Set(["model", "small_model", "hands_model", "reviewer_model", "guru_model"])
 
 function restoreModelRefs(value: unknown, key?: string): unknown {
   if (Array.isArray(value)) return value.map((item) => restoreModelRefs(item))
