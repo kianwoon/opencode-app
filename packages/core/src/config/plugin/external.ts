@@ -72,11 +72,25 @@ export const Plugin = define({
           }
         }
 
+        // A plugin can be referenced twice: once by a config document's
+        // `plugins` array and again by the same directory's
+        // `{plugin,plugins}/*` glob (the common setup of declaring plugins
+        // explicitly AND dropping the files in plugins/). Both sources
+        // resolve to the same absolute path, so dedupe on it — npm specs
+        // keep their package name as the key. First occurrence wins so a
+        // config document's `options` beat the glob's bare reference.
+        const configuredUnique = new Map<string, { package: string; options?: Record<string, any> }>()
+        for (const ref of configured) {
+          const key = path.isAbsolute(ref.package) ? path.normalize(ref.package) : ref.package
+          if (!configuredUnique.has(key)) configuredUnique.set(key, ref)
+        }
+        const deduped = [...configuredUnique.values()]
+
         yield* Effect.logInfo("external plugin discovery", {
-          entries: configured.map((item) => item.package),
+          entries: deduped.map((item) => item.package),
         })
 
-        for (const ref of configured) {
+        for (const ref of deduped) {
           yield* Effect.logInfo("external plugin load", { package: ref.package })
           yield* Effect.gen(function* () {
             const entrypoint = path.isAbsolute(ref.package)
