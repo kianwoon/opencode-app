@@ -27,6 +27,7 @@ import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { ConfigAgent } from "./agent"
+import { ConfigBrain } from "./brain"
 import { ConfigCommand } from "./command"
 import { ConfigManaged } from "./managed"
 import { ConfigParse } from "./parse"
@@ -576,6 +577,8 @@ const layer = Layer.effect(
           }
           result.permission = mergeDeep(perms, result.permission ?? {})
         }
+
+        ConfigBrain.expand(result)
 
         if (!result.username) {
           try {

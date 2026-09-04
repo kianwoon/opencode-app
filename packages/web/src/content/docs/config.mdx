@@ -528,6 +528,31 @@ You can also define agents using markdown files in `~/.config/opencode/agents/` 
 
 ---
 
+### Brain
+
+You can configure the brain orchestration agents through the `brain` option.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "brain": {
+    "model": "anthropic/claude-sonnet-4-5",
+    "hands_model": "zai/glm-4.7",
+    "reviewer_model": "openai/gpt-5",
+    "enforcement": "strict"
+  }
+}
+```
+
+- `model` - Model for the primary `brain` agent, in `provider/model` format.
+- `hands_model` - Model for the generated `explorer` and `implementer` subagents.
+- `reviewer_model` - Model for the generated `reviewer` subagent.
+- `enforcement` - `strict` gives the generated agents restrictive permissions that take precedence over the global `permission` block; `advisory` (default) only warns without blocking.
+
+Generation is fill-absent-only: any agent you define yourself in the [`agent`](#agents) block takes precedence over a generated one.
+
+---
+
 ### Default agent
 
 You can set the default agent using the `default_agent` option. This determines which agent is used when none is explicitly specified.

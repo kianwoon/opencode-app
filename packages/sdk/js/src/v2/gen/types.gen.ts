@@ -1934,6 +1934,12 @@ export type Config = {
   enabled_providers?: Array<string>
   model?: string
   small_model?: string
+  brain?: {
+    model?: string
+    hands_model?: string
+    reviewer_model?: string
+    enforcement?: "strict" | "advisory"
+  }
   default_agent?: string
   subagent_depth?: number
   username?: string

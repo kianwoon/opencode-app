@@ -50,12 +50,14 @@ function normalize(value: unknown): unknown {
   return schema
 }
 
+const MODEL_REF_KEYS = new Set(["model", "small_model", "hands_model", "reviewer_model"])
+
 function restoreModelRefs(value: unknown, key?: string): unknown {
   if (Array.isArray(value)) return value.map((item) => restoreModelRefs(item))
   if (!isRecord(value)) return value
 
   const schema = Object.fromEntries(Object.entries(value).map(([name, item]) => [name, restoreModelRefs(item, name)]))
-  if ((key === "model" || key === "small_model") && schema.type === "string") {
+  if (key !== undefined && MODEL_REF_KEYS.has(key) && schema.type === "string") {
     return { ...schema, $ref: MODEL_REF }
   }
   return schema
