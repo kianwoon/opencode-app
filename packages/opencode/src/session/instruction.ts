@@ -72,9 +72,29 @@ const layer: Layer.Layer<
         Effect.succeed({
           // Track which instruction files have already been attached for a given assistant message.
           claims: new Map<MessageID, Set<string>>(),
+          // Memoized nested AGENTS.md discovery: paths only, no content. The
+          // glob over a large tree is not free and system() runs per loop step.
+          nestedGuides: undefined as string[] | undefined,
         }),
       ),
     )
+
+    // Nested AGENTS.md guides below the instance root, discovered once per
+    // instance. Their CONTENT is never loaded eagerly; system() surfaces only
+    // this path index and resolve() attaches the guide when a session reads
+    // or runs commands inside the subtree.
+    const nestedGuides = Effect.fn("Instruction.nestedGuides")(function* () {
+      const s = yield* InstanceState.get(state)
+      if (s.nestedGuides) return s.nestedGuides
+      const ctx = yield* InstanceState.context
+      const found = yield* fs
+        .glob("**/AGENTS.md", { cwd: ctx.directory, absolute: true, include: "file", dot: true })
+        .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+      s.nestedGuides = found
+        .map((item) => path.resolve(item))
+        .filter((resolved) => !resolved.includes(`${path.sep}node_modules${path.sep}`))
+      return s.nestedGuides
+    })
 
     const relative = Effect.fnUntraced(function* (instruction: string) {
       const ctx = yield* InstanceState.context
@@ -135,20 +155,10 @@ const layer: Layer.Layer<
             break
           }
         }
-        // Surface every nested AGENTS.md below the project root so package-level
-        // guides (e.g. packages/desktop/AGENTS.md) are visible to the model even
-        // before it touches that subtree. Without this, the agent can only learn
-        // about a nested guide by reading a file there — it cannot know what it
-        // does not know. Only AGENTS.md is globbed (CLAUDE.md is convention-only
-        // at the root); node_modules is pruned by the glob dot:false + the
-        // consumer's ignore rules.
-        const nested = yield* fs
-          .glob("**/AGENTS.md", { cwd: ctx.directory, absolute: true, include: "file", dot: true })
-          .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-        for (const item of nested) {
-          const resolved = path.resolve(item)
-          if (!resolved.includes(`${path.sep}node_modules${path.sep}`)) paths.add(resolved)
-        }
+        // Nested package guides are deliberately NOT loaded here. Their full
+        // text is only attached on demand by resolve() when a session reads a
+        // file or runs a command inside their subtree; system() surfaces a
+        // compact path index so the model still knows they exist.
       }
 
       if (config.instructions) {
@@ -174,6 +184,9 @@ const layer: Layer.Layer<
     const system = Effect.fn("Instruction.system")(function* () {
       const config = yield* cfg.get()
       const paths = yield* systemPaths()
+      // The root-level guide already rides in paths (glob "**/AGENTS.md" also
+      // matches at the root); the index only covers guides not yet loaded.
+      const nested = (yield* nestedGuides()).filter((item) => !paths.has(item))
       const urls = (config.instructions ?? []).filter(
         (item) => item.startsWith("https://") || item.startsWith("http://"),
       )
@@ -181,8 +194,20 @@ const layer: Layer.Layer<
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
+      // Compact index of package-level guides whose full text is NOT loaded.
+      // Names the guide so the model knows it exists and can read it via its
+      // file tools when it starts working in that subtree (read/shell also
+      // auto-attach it there).
+      const nestedIndex: string[] =
+        nested.length > 0
+          ? [
+              `Package-level AGENTS.md guides exist but are not preloaded: ${nested.join(", ")}`,
+              "The matching guide is attached automatically when you read files or run commands in that subtree; or read it directly when you need its rules early.",
+            ]
+          : []
+
       const loaded = [
-        ...(paths.size + urls.length > 0
+        ...(paths.size + urls.length > 0 || nestedIndex.length > 0
           ? [
               // Precedence preamble: makes conflict resolution explicit when
               // global, project, and package-level guides disagree. Global
@@ -197,6 +222,7 @@ const layer: Layer.Layer<
           : []),
         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
+        ...(nestedIndex.length > 0 ? [nestedIndex.join("\n")] : []),
       ]
 
       // Loading summary so gaps are visible: a skipped or unreadable rule file
@@ -207,6 +233,7 @@ const layer: Layer.Layer<
         discovered: paths.size + urls.length,
         files: Array.from(paths).length,
         urls: urls.length,
+        nestedIndexed: nested.length,
         bytes,
         paths: Array.from(paths),
       })

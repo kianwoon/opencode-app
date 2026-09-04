@@ -314,3 +314,28 @@ Use `Effect.cached` when multiple concurrent callers should share a single in-fl
 Use `EffectBridge` for native or external callbacks (`@parcel/watcher`, `node-pty`, native `fs.watch`, plugin callbacks, etc.) that need to re-enter Effect services with instance/workspace context.
 
 Plain async code should pass explicit context or stay inside an Effect fiber; do not add ambient instance context shims.
+
+## Nested AGENTS.md guides are indexed, NOT preloaded (2026-09-03)
+
+- `Instruction.systemPaths()` (src/session/instruction.ts) eagerly globbed
+  `**/AGENTS.md` and dumped every package-level guide's FULL TEXT into system
+  context on every request (~119KB / 35k tokens in this repo, 19 files). The
+  context-gate plugin then evicted 14-17 of them per request anyway.
+- Root cause of "agent forgot how to build X": guides were evicted by the gate
+  because they never fit the budget; the model only saw a one-line footer.
+- Now: only GLOBAL + project-ROOT guides load eagerly. Nested guides are
+  discovered once per instance (`nestedGuides`, memoized in instance state)
+  and surfaced as a compact path index ("Package-level AGENTS.md guides exist
+  but are not preloaded: <paths>"). The guide's content attaches on demand:
+  - `read` tool reading a file in the subtree → resolve() attaches it as a
+    system-reminder (claims map dedupes per assistant message).
+  - `shell` tool running in a workdir inside the subtree → same.
+  - The model can also just read the AGENTS.md path directly.
+- Do NOT reintroduce eager loading of nested guides; context bloat is the
+  failure mode. If discoverability is ever the complaint, improve the index
+  line, not the payload.
+- Acceptance guard: test/session/instruction.test.ts ("indexes nested
+  AGENTS.md paths without loading their content", "includes nested AGENTS.md
+  in systemPaths and skips resolve" — now asserts on-demand attach) and
+  test/tool/read.test.ts "reads file content and attaches nearby nested
+  AGENTS.md".
