@@ -377,6 +377,7 @@ describe("summarization", () => {
             },
           }
         },
+        delete: async () => ({}),
       },
     }
     const ctx = { client: client as never, sessionModel: new Map() }

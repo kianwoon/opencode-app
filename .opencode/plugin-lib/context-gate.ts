@@ -512,6 +512,9 @@ async function llmSummarize(
     return extractSummaryText(response.data?.parts)
   } catch {
     return undefined
+  } finally {
+    // The helper session must never outlive its use — delete it on every path.
+    await client.session.delete({ path: { id: session.id } }).catch(() => {})
   }
 }
 
