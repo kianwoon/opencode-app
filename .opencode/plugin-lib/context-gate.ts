@@ -1,4 +1,5 @@
-import type { Hooks } from "@opencode-ai/plugin"
+import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import { createHash } from "node:crypto"
 
 /**
  * Context Gate — a permanent policy engine for fixed context overhead.
@@ -54,6 +55,12 @@ export interface GateConfig {
    * become evictable: withheld until session activity mentions the path.
    */
   evictablePaths: string[]
+  /** Disable LLM summarization of oversize markdown sections (default on). */
+  summarizeEnabled: boolean
+  /** Sections with more words than this get summarized before entering context. */
+  summarizeWordLimit: number
+  /** "provider/model" override for the summarizer; defaults to the session's model. */
+  summarizerModel: string
 }
 
 const DEFAULTS: GateConfig = {
@@ -62,6 +69,9 @@ const DEFAULTS: GateConfig = {
   scopingEnabled: true,
   pinnedPaths: [],
   evictablePaths: [],
+  summarizeEnabled: true,
+  summarizeWordLimit: 2_000,
+  summarizerModel: "",
 }
 
 const CONFIG_PATHS = () => {
@@ -88,6 +98,9 @@ function loadConfig(): GateConfig {
         if (typeof parsed.scopingEnabled === "boolean") configCache!.scopingEnabled = parsed.scopingEnabled
         if (Array.isArray(parsed.pinnedPaths)) configCache!.pinnedPaths = parsed.pinnedPaths
         if (Array.isArray(parsed.evictablePaths)) configCache!.evictablePaths = parsed.evictablePaths
+        if (typeof parsed.summarizeEnabled === "boolean") configCache!.summarizeEnabled = parsed.summarizeEnabled
+        if (typeof parsed.summarizeWordLimit === "number") configCache!.summarizeWordLimit = parsed.summarizeWordLimit
+        if (typeof parsed.summarizerModel === "string") configCache!.summarizerModel = parsed.summarizerModel
         break
       }
     } catch {
@@ -393,12 +406,204 @@ function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sect
 }
 
 // ---------------------------------------------------------------------------
-// Plugin
+// Summarization: oversize markdown sections are compressed BEFORE they enter
+// context. One LLM call per file version, sha-keyed disk cache, extractive
+// fallback so the request path never blocks on a slow or failing model.
 // ---------------------------------------------------------------------------
+
+const SUMMARIZE_TIMEOUT_MS = 30_000
+const EXTRACTIVE_MAX_WORDS = 1_200
+
+export function wordCount(text: string): number {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return 0
+  return trimmed.split(/\s+/).length
+}
+
+const cacheDir = () => `${dataRoot()}/opencode/context-gate-cache`
+
+/** Cache key binds content AND path: same text at two paths summarizes twice (provenance differs). */
+export function summaryCacheKey(path: string, content: string): string {
+  return createHash("sha256").update(`${path}\n${content}`).digest("hex")
+}
+
+export function isSummarizable(section: Section, config: GateConfig): boolean {
+  if (!section.path) return false
+  if (!/\.(md|mdx|txt|mdc)\b/i.test(section.path)) return false
+  if (!config.summarizeEnabled) return false
+  return wordCount(section.text) > config.summarizeWordLimit
+}
+
+/**
+ * Cheap, deterministic fallback: keep the document skeleton (headings), the
+ * opening lines, and bullet lists — the parts instruction files use for
+ * imperatives. Never throws.
+ */
+export function extractiveFallback(text: string): string {
+  const lines = text.split("\n")
+  const headings = lines.filter((l) => /^#{1,4}\s+\S/.test(l))
+  const bullets = lines.filter((l) => /^\s*([-*+]|\d+\.)\s+\S/.test(l))
+  const lead = lines.filter((l) => l.trim().length > 0).slice(0, 12)
+  const cap = (items: string[], max: number) => {
+    const out: string[] = []
+    let words = 0
+    for (const item of items) {
+      const w = wordCount(item)
+      if (words + w > max && out.length > 0) break
+      out.push(item)
+      words += w
+    }
+    return out
+  }
+  const parts = [
+    ...cap(headings, 200),
+    "",
+    ...cap(lead, 300),
+    "",
+    ...cap(bullets, EXTRACTIVE_MAX_WORDS - 500),
+  ]
+  return parts.join("\n").trim()
+}
+
+async function loadCachedSummary(fs: typeof import("node:fs/promises"), key: string): Promise<string | undefined> {
+  return fs.readFile(`${cacheDir()}/${key}.md`, "utf8").catch(() => undefined)
+}
+
+async function storeSummary(fs: typeof import("node:fs/promises"), key: string, summary: string) {
+  const dir = cacheDir()
+  await fs.mkdir(dir, { recursive: true })
+  const tmp = `${dir}/${key}.${process.pid}.tmp`
+  await fs.writeFile(tmp, summary)
+  await fs.rename(tmp, `${dir}/${key}.md`).catch(async () => fs.writeFile(`${dir}/${key}.md`, summary))
+}
+
+function extractSummaryText(parts: unknown): string | undefined {
+  if (!Array.isArray(parts)) return undefined
+  const texts = parts
+    .filter((p): p is { type: "text"; text: string } => (p as { type?: string })?.type === "text" && typeof (p as { text?: unknown })?.text === "string")
+    .map((p) => p.text.trim())
+    .filter(Boolean)
+  return texts.length > 0 ? texts.join("\n\n") : undefined
+}
+
+/**
+ * LLM summary via the gate's own hidden helper session. Returns undefined on
+ * any failure (caller falls back to extractive).
+ */
+async function llmSummarize(
+  client: PluginInput["client"],
+  model: { providerID: string; modelID: string } | undefined,
+  path: string,
+  text: string,
+): Promise<string | undefined> {
+  const created = await client.session.create({ body: { title: `context-gate summary: ${path}` } })
+  const session = created.data
+  if (!session) return undefined
+  try {
+    const response = await client.session.prompt({
+      path: { id: session.id },
+      body: {
+        ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
+        system:
+          "You compress instruction guides for an AI coding agent. Preserve every imperative, rule, constraint, command, and file path. Drop examples, prose, and repetition. Output ONLY the compressed guide in markdown, no preamble. Target at most 800 words.",
+        parts: [{ type: "text", text: `Summarize this instruction file (${path}):\n\n${text}` }],
+      },
+    })
+    return extractSummaryText(response.data?.parts)
+  } catch {
+    return undefined
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+interface SummarizeContext {
+  client: PluginInput["client"]
+  /** Last model seen per session (chat.params); summarizer defaults to it. */
+  sessionModel: Map<string, { providerID: string; modelID: string }>
+}
+
+const inflight = new Map<string, Promise<string | undefined>>()
+
+/**
+ * Replace an oversize section's text with its summary. NEVER blocks the
+ * request path: disk cache hit serves instantly; on a miss the extractive
+ * fallback is served immediately while the LLM summary (timeout-capped)
+ * populates the disk cache in the background — the next request gets the
+ * real summary. Concurrent misses share one background flight.
+ */
+export async function summarizeSection(section: Section, ctx: SummarizeContext, sessionID: string): Promise<Section> {
+  const config = loadConfig()
+  const path = section.path!
+  const key = summaryCacheKey(path, section.text)
+  const words = wordCount(section.text)
+
+  const cached = await withTimeout(
+    (async () => {
+      const fs = await import("node:fs/promises")
+      return loadCachedSummary(fs, key)
+    })(),
+    5_000,
+  )
+  if (cached) {
+    log("summarize", { path, words, cached: true, fallback: false })
+    return { path, text: provenance(cached, path, words) }
+  }
+
+  let flight: Promise<string | undefined>
+  const existing = inflight.get(key)
+  if (existing) {
+    flight = existing
+  } else {
+    flight = (async () => {
+      const model = resolveSummarizerModel(ctx, sessionID)
+      const llm = await withTimeout(llmSummarize(ctx.client, model, path, section.text), SUMMARIZE_TIMEOUT_MS)
+      if (!llm) return undefined
+      try {
+        const fs = await import("node:fs/promises")
+        await storeSummary(fs, key, llm)
+      } catch {
+        // Cache write is best-effort.
+      }
+      return llm
+    })().catch(() => undefined)
+    inflight.set(key, flight)
+    // Intentionally not awaited: the miss path returns the extractive
+    // fallback right away; the flight only warms the disk cache.
+    void flight.finally(() => inflight.delete(key))
+  }
+
+  log("summarize", { path, words, cached: false, fallback: true, model: resolveSummarizerModel(ctx, sessionID) })
+  return { path, text: provenance(extractiveFallback(section.text), path, words) }
+}
+
+function resolveSummarizerModel(ctx: SummarizeContext, sessionID: string): { providerID: string; modelID: string } | undefined {
+  const override = loadConfig().summarizerModel
+  if (override) {
+    const slash = override.indexOf("/")
+    if (slash > 0) return { providerID: override.slice(0, slash), modelID: override.slice(slash + 1) }
+  }
+  return ctx.sessionModel.get(sessionID)
+}
+
+function provenance(summary: string, path: string, words: number): string {
+  return `${summary}\n\n[Summarized from ~${words} words — original: ${path}]`
+}
+
+
 
 export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (input) => {
   const config = loadConfig()
   evictablePathsCache = config.evictablePaths
+  const summarizeCtx: SummarizeContext = { client: input.client, sessionModel: new Map() }
 
   const hooks: Hooks = {
     "tool.execute.after": async (hookInput, hookOutput) => {
@@ -415,9 +620,23 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
       }
     },
 
+    "chat.params": async (hookInput) => {
+      try {
+        const model = hookInput.model
+        if (model?.providerID && model?.id) {
+          summarizeCtx.sessionModel.set(hookInput.sessionID, { providerID: model.providerID, modelID: model.id })
+          if (summarizeCtx.sessionModel.size > MAX_SESSIONS) {
+            summarizeCtx.sessionModel.delete(summarizeCtx.sessionModel.keys().next().value!)
+          }
+        }
+      } catch {
+        // Model capture is advisory only.
+      }
+    },
+
     "experimental.chat.system.transform": async (hookInput, output) => {
       try {
-        await gateSystem(hookInput, output)
+        await gateSystem(hookInput, output, summarizeCtx)
       } catch (error) {
         // The transform hook runs inside the LLM request: a thrown error
         // here would fail the whole provider call. Gate must fail open.
@@ -432,6 +651,7 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
 async function gateSystem(
   hookInput: Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[0],
   output: Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[1],
+  summarizeCtx: SummarizeContext,
 ) {
   const sessionID = hookInput.sessionID
   if (!sessionID || output.system.length === 0) return
@@ -448,7 +668,26 @@ async function gateSystem(
     return
   }
 
+  // Summarize oversize markdown sections BEFORE policy/budget: a compressed
+  // section is cheap to keep, so scoping stops withholding guides it could
+  // have kept. Fail-open per section: a summarization failure keeps the
+  // original text and the gate proceeds normally.
   const config = loadConfig()
+  const expanded: Section[] = []
+  for (const section of sections) {
+    if (!isSummarizable(section, config)) {
+      expanded.push(section)
+      continue
+    }
+    try {
+      expanded.push(await summarizeSection(section, summarizeCtx, sessionID))
+    } catch (error) {
+      log("summarize-error", { sessionID, path: section.path, message: String(error) })
+      expanded.push(section)
+    }
+  }
+  sections.splice(0, sections.length, ...expanded)
+
   const scopes = activity.get(sessionID)?.scopes ?? new Set<string>()
   const decision = applyGate(prologue, sections, scopes, config)
 

@@ -3,9 +3,14 @@ import type { Hooks } from "@opencode-ai/plugin"
 import {
   ContextGatePlugin,
   applyGate,
+  extractiveFallback,
+  isSummarizable,
   joinSections,
   packageScopeOf,
   parseSections,
+  summaryCacheKey,
+  summarizeSection,
+  wordCount,
   type GateConfig,
   type Section,
 } from "../../../../.opencode/plugin-lib/context-gate"
@@ -20,6 +25,9 @@ const CONFIG: GateConfig = {
   scopingEnabled: true,
   pinnedPaths: [],
   evictablePaths: [],
+  summarizeEnabled: false,
+  summarizeWordLimit: 2_000,
+  summarizerModel: "",
 }
 
 function section(path: string, words: number): Section {
@@ -269,5 +277,158 @@ describe("plugin hook", () => {
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system })
     // Must not throw; system entries remain as-is (gate skipped on bad input).
     expect(system[1]).toBe("rest")
+  })
+})
+
+describe("summarization", () => {
+  const longText = (words: number) => Array.from({ length: words }, (_, i) => `word${i}`).join(" ")
+
+  test("wordCount counts whitespace-separated words", () => {
+    expect(wordCount("one two three")).toBe(3)
+    expect(wordCount("  spaced\t out \n words  ")).toBe(3)
+    expect(wordCount("")).toBe(0)
+    expect(wordCount("   \n  ")).toBe(0)
+  })
+
+  test("isSummarizable: markdown over limit yes, non-markdown no, disabled no, no path no", () => {
+    const ENABLED: GateConfig = { ...CONFIG, summarizeEnabled: true }
+    const section = { path: "/repo/AGENTS.md", text: longText(2001) }
+    expect(isSummarizable(section, ENABLED)).toBe(true)
+    expect(isSummarizable({ path: "/repo/notes.txt", text: longText(2001) }, ENABLED)).toBe(true)
+    expect(isSummarizable({ path: "/repo/AGENTS.md", text: longText(2000) }, ENABLED)).toBe(false)
+    expect(isSummarizable({ path: "https://example.com/rules.md", text: longText(5000) }, ENABLED)).toBe(true)
+    expect(isSummarizable(section, { ...CONFIG, summarizeEnabled: false })).toBe(false)
+    expect(isSummarizable({ text: longText(5000) }, ENABLED)).toBe(false)
+  })
+
+  test("summaryCacheKey binds path AND content", () => {
+    const a = summaryCacheKey("/a.md", "same text")
+    expect(summaryCacheKey("/a.md", "same text")).toBe(a)
+    expect(summaryCacheKey("/b.md", "same text")).not.toBe(a)
+    expect(summaryCacheKey("/a.md", "other text")).not.toBe(a)
+  })
+
+  test("extractiveFallback keeps headings, lead lines, bullets; caps length", () => {
+    const doc = [
+      "# Rules",
+      "",
+      "Intro line one.",
+      "Intro line two.",
+      "",
+      "- Do X always",
+      "- Never do Y",
+      "",
+      "## Commands",
+      "",
+      "1. Run build first",
+      ...Array.from({ length: 400 }, (_, i) => `filler sentence number ${i} with some words here.`),
+    ].join("\n")
+    const out = extractiveFallback(doc)
+    expect(out).toContain("# Rules")
+    expect(out).toContain("- Do X always")
+    expect(out).toContain("1. Run build first")
+    expect(out).toContain("Intro line one.")
+    expect(wordCount(out)).toBeLessThan(wordCount(doc))
+    // Never explodes on garbage.
+    expect(extractiveFallback("")).toBe("")
+  })
+
+  test("summarizeSection: cache hit serves stored summary with provenance (no LLM call)", async () => {
+    const client = {
+      session: {
+        create: async () => {
+          throw new Error("LLM must not be called on cache hit")
+        },
+        prompt: async () => {
+          throw new Error("LLM must not be called on cache hit")
+        },
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const original = { path: "/repo/AGENTS.md", text: longText(2500) }
+    const key = summaryCacheKey(original.path, original.text)
+    const fs = await import("node:fs/promises")
+    const dir = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/context-gate-cache`
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(`${dir}/${key}.md`, "CACHED SUMMARY CONTENT")
+    try {
+      const result = await summarizeSection(original, ctx, "ses_sum_cache")
+      expect(result.text).toContain("CACHED SUMMARY CONTENT")
+      expect(result.text).toContain(`[Summarized from ~${wordCount(original.text)} words — original: /repo/AGENTS.md]`)
+      expect(result.path).toBe("/repo/AGENTS.md")
+    } finally {
+      await fs.rm(`${dir}/${key}.md`, { force: true })
+    }
+  })
+
+  test("summarizeSection: cache miss serves extractive IMMEDIATELY and warms cache in background", async () => {
+    let llmCalls = 0
+    const client = {
+      session: {
+        create: async () => {
+          llmCalls++
+          return { data: { id: "ses_helper" } }
+        },
+        prompt: async () => {
+          llmCalls++
+          return {
+            data: {
+              parts: [{ type: "text", text: "LLM SUMMARY CONTENT" }],
+            },
+          }
+        },
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const original = { path: "/repo/ASYNC.md", text: "# Title\n\n- bullet one\n- bullet two\n" + longText(2500) }
+
+    // Miss: returns instantly with extractive fallback — must NOT await the LLM.
+    const start = Date.now()
+    const result = await summarizeSection(original, ctx, "ses_sum_async")
+    expect(Date.now() - start).toBeLessThan(1_000)
+    expect(result.text).toContain("# Title")
+    expect(result.text).toContain("- bullet one")
+    expect(result.text).toContain("[Summarized from")
+    expect(result.text).not.toContain("LLM SUMMARY CONTENT")
+    expect(llmCalls).toBe(2) // create + prompt were launched in the background
+
+    // The background flight warms the disk cache; wait for it and confirm
+    // the NEXT call serves the real summary from cache.
+    const key = summaryCacheKey(original.path, original.text)
+    const fs = await import("node:fs/promises")
+    const dir = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/context-gate-cache`
+    for (let i = 0; i < 50 && llmCalls === 2; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+      try {
+        await fs.access(`${dir}/${key}.md`)
+        break
+      } catch {
+        // cache file not written yet
+      }
+    }
+    const second = await summarizeSection(original, ctx, "ses_sum_async2")
+    expect(second.text).toContain("LLM SUMMARY CONTENT")
+    expect(second.text).toContain(`[Summarized from ~${wordCount(original.text)} words — original: /repo/ASYNC.md]`)
+    await fs.rm(`${dir}/${key}.md`, { force: true })
+  })
+
+  test("summarizeSection: LLM failure falls back to extractive, never throws", async () => {
+    const client = {
+      session: {
+        create: async () => {
+          throw new Error("provider down")
+        },
+        prompt: async () => {
+          throw new Error("provider down")
+        },
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const original = { path: "/repo/FAILURE.md", text: "# Title\n\n- bullet one\n- bullet two\n" + longText(2500) }
+    const result = await summarizeSection(original, ctx, "ses_sum_fallback")
+    expect(result.text).toContain("# Title")
+    expect(result.text).toContain("- bullet one")
+    expect(result.text).toContain("[Summarized from")
+    expect(result.text.length).toBeLessThan(original.text.length)
   })
 })
