@@ -3,6 +3,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Agent } from "@/agent/agent"
+import { Config } from "@/config/config"
 import { MCP } from "@/mcp"
 import { Permission } from "@/permission"
 import { Provider } from "@/provider/provider"
@@ -17,6 +18,7 @@ import { Plugin } from "@/plugin"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Effect, Layer, Schema } from "effect"
 import { testEffect } from "../lib/effect"
+import { TestConfig } from "../fixture/config"
 
 const callID = "call-test"
 const sessionID = SessionID.make("ses_test")
@@ -33,6 +35,7 @@ const agent: Agent.Info = {
 const model = {
   providerID: ProviderV2.ID.make("test"),
   api: { id: "test-model" },
+  limit: { context: 200_000, output: 32_000 },
 } as Provider.Model
 
 function fakeMcp() {
@@ -63,6 +66,8 @@ const fakeTruncate = Truncate.Service.of({
 
 const layer = Layer.mergeAll(
   Layer.succeed(Plugin.Service, fakePlugin),
+  Layer.mock(Agent.Service, { get: () => Effect.succeed(agent) }),
+  Layer.succeed(Config.Service, TestConfig.make()),
   Layer.succeed(Permission.Service, fakePermission),
   Layer.succeed(MCP.Service, fakeMcp()),
   Layer.succeed(Truncate.Service, fakeTruncate),
@@ -143,6 +148,7 @@ it.effect("preserves running tool start time across metadata updates", () =>
       bypassAgentCheck: false,
       messages: [],
       promptOps: {} as never,
+      mcpConfig: {},
     })
     const execute = tools.timing.execute
     if (!execute) throw new Error("timing tool is missing execute")
