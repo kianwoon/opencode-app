@@ -1,8 +1,7 @@
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
-import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
-import { type Component, createEffect, createMemo, For } from "solid-js"
-import { createStore } from "solid-js/store"
+import { type Component, createMemo, For } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { useModels } from "@/context/models"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
@@ -23,54 +22,41 @@ type BrainConfig = {
 // Empty string means "unset": the brain agent expansion treats falsy models as
 // absent, and the global config PATCH endpoint deep-merges, so cleared values
 // must still be sent for the field to take effect.
-const modelFields = ["model", "hands_model", "reviewer_model"] as const
 
 export const SettingsOrchestrationV2: Component = () => {
   const language = useLanguage()
   const serverSync = useServerSync()
 
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
-  const [draft, setDraft] = createStore({
-    model: brain().model ?? "",
-    hands_model: brain().hands_model ?? "",
-    reviewer_model: brain().reviewer_model ?? "",
-  })
 
-  // Resync server brain values into the local draft when the config changes
-  // elsewhere (another client/tab, or an in-flight commit landing). Fields the
-  // user is focused on or has typed into since the last sync are left alone so
-  // external updates never clobber in-progress edits.
-  const guarded: Record<(typeof modelFields)[number], boolean> = {
-    model: false,
-    hands_model: false,
-    reviewer_model: false,
+  type ModelOption =
+    | { key: string; kind: "unset" }
+    | { key: string; kind: "model"; name: string; providerName: string }
+  const models = useModels()
+  const modelOptions = createMemo<ModelOption[]>(() => [
+    { key: "unset", kind: "unset" },
+    ...models.list().map((m) => ({ key: `${m.provider.id}/${m.id}`, kind: "model" as const, name: m.name, providerName: m.provider.name })),
+  ])
+  const currentFor = (field: "model" | "hands_model" | "reviewer_model"): ModelOption => {
+    const value = brain()[field] ?? ""
+    return modelOptions().find((o) => o.key === value) ?? modelOptions()[0]
   }
-  createEffect(() => {
-    const server = brain()
-    for (const field of modelFields) {
-      if (guarded[field]) continue
-      setDraft(field, server[field] ?? "")
-    }
-  })
 
   const modelRows = [
     {
       field: "model" as const,
       title: () => language.t("settings.orchestration.row.model.title"),
       description: () => language.t("settings.orchestration.row.model.description"),
-      placeholder: () => language.t("settings.orchestration.row.model.placeholder"),
     },
     {
       field: "hands_model" as const,
       title: () => language.t("settings.orchestration.row.handsModel.title"),
       description: () => language.t("settings.orchestration.row.handsModel.description"),
-      placeholder: () => language.t("settings.orchestration.row.handsModel.placeholder"),
     },
     {
       field: "reviewer_model" as const,
       title: () => language.t("settings.orchestration.row.reviewerModel.title"),
       description: () => language.t("settings.orchestration.row.reviewerModel.description"),
-      placeholder: () => language.t("settings.orchestration.row.reviewerModel.placeholder"),
     },
   ]
 
@@ -88,12 +74,6 @@ export const SettingsOrchestrationV2: Component = () => {
       })
   }
 
-  const commitModel = (field: (typeof modelFields)[number]) => {
-    guarded[field] = false
-    if (draft[field] === (brain()[field] ?? "")) return
-    commit({ [field]: draft[field] })
-  }
-
   return (
     <>
       <div class="settings-v2-tab-header">
@@ -107,25 +87,20 @@ export const SettingsOrchestrationV2: Component = () => {
               {(row) => (
                 <SettingsRowV2 title={row.title()} description={row.description()}>
                   <div class="w-full sm:w-[220px]">
-                    <TextInputV2
-                      data-action={`settings-orchestration-${row.field}`}
-                      type="text"
+                    <SelectV2
                       appearance="base"
-                      value={draft[row.field]}
-                      onFocus={() => {
-                        guarded[row.field] = true
+                      data-action={`settings-orchestration-${row.field}`}
+                      options={modelOptions()}
+                      current={currentFor(row.field)}
+                      value={(o) => o.key}
+                      label={(o) => (o.kind === "unset" ? language.t("common.default") : o.name)}
+                      groupBy={(o) => (o.kind === "model" ? o.providerName : "")}
+                      onSelect={(o) => {
+                        if (!o) return
+                        const next = o.kind === "unset" ? "" : o.key
+                        if (next === (brain()[row.field] ?? "")) return
+                        commit({ [row.field]: next })
                       }}
-                      onInput={(event) => {
-                        guarded[row.field] = true
-                        setDraft(row.field, event.currentTarget.value)
-                      }}
-                      onBlur={() => commitModel(row.field)}
-                      placeholder={row.placeholder()}
-                      spellcheck={false}
-                      autocorrect="off"
-                      autocomplete="off"
-                      autocapitalize="off"
-                      aria-label={row.title()}
                     />
                   </div>
                 </SettingsRowV2>
