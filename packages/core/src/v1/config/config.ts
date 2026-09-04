@@ -6,6 +6,7 @@ import { ConfigExperimental } from "../../config/experimental"
 import { ConfigReference } from "../../config/reference"
 import { ConfigAgentV1 } from "./agent"
 import { ConfigAttachmentV1 } from "./attachment"
+import { ConfigBrainV1 } from "./brain"
 import { ConfigCommandV1 } from "./command"
 import { ConfigFormatterV1 } from "./formatter"
 import { ConfigLayoutV1 } from "./layout"
@@ -76,6 +77,10 @@ export const Info = Schema.Struct({
   }),
   small_model: Schema.optional(Schema.String).annotate({
     description: "Small model to use for tasks like title generation in the format of provider/model",
+  }),
+  brain: Schema.optional(ConfigBrainV1.Info).annotate({
+    description:
+      "Brain configuration for hands and review agents. Strict enforcement permissions take precedence over global `permission` for the generated agents.",
   }),
   default_agent: Schema.optional(Schema.String).annotate({
     description:

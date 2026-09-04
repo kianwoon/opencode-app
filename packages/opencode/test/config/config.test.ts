@@ -1518,6 +1518,33 @@ it.instance("permission config preserves user key order", () =>
   }),
 )
 
+test("config parser decodes brain configuration", () => {
+  const strict = ConfigParse.schema(
+    ConfigV1.Info,
+    {
+      brain: {
+        model: "anthropic/claude-sonnet-4-5",
+        hands_model: "zai/glm-4.7",
+        reviewer_model: "openai/gpt-5",
+        enforcement: "strict",
+      },
+    },
+    "test",
+  )
+  expect(strict.brain).toEqual({
+    model: "anthropic/claude-sonnet-4-5",
+    hands_model: "zai/glm-4.7",
+    reviewer_model: "openai/gpt-5",
+    enforcement: "strict",
+  })
+
+  const advisory = ConfigParse.schema(ConfigV1.Info, { brain: { enforcement: "advisory" } }, "test")
+  expect(advisory.brain).toEqual({ enforcement: "advisory" })
+
+  const absent = ConfigParse.schema(ConfigV1.Info, { model: "anthropic/claude" }, "test")
+  expect(absent.brain).toBeUndefined()
+})
+
 test("config parser preserves permission order while ignoring unknown top-level keys", () => {
   const config = ConfigParse.schema(
     ConfigV1.Info,

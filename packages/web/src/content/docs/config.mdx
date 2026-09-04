@@ -374,7 +374,7 @@ You can configure the providers and models you want to use in your OpenCode conf
 
 The `small_model` option configures a separate model for lightweight tasks like title generation. By default, OpenCode tries to use a cheaper model if one is available from your provider, otherwise it falls back to your main model.
 
-Provider options can include `timeout`, `chunkTimeout`, and `setCacheKey`:
+Provider options can include `timeout`, `headerTimeout`, `chunkTimeout`, and `setCacheKey`:
 
 ```json title="opencode.json"
 {
@@ -392,7 +392,8 @@ Provider options can include `timeout`, `chunkTimeout`, and `setCacheKey`:
 ```
 
 - `timeout` - Request timeout in milliseconds (default: 300000). Set to `false` to disable.
-- `chunkTimeout` - Timeout in milliseconds between streamed response chunks. If no chunk arrives in time, the request is aborted.
+- `headerTimeout` - Timeout in milliseconds to wait for response headers (default: 300000, or 5 minutes). This timer stops once headers arrive and does not limit the streamed response body. Set to `false` to disable.
+- `chunkTimeout` - Timeout in milliseconds between streamed response chunks (default: 300000, or 5 minutes). If no chunk arrives in time, the request is aborted. Set to `false` to disable.
 - `setCacheKey` - Ensure a cache key is always set for designated provider.
 
 You can also configure [local models](/docs/models#local). [Learn more](/docs/models).
@@ -524,6 +525,31 @@ You can configure specialized agents for specific tasks through the `agent` opti
 ```
 
 You can also define agents using markdown files in `~/.config/opencode/agents/` or `.opencode/agents/`. [Learn more here](/docs/agents).
+
+---
+
+### Brain
+
+You can configure the brain orchestration agents through the `brain` option.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "brain": {
+    "model": "anthropic/claude-sonnet-4-5",
+    "hands_model": "zai/glm-4.7",
+    "reviewer_model": "openai/gpt-5",
+    "enforcement": "strict"
+  }
+}
+```
+
+- `model` - Model for the primary `brain` agent, in `provider/model` format.
+- `hands_model` - Model for the generated `explorer` and `implementer` subagents.
+- `reviewer_model` - Model for the generated `reviewer` subagent.
+- `enforcement` - `strict` gives the generated agents restrictive permissions that take precedence over the global `permission` block; `advisory` (default) only warns without blocking.
+
+Generation is fill-absent-only: any agent you define yourself in the [`agent`](#agents) block takes precedence over a generated one.
 
 ---
 
