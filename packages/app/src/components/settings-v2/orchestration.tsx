@@ -1,8 +1,13 @@
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
-import { type Component, createMemo, For } from "solid-js"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { Icon } from "@opencode-ai/ui/v2/icon"
+import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
+import { Show, type Component, createMemo, For } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
+import type { ModelKey } from "@/context/local"
 import { useServerSync } from "@/context/server-sync"
+import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
@@ -23,24 +28,93 @@ type BrainConfig = {
 // absent, and the global config PATCH endpoint deep-merges, so cleared values
 // must still be sent for the field to take effect.
 
-export const SettingsOrchestrationV2: Component = () => {
+type FieldState = {
+  ready: unknown
+  list: unknown
+  current: () => unknown
+  set: (item: ModelKey | undefined) => void
+  visible: (item: ModelKey) => boolean
+  setVisibility: (item: ModelKey, visible: boolean) => void
+}
+
+const ModelFieldControl: Component<{ field: string; state: FieldState }> = (props) => {
   const language = useLanguage()
+  const current = createMemo(() => {
+    const item = props.state.current() as { provider?: { id: string }; name?: string } | undefined
+    return item
+  })
+  return (
+    <ModelSelectorPopoverV2
+      model={props.state as never}
+      trigger={(triggerProps) => (
+        <ButtonV2
+          {...triggerProps}
+          variant="ghost-muted"
+          size="normal"
+          style={{ height: "28px" }}
+          class="min-w-0 w-full justify-start ![font-weight:440] group"
+          data-action={`settings-orchestration-${props.field}`}
+          data-control-type="popover"
+        >
+          <Show
+            when={current()}
+            fallback={<span class="truncate leading-4">{language.t("common.default")}</span>}
+          >
+            {(item) => (
+              <>
+                <Show when={item().provider}>
+                  {(provider) => (
+                    <ProviderIcon
+                      id={provider().id}
+                      class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
+                    />
+                  )}
+                </Show>
+                <span class="truncate leading-4">{item().name}</span>
+                <span class="-ml-0.5 -mr-1 flex shrink-0">
+                  <Icon name="chevron-down" />
+                </span>
+              </>
+            )}
+          </Show>
+        </ButtonV2>
+      )}
+    />
+  )
+}
+export const SettingsOrchestrationV2: Component = () => {  const language = useLanguage()
   const serverSync = useServerSync()
 
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
-
-  type ModelOption =
-    | { key: string; kind: "unset" }
-    | { key: string; kind: "model"; name: string; providerName: string }
   const models = useModels()
-  const modelOptions = createMemo<ModelOption[]>(() => [
-    { key: "unset", kind: "unset" },
-    ...models.list().map((m) => ({ key: `${m.provider.id}/${m.id}`, kind: "model" as const, name: m.name, providerName: m.provider.name })),
-  ])
-  const currentFor = (field: "model" | "hands_model" | "reviewer_model"): ModelOption => {
+
+  const currentFor = (field: "model" | "hands_model" | "reviewer_model") => {
     const value = brain()[field] ?? ""
-    return modelOptions().find((o) => o.key === value) ?? modelOptions()[0]
+    const [providerID, ...rest] = value.split("/")
+    const modelID = rest.join("/")
+    if (!providerID || !modelID) return
+    return models.find({ providerID, modelID })
   }
+
+  const commitField = (field: "model" | "hands_model" | "reviewer_model", item: ModelKey | undefined) => {
+    commit({ [field]: item ? `${item.providerID}/${item.modelID}` : "" })
+  }
+
+  // Adapter exposing a brain field as the ModelState shape the composer
+  // picker expects. Selection reads from server config; commit writes back.
+  // The picker also uses `recent.push` when selecting; that only affects the
+  // composer's recent list, which is harmless here.
+  const stateFor = (field: "model" | "hands_model" | "reviewer_model") => ({
+    ready: models.ready,
+    list: models.list,
+    current: () => currentFor(field),
+    set(item: ModelKey | undefined) {
+      commitField(field, item)
+    },
+    visible: (item: ModelKey) => models.visible(item),
+    setVisibility: (item: ModelKey, visible: boolean) => models.setVisibility(item, visible),
+    recent: models.recent,
+  })
 
   const modelRows = [
     {
@@ -87,21 +161,7 @@ export const SettingsOrchestrationV2: Component = () => {
               {(row) => (
                 <SettingsRowV2 title={row.title()} description={row.description()}>
                   <div class="w-full sm:w-[220px]">
-                    <SelectV2
-                      appearance="base"
-                      data-action={`settings-orchestration-${row.field}`}
-                      options={modelOptions()}
-                      current={currentFor(row.field)}
-                      value={(o) => o.key}
-                      label={(o) => (o.kind === "unset" ? language.t("common.default") : o.name)}
-                      groupBy={(o) => (o.kind === "model" ? o.providerName : "")}
-                      onSelect={(o) => {
-                        if (!o) return
-                        const next = o.kind === "unset" ? "" : o.key
-                        if (next === (brain()[row.field] ?? "")) return
-                        commit({ [row.field]: next })
-                      }}
-                    />
+                    <ModelFieldControl field={row.field} state={stateFor(row.field)} />
                   </div>
                 </SettingsRowV2>
               )}
