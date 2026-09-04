@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Տեղադրումը ձախողվեց",
   "desktop.cli.failed.message": "Չհաջողվեց տեղադրել CLI՝ {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Արմատային տարրը չի գտնվել։ Մոռացե՞լ եք այն ավելացնել ձեր index.html-ում: Կամ գուցե id հատկանիշը սխալ է գրվել:",
 }

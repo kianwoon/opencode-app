@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "ထည့်သွင်းခြင်း မအောင်မြင်ပါ။",
   "desktop.cli.failed.message": "CLI- {{error}} ကို ထည့်သွင်းရန် မအောင်မြင်ပါ။",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "အမြစ်ဒြပ်စင်ကို ရှာမတွေ့ပါ။ ၎င်းကို သင်၏ index.html တွင် ထည့်ရန် မေ့သွားပါသလား။ ဒါမှမဟုတ် id attribute က စာလုံးပေါင်းမှားနေသလား။",
 }

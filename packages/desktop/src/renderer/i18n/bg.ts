@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Неуспешно инсталиране",
   "desktop.cli.failed.message": "Неуспешно инсталиране на CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Основният елемент не е намерен. Забравихте ли да го добавите към вашия index.html? Или може би атрибутът id е изписан неправилно?",
 }

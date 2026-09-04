@@ -26,6 +26,9 @@ export const dict = {
   "desktop.cli.failed.title": "Quraşdırma uğursuz oldu",
   "desktop.cli.failed.message": "CLI quraşdırıla bilmədi: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Kök element tapılmadı. index.html-ə əlavə etməyi unutmusunuz? Yoxsa id atributu səhv yazılıb?",
 }

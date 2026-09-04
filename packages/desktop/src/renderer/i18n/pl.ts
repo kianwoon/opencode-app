@@ -26,6 +26,9 @@ export const dict = {
   "desktop.cli.failed.title": "Instalacja nie powiodła się",
   "desktop.cli.failed.message": "Nie udało się zainstalować CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Nie znaleziono elementu głównego. Czy zapomniałeś dodać go do swojego index.html? A może atrybut id został błędnie wpisany?",
 }

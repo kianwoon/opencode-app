@@ -23,6 +23,9 @@ export const dict: Record<string, string> = {
   "desktop.cli.failed.title": "གཞི་བཙུགས་འཐུས་ཤོར་འབྱུང་ཡོདཔ།",
   "desktop.cli.failed.message": "CLI: {{error}} གཞི་བཙུགས་འབད་ནི་ལུ་འཐུས་ཤོར་འབྱུང་ཡོདཔ།",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "རྩ་བའི་ཆ་ཤས་འཚོལ་མ་ཐོབ། ཁྱོད་ཀྱི་ index.html ལུ་ཁ་སྐོང་འབད་ནི་བརྗེད་སོང་ག? ཡང་ན་ id ཁྱད་ཆོས་འདི་ཡིག་སྡེབ་འཛོལ་བ་འོང་ག?",
 }

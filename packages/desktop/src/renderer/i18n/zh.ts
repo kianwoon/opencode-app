@@ -24,5 +24,8 @@ export const dict = {
   "desktop.cli.failed.title": "安装失败",
   "desktop.cli.failed.message": "无法安装 CLI：{{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound": "未找到根元素。你是不是忘了把它添加到 index.html？或者 id 属性拼写错了？",
 }

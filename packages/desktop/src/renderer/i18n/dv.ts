@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "އިންސްޓޯލް ކުރުން ފެއިލްވެއްޖެ",
   "desktop.cli.failed.message": "CLI: {{error}} އިންސްޓޯލް ކުރަން ނާކާމިޔާބު",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "ރޫޓް އެލިމެންޓް ނުފެނެއެވެ. ތިބާގެ index.html އަށް އެޑް ކުރަން ހަނދާން ނެތުނީ ހެއްޔެވެ؟ ނުވަތަ id އެޓްރިބިއުޓް ގޯސްކޮށް އިމްތިހާނު ވެދާނެ ހެއްޔެވެ؟",
 }

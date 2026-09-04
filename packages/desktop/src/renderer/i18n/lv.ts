@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Instalēšana neizdevās",
   "desktop.cli.failed.message": "Neizdevās instalēt CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Saknes elements nav atrasts. Vai aizmirsāt to pievienot index.html? Vai arī id atribūts ir kļūdaini uzrakstīts?",
 }

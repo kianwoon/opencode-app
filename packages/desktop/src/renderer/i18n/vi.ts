@@ -22,6 +22,9 @@ export const dict = {
   "desktop.cli.failed.title": "Cài đặt không thành công",
   "desktop.cli.failed.message": "Không cài đặt được CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Không tìm thấy phần tử gốc. Bạn đã quên thêm nó vào index.html của mình? Hoặc có thể thuộc tính id bị sai chính tả?",
 }

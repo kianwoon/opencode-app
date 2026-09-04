@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "ინსტალაცია ვერ მოხერხდა",
   "desktop.cli.failed.message": "ვერ დაინსტალირდა CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "ძირის ელემენტი ვერ მოიძებნა. დაგავიწყდათ მისი დამატება თქვენს index.html-ში? ან იქნებ id ატრიბუტი არასწორად არის დაწერილი?",
 }

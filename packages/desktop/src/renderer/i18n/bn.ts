@@ -22,6 +22,9 @@ export const dict: Record<string, string> = {
   "desktop.cli.failed.title": "ইনস্টলেশন ব্যর্থ হয়েছে",
   "desktop.cli.failed.message": "CLI ইনস্টল করতে ব্যর্থ: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "মূল উপাদান পাওয়া যায়নি. আপনি কি আপনার index.html এ যোগ করতে ভুলে গেছেন? অথবা হয়তো আইডি অ্যাট্রিবিউট ভুল বানান হয়েছে?",
 }

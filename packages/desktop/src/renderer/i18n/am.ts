@@ -21,6 +21,9 @@ export const dict = {
   "desktop.cli.failed.title": "መጫኑ አልተሳካም",
   "desktop.cli.failed.message": "CLIን መጫን አልተሳካም፦ {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "ሥርወ አካል አልተገኘም። ወደ የእርስዎ index.html ማከልን ረስተዋል? ወይም የመታወቂያ ባህሪው የተሳሳተ ፊደል ተጽፎ ሊሆን ይችላል?",
 }

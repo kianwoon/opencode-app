@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Суулгалт амжилтгүй боллоо",
   "desktop.cli.failed.message": "CLI суулгаж чадсангүй: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Үндэс элемент олдсонгүй. Та үүнийг index.html дээрээ нэмэхээ мартсан уу? Эсвэл id атрибутыг буруу бичсэн байж магадгүй юм уу?",
 }

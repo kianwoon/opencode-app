@@ -26,6 +26,9 @@ export const dict = {
   "desktop.cli.failed.title": "Yükleme başarısız oldu",
   "desktop.cli.failed.message": "CLI yüklenemedi: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Kök eleman bulunamadı. index.html dosyanıza eklemeyi unuttunuz mu? Ya da id özelliği yanlış mı yazıldı?",
 }

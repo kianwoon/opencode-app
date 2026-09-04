@@ -25,6 +25,9 @@ export const dict = {
   "desktop.cli.failed.title": "فشل التثبيت",
   "desktop.cli.failed.message": "فشل تثبيت CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "لم يتم العثور على العنصر الجذري. هل نسيت إضافته إلى index.html؟ أو ربما تمت كتابة سمة id بشكل خاطئ؟",
 }

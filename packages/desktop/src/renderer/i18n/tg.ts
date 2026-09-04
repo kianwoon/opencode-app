@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Насб карда нашуд",
   "desktop.cli.failed.message": "Насб карда нашуд CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Элементи решавӣ ёфт нашуд. Оё шумо онро ба index.html илова карданро фаромӯш кардаед? Ё шояд атрибути id хато навишта шудааст?",
 }

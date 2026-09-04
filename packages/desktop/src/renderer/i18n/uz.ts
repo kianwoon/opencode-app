@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Oʻrnatish amalga oshmadi",
   "desktop.cli.failed.message": "CLI: {{error}} oʻrnatib boʻlmadi",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Ildiz element topilmadi. Uni index.html-ga qo'shishni unutdingizmi? Yoki id atributi noto'g'ri yozilgandir?",
 }

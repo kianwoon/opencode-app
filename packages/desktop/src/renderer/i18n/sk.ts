@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Inštalácia zlyhala",
   "desktop.cli.failed.message": "Nepodarilo sa nainštalovať CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Koreňový prvok sa nenašiel. Pridali ste ho do index.html? Alebo je atribút id napísaný nesprávne?",
 }

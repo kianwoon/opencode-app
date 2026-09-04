@@ -23,6 +23,9 @@ export const dict: Record<string, string> = {
   "desktop.cli.failed.title": "स्थापना असफल भयो",
   "desktop.cli.failed.message": "CLI स्थापना गर्न असफल: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "मूल तत्व फेला परेन। के तपाईंले यसलाई आफ्नो index.html मा थप्न बिर्सनुभयो? वा हुनसक्छ आईडी विशेषता गलत हिज्जे भयो?",
 }

@@ -22,6 +22,9 @@ export const dict = {
   "desktop.cli.failed.title": "ການຕິດຕັ້ງລົ້ມເຫລວ",
   "desktop.cli.failed.message": "ລົ້ມເຫລວໃນການຕິດຕັ້ງ CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "ບໍ່ພົບອົງປະກອບຮາກ. ທ່ານລືມເພີ່ມມັນໃສ່ index.html ຂອງທ່ານບໍ? ຫຼືບາງທີຄຸນສົມບັດ id ມີການສະກົດຜິດ?",
 }

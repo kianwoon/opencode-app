@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Innleggingin miseydnaðist",
   "desktop.cli.failed.message": "Tað eydnaðist ikki at seta upp CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Rótarevni ikki funnið. Gloymdi tú at leggja tað til títt index.html? Ella kanska fekk id eginleikin skeivt stavað?",
 }

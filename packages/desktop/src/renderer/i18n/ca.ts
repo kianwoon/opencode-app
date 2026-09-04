@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "La instal·lació ha fallat",
   "desktop.cli.failed.message": "No s'ha pogut instal·lar CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "No s'ha trobat l'element arrel. T'has oblidat d'afegir-lo al teu index.html? O potser l'atribut id s'ha escrit malament?",
 }

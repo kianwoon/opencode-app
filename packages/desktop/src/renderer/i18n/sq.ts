@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Instalimi dështoi",
   "desktop.cli.failed.message": "Instalimi i CLI dështoi: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Elementi rrënjë nuk u gjet. A keni harruar ta shtoni atë në index.html tuaj? Apo ndoshta atributi id është shkruar gabim?",
 }

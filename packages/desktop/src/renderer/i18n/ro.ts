@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Instalarea a eșuat",
   "desktop.cli.failed.message": "Nu s-a putut instala CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Elementul root nu a fost găsit. L-ai adăugat în index.html? Sau poate atributul id este scris greșit?",
 }

@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Diegimas nepavyko",
   "desktop.cli.failed.message": "Nepavyko įdiegti CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Šakninis elementas nerastas. Ar pamiršote jį įtraukti į index.html? O gal id atributas buvo neteisingai parašytas?",
 }

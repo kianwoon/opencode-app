@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Namestitev ni uspela",
   "desktop.cli.failed.message": "Namestitev CLI ni uspela: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Korenski element ni bil najden. Ste ga pozabili dodati v svoj index.html? Ali pa je morda atribut id narobe črkovan?",
 }

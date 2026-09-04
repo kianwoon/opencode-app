@@ -26,6 +26,9 @@ export const dict = {
   "desktop.cli.failed.title": "Instalasi gagal",
   "desktop.cli.failed.message": "Gagal menginstal CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Elemen root tidak ditemukan. Apakah Anda lupa menambahkannya ke index.html? Atau mungkin atribut id salah eja?",
 }

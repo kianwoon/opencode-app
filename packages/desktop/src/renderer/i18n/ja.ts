@@ -26,6 +26,9 @@ export const dict = {
   "desktop.cli.failed.title": "インストールに失敗しました",
   "desktop.cli.failed.message": "CLI のインストールに失敗しました: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "ルート要素が見つかりません。index.htmlに追加するのを忘れていませんか？またはid属性のスペルが間違っていませんか？",
 }

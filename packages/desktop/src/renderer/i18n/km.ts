@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "ការដំឡើងបរាជ័យ",
   "desktop.cli.failed.message": "បរាជ័យក្នុងការដំឡើង CLI៖ {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "រកមិនឃើញធាតុឫសទេ។ តើអ្នកភ្លេចបន្ថែមវាទៅ index.html របស់អ្នកទេ? ឬប្រហែលជាគុណលក្ខណៈលេខសម្គាល់ត្រូវបានសរសេរខុស?",
 }

@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Asennus epäonnistui",
   "desktop.cli.failed.message": "CLI:n asennus epäonnistui: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Juurielementtiä ei löydy. Unohditko lisätä sen index.html-tiedostoosi? Tai ehkä id-attribuutti on kirjoitettu väärin?",
 }

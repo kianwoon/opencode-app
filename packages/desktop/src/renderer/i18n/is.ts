@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Uppsetning mistókst",
   "desktop.cli.failed.message": "Mistókst að setja upp CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Rótarþáttur fannst ekki. Gleymdirðu að bæta því við index.html þinn? Eða er id eigindin kannski rangt stafsett?",
 }

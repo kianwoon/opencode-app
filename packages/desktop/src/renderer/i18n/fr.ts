@@ -26,6 +26,9 @@ export const dict = {
   "desktop.cli.failed.title": "Échec de l'installation",
   "desktop.cli.failed.message": "Impossible d'installer l'interface en ligne de commande : {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Élément racine introuvable. Avez-vous oublié de l'ajouter à votre index.html ? Ou peut-être que l'attribut id est mal orthographié ?",
 }

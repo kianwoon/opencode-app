@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Η εγκατάσταση απέτυχε",
   "desktop.cli.failed.message": "Απέτυχε η εγκατάσταση του CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Το στοιχείο ρίζας δεν βρέθηκε. Ξεχάσατε να το προσθέσετε στο index.html; Ή μήπως το χαρακτηριστικό id γράφτηκε λάθος;",
 }

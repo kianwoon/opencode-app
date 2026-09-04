@@ -22,6 +22,9 @@ export const dict: Record<string, string> = {
   "desktop.cli.failed.title": "ස්ථාපනය අසාර්ථක විය",
   "desktop.cli.failed.message": "CLI ස්ථාපනය කිරීමට අසමත් විය: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "මූල මූලද්රව්යය හමු නොවීය. ඔබට එය ඔබගේ index.html වෙත එක් කිරීමට අමතකද? එසේත් නැතිනම් හැඳුනුම්පත වැරදි ලෙස සටහන් වී තිබේද?",
 }

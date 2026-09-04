@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Gurmak şowsuz",
   "desktop.cli.failed.message": "CLI gurup bilmedi: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Kök elementi tapylmady index.html-e goşmagy ýatdan çykardyňyzmy? Ora-da id atributynyň ýalňyş ýazylan bolmagy mümkin?",
 }

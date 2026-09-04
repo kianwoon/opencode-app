@@ -25,5 +25,8 @@ export const dict = {
   "desktop.cli.failed.title": "การติดตั้งล้มเหลว",
   "desktop.cli.failed.message": "ไม่สามารถติดตั้ง CLI ได้: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound": "ไม่พบองค์ประกอบรูท คุณลืมเพิ่มใน index.html หรือบางทีแอตทริบิวต์ id อาจสะกดผิด?",
 }

@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "स्थापना विफल",
   "desktop.cli.failed.message": "CLI इंस्टॉल करने में विफल: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "मूल तत्व नहीं मिला. क्या आप इसे अपने index.html में जोड़ना भूल गए? या हो सकता है कि आईडी विशेषता गलत वर्तनी हो गई हो?",
 }

@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "نصب ناموفق بود",
   "desktop.cli.failed.message": "CLI نصب نشد: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "عنصر ریشه یافت نشد. آیا فراموش کرده اید که آن را به index.html خود اضافه کنید؟ یا شاید ویژگی id اشتباه املایی داشته باشد؟",
 }

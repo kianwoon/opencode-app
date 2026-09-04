@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "Installationen misslyckades",
   "desktop.cli.failed.message": "Det gick inte att installera CLI: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "Rotelementet hittades inte. Har du glömt att lägga till det i din index.html? Eller kanske id-attributet är felstavat?",
 }

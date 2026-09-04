@@ -23,6 +23,9 @@ export const dict = {
   "desktop.cli.failed.title": "A telepítés sikertelen",
   "desktop.cli.failed.message": "A CLI telepítése sikertelen: {{error}}",
 
+  "desktop.toast.memory.recovered.title": "Window recovered",
+  "desktop.toast.memory.recovered.description": "A window ran low on memory and was reloaded.",
+
   "desktop.error.dev.rootNotFound":
     "A gyökérelem nem található. Elfelejtette hozzáadni az index.html-hez? Vagy lehet, hogy az id attribútumot rosszul írták?",
 }
