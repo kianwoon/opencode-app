@@ -374,6 +374,55 @@ function escapeRegExp(text: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Turn stability caches. system[0] is the provider prompt-cache header block:
+// flipping its bytes mid-turn (fallback → LLM summary, or a scope unlock that
+// changes kept sections) invalidates the cached prefix for every later chunk —
+// a full cache-write of the whole system block on the very next loop step.
+// Both caches trade minutes of staleness for byte-stable turns and fail open:
+// expiry just means "refresh on next read".
+// ---------------------------------------------------------------------------
+
+/** How long a served extractive-fallback variant stays pinned per (session, content). */
+const FALLBACK_PIN_MS = 5 * 60_000
+/** How long a scope snapshot is reused before live activity is re-read. */
+const SCOPE_SNAPSHOT_MS = 90_000
+
+/** (session, summaryCacheKey) → served-as-fallback-at. Content edits produce a new key and adopt fresh summaries immediately. */
+export const fallbackPins = new Map<string, Map<string, number>>()
+/** session → scope-set snapshot taken at the turn's first transform. */
+export const scopeSnapshots = new Map<string, { scopes: Set<string>; at: number }>()
+
+function pinFallback(sessionID: string, key: string) {
+  let pins = fallbackPins.get(sessionID)
+  if (!pins) {
+    if (fallbackPins.size >= MAX_SESSIONS) fallbackPins.delete(fallbackPins.keys().next().value!)
+    pins = new Map()
+    fallbackPins.set(sessionID, pins)
+  }
+  pins.set(key, Date.now())
+}
+
+function pinnedToFallback(sessionID: string, key: string): boolean {
+  const at = fallbackPins.get(sessionID)?.get(key)
+  if (at === undefined) return false
+  if (Date.now() - at > FALLBACK_PIN_MS) {
+    fallbackPins.get(sessionID)!.delete(key)
+    return false
+  }
+  return true
+}
+
+/** Snapshot view of activity scopes: new scopes adopted at most once per window. */
+function turnScopes(sessionID: string): Set<string> {
+  const snap = scopeSnapshots.get(sessionID)
+  if (snap && Date.now() - snap.at < SCOPE_SNAPSHOT_MS) return snap.scopes
+  const scopes = new Set(activity.get(sessionID)?.scopes)
+  if (scopeSnapshots.size >= MAX_SESSIONS) scopeSnapshots.delete(scopeSnapshots.keys().next().value!)
+  scopeSnapshots.set(sessionID, { scopes, at: Date.now() })
+  return scopes
+}
+
+// ---------------------------------------------------------------------------
 // Memoization: stable output within a turn keeps the provider cache warm.
 // Key = session + activity fingerprint + per-section content hash + config.
 // Content hash (not length): a same-length AGENTS.md edit must NOT serve
@@ -412,7 +461,6 @@ function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sect
 // ---------------------------------------------------------------------------
 
 const SUMMARIZE_TIMEOUT_MS = 30_000
-const EXTRACTIVE_MAX_WORDS = 1_200
 
 export function wordCount(text: string): number {
   const trimmed = text.trim()
@@ -440,28 +488,31 @@ export function isSummarizable(section: Section, config: GateConfig): boolean {
  * imperatives. Never throws.
  */
 export function extractiveFallback(text: string): string {
+  const words = wordCount(text)
+  if (words === 0) return ""
+  // Compaction policy: aim for ~50% of the input words. Headings take ≤15% of
+  // the target, lead lines ≤25%, and bullets absorb whatever budget remains —
+  // sequential budgeting keeps total output ≈ target when bullets are plentiful.
+  const target = Math.max(1, Math.floor(words * 0.5))
   const lines = text.split("\n")
   const headings = lines.filter((l) => /^#{1,4}\s+\S/.test(l))
   const bullets = lines.filter((l) => /^\s*([-*+]|\d+\.)\s+\S/.test(l))
   const lead = lines.filter((l) => l.trim().length > 0).slice(0, 12)
   const cap = (items: string[], max: number) => {
     const out: string[] = []
-    let words = 0
+    let used = 0
     for (const item of items) {
       const w = wordCount(item)
-      if (words + w > max && out.length > 0) break
+      if (used + w > max && out.length > 0) break
       out.push(item)
-      words += w
+      used += w
     }
-    return out
+    return { out, used }
   }
-  const parts = [
-    ...cap(headings, 200),
-    "",
-    ...cap(lead, 300),
-    "",
-    ...cap(bullets, EXTRACTIVE_MAX_WORDS - 500),
-  ]
+  const pickedHeadings = cap(headings, Math.floor(target * 0.15))
+  const pickedLead = cap(lead, Math.floor(target * 0.25))
+  const bulletBudget = Math.max(0, target - pickedHeadings.used - pickedLead.used)
+  const parts = [...pickedHeadings.out, "", ...pickedLead.out, "", ...cap(bullets, bulletBudget).out]
   return parts.join("\n").trim()
 }
 
@@ -499,13 +550,14 @@ async function llmSummarize(
   const created = await client.session.create({ body: { title: `context-gate summary: ${path}` } })
   const session = created.data
   if (!session) return undefined
+  const words = wordCount(text)
+  const target = Math.max(1, Math.floor(words * 0.5))
   try {
     const response = await client.session.prompt({
       path: { id: session.id },
       body: {
         ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
-        system:
-          "You compress instruction guides for an AI coding agent. Preserve every imperative, rule, constraint, command, and file path. Drop examples, prose, and repetition. Output ONLY the compressed guide in markdown, no preamble. Target at most 800 words.",
+        system: `You compress instruction guides for an AI coding agent. Preserve every imperative, rule, constraint, command, and file path. Drop examples, prose, and repetition. Output ONLY the compressed guide in markdown, no preamble. Target at most ~${target} words (about half of the original ~${words} words).`,
         parts: [{ type: "text", text: `Summarize this instruction file (${path}):\n\n${text}` }],
       },
     })
@@ -549,6 +601,11 @@ export async function summarizeSection(section: Section, ctx: SummarizeContext, 
   const key = summaryCacheKey(path, section.text)
   const words = wordCount(section.text)
 
+  // Within the pin window, keep serving the variant the session already saw —
+  // even if the LLM summary lands on disk mid-turn — so system[0] stays
+  // byte-identical across loop steps.
+  const pinned = pinnedToFallback(sessionID, key)
+
   const cached = await withTimeout(
     (async () => {
       const fs = await import("node:fs/promises")
@@ -556,7 +613,7 @@ export async function summarizeSection(section: Section, ctx: SummarizeContext, 
     })(),
     5_000,
   )
-  if (cached) {
+  if (cached && !pinned) {
     log("summarize", { path, words, cached: true, fallback: false })
     return { path, text: provenance(cached, path, words) }
   }
@@ -585,6 +642,7 @@ export async function summarizeSection(section: Section, ctx: SummarizeContext, 
   }
 
   log("summarize", { path, words, cached: false, fallback: true, model: resolveSummarizerModel(ctx, sessionID) })
+  pinFallback(sessionID, key)
   return { path, text: provenance(extractiveFallback(section.text), path, words) }
 }
 
@@ -691,7 +749,7 @@ async function gateSystem(
   }
   sections.splice(0, sections.length, ...expanded)
 
-  const scopes = activity.get(sessionID)?.scopes ?? new Set<string>()
+  const scopes = turnScopes(sessionID)
   const decision = applyGate(prologue, sections, scopes, config)
 
   const key = memoKey(sessionID, decision, sections, config)

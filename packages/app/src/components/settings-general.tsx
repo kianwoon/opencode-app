@@ -298,6 +298,21 @@ export const SettingsGeneral: Component = () => {
     triggerVariant: "settings" as const,
   })
 
+  const messageAlignOptions = createMemo<
+    { value: "left" | "center" | "right"; label: string }[]
+  >(() => [
+    { value: "left", label: language.t("settings.general.row.messageAlign.option.left") },
+    { value: "center", label: language.t("settings.general.row.messageAlign.option.center") },
+    { value: "right", label: language.t("settings.general.row.messageAlign.option.right") },
+  ])
+
+  const messageBorderWidthOptions = createMemo(() => [
+    { value: "0", label: language.t("settings.general.row.messageBorder.width.none") },
+    { value: "0.5", label: "0.5px" },
+    { value: "1", label: "1px" },
+    { value: "2", label: "2px" },
+  ])
+
   const soundSelectProps = (
     enabled: () => boolean,
     current: () => string,
@@ -754,6 +769,78 @@ export const SettingsGeneral: Component = () => {
               variant="secondary"
               size="small"
               triggerVariant="settings"
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.messageAlign.title")}
+          description={language.t("settings.general.row.messageAlign.description")}
+        >
+          <div class="w-full sm:w-[220px]">
+            <Select
+              data-action="settings-message-align"
+              options={messageAlignOptions()}
+              current={messageAlignOptions().find((o) => o.value === settings.appearance.messageAlign())}
+              value={(o) => o.value}
+              label={(o) => o.label}
+              onSelect={(option) => option && settings.appearance.setMessageAlign(option.value)}
+              variant="secondary"
+              size="small"
+              triggerVariant="settings"
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.messageBorder.title")}
+          description={language.t("settings.general.row.messageBorder.description")}
+        >
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
+            <Select
+              data-action="settings-message-border-width"
+              options={messageBorderWidthOptions()}
+              current={messageBorderWidthOptions().find((o) => o.value === String(settings.appearance.messageBorderWidth()))}
+              value={(o) => o.value}
+              label={(o) => o.label}
+              onSelect={(option) => option && settings.appearance.setMessageBorderWidth(Number(option.value))}
+              variant="secondary"
+              size="small"
+              triggerVariant="settings"
+            />
+            <FontColorControls
+              colorLight={settings.appearance.messageBorderColorLight()}
+              colorDark={settings.appearance.messageBorderColorDark()}
+              setColorLight={settings.appearance.setMessageBorderColorLight}
+              setColorDark={settings.appearance.setMessageBorderColorDark}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.messageBackground.title")}
+          description={language.t("settings.general.row.messageBackground.description")}
+        >
+          <div class="w-full sm:w-[220px]">
+            <FontColorControls
+              colorLight={settings.appearance.messageBackgroundLight()}
+              colorDark={settings.appearance.messageBackgroundDark()}
+              setColorLight={settings.appearance.setMessageBackgroundLight}
+              setColorDark={settings.appearance.setMessageBackgroundDark}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.userMessageTextColor.title")}
+          description={language.t("settings.general.row.userMessageTextColor.description")}
+        >
+          <div class="w-full sm:w-[220px]">
+            <FontColorControls
+              colorLight={settings.appearance.userMessageTextColorLight()}
+              colorDark={settings.appearance.userMessageTextColorDark()}
+              setColorLight={settings.appearance.setUserMessageTextColorLight}
+              setColorDark={settings.appearance.setUserMessageTextColorDark}
             />
           </div>
         </SettingsRow>

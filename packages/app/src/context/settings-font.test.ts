@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  fontColor,
-  messageFontFamily,
-  monoFontFamily,
-  sansFontFamily,
-  terminalFontFamily,
-  weightFamilyNames,
-} from "./settings"
+import { defaultSettings, fontColor, messageFontFamily, monoFontFamily, sansFontFamily, terminalFontFamily, weightFamilyNames } from "./settings"
 
 describe("font family stack", () => {
   test("includes the weight-qualified family name ahead of the base family", () => {
@@ -73,5 +66,40 @@ describe("font color", () => {
 
   test("uses the single color for both schemes when only one is set", () => {
     expect(fontColor("#ff0000", "")).toBe("#ff0000")
+  })
+})
+
+describe("message appearance settings", () => {
+  test("defaults preserve the current look", () => {
+    expect(defaultSettings.appearance.messageAlign).toBe("right")
+    expect(defaultSettings.appearance.messageBorderWidth).toBe(0)
+    expect(defaultSettings.appearance.messageBorderColorLight).toBe("")
+    expect(defaultSettings.appearance.messageBorderColorDark).toBe("")
+    expect(defaultSettings.appearance.messageBackgroundLight).toBe("")
+    expect(defaultSettings.appearance.messageBackgroundDark).toBe("")
+    expect(defaultSettings.appearance.userMessageTextColorLight).toBe("")
+    expect(defaultSettings.appearance.userMessageTextColorDark).toBe("")
+  })
+
+  test("empty border and background colors emit no override", () => {
+    expect(fontColor(defaultSettings.appearance.messageBorderColorLight, defaultSettings.appearance.messageBorderColorDark)).toBe("")
+    expect(fontColor(defaultSettings.appearance.messageBackgroundLight, defaultSettings.appearance.messageBackgroundDark)).toBe("")
+    expect(
+      fontColor(defaultSettings.appearance.userMessageTextColorLight, defaultSettings.appearance.userMessageTextColorDark),
+    ).toBe("")
+  })
+
+  test("border and background colors resolve per color scheme", () => {
+    expect(fontColor("#ff0000", "#00ff00")).toBe("light-dark(#ff0000, #00ff00)")
+  })
+
+  test("user message text color is decoupled from the message font color", () => {
+    expect(fontColor("#123456", "")).toBe("#123456")
+    expect(fontColor(defaultSettings.appearance.messageFontColorLight, defaultSettings.appearance.messageFontColorDark)).toBe(
+      "",
+    )
+    expect(defaultSettings.appearance.messageFontColorLight).toBe("")
+    expect(defaultSettings.appearance.userMessageTextColorLight).toBe("")
+    expect(fontColor("#123456", defaultSettings.appearance.messageFontColorDark)).toBe("#123456")
   })
 })

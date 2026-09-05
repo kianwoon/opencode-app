@@ -145,6 +145,32 @@ export function createAppearanceSettingsController() {
       current: createMemo(() => String(settings.appearance.messageWidth())),
       select: (value: string) => settings.appearance.setMessageWidth(Number(value)),
     },
+    messageAlign: {
+      current: settings.appearance.messageAlign,
+      select: (value: "left" | "center" | "right") => settings.appearance.setMessageAlign(value),
+    },
+    messageBorderWidth: {
+      current: createMemo(() => String(settings.appearance.messageBorderWidth())),
+      select: (value: string) => settings.appearance.setMessageBorderWidth(Number(value)),
+    },
+    messageBorderColors: {
+      light: () => settings.appearance.messageBorderColorLight(),
+      dark: () => settings.appearance.messageBorderColorDark(),
+      setLight: (value: string) => settings.appearance.setMessageBorderColorLight(value),
+      setDark: (value: string) => settings.appearance.setMessageBorderColorDark(value),
+    },
+    messageBackgroundColors: {
+      light: () => settings.appearance.messageBackgroundLight(),
+      dark: () => settings.appearance.messageBackgroundDark(),
+      setLight: (value: string) => settings.appearance.setMessageBackgroundLight(value),
+      setDark: (value: string) => settings.appearance.setMessageBackgroundDark(value),
+    },
+    userMessageTextColors: {
+      light: () => settings.appearance.userMessageTextColorLight(),
+      dark: () => settings.appearance.userMessageTextColorDark(),
+      setLight: (value: string) => settings.appearance.setUserMessageTextColorLight(value),
+      setDark: (value: string) => settings.appearance.setUserMessageTextColorDark(value),
+    },
   }
 }
 

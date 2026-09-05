@@ -17,7 +17,8 @@
   letter-spacing: var(--letter-spacing-normal);
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  /* Alignment is user-configurable via --message-align-* (Settings → Appearance). */
+  align-items: var(--message-align-items, flex-end);
   align-self: stretch;
   width: 100%;
   max-width: 100%;
@@ -128,10 +129,11 @@
     width: fit-content;
     /* Width cap is user-configurable via --message-width-ch (Settings → Appearance). */
     max-width: min(82%, var(--message-width-ch, 64ch));
-    margin-inline-start: auto;
+    margin-inline-start: var(--message-align-start, auto);
+    margin-inline-end: var(--message-align-end, 0);
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: var(--message-align-items, flex-end);
   }
 
   [data-slot="user-message-text"] {
@@ -140,8 +142,11 @@
     word-break: break-word;
     overflow: hidden;
     unicode-bidi: plaintext;
-    background: var(--v2-background-bg-layer-02);
-    border: none;
+    /* Border/background/text color/alignment are user-configurable
+       (Settings → Appearance); fallbacks preserve the pre-setting look. */
+    background: var(--message-background-color, var(--v2-background-bg-layer-02));
+    border: var(--message-border-width, 0) solid var(--message-border-color, transparent);
+    color: var(--message-text-color, inherit);
     padding: 8px 12px;
     border-radius: 10px;
 
@@ -1338,7 +1343,8 @@ body[data-new-layout] [data-component="user-message"] {
   font-weight: var(--font-family-message--font-weight, 440);
 
   [data-slot="user-message-text"] {
-    background: var(--v2-background-bg-layer-01);
+    background: var(--message-background-color, var(--v2-background-bg-layer-01));
+    border: var(--message-border-width, 0) solid var(--message-border-color, transparent);
   }
 
   [data-slot="user-message-comments"] {
@@ -1415,8 +1421,8 @@ body:not([data-new-layout]) {
     }
 
     [data-slot="user-message-text"] {
-      background: var(--surface-base);
-      border: 1px solid var(--border-weak-base);
+      background: var(--message-background-color, var(--surface-base));
+      border: var(--message-border-width, 1px) solid var(--message-border-color, var(--border-weak-base));
       border-radius: 6px;
     }
 

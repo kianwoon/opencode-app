@@ -56,9 +56,17 @@ export interface Settings {
     terminalFontColorDark: string
     message: string
     messageWidth: number
+    messageAlign: "left" | "center" | "right"
+    messageBorderWidth: number
+    messageBorderColorLight: string
+    messageBorderColorDark: string
+    messageBackgroundLight: string
+    messageBackgroundDark: string
     messageFontWeight: number
     messageFontColorLight: string
     messageFontColorDark: string
+    userMessageTextColorLight: string
+    userMessageTextColorDark: string
   }
   keybinds: Record<string, string>
   permissions: {
@@ -249,7 +257,7 @@ export function fontColor(light: string | undefined, dark: string | undefined) {
   return lightValue || darkValue
 }
 
-const defaultSettings: Settings = {
+export const defaultSettings: Settings = {
   general: {
     autoSave: true,
     releaseNotes: true,
@@ -281,9 +289,17 @@ const defaultSettings: Settings = {
     terminalFontColorDark: "",
     message: "",
     messageWidth: 64,
+    messageAlign: "right",
+    messageBorderWidth: 0,
+    messageBorderColorLight: "",
+    messageBorderColorDark: "",
+    messageBackgroundLight: "",
+    messageBackgroundDark: "",
     messageFontWeight: 400,
     messageFontColorLight: "",
     messageFontColorDark: "",
+    userMessageTextColorLight: "",
+    userMessageTextColorDark: "",
   },
   keybinds: {},
   permissions: {
@@ -450,6 +466,40 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       root.style.setProperty(
         "--message-width-ch",
         typeof messageWidth === "number" && messageWidth > 0 ? `${messageWidth}ch` : "",
+      )
+      // Alignment uses logical properties downstream, so left/right follow the
+      // writing direction. Empty strings restore the CSS defaults (right).
+      const messageAlign =
+        store.appearance?.messageAlign === "left" || store.appearance?.messageAlign === "center"
+          ? store.appearance?.messageAlign
+          : ""
+      root.style.setProperty("--message-align-start", messageAlign === "left" ? "0" : "")
+      root.style.setProperty("--message-align-end", messageAlign ? "auto" : "")
+      root.style.setProperty(
+        "--message-align-items",
+        messageAlign === "left" ? "flex-start" : messageAlign === "center" ? "center" : "",
+      )
+      // Thickness: only positive values override; 0/unset restore the CSS
+      // fallbacks (none in base/new layout, the themed 1px border in old
+      // layout) so existing users keep the current look.
+      const messageBorderWidth = store.appearance?.messageBorderWidth
+      root.style.setProperty(
+        "--message-border-width",
+        typeof messageBorderWidth === "number" && messageBorderWidth > 0 ? `${messageBorderWidth}px` : "",
+      )
+      root.style.setProperty(
+        "--message-border-color",
+        fontColor(store.appearance?.messageBorderColorLight, store.appearance?.messageBorderColorDark),
+      )
+      root.style.setProperty(
+        "--message-background-color",
+        fontColor(store.appearance?.messageBackgroundLight, store.appearance?.messageBackgroundDark),
+      )
+      // Text color of user message bubbles, independent of the shared Message
+      // Font color; empty restores the inherited themed color.
+      root.style.setProperty(
+        "--message-text-color",
+        fontColor(store.appearance?.userMessageTextColorLight, store.appearance?.userMessageTextColorDark),
       )
       // Font colors are resolved by the browser per color scheme via light-dark(),
       // falling back to the themed text color when the user leaves a value empty.
@@ -674,6 +724,48 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setMessageWidth(value: number) {
           setStore("appearance", "messageWidth", value)
         },
+        messageAlign: withFallback(
+          () => store.appearance?.messageAlign,
+          defaultSettings.appearance.messageAlign,
+        ),
+        setMessageAlign(value: "left" | "center" | "right") {
+          setStore("appearance", "messageAlign", value)
+        },
+        messageBorderWidth: withFallback(
+          () => store.appearance?.messageBorderWidth,
+          defaultSettings.appearance.messageBorderWidth,
+        ),
+        setMessageBorderWidth(value: number) {
+          setStore("appearance", "messageBorderWidth", value)
+        },
+        messageBorderColorLight: withFallback(
+          () => store.appearance?.messageBorderColorLight,
+          defaultSettings.appearance.messageBorderColorLight,
+        ),
+        setMessageBorderColorLight(value: string) {
+          setStore("appearance", "messageBorderColorLight", color(value))
+        },
+        messageBorderColorDark: withFallback(
+          () => store.appearance?.messageBorderColorDark,
+          defaultSettings.appearance.messageBorderColorDark,
+        ),
+        setMessageBorderColorDark(value: string) {
+          setStore("appearance", "messageBorderColorDark", color(value))
+        },
+        messageBackgroundLight: withFallback(
+          () => store.appearance?.messageBackgroundLight,
+          defaultSettings.appearance.messageBackgroundLight,
+        ),
+        setMessageBackgroundLight(value: string) {
+          setStore("appearance", "messageBackgroundLight", color(value))
+        },
+        messageBackgroundDark: withFallback(
+          () => store.appearance?.messageBackgroundDark,
+          defaultSettings.appearance.messageBackgroundDark,
+        ),
+        setMessageBackgroundDark(value: string) {
+          setStore("appearance", "messageBackgroundDark", color(value))
+        },
         messageFontWeight: withFallback(
           () => store.appearance?.messageFontWeight,
           defaultSettings.appearance.messageFontWeight,
@@ -694,6 +786,20 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setMessageFontColorDark(value: string) {
           setStore("appearance", "messageFontColorDark", color(value))
+        },
+        userMessageTextColorLight: withFallback(
+          () => store.appearance?.userMessageTextColorLight,
+          defaultSettings.appearance.userMessageTextColorLight,
+        ),
+        setUserMessageTextColorLight(value: string) {
+          setStore("appearance", "userMessageTextColorLight", color(value))
+        },
+        userMessageTextColorDark: withFallback(
+          () => store.appearance?.userMessageTextColorDark,
+          defaultSettings.appearance.userMessageTextColorDark,
+        ),
+        setUserMessageTextColorDark(value: string) {
+          setStore("appearance", "userMessageTextColorDark", color(value))
         },
       },
       keybinds: {

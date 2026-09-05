@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, createResource } from "solid-js"
+import { type Accessor, Component, Show, createMemo, createResource } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
@@ -85,6 +85,17 @@ const messageWidthOptions = [
   { value: "88", label: "settings.general.row.messageWidth.option.wider" },
   { value: "102", label: "settings.general.row.messageWidth.option.full" },
   { value: "128", label: "settings.general.row.messageWidth.option.max" },
+]
+const messageAlignOptions: { value: "left" | "center" | "right"; label: string }[] = [
+  { value: "left", label: "settings.general.row.messageAlign.option.left" },
+  { value: "center", label: "settings.general.row.messageAlign.option.center" },
+  { value: "right", label: "settings.general.row.messageAlign.option.right" },
+]
+const messageBorderWidthOptions = [
+  { value: "0", label: "settings.general.row.messageBorder.width.none" },
+  { value: "0.5", label: "0.5px" },
+  { value: "1", label: "1px" },
+  { value: "2", label: "2px" },
 ]
 const soundSettings = {
   agent: {
@@ -228,7 +239,123 @@ const AppearanceSection: Component<{ controller: AppearanceSettingsController }>
             onSelect={(option) => option && props.controller.messageWidth.select(option.value)}
           />
         </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.row.messageAlign.title")}
+          description={language.t("settings.general.row.messageAlign.description")}
+        >
+          <SelectV2
+            appearance="inline"
+            data-action="settings-message-align"
+            options={messageAlignOptions}
+            current={messageAlignOptions.find((option) => option.value === props.controller.messageAlign.current())}
+            placement="bottom-end"
+            gutter={6}
+            value={(option) => option.value}
+            label={(option) => language.t(option.label)}
+            onSelect={(option) => option && props.controller.messageAlign.select(option.value)}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.row.messageBorder.title")}
+          description={language.t("settings.general.row.messageBorder.description")}
+        >
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
+            <SelectV2
+              appearance="inline"
+              data-action="settings-message-border-width"
+              options={messageBorderWidthOptions}
+              current={
+                messageBorderWidthOptions.find(
+                  (option) => option.value === props.controller.messageBorderWidth.current(),
+                ) ?? messageBorderWidthOptions[0]
+              }
+              placement="bottom-end"
+              gutter={6}
+              value={(option) => option.value}
+              label={(option) => (option.value === "0" ? language.t(option.label) : option.label)}
+              onSelect={(option) => option && props.controller.messageBorderWidth.select(option.value)}
+            />
+            <ColorPairSetting
+              config={{
+                action: "settings-message-border-color",
+                light: props.controller.messageBorderColors.light,
+                dark: props.controller.messageBorderColors.dark,
+                setLight: props.controller.messageBorderColors.setLight,
+                setDark: props.controller.messageBorderColors.setDark,
+              }}
+            />
+          </div>
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.row.messageBackground.title")}
+          description={language.t("settings.general.row.messageBackground.description")}
+        >
+          <ColorPairSetting
+            config={{
+              action: "settings-message-background-color",
+              light: props.controller.messageBackgroundColors.light,
+              dark: props.controller.messageBackgroundColors.dark,
+              setLight: props.controller.messageBackgroundColors.setLight,
+              setDark: props.controller.messageBackgroundColors.setDark,
+            }}
+          />
+        </SettingsRowV2>
+
+        <SettingsRowV2
+          title={language.t("settings.general.row.userMessageTextColor.title")}
+          description={language.t("settings.general.row.userMessageTextColor.description")}
+        >
+          <ColorPairSetting
+            config={{
+              action: "settings-user-message-text-color",
+              light: props.controller.userMessageTextColors.light,
+              dark: props.controller.userMessageTextColors.dark,
+              setLight: props.controller.userMessageTextColors.setLight,
+              setDark: props.controller.userMessageTextColors.setDark,
+            }}
+          />
+        </SettingsRowV2>
       </SettingsListV2>
+    </div>
+  )
+}
+
+const ColorPairSetting: Component<{
+  config: {
+    action: string
+    light: Accessor<string>
+    dark: Accessor<string>
+    setLight: (value: string) => void
+    setDark: (value: string) => void
+  }
+}> = (props) => {
+  const language = useLanguage()
+  return (
+    <div class="flex items-center gap-2" data-action={props.config.action}>
+      <label class="flex items-center gap-1.5 text-[12px] text-v2-text-text-muted">
+        <span aria-hidden="true">☀</span>
+        <input
+          type="color"
+          value={props.config.light() || "#000000"}
+          onInput={(event) => props.config.setLight(event.currentTarget.value)}
+          class="size-5 cursor-pointer appearance-none rounded border border-v2-border-border-base bg-transparent p-0"
+        />
+      </label>
+      <label class="flex items-center gap-1.5 text-[12px] text-v2-text-text-muted">
+        <span aria-hidden="true">☾</span>
+        <input
+          type="color"
+          value={props.config.dark() || "#000000"}
+          onInput={(event) => props.config.setDark(event.currentTarget.value)}
+          class="size-5 cursor-pointer appearance-none rounded border border-v2-border-border-base bg-transparent p-0"
+        />
+      </label>
+      <span class="ml-auto text-[12px] text-v2-text-text-faint">
+        {language.t("settings.general.row.fontColor.help")}
+      </span>
     </div>
   )
 }

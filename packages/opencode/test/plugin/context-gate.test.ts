@@ -11,6 +11,8 @@ import {
   summaryCacheKey,
   summarizeSection,
   wordCount,
+  fallbackPins,
+  scopeSnapshots,
   type GateConfig,
   type Section,
 } from "../../../../.opencode/plugin-lib/context-gate"
@@ -236,6 +238,10 @@ describe("plugin hook", () => {
       { tool: "edit", sessionID, callID: "c1", args: { filePath: "/repo/packages/ui/src/button.tsx" } },
       { title: "button.tsx", output: "ok", metadata: {} },
     )
+    // Activity lands inside the 90s scope-snapshot window: rewind the snapshot
+    // to simulate the window having expired so the new scope is adopted now.
+    const snap = scopeSnapshots.get(sessionID)!
+    scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
 
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
@@ -263,10 +269,40 @@ describe("plugin hook", () => {
       { tool: "task", sessionID, callID: "c2", args: { prompt: "review ui components" } },
       { title: "ui review", output: "explored /repo/packages/ui/src and found 3 issues", metadata: {} },
     )
+    const snap = scopeSnapshots.get(sessionID)!
+    scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
 
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
     expect(after[0]).toContain("packages/ui/AGENTS.md")
+  })
+
+  test("scope snapshot: activity added mid-window does not change output until window expires", async () => {
+    const sessionID = "ses_scope_snapshot"
+    const block = joinedSystem([
+      ["/repo/packages/llm/AGENTS.md", 100],
+      ["/repo/packages/ui/AGENTS.md", 100],
+    ])
+    const before = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: before })
+    expect(before[0]).not.toContain("packages/ui/AGENTS.md")
+
+    // Tool fires, but the snapshot is still fresh → output unchanged.
+    await hooks["tool.execute.after"]!(
+      { tool: "edit", sessionID, callID: "c3", args: { filePath: "/repo/packages/ui/src/button.tsx" } },
+      { title: "button.tsx", output: "ok", metadata: {} },
+    )
+    const during = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: during })
+    expect(during[0]).toBe(before[0])
+
+    // Window expires → next transform adopts the new scope.
+    const snap = scopeSnapshots.get(sessionID)!
+    scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
+    const after = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
+    expect(after[0]).toContain("packages/ui/AGENTS.md")
+    expect(after[0]).not.toBe(before[0])
   })
 
   test("hook error fails open — transform still returns usable system text", async () => {
@@ -333,6 +369,39 @@ describe("summarization", () => {
     expect(extractiveFallback("")).toBe("")
   })
 
+  test("extractiveFallback targets ~50% of input words for oversize docs", () => {
+    // Two-word lines: 12 lead lines (the extractive lead window) first, then
+    // headings, then bullets filling the rest — so each proportional cap can
+    // fill to its limit and the total should land on ~50% of the input.
+    const uniformDoc = (words: number) => {
+      const leadWords = 24
+      const headingWords = Math.floor(words * 0.15)
+      const bulletWords = words - leadWords - headingWords
+      return [
+        ...Array.from({ length: leadWords / 2 }, () => "lead line"),
+        ...Array.from({ length: headingWords / 2 }, () => "# rule"),
+        ...Array.from({ length: bulletWords / 2 }, () => "- always"),
+      ].join("\n")
+    }
+
+    const check = (inputWords: number) => {
+      const doc = uniformDoc(inputWords)
+      expect(wordCount(doc)).toBe(inputWords)
+      const out = extractiveFallback(doc)
+      const target = inputWords / 2
+      // Sections may overshoot the target by at most one line.
+      expect(wordCount(out)).toBeGreaterThanOrEqual(target - 12)
+      expect(wordCount(out)).toBeLessThanOrEqual(target + 12)
+      expect(wordCount(out)).toBeLessThan(inputWords)
+      expect(out).toContain("# rule")
+      expect(out).toContain("lead line")
+      expect(out).toContain("- always")
+      expect(out).toContain("\n\n")
+    }
+    check(2400) // 2400-word doc → ≈1200-word summary
+    check(4000) // 4000-word doc → ≈2000-word summary
+  })
+
   test("summarizeSection: cache hit serves stored summary with provenance (no LLM call)", async () => {
     const client = {
       session: {
@@ -356,6 +425,47 @@ describe("summarization", () => {
       expect(result.text).toContain("CACHED SUMMARY CONTENT")
       expect(result.text).toContain(`[Summarized from ~${wordCount(original.text)} words — original: /repo/AGENTS.md]`)
       expect(result.path).toBe("/repo/AGENTS.md")
+    } finally {
+      await fs.rm(`${dir}/${key}.md`, { force: true })
+    }
+  })
+
+  test("fallback pin: same input twice → byte-identical output even if disk cache lands between", async () => {
+    const client = {
+      session: {
+        create: async () => {
+          throw new Error("LLM must not be called while pin is active")
+        },
+        prompt: async () => {
+          throw new Error("LLM must not be called while pin is active")
+        },
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const sessionID = "ses_pin"
+    const original = { path: "/repo/PINNED.md", text: "# Title\n\n- bullet one\n- bullet two\n" + longText(2500) }
+    const key = summaryCacheKey(original.path, original.text)
+    const fs = await import("node:fs/promises")
+    const dir = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/context-gate-cache`
+    await fs.rm(`${dir}/${key}.md`, { force: true })
+    try {
+      // Miss → extractive fallback, pinned to this session.
+      const first = await summarizeSection(original, ctx, sessionID)
+      expect(first.text).not.toContain("LLM SUMMARY CONTENT")
+
+      // Cache lands mid-turn (here: pre-populated between calls).
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(`${dir}/${key}.md`, "LLM SUMMARY CONTENT")
+
+      // Second call in the same turn/pin window → byte-identical fallback.
+      const second = await summarizeSection(original, ctx, sessionID)
+      expect(second.text).toBe(first.text)
+
+      // Pin expired (simulated) → the cached LLM summary is adopted.
+      fallbackPins.get(sessionID)!.set(key, Date.now() - 6 * 60_000)
+      const third = await summarizeSection(original, ctx, sessionID)
+      expect(third.text).toContain("LLM SUMMARY CONTENT")
+      expect(third.text).not.toBe(first.text)
     } finally {
       await fs.rm(`${dir}/${key}.md`, { force: true })
     }
@@ -414,14 +524,15 @@ describe("summarization", () => {
   })
 
   test("summarizeSection: LLM failure falls back to extractive, never throws", async () => {
+    let systems: string[] = []
     const client = {
       session: {
-        create: async () => {
+        create: async () => ({ data: { id: "ses_helper" } }),
+        prompt: async (input: { body: { system?: string } }) => {
+          if (input.body.system) systems = [...systems, input.body.system]
           throw new Error("provider down")
         },
-        prompt: async () => {
-          throw new Error("provider down")
-        },
+        delete: async () => ({}),
       },
     }
     const ctx = { client: client as never, sessionModel: new Map() }
@@ -431,5 +542,15 @@ describe("summarization", () => {
     expect(result.text).toContain("- bullet one")
     expect(result.text).toContain("[Summarized from")
     expect(result.text.length).toBeLessThan(original.text.length)
+    // llmSummarize runs in the background; poll briefly for its system prompt.
+    const words = wordCount(original.text)
+    const target = Math.floor(words * 0.5)
+    const expected = `Target at most ~${target} words (about half of the original ~${words} words)`
+    let prompted = systems.some((s) => s.includes(expected))
+    for (let i = 0; i < 50 && !prompted; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      prompted = systems.some((s) => s.includes(expected))
+    }
+    expect(prompted).toBe(true)
   })
 })
