@@ -26,6 +26,28 @@ plane that manages context, intelligence allocation, orchestration, and
 verification around every turn. All enhancements are implemented in-process
 (no external meta-harness), staying upstream-mergeable.
 
+## Enterprise Harness
+
+The fork ships a complete harness layer, organized in phases 0–3 (see
+`harness-enhancement-plan.md`):
+
+- **Effort governance** — `task-effort-router.ts` routes each task to an
+  appropriate model effort level, so routine work doesn't burn premium
+  reasoning tokens. Direct cost control with per-agent overrides.
+- **Context policy engine** — `context-gate.ts` enforces cache-safe context
+  control and auditability before content reaches a turn. Measured savings:
+  **676k+ tokens** avoided.
+- **Phases 0–3 shipped** — scheduled tasks, loop/stall guards, effort
+  routing, orchestration, and verification gates are all live, not planned.
+- **Knowledge-graph navigation** — `graphify-out/` provides a persistent
+  graph of the codebase with query/path/explain tools for architecture
+  questions.
+- **Skills & agents** — packaged expertise (`effect`, `rtl-aware-development`)
+  and specialist subagents (`triage`, `duplicate-pr`) extend the harness
+  without touching core.
+- **Plugin-first, zero-fork architecture** — everything lives in
+  `.opencode/plugin-lib/`, staying upstream-mergeable.
+
 ## Unique Features
 
 ### ⏰ Scheduled Tasks (default ON)
