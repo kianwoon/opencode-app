@@ -305,18 +305,49 @@ const AppearanceSection: Component<{ controller: AppearanceSettingsController }>
         </SettingsRowV2>
 
         <SettingsRowV2
-          title={language.t("settings.general.row.userMessageTextColor.title")}
-          description={language.t("settings.general.row.userMessageTextColor.description")}
+          title={language.t("settings.general.row.userMessageFont.title")}
+          description={language.t("settings.general.row.userMessageFont.description")}
         >
-          <ColorPairSetting
-            config={{
-              action: "settings-user-message-text-color",
-              light: props.controller.userMessageTextColors.light,
-              dark: props.controller.userMessageTextColors.dark,
-              setLight: props.controller.userMessageTextColors.setLight,
-              setDark: props.controller.userMessageTextColors.setDark,
-            }}
-          />
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
+            <TextInputV2
+              data-action="settings-user-message-font"
+              type="text"
+              appearance="base"
+              value={props.controller.userMessageFont().value}
+              onInput={(event) => props.controller.setUserMessageFont(event.currentTarget.value)}
+              placeholder={props.controller.userMessageFont().placeholder}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              aria-label={language.t("settings.general.row.userMessageFont.title")}
+              style={{ "font-family": props.controller.userMessageFont().family }}
+            />
+            <SelectV2
+              appearance="inline"
+              data-action="settings-user-message-font-weight"
+              options={fontWeightOptions}
+              current={
+                fontWeightOptions.find(
+                  (option) => option.value === String(props.controller.userMessageFont().weight),
+                ) ?? fontWeightOptions[1]
+              }
+              placement="bottom-end"
+              gutter={6}
+              value={(option) => option.value}
+              label={(option) => language.t(option.label)}
+              onSelect={(option) => option && props.controller.setUserMessageFontWeight(Number(option.value))}
+            />
+            <ColorPairSetting
+              config={{
+                action: "settings-user-message-text-color",
+                light: props.controller.userMessageTextColors.light,
+                dark: props.controller.userMessageTextColors.dark,
+                setLight: props.controller.userMessageTextColors.setLight,
+                setDark: props.controller.userMessageTextColors.setDark,
+              }}
+            />
+          </div>
         </SettingsRowV2>
       </SettingsListV2>
     </div>

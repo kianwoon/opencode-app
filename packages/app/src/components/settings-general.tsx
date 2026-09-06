@@ -832,10 +832,37 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
-          title={language.t("settings.general.row.userMessageTextColor.title")}
-          description={language.t("settings.general.row.userMessageTextColor.description")}
+          title={language.t("settings.general.row.userMessageFont.title")}
+          description={language.t("settings.general.row.userMessageFont.description")}
         >
-          <div class="w-full sm:w-[220px]">
+          <div class="flex w-full flex-col gap-2 sm:w-[220px]">
+            <TextField
+              data-action="settings-user-message-font"
+              label={language.t("settings.general.row.userMessageFont.title")}
+              hideLabel
+              type="text"
+              value={settings.appearance.userMessageFont()}
+              onChange={(value) => settings.appearance.setUserMessageFont(value)}
+              placeholder={messageDefault}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              class="text-12-regular"
+              style={{
+                "font-family": messageFontFamily(
+                  settings.appearance.userMessageFont(),
+                  settings.appearance.userMessageFontWeight(),
+                ),
+              }}
+            />
+            <Select
+              data-action="settings-user-message-font-weight"
+              {...fontWeightSelectProps(
+                () => settings.appearance.userMessageFontWeight(),
+                (value) => settings.appearance.setUserMessageFontWeight(value),
+              )}
+            />
             <FontColorControls
               colorLight={settings.appearance.userMessageTextColorLight()}
               colorDark={settings.appearance.userMessageTextColorDark()}

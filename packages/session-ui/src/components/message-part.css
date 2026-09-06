@@ -8,8 +8,8 @@
 }
 
 [data-component="user-message"] {
-  font-family: var(--font-family-message, var(--font-family-sans));
-  font-weight: var(--font-family-message--font-weight, 400);
+  font-family: var(--message-font-family, var(--font-family-message, var(--font-family-sans)));
+  font-weight: var(--message-font-family--font-weight, var(--font-family-message--font-weight, 400));
   color: var(--font-family-message--color, inherit);
   font-size: var(--font-size-base);
   font-style: normal;
@@ -1340,7 +1340,7 @@
 }
 
 body[data-new-layout] [data-component="user-message"] {
-  font-weight: var(--font-family-message--font-weight, 440);
+  font-weight: var(--message-font-family--font-weight, var(--font-family-message--font-weight, 440));
 
   [data-slot="user-message-text"] {
     background: var(--message-background-color, var(--v2-background-bg-layer-01));

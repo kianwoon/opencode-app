@@ -165,6 +165,14 @@ export function createAppearanceSettingsController() {
       setLight: (value: string) => settings.appearance.setMessageBackgroundLight(value),
       setDark: (value: string) => settings.appearance.setMessageBackgroundDark(value),
     },
+    userMessageFont: createMemo(() => ({
+      value: settings.appearance.userMessageFont(),
+      family: messageFontFamily(settings.appearance.userMessageFont(), settings.appearance.userMessageFontWeight()),
+      placeholder: messageDefault,
+      weight: settings.appearance.userMessageFontWeight(),
+    })),
+    setUserMessageFont: (value: string) => settings.appearance.setUserMessageFont(value),
+    setUserMessageFontWeight: (value: number) => settings.appearance.setUserMessageFontWeight(value),
     userMessageTextColors: {
       light: () => settings.appearance.userMessageTextColorLight(),
       dark: () => settings.appearance.userMessageTextColorDark(),

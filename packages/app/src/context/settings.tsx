@@ -67,6 +67,8 @@ export interface Settings {
     messageFontColorDark: string
     userMessageTextColorLight: string
     userMessageTextColorDark: string
+    userMessageFont: string
+    userMessageFontWeight: number
   }
   keybinds: Record<string, string>
   permissions: {
@@ -300,6 +302,8 @@ export const defaultSettings: Settings = {
     messageFontColorDark: "",
     userMessageTextColorLight: "",
     userMessageTextColorDark: "",
+    userMessageFont: "",
+    userMessageFontWeight: 400,
   },
   keybinds: {},
   permissions: {
@@ -501,6 +505,19 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         "--message-text-color",
         fontColor(store.appearance?.userMessageTextColorLight, store.appearance?.userMessageTextColorDark),
       )
+      // User-message bubble font, independent of the shared Message Font; an
+      // empty font emits no override so the inherited --font-family-message
+      // stack still applies.
+      const userMessageFont = store.appearance?.userMessageFont?.trim()
+      const userMessageWeight = weight(
+        store.appearance?.userMessageFontWeight,
+        defaultSettings.appearance.userMessageFontWeight,
+      )
+      root.style.setProperty(
+        "--message-font-family",
+        userMessageFont ? messageFontFamily(userMessageFont, userMessageWeight) : "",
+      )
+      root.style.setProperty("--message-font-family--font-weight", userMessageFont ? String(userMessageWeight) : "")
       // Font colors are resolved by the browser per color scheme via light-dark(),
       // falling back to the themed text color when the user leaves a value empty.
       root.style.setProperty(
@@ -800,6 +817,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setUserMessageTextColorDark(value: string) {
           setStore("appearance", "userMessageTextColorDark", color(value))
+        },
+        userMessageFont: withFallback(() => store.appearance?.userMessageFont, defaultSettings.appearance.userMessageFont),
+        setUserMessageFont(value: string) {
+          setStore("appearance", "userMessageFont", value.trim() ? value : "")
+        },
+        userMessageFontWeight: withFallback(
+          () => store.appearance?.userMessageFontWeight,
+          defaultSettings.appearance.userMessageFontWeight,
+        ),
+        setUserMessageFontWeight(value: number) {
+          setStore("appearance", "userMessageFontWeight", value)
         },
       },
       keybinds: {

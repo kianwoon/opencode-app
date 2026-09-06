@@ -79,6 +79,20 @@ describe("message appearance settings", () => {
     expect(defaultSettings.appearance.messageBackgroundDark).toBe("")
     expect(defaultSettings.appearance.userMessageTextColorLight).toBe("")
     expect(defaultSettings.appearance.userMessageTextColorDark).toBe("")
+    expect(defaultSettings.appearance.userMessageFont).toBe("")
+    expect(defaultSettings.appearance.userMessageFontWeight).toBe(400)
+  })
+
+  test("user message font falls back to the shared message stack when unset", () => {
+    expect(messageFontFamily(defaultSettings.appearance.userMessageFont, defaultSettings.appearance.userMessageFontWeight)).toBe(
+      "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    )
+  })
+
+  test("user message font builds a weighted stack when set", () => {
+    expect(messageFontFamily("Inter", 600)).toBe(
+      '"Inter SemiBold", "Inter Semi-Bold", "Inter DemiBold", "Inter Semibold", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    )
   })
 
   test("empty border and background colors emit no override", () => {
