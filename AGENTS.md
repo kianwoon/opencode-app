@@ -9,10 +9,6 @@
 - `client → schema, protocol` (never core/server)
 - `sdk-next → client, core, server`
 
-## Git
-- Default branch `dev`; base diffs on `dev`/`origin/dev` (local `main` may be stale).
-- Branches: ≤3 words, hyphen-separated, no slashes/prefixes (e.g. `session-recovery`).
-- Commits/PRs: `type(scope): summary`; types `feat|fix|docs|chore|refactor|test`; scopes e.g. `core, server, client, tui, app, sdk-next`.
 
 ## Style
 - One function unless composable/reusable; no preemptive single-use helpers; inline single-use values.
