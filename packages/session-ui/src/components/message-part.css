@@ -126,7 +126,8 @@
   }
 
   [data-slot="user-message-body"] {
-    width: fit-content;
+    /* Bubble always fills the configured width; short text stretches instead of shrink-to-fit. */
+    width: min(82%, var(--message-width-ch, 64ch));
     /* Width cap is user-configurable via --message-width-ch (Settings → Appearance). */
     max-width: min(82%, var(--message-width-ch, 64ch));
     margin-inline-start: var(--message-align-start, auto);
@@ -138,6 +139,8 @@
 
   [data-slot="user-message-text"] {
     display: inline-block;
+    width: 100%;
+    box-sizing: border-box;
     white-space: pre-wrap;
     word-break: break-word;
     overflow: hidden;
@@ -1381,6 +1384,7 @@ body[data-new-layout] [data-component="user-message"] {
 
   [data-slot="user-message-text"][data-comments] {
     width: 342px;
+    max-width: 100%;
     padding-bottom: 12px;
   }
 }
