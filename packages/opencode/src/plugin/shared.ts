@@ -204,10 +204,20 @@ export async function checkPluginCompatibility(target: string, opencodeVersion: 
   }
 }
 
+// Preview builds produce `0.0.0-prod-<ts>` versions that are never published to npm;
+// rewriting them to `latest` avoids NpmInstallFailedError storms on every boot.
+export function normalizePluginSpec(spec: string) {
+  if (!/@0\.0\.0-(prod|beta|dev|preview)-\d+/.test(spec)) return spec
+  const next = spec.replace(/@0\.0\.0-[a-z]+-\d+$/, "@latest")
+  console.warn(`plugin ${spec} is an unpublished preview version, resolving as ${next}`)
+  return next
+}
+
 export async function resolvePluginTarget(spec: string) {
   if (isPathPluginSpec(spec)) return resolvePathPluginTarget(spec)
-  const hit = parse(spec)
-  const pkg = hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : spec
+  const normalized = normalizePluginSpec(spec)
+  const hit = parse(normalized)
+  const pkg = hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : normalized
   const result = await Npm.add(pkg)
   return result.directory
 }

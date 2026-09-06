@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { parsePluginSpecifier } from "../../src/plugin/shared"
+import { normalizePluginSpec, parsePluginSpecifier } from "../../src/plugin/shared"
 
 describe("parsePluginSpecifier", () => {
   test("parses standard npm package without version", () => {
@@ -84,5 +84,27 @@ describe("parsePluginSpecifier", () => {
       pkg: "@opencode/acme",
       version: "latest",
     })
+  })
+})
+
+describe("normalizePluginSpec", () => {
+  test("rewrites unpublished prod preview version to latest", () => {
+    expect(normalizePluginSpec("@opencode-ai/plugin@0.0.0-prod-202608160439")).toBe("@opencode-ai/plugin@latest")
+  })
+
+  test("rewrites other preview channel versions to latest", () => {
+    expect(normalizePluginSpec("acme@0.0.0-beta-202608160439")).toBe("acme@latest")
+    expect(normalizePluginSpec("acme@0.0.0-dev-202608160439")).toBe("acme@latest")
+  })
+
+  test("keeps published versions and non-version specs untouched", () => {
+    expect(normalizePluginSpec("acme@1.2.3")).toBe("acme@1.2.3")
+    expect(normalizePluginSpec("acme@0.0.0-prod")).toBe("acme@0.0.0-prod")
+    expect(normalizePluginSpec("acme@latest")).toBe("acme@latest")
+    expect(normalizePluginSpec("acme")).toBe("acme")
+  })
+
+  test("keeps file specs untouched", () => {
+    expect(normalizePluginSpec("file:///tmp/acme.ts")).toBe("file:///tmp/acme.ts")
   })
 })

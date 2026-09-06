@@ -455,7 +455,10 @@ const layer = Layer.effect(
               add: [
                 {
                   name: "@opencode-ai/plugin",
-                  version: InstallationLocal ? undefined : InstallationVersion,
+                  // Preview builds produce `0.0.0-prod-<ts>` versions that are never
+                  // published to npm; pinning them here makes every subsequent boot
+                  // fail npm install. Fall back to the latest published release.
+                  version: InstallationLocal || InstallationVersion.startsWith("0.0.0-") ? undefined : InstallationVersion,
                 },
               ],
             })

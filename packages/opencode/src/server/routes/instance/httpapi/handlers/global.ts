@@ -85,7 +85,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       // Drop the cached global config so a subsequent read re-parses the on-disk
       // config (the cache is TTL-infinity, so it would otherwise never refresh).
       yield* config.invalidate()
-      yield* disposeAllInstancesAndEmitGlobalDisposed()
+      yield* disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true })
       return true
     })
 

@@ -100,11 +100,13 @@ function getLegacyPlugins(mod: Record<string, unknown>) {
   const seen = new Set<unknown>()
   const result: PluginInstance[] = []
 
+  // A single bad export (DEFAULTS object, `export * as X` namespace, helper fn without
+  // a server field) must not fail the whole module — skip it and keep the valid plugins.
   for (const entry of Object.values(mod)) {
     if (seen.has(entry)) continue
     seen.add(entry)
     const plugin = getServerPlugin(entry)
-    if (!plugin) throw new TypeError("Plugin export is not a function")
+    if (!plugin) continue
     result.push(plugin)
   }
 
@@ -119,7 +121,9 @@ async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks:
     return
   }
 
-  for (const server of getLegacyPlugins(load.mod)) {
+  const legacy = getLegacyPlugins(load.mod)
+  if (!legacy.length) throw new Error(`Plugin ${load.spec} exposes no plugin exports`)
+  for (const server of legacy) {
     hooks.push(await server(input, load.options))
   }
 }
@@ -229,15 +233,11 @@ const layer = Layer.effect(
             },
           }).pipe(
             Effect.tapError((error) => Effect.logError("failed to load plugin", { path: load.spec, error })),
-            Effect.catch(() => {
-              // TODO: make proper events for this
-              // events.publish(Session.Event.Error, {
-              //   error: new NamedError.Unknown({
-              //     message: `Failed to load plugin ${load.spec}: ${message}`,
-              //   }).toObject(),
-              // })
-              return Effect.void
-            }),
+            Effect.catch((message) =>
+              Effect.sync(() => {
+                publishPluginError(`Failed to load plugin ${load.spec}: ${message}`)
+              }),
+            ),
           )
         }
 

@@ -1,6 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { NodePath } from "@effect/platform-node"
 import { Cause, Duration, Effect, Layer, Option, Schedule, Context } from "effect"
+import { createHash } from "node:crypto"
 import path from "path"
 import type { Agent } from "../agent/agent"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -10,6 +11,12 @@ import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
 
 const RETENTION = Duration.days(7)
+
+// Process-wide hash-dedup state: (sessionID, toolName) -> hash of the last full
+// output written for that key, plus hash -> file path so identical outputs reuse
+// the existing file instead of duplicating 60KB+ dumps.
+const lastOutputHash = new Map<string, string>()
+const hashToFile = new Map<string, string>()
 
 export const MAX_LINES = 2000
 export const MAX_BYTES = 50 * 1024
@@ -22,6 +29,8 @@ export interface Options {
   maxLines?: number
   maxBytes?: number
   direction?: "head" | "tail"
+  /** Dedup key (usually `${sessionID}/${toolName}`): identical consecutive outputs reuse the previous file. */
+  dedupKey?: string
 }
 
 function hasTaskTool(agent?: Agent.Info) {
@@ -41,6 +50,11 @@ export interface Interface {
    * Resolved truncation limits: values from `tool_output` in opencode config, or MAX_LINES / MAX_BYTES if unset.
    */
   readonly limits: () => Effect.Effect<{ maxLines: number; maxBytes: number }>
+  /**
+   * Records the hash of a full tool output for `dedupKey`. Call before `output` so an identical
+   * consecutive output reuses the previously written file instead of duplicating 60KB+ dumps.
+   */
+  readonly dedup: (key: string, text: string) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Truncate") {}
@@ -121,23 +135,54 @@ const layer = Layer.effect(
         }
       }
 
-      const removed = hitBytes ? totalBytes - bytes : lines.length - out.length
+      const removedLines = lines.length - out.length
+      const removedBytes = totalBytes - bytes
       const unit = hitBytes ? "bytes" : "lines"
+      const removed = hitBytes ? removedBytes : removedLines
       const preview = out.join("\n")
+
+      // Hash-dedup: when this exact output was already written for this key, reuse
+      // that file instead of duplicating another 60KB+ dump on disk.
+      const hash = createHash("sha256").update(text).digest("hex")
+      if (options.dedupKey) {
+        const previous = lastOutputHash.get(options.dedupKey)
+        lastOutputHash.set(options.dedupKey, hash)
+        if (previous && previous === hash) {
+          const existing = hashToFile.get(previous)
+          if (existing && (yield* fs.stat(existing).pipe(Effect.catch(() => Effect.succeed(undefined))))) {
+            const dedupHint = hasTaskTool(agent)
+              ? `Identical to the previous tool output. Full output already saved to: ${existing}\nDelegate to the Task tool (explore agent) to process it - do NOT read the full file yourself and do NOT repeat this call.`
+              : `Identical to the previous tool output. Full output already saved to: ${existing}\nUse Grep on that file or Read with offset/limit for specific sections - do NOT repeat this call.`
+            const marker = `... [truncated ${removedBytes} bytes (${removedLines} lines), identical duplicate — full output in ${existing}] ...`
+            return {
+              content: direction === "head" ? `${preview}\n\n${marker}\n\n${dedupHint}` : `${marker}\n\n${dedupHint}\n\n${preview}`,
+              truncated: true,
+              outputPath: existing,
+            } as const
+          }
+        }
+      }
+
       const file = yield* write(text)
+      hashToFile.set(hash, file)
 
       const hint = hasTaskTool(agent)
         ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
         : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
 
+      // Explicit marker always carries byte count + file path so a mid-line byte cut
+      // (e.g. inside JSON) is never mistaken for complete output.
+      const marker = `... [truncated ${removedBytes} bytes (${removedLines} lines omitted), full output in ${file}] ...`
+
       return {
-        content:
-          direction === "head"
-            ? `${preview}\n\n...${removed} ${unit} truncated...\n\n${hint}`
-            : `...${removed} ${unit} truncated...\n\n${hint}\n\n${preview}`,
+        content: direction === "head" ? `${preview}\n\n${marker}\n\n${hint}` : `${marker}\n\n${hint}\n\n${preview}`,
         truncated: true,
         outputPath: file,
       } as const
+    })
+
+    const dedup = Effect.fn("Truncate.dedup")(function* (key: string, text: string) {
+      lastOutputHash.set(key, createHash("sha256").update(text).digest("hex"))
     })
 
     yield* cleanup().pipe(
@@ -147,7 +192,7 @@ const layer = Layer.effect(
       Effect.forkScoped,
     )
 
-    return Service.of({ cleanup, write, output, limits })
+    return Service.of({ cleanup, write, output, limits, dedup })
   }),
 )
 

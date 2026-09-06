@@ -126,6 +126,12 @@
   across reloads. npm plugin entries keep their stable URL (their versioned install dir
   already changes on update). Acceptance guard: test/plugin/loader-shared.test.ts
   "re-evaluates edited file plugin code across instance reload".
+- Global dispose MUST be failure-tolerant: the `POST /global/dispose` handler passes
+  `{ swallowErrors: true }` to `disposeAllInstancesAndEmitGlobalDisposed` — exactly like the
+  configUpdate / TUI-worker / config-watcher reload paths. A bare call aborts reload at the
+  first throwing plugin disposer, so `global.disposed` never emits and clients keep stale
+  half-disposed instances with no app refetch. Fixed 2026-09-06 in
+  src/server/routes/instance/httpapi/handlers/global.ts:88.
 
 ## Plugin loader must be Node-compatible (desktop sidecar)
 

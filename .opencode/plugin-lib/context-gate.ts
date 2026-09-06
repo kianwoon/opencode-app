@@ -216,6 +216,7 @@ export function joinSections(prologue: string, sections: Section[]): string {
 
 const PINNED_SUFFIXES = [
   "/.config/opencode/AGENTS.md",
+  "/.config/opencode/agent/brain.md",
   "/.claude/CLAUDE.md",
 ]
 

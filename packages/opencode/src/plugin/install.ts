@@ -256,8 +256,18 @@ function patchPluginList(
   }
 }
 
+// Preview builds bake `0.0.0-prod-<ts>` versions into .opencode/package.json; those
+// versions are never published to npm, so rewriting them to `latest` avoids a
+// NpmInstallFailedError storm on every boot.
+function resolveAliasSpec(spec: string) {
+  if (!/@0\.0\.0-(prod|beta|dev|preview)-\d+/.test(spec)) return spec
+  return spec.replace(/@0\.0\.0-[a-z]+-\d+$/, "@latest")
+}
+
 export async function installPlugin(spec: string, dep: InstallDeps = defaultInstallDeps): Promise<InstallResult> {
-  const target = await dep.resolve(spec).then(
+  const aliased = resolveAliasSpec(spec)
+  if (aliased !== spec) console.warn(`plugin ${spec} is an unpublished preview version, resolving as ${aliased}`)
+  const target = await dep.resolve(aliased).then(
     (item) => ({
       ok: true as const,
       item,

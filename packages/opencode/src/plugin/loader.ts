@@ -164,6 +164,49 @@ export namespace PluginLoader {
     return `${file}?mtime=${Math.floor(stats.mtimeMs)}`
   }
 
+  // Process-level dedup for external plugin resolution/loading: with multiple
+  // project dirs bootstrapping at once, concurrent callers share one resolve
+  // and one import for the same spec. Entries are IN-FLIGHT ONLY — they are
+  // dropped as soon as they settle. A settled cache would serve stale targets
+  // after a reload (edited file plugin must re-evaluate via ?mtime bust) and
+  // across instance lifetimes (npm target dirs are not stable identifiers),
+  // which regressed reload-re-evaluation and leaked results between loads.
+  const resolvedCache = new Map<string, Promise<Awaited<ReturnType<typeof resolve>>>>()
+  const moduleCache = new Map<string, Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }>>()
+
+  function resolveCached(plan: Plan, kind: PluginKind, scope: string) {
+    const key = `${scope}\u0000${plan.spec}`
+    const inFlight = resolvedCache.get(key)
+    if (inFlight) return inFlight
+    const promise = resolve(plan, kind)
+    resolvedCache.set(key, promise)
+    void promise.then(() => {
+      if (resolvedCache.get(key) === promise) resolvedCache.delete(key)
+    })
+    return promise
+  }
+
+  async function loadCached(resolved: Resolved) {
+    // Key on the mtime-busted entry so an edited file plugin lands on a new
+    // cache key (and a fresh import) instead of the old module.
+    const busted = await bustFileEntry(resolved.entry)
+    const key = `${resolved.spec}\u0000${busted}`
+    const inFlight = moduleCache.get(key)
+    if (inFlight) return inFlight
+    const promise = import(busted).then(
+      (mod): { ok: true; value: Loaded } | { ok: false; error: unknown } =>
+        mod
+          ? { ok: true, value: { ...resolved, mod: mod as Record<string, unknown> } }
+          : { ok: false, error: new Error(`Plugin ${resolved.spec} module is empty`) },
+      (error: unknown): { ok: false; error: unknown } => ({ ok: false, error }),
+    )
+    moduleCache.set(key, promise)
+    void promise.then(() => {
+      if (moduleCache.get(key) === promise) moduleCache.delete(key)
+    })
+    return promise
+  }
+
   // Run one candidate through the full pipeline: resolve, optionally surface a missing entry,
   // import the module, and finally let the caller transform the loaded plugin into any result type.
   async function attempt<R>(
@@ -173,6 +216,7 @@ export namespace PluginLoader {
     finish: ((load: Loaded, origin: ConfigPlugin.Origin, retry: boolean) => Promise<R | undefined>) | undefined,
     missing: ((value: Missing, origin: ConfigPlugin.Origin, retry: boolean) => Promise<R | undefined>) | undefined,
     report: Report | undefined,
+    scope: string,
   ): Promise<AttemptResult<R>> {
     const plan = candidate.plan
     const filePlugin = pluginSource(plan.spec) === "file"
@@ -182,7 +226,7 @@ export namespace PluginLoader {
 
     report?.start?.(candidate, retry)
 
-    const resolved = await resolve(plan, kind)
+    const resolved = filePlugin ? await resolve(plan, kind) : await resolveCached(plan, kind, scope)
     if (!resolved.ok) {
       if (resolved.stage === "missing") {
         // Missing entrypoints are handled separately so callers can still inspect package metadata,
@@ -198,7 +242,7 @@ export namespace PluginLoader {
       return { retry: filePlugin && isRetryableResolveError(resolved.stage, resolved.error) }
     }
 
-    const loaded = await load(resolved.value)
+    const loaded = await loadCached(resolved.value)
     if (!loaded.ok) {
       report?.error?.(candidate, retry, "load", loaded.error, resolved.value)
       return { retry: false }
@@ -229,7 +273,7 @@ export namespace PluginLoader {
     const candidates = input.items.map((origin) => ({ origin, plan: plan(origin.spec) }))
     const list: Array<Promise<AttemptResult<R>>> = []
     for (const candidate of candidates) {
-      list.push(attempt(candidate, input.kind, false, input.finish, input.missing, input.report))
+      list.push(attempt(candidate, input.kind, false, input.finish, input.missing, input.report, candidate.origin.scope))
     }
     const out = await Promise.all(list)
     if (input.wait) {
@@ -245,7 +289,7 @@ export namespace PluginLoader {
         if (!candidate || pluginSource(candidate.plan.spec) !== "file") continue
         deps ??= input.wait()
         await deps
-        out[i] = await attempt(candidate, input.kind, true, input.finish, input.missing, input.report)
+        out[i] = await attempt(candidate, input.kind, true, input.finish, input.missing, input.report, candidate.origin.scope)
       }
     }
 

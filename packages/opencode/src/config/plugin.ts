@@ -16,6 +16,11 @@ export type Origin = {
 }
 
 export async function load(dir: string) {
+  // Memoize discovery per process: with ×N project dirs open, each dir paid a
+  // full glob on every bootstrap even though plugin files rarely change within
+  // one process run. Keyed by dir; bounded so long-lived processes can't leak.
+  const cached = discoveryCache.get(dir)
+  if (cached) return [...cached]
   const plugins: ConfigPluginV1.Spec[] = []
 
   for (const item of await Glob.scan("{plugin,plugins}/*.{ts,js}", {
@@ -26,8 +31,13 @@ export async function load(dir: string) {
   })) {
     plugins.push(pathToFileURL(item).href)
   }
+  if (discoveryCache.size >= MAX_CACHED_DIRS) discoveryCache.clear()
+  discoveryCache.set(dir, plugins)
   return plugins
 }
+
+const discoveryCache = new Map<string, readonly ConfigPluginV1.Spec[]>()
+const MAX_CACHED_DIRS = 64
 
 export function pluginSpecifier(plugin: ConfigPluginV1.Spec): string {
   return Array.isArray(plugin) ? plugin[0] : plugin

@@ -237,8 +237,47 @@ describe("SessionRunCoordinator", () => {
         yield* Deferred.await(interrupted)
 
         const exit = yield* Fiber.await(resumed)
-        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
+        // A user-initiated stop is scoped to the entry: the `run` joiner
+        // observes a successful (partial) end instead of inheriting the
+        // interrupt, so e.g. a parent session awaiting a subagent is not
+        // aborted by a stop that targeted the subagent's drain.
+        expect(Exit.isSuccess(exit)).toBeTrue()
         expect(Array.from(yield* coordinator.active)).toEqual([])
+        expect(runs).toBe(1)
+      }),
+    ),
+  )
+
+  it.effect("interrupt during stop still fails joiners on a real failure", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        const failure = new Error("failed")
+        let runs = 0
+        const coordinator = yield* SessionRunCoordinator.make({
+          drain: () =>
+            Effect.sync(() => ++runs).pipe(
+              Effect.andThen(Deferred.succeed(started, undefined)),
+              // Uninterruptible so the stop cannot kill the fiber before the
+              // real failure below is produced — deterministic ordering.
+              Effect.andThen(Effect.uninterruptible(Deferred.await(gate).pipe(Effect.andThen(Effect.fail(failure))))),
+            ),
+        })
+
+        const resumed = yield* coordinator.run("session").pipe(Effect.forkChild)
+        yield* Deferred.await(started)
+        yield* coordinator.interrupt("session")
+
+        // The drain is parked inside the uninterruptible region; the stop is
+        // already registered (stopping=true). Releasing the gate lets the
+        // drain fail with a real cause.
+        yield* Deferred.succeed(gate, undefined)
+
+        const exit = yield* Fiber.await(resumed)
+        // Only pure interrupts are swallowed as scoped stops; a real failure
+        // under a stopping entry must still propagate to joiners.
+        expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBeTrue()
         expect(runs).toBe(1)
       }),
     ),

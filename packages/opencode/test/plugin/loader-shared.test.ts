@@ -793,6 +793,58 @@ describe("plugin.loader.shared", () => {
     ),
   )
 
+  it.live("loads valid plugin even when one export in the same module is not a function", () =>
+    withTmp(
+      async (dir) => {
+        const file = pathToFileURL(path.join(dir, "mixed.ts")).href
+        const mark = path.join(dir, "mixed.txt")
+        await Bun.write(
+          path.join(dir, "mixed.ts"),
+          [
+            "export const DEFAULTS = { mode: 'safe' }",
+            "export const assess = (x) => x",
+            "export * as helpers from './helpers.ts'",
+            "export const good = async () => {",
+            `  await Bun.write(${JSON.stringify(mark)}, "ok")`,
+            "  return {}",
+            "}",
+            "",
+          ].join("\n"),
+        )
+        await Bun.write(path.join(dir, "helpers.ts"), "export const x = 1\n")
+        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: [file] }, null, 2))
+
+        return { mark }
+      },
+      (tmp) =>
+        Effect.gen(function* () {
+          yield* load(tmp.path)
+          expect(yield* Effect.promise(() => Bun.file(tmp.extra.mark).text())).toBe("ok")
+        }),
+    ),
+  )
+
+  it.live("does not load whole module when it has no plugin exports at all", () =>
+    withTmp(
+      async (dir) => {
+        const file = pathToFileURL(path.join(dir, "dead.ts")).href
+        const mark = path.join(dir, "dead.txt")
+        await Bun.write(
+          path.join(dir, "dead.ts"),
+          ["export const DEFAULTS = { mode: 'safe' }", "export const VERSION = '1.0.0'", ""].join("\n"),
+        )
+        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: [file] }, null, 2))
+
+        return { mark }
+      },
+      (tmp) =>
+        Effect.gen(function* () {
+          yield* load(tmp.path)
+          expect(yield* Effect.promise(() => Bun.file(tmp.extra.mark).exists())).toBe(false)
+        }),
+    ),
+  )
+
   it.live("continues loading plugins when plugin import fails", () =>
     withTmp(
       async (dir) => {

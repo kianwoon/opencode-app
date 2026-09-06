@@ -460,6 +460,42 @@ noLLMServer.instance(
   { config: cfg },
 )
 
+it.instance(
+  "three rapid user prompts all complete without hitting the wake re-entry cap",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Rapid prompts",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      // Three prompt→answer cycles inside the 60s re-entry window. Each
+      // prompt() is a user-initiated run: it must reset the wake re-entry
+      // counter, not accumulate toward the cap.
+      for (const text of ["one", "two", "three"]) {
+        yield* llm.text(`answer ${text}`)
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          parts: [{ type: "text", text }],
+        })
+        const msgs = yield* MessageV2.filterCompactedEffect(session.id)
+        const last = msgs.findLast((msg) => msg.info.role === "assistant")
+        expect(last?.info.role).toBe("assistant")
+        if (last?.info.role !== "assistant") return
+        expect(last.info.error).toBeUndefined()
+        expect(
+          last.parts.some((part) => part.type === "text" && part.text === `answer ${text}`),
+        ).toBe(true)
+      }
+      expect(yield* llm.calls).toBe(3)
+    }),
+  { config: cfg },
+)
+
 noLLMServer.instance(
   "loop exits for a completed parent turn with nonmonotonic message IDs",
   () =>

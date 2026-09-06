@@ -132,7 +132,7 @@ function wrap<Parameters extends Schema.Decoder<unknown>, Result extends Metadat
             return result
           }
           const agent = yield* agents.get(ctx.agent)
-          const truncated = yield* truncate.output(result.output, {}, agent)
+          const truncated = yield* truncate.output(result.output, { dedupKey: `${ctx.sessionID}/${id}` }, agent)
           return {
             ...result,
             output: truncated.content,

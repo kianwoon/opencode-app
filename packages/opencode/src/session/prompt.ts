@@ -71,6 +71,29 @@ const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 // config previously ran unbounded (`Infinity`), so a model that keeps ending
 // turns with tool calls could loop for hours burning millions of tokens.
 const DEFAULT_MAX_STEPS = 1000
+// Subagents share the session loop with the main agent, so an unbounded step
+// budget for a subagent amplifies into the same runaway-token failure mode the
+// DEFAULT_MAX_STEPS wall guards against. Cap subagents at 100 unless their
+// explicit `steps` config is lower; the primary agent keeps the full budget.
+const SUBAGENT_MAX_STEPS = 100
+// Re-entry cap: `runLoop` is re-entered fresh (step=0) whenever a finished run
+// is re-driven — e.g. a subagent↔parent wake ping-pong. Each fresh entry
+// silently restarts the loop, so a pathological wake cycle burns tokens with
+// no failure ever surfacing. Past 3 wake re-drives within 60s per session, stop
+// re-driving and surface a user-visible error instead of silently restarting.
+// User-initiated prompts (`source: "prompt"`) bypass the cap by resetting the
+// window — only automatic wake re-drives accumulate. Entries are pruned when
+// their window expires (swept opportunistically once the map grows), so the
+// map never grows unbounded. NOTE: entries must NOT be deleted on session
+// idle — every re-drive passes through idle, so an idle hook would reset the
+// count each cycle and nullify the cap.
+// The per-iteration `!finished` grace backstop below is intentionally kept.
+const REENTRY_LIMIT = 3
+const REENTRY_WINDOW_MS = 60_000
+const reentries = new Map<SessionID, { count: number; windowStart: number }>()
+// The map only needs recent sessions; once it grows past this many entries,
+// drop entries whose window has expired to bound memory on long-lived servers.
+const REENTRY_PRUNE_MIN = 128
 // Grace steps granted after the soft max-steps wall for the model to produce
 // its text-only summary. If it still calls tools past the grace window, the
 // loop is force-broken with an error instead of continuing forever.
@@ -1461,7 +1484,7 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
+      return yield* loop({ sessionID: input.sessionID, source: "prompt" })
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
@@ -1472,8 +1495,10 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
-      function* (sessionID: SessionID) {
+    const runLoop: (sessionID: SessionID, source: "prompt" | "wake") => Effect.Effect<SessionV1.WithParts> = Effect.fn(
+      "SessionPrompt.run",
+    )(
+      function* (sessionID, source) {
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
@@ -1481,6 +1506,37 @@ const layer = Layer.effect(
         let repeatCount = 0
         let forceWrapUp = false
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+
+        // Re-entry cap (module-level state, survives within the process).
+        // Counts only wake-sourced FRESH entries (step=0); a user-initiated
+        // prompt resets the window so legitimate rapid prompting never hits
+        // the cap. Wake re-drives (e.g. a subagent↔parent ping-pong) still
+        // accumulate and surface a visible error past the limit.
+        if (step === 0) {
+          const now = Date.now()
+          const entry = reentries.get(sessionID)
+          if (source === "prompt") {
+            reentries.set(sessionID, { count: 0, windowStart: now })
+          } else if (entry && now - entry.windowStart < REENTRY_WINDOW_MS) {
+            entry.count++
+            if (entry.count >= REENTRY_LIMIT) {
+              const error = new NamedError.Unknown({
+                message: "loop re-entry cap hit, reporting to user",
+              })
+              yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+              yield* Effect.logWarning("loop re-entry cap hit", { "session.id": sessionID, reentries: entry.count })
+              return yield* lastAssistant(sessionID)
+            }
+          } else {
+            reentries.set(sessionID, { count: 1, windowStart: now })
+          }
+          // Opportunistic prune: drop expired windows once the map grows.
+          if (reentries.size > REENTRY_PRUNE_MIN) {
+            for (const [id, e] of reentries) {
+              if (now - e.windowStart >= REENTRY_WINDOW_MS) reentries.delete(id)
+            }
+          }
+        }
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
@@ -1645,7 +1701,27 @@ const layer = Layer.effect(
             yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
             throw error
           }
-          const maxSteps = agent.steps ?? DEFAULT_MAX_STEPS
+          const maxSteps =
+            agent.mode === "subagent" || agent.mode === "all"
+              ? // Subagents (mode "subagent") and agents invoked as subagents
+                // (mode "all" reached through the task tool, i.e. running in a
+                // session with a parentID) share the session loop with the main
+                // agent, so the same runaway-token cap applies. Explicit `steps`
+                // config is honored only when it is lower than the cap.
+                Math.min(agent.steps ?? SUBAGENT_MAX_STEPS, SUBAGENT_MAX_STEPS)
+              : (agent.steps ?? DEFAULT_MAX_STEPS)
+          if (
+            (agent.mode === "subagent" || agent.mode === "all") &&
+            (agent.steps ?? SUBAGENT_MAX_STEPS) > SUBAGENT_MAX_STEPS
+          ) {
+            yield* Effect.logWarning("subagent steps clamped", {
+              "session.id": sessionID,
+              agent: agent.name,
+              mode: agent.mode,
+              configured: agent.steps,
+              clampedTo: SUBAGENT_MAX_STEPS,
+            })
+          }
           const isLastStep = step >= maxSteps
           const isPastGrace = step >= maxSteps + MAX_STEPS_GRACE
           msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
@@ -1948,7 +2024,11 @@ const layer = Layer.effect(
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      return yield* state.ensureRunning(
+        input.sessionID,
+        lastAssistant(input.sessionID),
+        runLoop(input.sessionID, input.source ?? "wake"),
+      )
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
@@ -2128,6 +2208,11 @@ export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
+  // "prompt" = user-initiated (bypasses the wake re-entry cap by resetting it);
+  // "prompt()" passes it explicitly. Unset/"wake" = automatic re-drive
+  // (counted toward the cap) — the HTTP loop path is a re-drive, not a fresh
+  // user prompt, so a bare decoded `{ sessionID }` payload keeps counting.
+  source: Schema.optional(Schema.Literals(["prompt", "wake"])),
 }) {}
 
 export const ShellInput = Schema.Struct({

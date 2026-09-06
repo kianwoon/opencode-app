@@ -1,6 +1,6 @@
 export * as SessionRunCoordinator from "./run-coordinator"
 
-import { Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
 
 /** Serializes execution for each key while allowing different keys to run concurrently. */
 export interface Coordinator<Key, E> {
@@ -61,14 +61,28 @@ export const make = <Key, E>(options: {
         active.set(key, successor)
         start(key, successor, false, true)
       }
-      Deferred.doneUnsafe(entry.done, exit)
+      // A user-initiated stop must stay scoped to this entry: joiners of
+      // `run` (e.g. a parent session awaiting a subagent) observe a
+      // successful (partial) end instead of inheriting this interrupt,
+      // which would abort the parent's own stream. The drain is partial —
+      // its interrupted assistant is finalized upstream as an abort, so no
+      // joiner re-drives it as a fresh step-0 run; durable pending input is
+      // still picked up by an explicit later wake, never auto-retried here.
+      // Only a pure interrupt counts as an abort; a real failure (LLM error,
+      // defect) that happens to race the stop must propagate to joiners
+      // (precedent: runner.ts `complete`, execution/local.ts logging guard).
+      const aborted = Exit.isFailure(exit) && entry.stopping && Cause.hasInterruptsOnly(exit.cause)
+      Deferred.doneUnsafe(entry.done, aborted ? Exit.succeed(undefined) : exit)
     }
 
     const run = (key: Key): Effect.Effect<void, E> =>
       Effect.uninterruptibleMask((restore) => {
         const entry = active.get(key)
         if (entry !== undefined) {
-          if (entry.stopping) return restore(Deferred.await(entry.done).pipe(Effect.andThen(run(key))))
+          // While a stop is in flight, joiners (e.g. a parent session
+          // awaiting a subagent run) observe the partial end instead of
+          // queueing a fresh re-run — an aborted drain must never come back
+          // as a new step-0 execution. Later explicit runs start a new entry.
           return restore(Deferred.await(entry.done))
         }
 

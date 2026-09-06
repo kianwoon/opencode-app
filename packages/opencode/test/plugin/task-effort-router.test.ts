@@ -138,7 +138,7 @@ describe("task effort router", () => {
     expect(output.options).toEqual({})
   })
 
-  test("assesses complex tasks to a medium baseline", async () => {
+  test("keyword-rich short prompts get no lexical boost (minimal baseline → cheapest tier)", async () => {
     await hooks["chat.message"]?.(
       { sessionID: "ses_test" },
       {
@@ -154,12 +154,14 @@ describe("task effort router", () => {
         ] as never,
       },
     )
+    // The assessor is shape-only: 12 words with zero structural signal stays
+    // minimal even though the words used to match complexity keywords.
     const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
-    expect(output.options).toEqual({ reasoningEffort: "medium" })
+    expect(output.options).toEqual({ reasoningEffort: "low" })
   })
 
-  test("assesses complex + risky tasks to a high baseline and pushes a risk notice", async () => {
+  test("a mutating tool execution pushes a risk notice regardless of task text", async () => {
     await hooks["chat.message"]?.(
       { sessionID: "ses_test" },
       {
@@ -175,9 +177,15 @@ describe("task effort router", () => {
         ] as never,
       },
     )
+    // Risk comes from behavior, never words: only executing a configured
+    // risky tool marks the task risky.
+    await hooks["tool.execute.after"]?.(
+      { sessionID: "ses_test", tool: "edit", callID: "call_1", args: {} } as never,
+      { title: "edit", output: "ok", metadata: {} } as never,
+    )
     const output = { temperature: 0.7, topP: 1, topK: 0, maxOutputTokens: undefined, options: {} }
     await hooks["chat.params"]?.(chatParamsInput() as never, output as never)
-    expect(output.options).toEqual({ reasoningEffort: "high" })
+    expect(output.options).toEqual({ reasoningEffort: "low" })
 
     const system = { system: ["base"] }
     await hooks["experimental.chat.system.transform"]?.(
@@ -211,7 +219,7 @@ describe("task effort router", () => {
     expect(output.options).toEqual({ reasoningEffort: "low" })
   })
 
-  test("request_effort above an assessed baseline still escalates", async () => {
+  test("request_effort above a structurally-assessed baseline still escalates", async () => {
     await hooks["chat.message"]?.(
       { sessionID: "ses_test" },
       {
@@ -352,6 +360,15 @@ describe("task effort router", () => {
   })
 
   test("a pin is a floor: complex task raises above a pinned low on glm-shaped models", async () => {
+    // Structurally medium: >=3 frame-shaped lines (separator + digit) trigger
+    // the stack-trace baseline — the shape-only assessor's medium signal.
+    const stackText = [
+      "The deploy is broken after the migration, see:",
+      "at Object.run (/app/src/deploy.ts:41:9)",
+      "at File \"/app/src/migrate.ts\", line 88",
+      "at async /app/src/pipeline.ts:210:3",
+      "Fix the whole flow.",
+    ].join("\n")
     await hooks["chat.message"]?.(
       { sessionID: "ses_test" },
       {
@@ -362,7 +379,7 @@ describe("task effort router", () => {
             id: "p1",
             sessionID: "ses_test",
             messageID: "msg_1",
-            text: "Refactor the provider module and redesign the session loop across the codebase",
+            text: stackText,
           },
         ] as never,
       },
@@ -596,7 +613,8 @@ describe("task effort router", () => {
         ] as never,
       },
     )
-    // Different text = a new task boundary even within the window.
+    // Different text = a new task boundary even within the window. The new
+    // message carries structural signal (stack-trace frames) → medium baseline.
     await hooks["chat.message"]?.(
       { sessionID: "ses_new" },
       {
@@ -607,7 +625,12 @@ describe("task effort router", () => {
             id: "p2",
             sessionID: "ses_new",
             messageID: "msg_2",
-            text: "Refactor the provider module and redesign the session loop across the codebase",
+            text: [
+              "Refactor broke it, trace:",
+              "at Object.run (/app/src/deploy.ts:41:9)",
+              "at File \"/app/src/migrate.ts\", line 88",
+              "at async /app/src/pipeline.ts:210:3",
+            ].join("\n"),
           },
         ] as never,
       },

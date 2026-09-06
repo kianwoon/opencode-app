@@ -14,6 +14,11 @@ import { Service } from "./bootstrap-service"
 export { Service } from "./bootstrap-service"
 export type { Interface } from "./bootstrap-service"
 
+// Process-level set of directories already announced at info level. Repeat
+// bootstraps of the same dir (reload, reopen, ×N project dirs sharing it)
+// log at debug instead — one info line per directory per process run.
+const bootstrappedDirs = new Set<string>()
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -31,7 +36,16 @@ const layer = Layer.effect(
 
     const run = Effect.gen(function* () {
       const ctx = yield* InstanceState.context
-      yield* Effect.logInfo("bootstrapping", { directory: ctx.directory })
+      // First bootstrap of a directory in this process logs at info; repeat
+      // bootstraps (reload/reopen of the same dir) collapse to debug so ×N
+      // project dirs don't each emit an identical "bootstrapping" line.
+      const seen = bootstrappedDirs.has(ctx.directory)
+      if (seen) {
+        yield* Effect.logDebug("bootstrapping (repeat)", { directory: ctx.directory })
+      } else {
+        bootstrappedDirs.add(ctx.directory)
+        yield* Effect.logInfo("bootstrapping", { directory: ctx.directory })
+      }
       // everything depends on config so eager load it for nice traces
       yield* config.get()
       // Plugin can mutate config so it has to be initialized before anything else.
