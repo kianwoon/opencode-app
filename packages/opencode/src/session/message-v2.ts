@@ -49,10 +49,21 @@ interface FetchDecompressionError extends Error {
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:"
 export { isMedia }
 
+/**
+ * Cap on each completed tool result's text replayed to the model at history
+ * lowering. ~8000 chars (≈2k tokens) per result keeps N accumulated `read`
+ * results within a stable provider-cacheable prefix (openrouter sawtooth miss
+ * at 30-76k input). Only the model-visible replay is capped; the saved preview
+ * (Truncate.output) and durable output paths are untouched. Pass
+ * `toolOutputMaxChars: 0` to disable the cap for a specific call.
+ */
+export const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 8000
+
 function truncateToolOutput(text: string, maxChars?: number) {
-  if (!maxChars || text.length <= maxChars) return text
-  const omitted = text.length - maxChars
-  return `${text.slice(0, maxChars)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
+  const cap = maxChars ?? DEFAULT_TOOL_OUTPUT_MAX_CHARS
+  if (cap <= 0 || text.length <= cap) return text
+  const omitted = text.length - cap
+  return `${text.slice(0, cap)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
 }
 
 export const Event = {

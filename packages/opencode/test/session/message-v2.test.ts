@@ -822,6 +822,51 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("caps replayed tool output at the default when no option is passed", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+    const longOutput = "x".repeat(10_000)
+
+    const input: SessionV1.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "run tool",
+          },
+        ] as SessionV1.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "ls" },
+              output: longOutput,
+              title: "Shell",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as SessionV1.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const toolResult = result.find((msg) => msg.role === "tool")
+    const value = (toolResult?.content as Array<{ type: string; output?: { type: string; value?: string } }>).find(
+      (part) => part.type === "tool-result",
+    )?.output?.value
+    expect(value).toBe("x".repeat(8000) + "\n[Tool output truncated for compaction: omitted 2000 chars]")
+  })
+
   test("converts assistant tool error into error-text tool result", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
