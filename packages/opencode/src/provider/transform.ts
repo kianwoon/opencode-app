@@ -1369,7 +1369,8 @@ export function options(input: {
       if (Array.isArray(picked.quantizations))
         result2.quantizations = picked.quantizations.filter((item: unknown) => typeof item === "string")
       if (isPlainObject(picked.max_price)) result2.max_price = picked.max_price
-      if (Object.keys(result2).length > 0) result["provider"] = { ...result["provider"], ...result2 }
+      if (Object.keys(result2).length > 0 || ["only", "order", "data_collection", "ignore"].some((k) => Object.hasOwn(picked, k)))
+        result["provider"] = { ...result["provider"], ...result2 }
     }
   }
 
@@ -1575,6 +1576,49 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
     }
 
     return result
+  }
+
+  // Per-model OpenRouter routing preference. Config: model.options.routing = { only, order, ... }
+  // or the raw shape model.options.provider = { only, ... }. `routing` overlays `provider`.
+  // Translate into providerOptions.openrouter.provider (what @openrouter/ai-sdk-provider reads);
+  // unknown existing provider subkeys are preserved and the routing key is dropped.
+  if (model.api.npm === "@openrouter/ai-sdk-provider" && isPlainObject(normalized)) {
+    const routing = normalized.routing
+    const raw = normalized.provider
+    if (isPlainObject(routing) || isPlainObject(raw)) {
+      const picked: Record<string, any> = {
+        ...(isPlainObject(raw) ? raw : {}),
+        ...(isPlainObject(routing) ? routing : {}),
+      }
+      const result2: Record<string, any> = {}
+      if (picked.sort === "price" || picked.sort === "throughput" || picked.sort === "latency")
+        result2.sort = picked.sort
+      const only = asStringArray(picked.only)
+      if (only) result2.only = only
+      const order = asStringArray(picked.order)
+      if (order) result2.order = order
+      if (typeof picked.allow_fallbacks === "boolean") result2.allow_fallbacks = picked.allow_fallbacks
+      if (typeof picked.require_parameters === "boolean") result2.require_parameters = picked.require_parameters
+      if (typeof picked.data_collection === "string" && picked.data_collection.length > 0)
+        result2.data_collection = picked.data_collection
+      if (typeof picked.zdr === "boolean") result2.zdr = picked.zdr
+      if (typeof picked.ignore === "string" && picked.ignore.length > 0) result2.ignore = picked.ignore
+      if (Array.isArray(picked.quantizations))
+        result2.quantizations = picked.quantizations.filter((item: unknown) => typeof item === "string")
+      if (isPlainObject(picked.max_price)) result2.max_price = picked.max_price
+      const { routing: _routing, ...rest } = normalized
+      const existing = isPlainObject(rest.provider) ? rest.provider : {}
+      const next = { ...existing, ...result2 }
+      // Presence-wins: a key explicitly set to an empty value ("only: []", "data_collection: ''")
+      // means "clear", so delete it from the output instead of preserving the existing value.
+      // Absent keys still preserve existing.
+      for (const key of ["only", "order", "data_collection", "ignore"] as const) {
+        if (Object.hasOwn(picked, key) && !(key in result2)) delete next[key]
+      }
+      // Drop the raw untranslated provider object from rest; re-add the translated one.
+      const { provider: _provider, ...rest2 } = rest
+      return { openrouter: { ...rest2, ...(Object.keys(next).length > 0 ? { provider: next } : {}) } }
+    }
   }
 
   // AI SDK packages that resolve providerOptionsName by splitting the
