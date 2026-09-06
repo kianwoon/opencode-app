@@ -1577,6 +1577,55 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
     return result
   }
 
+  // OpenRouter per-model routing. Model options may carry `routing` (strategy
+  // only) and/or `provider` (pin: only/order) keys. `routing` overlays
+  // `provider` so routing.* wins on conflict. The raw `routing` key is never
+  // forwarded to the SDK; only the whitelisted `provider` shape is attached.
+  if (model.api.npm === "@openrouter/ai-sdk-provider") {
+    const routing = normalized.routing
+    const raw = normalized.provider
+    const result: Record<string, any> = { ...normalized }
+    delete result.routing
+    if (isPlainObject(routing) || isPlainObject(raw)) {
+      const picked: Record<string, any> = {
+        ...(isPlainObject(raw) ? raw : {}),
+        ...(isPlainObject(routing) ? routing : {}),
+      }
+      // Start from existing provider subkeys so unknown keys survive; every
+      // whitelisted key present in `picked` overrides (or, when invalid, clears)
+      // that value so a model can drop a global pin.
+      const provider: Record<string, any> = { ...(isPlainObject(result.provider) ? result.provider : {}) }
+      if (picked.sort === "price" || picked.sort === "throughput" || picked.sort === "latency")
+        provider.sort = picked.sort
+      else if (Object.hasOwn(picked, "sort")) delete provider.sort
+      const only = asSlugArray(picked.only)
+      if (only) provider.only = only
+      else if (Object.hasOwn(picked, "only")) delete provider.only
+      const order = asSlugArray(picked.order)
+      if (order) provider.order = order
+      else if (Object.hasOwn(picked, "order")) delete provider.order
+      if (typeof picked.allow_fallbacks === "boolean") provider.allow_fallbacks = picked.allow_fallbacks
+      else if (Object.hasOwn(picked, "allow_fallbacks")) delete provider.allow_fallbacks
+      if (typeof picked.require_parameters === "boolean") provider.require_parameters = picked.require_parameters
+      else if (Object.hasOwn(picked, "require_parameters")) delete provider.require_parameters
+      if (typeof picked.data_collection === "string" && picked.data_collection.length > 0)
+        provider.data_collection = picked.data_collection
+      else if (Object.hasOwn(picked, "data_collection")) delete provider.data_collection
+      if (typeof picked.zdr === "boolean") provider.zdr = picked.zdr
+      else if (Object.hasOwn(picked, "zdr")) delete provider.zdr
+      if (typeof picked.ignore === "string" && picked.ignore.length > 0) provider.ignore = picked.ignore
+      else if (Object.hasOwn(picked, "ignore")) delete provider.ignore
+      if (Array.isArray(picked.quantizations))
+        provider.quantizations = picked.quantizations.filter((item: unknown) => typeof item === "string")
+      else if (Object.hasOwn(picked, "quantizations")) delete provider.quantizations
+      if (isPlainObject(picked.max_price)) provider.max_price = picked.max_price
+      else if (Object.hasOwn(picked, "max_price")) delete provider.max_price
+      if (Object.keys(provider).length > 0) result.provider = provider
+      else delete result.provider
+    }
+    return { openrouter: result }
+  }
+
   // AI SDK packages that resolve providerOptionsName by splitting the
   // provider name on "." (e.g. "wafer.ai" -> "wafer") need the same
   // logic here so the key we write matches the key they read.
@@ -1612,6 +1661,16 @@ function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(list)) return undefined
   const result = list.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
   return result.length > 0 ? result.map((item) => item.trim()) : undefined
+}
+
+// Provider slugs are bare ("streamlake"); any entry containing "/" is a model
+// ID (e.g. "streamlake/deepseek-v4-flash-0731") and must be dropped so the pin
+// falls back to the routing strategy instead of being sent to OpenRouter.
+function asSlugArray(value: unknown): string[] | undefined {
+  const list = asStringArray(value)
+  if (!list) return undefined
+  const slugs = list.filter((item) => !item.includes("/"))
+  return slugs.length > 0 ? slugs : undefined
 }
 
 // Mirrors Codex's Rust JSON schema compatibility lowering for OpenAI tool schemas.

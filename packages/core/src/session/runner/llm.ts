@@ -117,9 +117,22 @@ const openrouterRouting = (options: unknown): Record<string, unknown> => {
   if (!isRecordValue(routing) && !isRecordValue(raw)) return {}
   // `routing` overlays `provider` so routing.* wins on conflict.
   const picked = { ...(isRecordValue(raw) ? raw : {}), ...(isRecordValue(routing) ? routing : {}) }
-  return Object.fromEntries(
-    openrouterRoutingKeys.filter((key) => picked[key] !== undefined).map((key) => [key, picked[key]]),
-  )
+  const filtered: Record<string, unknown> = {}
+  for (const key of openrouterRoutingKeys) {
+    const value = picked[key]
+    if (value === undefined) continue
+    // Provider slugs are bare ("streamlake"); entries containing "/" are model
+    // IDs and are dropped so a bad pin falls back to the routing strategy.
+    if ((key === "only" || key === "order") && Array.isArray(value)) {
+      const slugs = value.filter(
+        (item): item is string => typeof item === "string" && item.length > 0 && !item.includes("/"),
+      )
+      if (slugs.length > 0) filtered[key] = slugs
+      continue
+    }
+    filtered[key] = value
+  }
+  return filtered
 }
 
 const layer = Layer.effect(

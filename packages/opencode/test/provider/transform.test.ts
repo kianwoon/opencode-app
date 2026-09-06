@@ -433,6 +433,105 @@ describe("ProviderTransform.options - openrouter routing", () => {
   })
 })
 
+describe("ProviderTransform.providerOptions - openrouter routing", () => {
+  const sessionID = "test-session-123"
+
+  const model = {
+    id: "meta-llama/llama-3.3-70b-instruct",
+    providerID: "openrouter",
+    api: {
+      id: "meta-llama/llama-3.3-70b-instruct",
+      url: "https://openrouter.ai/api/v1",
+      npm: "@openrouter/ai-sdk-provider",
+    },
+    name: "Llama 3.3 70B Instruct",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+  } as unknown as Parameters<typeof ProviderTransform.providerOptions>[0]
+
+  const pinOptions = (only: string[]) =>
+    ProviderTransform.options({
+      model: model as unknown as Parameters<typeof ProviderTransform.options>[0]["model"],
+      sessionID,
+      providerOptions: { routing: { only } },
+    })
+
+  test("model routing.only reaches providerOptions.provider.only", () => {
+    const out = ProviderTransform.providerOptions(model, { routing: { only: ["streamlake"], allow_fallbacks: false } })
+    expect(out.openrouter.provider).toEqual({ only: ["streamlake"], allow_fallbacks: false })
+  })
+
+  test("model routing.order reaches providerOptions.provider.order", () => {
+    const out = ProviderTransform.providerOptions(model, { routing: { order: ["streamlake", "together"] } })
+    expect(out.openrouter.provider).toEqual({ order: ["streamlake", "together"] })
+  })
+
+  test("routing overlays provider at model level", () => {
+    const out = ProviderTransform.providerOptions(model, {
+      provider: { only: ["streamlake"], sort: "bogus" },
+      routing: { allow_fallbacks: false },
+    })
+    expect(out.openrouter.provider).toEqual({ only: ["streamlake"], allow_fallbacks: false })
+  })
+
+  test("invalid sort is dropped", () => {
+    const out = ProviderTransform.providerOptions(model, { routing: { sort: "cheapest-gpu" } })
+    expect(out.openrouter.routing).toBeUndefined()
+    expect(out.openrouter.provider).toBeUndefined()
+  })
+
+  test("routing key is absent from output", () => {
+    const out = ProviderTransform.providerOptions(model, { routing: { only: ["streamlake"] } })
+    expect(out.openrouter.routing).toBeUndefined()
+  })
+
+  test("entries containing / are dropped from only/order", () => {
+    const out = ProviderTransform.providerOptions(model, { routing: { only: ["streamlake/deepseek-x", "deepinfra"] } })
+    expect(out.openrouter.provider).toEqual({ only: ["deepinfra"] })
+  })
+
+  test("all-invalid only drops the key", () => {
+    const out = ProviderTransform.providerOptions(model, { routing: { only: ["streamlake/deepseek-x"] } })
+    expect(out.openrouter.provider).toBeUndefined()
+  })
+
+  test("empty only [] clears a base pin", () => {
+    const merged = mergeDeep(pinOptions(["streamlake"]), { routing: { only: [] } }) as Record<string, any>
+    const out = ProviderTransform.providerOptions(model, merged)
+    expect(out.openrouter.only).toBeUndefined()
+    expect(out.openrouter.provider).toBeUndefined()
+  })
+
+  test("absent keys preserve the base pin", () => {
+    const out = ProviderTransform.providerOptions(model, pinOptions(["streamlake"]))
+    expect(out.openrouter.provider).toEqual({ only: ["streamlake"] })
+  })
+
+  test("end-to-end p1 to p2 override", () => {
+    const merged = mergeDeep(pinOptions(["streamlake"]), { routing: { only: ["deepinfra"] } }) as Record<string, any>
+    const out = ProviderTransform.providerOptions(model, merged)
+    expect(out.openrouter.provider).toEqual({ only: ["deepinfra"] })
+  })
+
+  test("no-pin model keeps global sort", () => {
+    const base = ProviderTransform.options({
+      model: model as unknown as Parameters<typeof ProviderTransform.options>[0]["model"],
+      sessionID,
+      providerOptions: { routing: { sort: "price" } },
+    })
+    const out = ProviderTransform.providerOptions(model, base)
+    expect(out.openrouter.provider).toEqual({ sort: "price" })
+    expect(out.openrouter.provider.only).toBeUndefined()
+  })
+})
+
 describe("ProviderTransform.options - zai/zhipuai thinking", () => {
   const sessionID = "test-session-123"
 
