@@ -1173,6 +1173,8 @@ export const dict = {
   "settings.providers.routing.latency": "Vonesa më e ulët",
   "settings.models.title": "Modelet",
   "settings.models.description": "Cilësimet e modelit do të konfigurohen këtu.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agjentët",
   "settings.agents.description": "Cilësimet e agjentit do të konfigurohen këtu.",
   "settings.commands.title": "Komandat",

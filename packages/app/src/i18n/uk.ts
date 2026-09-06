@@ -1271,6 +1271,8 @@ export const dict = {
   "settings.providers.routing.latency": "Найменша затримка",
   "settings.models.title": "Моделі",
   "settings.models.description": "Налаштування моделей будуть доступні тут.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Агенти",
   "settings.agents.description": "Налаштування агентів будуть доступні тут.",
   "settings.commands.title": "Команди",

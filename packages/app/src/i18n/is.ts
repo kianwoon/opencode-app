@@ -1167,6 +1167,8 @@ export const dict = {
   "settings.providers.routing.latency": "Minnst biðtími",
   "settings.models.title": "Fyrirmyndir",
   "settings.models.description": "Líkanstillingar verða stillanlegar hér.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Umboðsmenn",
   "settings.agents.description": "Umboðsmannsstillingar verða stillanlegar hér.",
   "settings.commands.title": "Skipanir",

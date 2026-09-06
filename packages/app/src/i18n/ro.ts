@@ -1172,6 +1172,8 @@ export const dict = {
   "settings.providers.routing.latency": "Cea mai mică latență",
   "settings.models.title": "Modele",
   "settings.models.description": "Setările modelelor vor putea fi configurate aici.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agenți",
   "settings.agents.description": "Setările agenților vor putea fi configurate aici.",
   "settings.commands.title": "Comenzi",

@@ -1140,6 +1140,8 @@ export const dict = {
   "settings.providers.routing.latency": "ዝቅተኛ ምላሽ ጊዜ",
   "settings.models.title": "ሞዴሎች",
   "settings.models.description": "የሞዴል ቅንብሮች እዚህ ሊዋቀሩ ይችላሉ።",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "ወኪሎች",
   "settings.agents.description": "የወኪል ቅንብሮች እዚህ ይዋቀራሉ።",
   "settings.commands.title": "ትዕዛዞች",

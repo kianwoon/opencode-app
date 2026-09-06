@@ -1175,6 +1175,8 @@ export const dict = {
   "settings.providers.routing.latency": "Ամենացածր ուշացում",
   "settings.models.title": "Մոդելներ",
   "settings.models.description": "Մոդելի կարգավորումները կարգավորելի կլինեն այստեղ։",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Գործակալներ",
   "settings.agents.description": "Գործակալի կարգավորումները կկարգավորվեն այստեղ։",
   "settings.commands.title": "Հրամաններ",

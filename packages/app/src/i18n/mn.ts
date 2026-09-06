@@ -1178,6 +1178,8 @@ export const dict = {
   "settings.providers.routing.latency": "Хамгийн бага саатал",
   "settings.models.title": "Загварууд",
   "settings.models.description": "Загварын тохиргоог энд хийх боломжтой.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Агентууд",
   "settings.agents.description": "Агентын тохиргоог энд хийх боломжтой.",
   "settings.commands.title": "Тушаалууд",

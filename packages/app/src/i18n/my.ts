@@ -1185,6 +1185,8 @@ export const dict = {
   "settings.providers.routing.latency": "အနိမ့်ဆုံး နှောင့်နှေးမှု",
   "settings.models.title": "မော်ဒယ်များ",
   "settings.models.description": "မော်ဒယ်လ်ဆက်တင်များကို ဤနေရာတွင် စီစဉ်သတ်မှတ်နိုင်မည်ဖြစ်သည်။",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "အေးဂျင့်များ",
   "settings.agents.description": "အေးဂျင့်ဆက်တင်များကို ဤနေရာတွင် ပြင်ဆင်သတ်မှတ်နိုင်ပါမည်။",
   "settings.commands.title": "အမိန့်များ",

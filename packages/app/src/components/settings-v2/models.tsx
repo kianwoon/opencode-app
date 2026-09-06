@@ -9,8 +9,10 @@ import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 import { useServerSDK } from "@/context/server-sdk"
+import { useServerSync } from "@/context/server-sync"
 import { popularProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
@@ -23,10 +25,15 @@ export const SettingsModelsV2: Component = () => {
   const language = useLanguage()
   const models = useModels()
   const serverSdk = useServerSDK()
+  const serverSync = useServerSync()
   const [store, setStore] = persisted(
     Persist.serverGlobal(serverSdk().scope, "settings-v2.models.providers"),
     createStore({ collapsed: {} as Record<string, boolean> }),
   )
+  // Per-row backing-provider pin drafts, keyed by model id. Kept transient
+  // (not persisted) so the field reflects the server config once a draft is
+  // committed or the row is remounted.
+  const [draftStore, setDraft] = createStore({ drafts: {} as Record<string, string | undefined> })
 
   const providerModels = (providerID: string) => models.list().filter((x) => x.provider.id === providerID)
   const providerAnyVisible = (providerID: string) =>
@@ -174,9 +181,83 @@ export const SettingsModelsV2: Component = () => {
                         <For each={group.items}>
                           {(item) => {
                             const key = { providerID: item.provider.id, modelID: item.id }
+                            // Only OpenRouter models can pin a backing provider; the
+                            // global routing strategy (settings.providers.routing) is
+                            // the fallback when no pin is set.
+                            const isOpenRouter = group.category === "openrouter"
+                            const pinnedOnly = () => {
+                              const routing = serverSync().data.config.provider?.openrouter?.models?.[item.id]
+                                ?.options?.routing as { only?: unknown } | undefined
+                              return Array.isArray(routing?.only) ? (routing.only as string[]).join(", ") : ""
+                            }
+                            const pinValue = () => draftStore.drafts[item.id] ?? pinnedOnly()
+                            // Entries containing "/" are dropped server-side; flag them
+                            // inline while typing so the user knows they won't apply.
+                            const pinInvalid = () =>
+                              pinValue()
+                                .split(",")
+                                .some((slug) => {
+                                  const trimmed = slug.trim()
+                                  return trimmed.length > 0 && trimmed.includes("/")
+                                })
+                            const commitPin = () => {
+                              const draft = draftStore.drafts[item.id]
+                              if (draft === undefined) return
+                              setDraft("drafts", item.id, undefined)
+                              const entries = draft
+                                .split(",")
+                                .map((slug) => slug.trim())
+                                .filter((slug) => slug.length > 0)
+                              const only = entries.filter((slug) => !slug.includes("/"))
+                              const dropped = entries.length !== only.length
+                              void serverSync()
+                                .updateConfig({
+                                  provider: {
+                                    openrouter: {
+                                      models: {
+                                        [item.id]: { options: { routing: { only } } },
+                                      },
+                                    },
+                                  },
+                                })
+                                .then(() => {
+                                  if (dropped) {
+                                    showToast({ title: language.t("settings.models.routing.pin.invalid") })
+                                  }
+                                })
+                                .catch((err: unknown) => {
+                                  const message = err instanceof Error ? err.message : String(err)
+                                  showToast({ title: language.t("common.requestFailed"), description: message })
+                                })
+                            }
                             return (
-                              <SettingsRowV2 title={item.name} description="">
+                              <SettingsRowV2
+                                title={item.name}
+                                description={
+                                  isOpenRouter && pinInvalid()
+                                    ? language.t("settings.models.routing.pin.invalid")
+                                    : ""
+                                }
+                              >
                                 <div>
+                                  <Show when={isOpenRouter}>
+                                    <TextInputV2
+                                      type="text"
+                                      appearance="base"
+                                      value={pinValue()}
+                                      onInput={(event) => setDraft("drafts", item.id, event.currentTarget.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") commitPin()
+                                      }}
+                                      onBlur={() => commitPin()}
+                                      placeholder={language.t("settings.models.routing.pin.placeholder")}
+                                      invalid={pinInvalid()}
+                                      spellcheck={false}
+                                      autocomplete="off"
+                                      autocapitalize="off"
+                                      aria-label={language.t("settings.models.routing.pin.placeholder")}
+                                    />
+                                  </Show>
                                   <Switch
                                     checked={models.visible(key)}
                                     onChange={(checked) => {

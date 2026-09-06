@@ -1166,6 +1166,8 @@ export const dict = {
   "settings.providers.routing.latency": "ყველაზე დაბალი დაყოვნება",
   "settings.models.title": "მოდელები",
   "settings.models.description": "მოდელის პარამეტრების კონფიგურაცია იქნება აქ.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "აგენტები",
   "settings.agents.description": "აგენტის პარამეტრების კონფიგურაცია იქნება აქ.",
   "settings.commands.title": "ბრძანებები",

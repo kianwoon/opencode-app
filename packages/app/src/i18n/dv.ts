@@ -1186,6 +1186,8 @@ export const dict = {
   "settings.providers.routing.latency": "އެންމެ ދަށް ލެޓެންސީ",
   "settings.models.title": "މޮޑެލްތަކެވެ",
   "settings.models.description": "މޮޑެލް ސެޓިންގސް މިތަނުގައި ކޮންފިގްރޭޓް ކުރެވޭނެއެވެ.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "އޭޖެންޓުންނެވެ",
   "settings.agents.description": "އޭޖެންޓް ސެޓިންގސް މިތަނުގައި ކޮންފިގްރޭޓް ކުރެވޭނެއެވެ.",
   "settings.commands.title": "އަމުރުތަކެވެ",

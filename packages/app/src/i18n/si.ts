@@ -1163,6 +1163,8 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.latency": "අඩුම ප්‍රමාදය",
   "settings.models.title": "ආකෘති",
   "settings.models.description": "ආදර්ශ සැකසුම් මෙහි වින්‍යාසගත වනු ඇත.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "නියෝජිතයන්",
   "settings.agents.description": "නියෝජිත සැකසුම් මෙහි වින්‍යාස කළ හැක.",
   "settings.commands.title": "විධාන",

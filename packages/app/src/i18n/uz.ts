@@ -1180,6 +1180,8 @@ export const dict = {
   "settings.providers.routing.latency": "Eng past kechikish",
   "settings.models.title": "Modellar",
   "settings.models.description": "Model sozlamalari bu erda sozlanishi mumkin.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agentlar",
   "settings.agents.description": "Bu yerda agent sozlamalari sozlanishi mumkin.",
   "settings.commands.title": "Buyruqlar",

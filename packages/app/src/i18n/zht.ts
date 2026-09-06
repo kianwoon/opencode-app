@@ -1130,6 +1130,8 @@ export const dict = {
   "settings.providers.routing.latency": "最低延遲",
   "settings.models.title": "模型",
   "settings.models.description": "模型設定將在此處可設定。",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "代理程式",
   "settings.agents.description": "代理程式設定將在此處可設定。",
   "settings.commands.title": "命令",

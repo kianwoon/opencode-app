@@ -1181,6 +1181,8 @@ export const dict = {
   "settings.providers.routing.latency": "Mažiausia delsa",
   "settings.models.title": "Modeliai",
   "settings.models.description": "Čia bus konfigūruojami modelio nustatymai.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agentai",
   "settings.agents.description": "Agento nustatymus bus galima konfigūruoti čia.",
   "settings.commands.title": "Komandos",

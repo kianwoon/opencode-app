@@ -1173,6 +1173,8 @@ export const dict = {
   "settings.providers.routing.latency": "Najnižja zakasnitev",
   "settings.models.title": "Modeli",
   "settings.models.description": "Tukaj je mogoče konfigurirati nastavitve modela.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agenti",
   "settings.agents.description": "Tukaj je mogoče konfigurirati nastavitve agenta.",
   "settings.commands.title": "Ukazi",

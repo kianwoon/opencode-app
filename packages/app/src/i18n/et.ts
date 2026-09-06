@@ -1161,6 +1161,8 @@ export const dict = {
   "settings.providers.routing.latency": "Madalaim latentsus",
   "settings.models.title": "Mudelid",
   "settings.models.description": "Mudeli sätteid saab siin konfigureerida.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agendid",
   "settings.agents.description": "Agendi seadeid saab siin konfigureerida.",
   "settings.commands.title": "Käsud",

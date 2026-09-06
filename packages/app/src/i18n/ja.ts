@@ -1074,6 +1074,8 @@ export const dict = {
   "settings.providers.routing.latency": "最小レイテンシ",
   "settings.models.title": "モデル",
   "settings.models.description": "モデル設定は今後ここで構成できるようになります。",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "エージェント",
   "settings.agents.description": "エージェント設定は今後ここで構成できるようになります。",
   "settings.commands.title": "コマンド",

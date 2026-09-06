@@ -1167,6 +1167,8 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.latency": "सबैभन्दा कम विलम्ब",
   "settings.models.title": "मोडेलहरू",
   "settings.models.description": "मोडेल सेटिङहरू यहाँ कन्फिगर योग्य हुनेछ।",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "एजेन्टहरू",
   "settings.agents.description": "एजेन्ट सेटिङहरू यहाँ कन्फिगर योग्य हुनेछ।",
   "settings.commands.title": "आदेशहरू",

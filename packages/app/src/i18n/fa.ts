@@ -1165,6 +1165,8 @@ export const dict = {
   "settings.providers.routing.latency": "کمترین تأخیر",
   "settings.models.title": "مدل ها",
   "settings.models.description": "تنظیمات مدل در اینجا قابل تنظیم خواهد بود.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "عوامل",
   "settings.agents.description": "تنظیمات عامل در اینجا قابل تنظیم خواهد بود.",
   "settings.commands.title": "دستورات",

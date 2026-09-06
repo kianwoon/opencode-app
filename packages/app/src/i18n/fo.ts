@@ -1164,6 +1164,8 @@ export const dict = {
   "settings.providers.routing.latency": "Lægsta dráttur",
   "settings.models.title": "Fyrimyndir",
   "settings.models.description": "Model innstillingar verða stillaðar her.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agentar",
   "settings.agents.description": "Agentinnstillingar verða stillaðar her.",
   "settings.commands.title": "Skipanir",

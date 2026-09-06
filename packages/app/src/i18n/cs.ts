@@ -1173,6 +1173,8 @@ export const dict = {
   "settings.providers.routing.latency": "Nejnižší latence",
   "settings.models.title": "Modely",
   "settings.models.description": "Zde bude možné konfigurovat nastavení modelu.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agenti",
   "settings.agents.description": "Zde bude možné konfigurovat nastavení agenta.",
   "settings.commands.title": "Příkazy",

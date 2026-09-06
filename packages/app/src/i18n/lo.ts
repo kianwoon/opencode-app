@@ -1158,6 +1158,8 @@ export const dict = {
   "settings.providers.routing.latency": "ຄວາມຊັກຊ້າຕໍ່າສຸດ",
   "settings.models.title": "ຕົວແບບ",
   "settings.models.description": "ການຕັ້ງຄ່າຕົວແບບຈະຕັ້ງຄ່າໄດ້ທີ່ນີ້.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "ຕົວແທນ",
   "settings.agents.description": "ການຕັ້ງຄ່າຕົວແທນຈະຖືກຕັ້ງຄ່າໄດ້ທີ່ນີ້.",
   "settings.commands.title": "ຄໍາສັ່ງ",

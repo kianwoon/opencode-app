@@ -1179,6 +1179,8 @@ export const dict = {
   "settings.providers.routing.latency": "Độ trễ thấp nhất",
   "settings.models.title": "Mô hình",
   "settings.models.description": "Cài đặt mô hình sẽ được cấu hình ở đây.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Tác nhân",
   "settings.agents.description": "Cài đặt tác nhân sẽ được cấu hình ở đây.",
   "settings.commands.title": "Lệnh",

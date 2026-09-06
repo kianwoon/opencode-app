@@ -1173,6 +1173,8 @@ export const dict = {
   "settings.providers.routing.latency": "Zemākais latentums",
   "settings.models.title": "Modeļi",
   "settings.models.description": "Modeļu iestatījumus varēs konfigurēt šeit.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Aģenti",
   "settings.agents.description": "Šeit varēs konfigurēt aģentu iestatījumus.",
   "settings.commands.title": "Komandas",

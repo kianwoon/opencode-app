@@ -1166,6 +1166,8 @@ export const dict = {
   "settings.providers.routing.latency": "Lowest latency",
   "settings.models.title": "Models",
   "settings.models.description": "Model settings will be configurable here.",
+  "settings.models.routing.pin.placeholder": "e.g. streamlake",
+  "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agents",
   "settings.agents.description": "Agent settings will be configurable here.",
   "settings.commands.title": "Commands",

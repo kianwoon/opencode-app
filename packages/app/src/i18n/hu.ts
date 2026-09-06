@@ -1178,6 +1178,8 @@ export const dict = {
   "settings.providers.routing.latency": "Legalacsonyabb késleltetés",
   "settings.models.title": "Modellek",
   "settings.models.description": "A modellbeállítások itt konfigurálhatók.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Ügynökök",
   "settings.agents.description": "Az ügynök beállításai itt konfigurálhatók.",
   "settings.commands.title": "Parancsok",

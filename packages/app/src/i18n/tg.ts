@@ -1174,6 +1174,8 @@ export const dict = {
   "settings.providers.routing.latency": "Камтарин таъхир",
   "settings.models.title": "Моделҳо",
   "settings.models.description": "Танзимоти модел дар ин ҷо танзим карда мешавад.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Агентҳо",
   "settings.agents.description": "Танзимоти агент дар ин ҷо танзим карда мешавад.",
   "settings.commands.title": "Фармонҳо",

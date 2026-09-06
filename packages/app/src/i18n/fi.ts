@@ -1069,6 +1069,8 @@ export const dict = {
   "settings.providers.routing.latency": "Alin viive",
   "settings.models.title": "Mallit",
   "settings.models.description": "Mallin asetukset voidaan määrittää täällä.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agentit",
   "settings.agents.description": "Agentin asetukset voidaan määrittää täällä.",
   "settings.commands.title": "Komennot",

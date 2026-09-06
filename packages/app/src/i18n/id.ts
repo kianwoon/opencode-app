@@ -1255,6 +1255,8 @@ export const dict = {
   "settings.providers.routing.latency": "Latensi terendah",
   "settings.models.title": "Model",
   "settings.models.description": "Pengaturan model akan dapat dikonfigurasi di sini.",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "Agen",
   "settings.agents.description": "Pengaturan agen akan dapat dikonfigurasi di sini.",
   "settings.commands.title": "Perintah",

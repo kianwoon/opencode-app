@@ -1175,6 +1175,8 @@ export const dict = {
   "settings.providers.routing.latency": "کم ترین تاخیر",
   "settings.models.title": "ماڈلز",
   "settings.models.description": "ماڈل کی ترتیبات یہاں قابل ترتیب ہوں گی۔",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "ایجنٹس",
   "settings.agents.description": "ایجنٹ کی ترتیبات یہاں قابل ترتیب ہوں گی۔",
   "settings.commands.title": "کمانڈز",

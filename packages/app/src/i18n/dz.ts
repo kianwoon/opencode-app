@@ -1189,6 +1189,8 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.latency": "འགོར་འགྱངས་ཉུང་ཤོས།",
   "settings.models.title": "དཔེ་ཚད།",
   "settings.models.description": "དཔེ་ཚད་སྒྲིག་སྟངས་ཚུ་ནཱ་ལུ་རིམ་སྒྲིག་འབད་བཏུབ་འོང་།",
+    "settings.models.routing.pin.placeholder": "e.g. streamlake",
+    "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
   "settings.agents.title": "ལས་ཚབ་ཚུ།",
   "settings.agents.description": "ལས་ཚབ་སྒྲིག་སྟངས་ཚུ་ནཱ་ལུ་རིམ་སྒྲིག་འབད་བཏུབ་འོང་།",
   "settings.commands.title": "བརྡ་བཀོད་ཚུ།",
