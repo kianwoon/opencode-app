@@ -153,7 +153,7 @@ function googleVertexAnthropicBaseURL(project: string | undefined, location: str
 // connection reads is frozen when the connection is established). Reusing a
 // pooled keep-alive socket makes later requests read a stale snapshot and
 // re-bill the grown prefix as uncached input.
-const FRESH_CONNECTION_HOSTS = [".z.ai", ".bigmodel.cn"]
+const FRESH_CONNECTION_HOSTS = [".z.ai", ".bigmodel.cn", ".openrouter.ai"]
 
 export function needsFreshConnections(baseURL: string | undefined) {
   if (!baseURL) return false

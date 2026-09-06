@@ -18,9 +18,10 @@ const it = testEffect(
 )
 
 describe("needsFreshConnections", () => {
-  test("matches z.ai and bigmodel hosts on any subdomain", () => {
+  test("matches z.ai, bigmodel and openrouter hosts on any subdomain", () => {
     expect(needsFreshConnections("https://api.z.ai/api/coding/paas/v4")).toBe(true)
     expect(needsFreshConnections("https://open.bigmodel.cn/api/paas/v4")).toBe(true)
+    expect(needsFreshConnections("https://openrouter.ai/api/v1")).toBe(true)
     expect(needsFreshConnections("https://z.ai")).toBe(true)
   })
 
@@ -28,6 +29,7 @@ describe("needsFreshConnections", () => {
     expect(needsFreshConnections("https://api.openai.com/v1")).toBe(false)
     expect(needsFreshConnections("https://api.deepseek.com/v1")).toBe(false)
     expect(needsFreshConnections("https://evilz.ai.example.com/v1")).toBe(false)
+    expect(needsFreshConnections("https://evilopenrouter.ai.example.com/v1")).toBe(false)
     expect(needsFreshConnections(undefined)).toBe(false)
     expect(needsFreshConnections("not a url")).toBe(false)
   })
