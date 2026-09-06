@@ -1130,6 +1130,9 @@ export const dict = {
   "settings.providers.routing.price": "最低价格",
   "settings.providers.routing.throughput": "最高吞吐量",
   "settings.providers.routing.latency": "最低延迟",
+  "settings.providers.routing.pin.title": "Pinned providers",
+  "settings.providers.routing.pin.description": "Restrict routing to specific backing providers, separated by commas.",
+  "settings.providers.routing.pin.placeholder": "e.g. anthropic/claude-3.5-sonnet, openai/gpt-4o",
 
   "settings.models.title": "模型",
   "settings.models.description": "可在此处配置模型设置。",

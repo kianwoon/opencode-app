@@ -1,11 +1,12 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
+import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
-import { createMemo, type Accessor, type Component, For, Show } from "solid-js"
+import { createMemo, createSignal, type Accessor, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
@@ -35,6 +36,12 @@ type RoutingSort = "price" | "throughput" | "latency"
 
 const ROUTING_SORTS: RoutingSort[] = ["price", "throughput", "latency"]
 
+const splitPin = (value: string): string[] =>
+  value
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+
 // OpenRouter can route each request to one of many backing providers; the
 // sort preference is written to provider.openrouter.options.routing.sort and
 // injected into every OpenRouter request server-side.
@@ -50,14 +57,38 @@ const OpenRouterRoutingSection: Component = () => {
     })),
   ]
 
+  const routing = () => serverSync().data.config.provider?.openrouter?.options?.routing as
+    | { sort?: unknown; only?: unknown; allow_fallbacks?: unknown }
+    | undefined
+
   const currentSort = (): RoutingSort | undefined => {
-    const routing = serverSync().data.config.provider?.openrouter?.options?.routing as { sort?: unknown } | undefined
-    return ROUTING_SORTS.find((sort) => sort === routing?.sort)
+    const value = routing()?.sort
+    return ROUTING_SORTS.find((sort) => sort === value)
   }
 
-  const setRoutingSort = async (sort: RoutingSort | undefined) => {
+  const currentPin = (): string => {
+    const only = routing()?.only
+    return Array.isArray(only) ? only.filter((id): id is string => typeof id === "string").join(",") : ""
+  }
+
+  const [pinValue, setPinValue] = createSignal(currentPin())
+
+  const setRouting = async (patch: { sort?: RoutingSort; only?: string[] }) => {
+    const existing = routing()
+    const next = {
+      ...(existing?.sort ? { sort: existing.sort as RoutingSort } : {}),
+      ...(Array.isArray(existing?.only) ? { only: existing.only } : {}),
+      ...(typeof existing?.allow_fallbacks === "boolean" ? { allow_fallbacks: existing.allow_fallbacks } : {}),
+      ...("only" in patch && patch.only === undefined ? {} : patch),
+    } as { sort?: RoutingSort; only?: string[] }
+    const pin = "only" in patch ? patch.only : next.only
+    if ("only" in patch) {
+      if (pin?.length) next.only = pin
+      else delete next.only
+    }
+    const cleared = !next.sort && !next.only
     await serverSync()
-      .updateConfig({ provider: { openrouter: { options: { routing: sort ? { sort } : {} } } } })
+      .updateConfig({ provider: { openrouter: { options: { routing: cleared ? {} : next } } } })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })
@@ -81,7 +112,28 @@ const OpenRouterRoutingSection: Component = () => {
             gutter={6}
             value={(option) => option.value}
             label={(option) => option.label()}
-            onSelect={(option) => option && void setRoutingSort(option.value === "default" ? undefined : option.value)}
+            onSelect={(option) => option && void setRouting(option.value === "default" ? { sort: undefined } : { sort: option.value })}
+          />
+        </SettingsRowV2>
+        <SettingsRowV2
+          title={language.t("settings.providers.routing.pin.title")}
+          description={language.t("settings.providers.routing.pin.description")}
+        >
+          <TextInputV2
+            type="text"
+            appearance="base"
+            data-action="settings-openrouter-routing-pin"
+            value={pinValue()}
+            onInput={(event) => setPinValue(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.isComposing) {
+                event.preventDefault()
+                void setRouting({ only: splitPin(pinValue()) })
+              }
+            }}
+            onBlur={() => void setRouting({ only: splitPin(pinValue()) })}
+            placeholder={language.t("settings.providers.routing.pin.placeholder")}
+            aria-label={language.t("settings.providers.routing.pin.title")}
           />
         </SettingsRowV2>
       </SettingsListV2>

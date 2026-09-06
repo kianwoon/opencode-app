@@ -91,6 +91,37 @@ import { llmClient } from "../../effect/app-node-platform"
  * explicit loop starts the next provider turn after local settlement. Configured agent step limits bound the loop.
  */
 
+// OpenRouter routing pin (config: provider.<id>.options.routing / options.provider).
+// The native runtime bypasses ProviderTransform, so apply the same whitelist here.
+// Mirrors packages/opencode/src/provider/transform.ts — keep both in sync.
+const openrouterRoutingKeys = [
+  "sort",
+  "only",
+  "order",
+  "allow_fallbacks",
+  "require_parameters",
+  "data_collection",
+  "zdr",
+  "max_price",
+  "ignore",
+  "quantizations",
+] as const
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const openrouterRouting = (options: unknown): Record<string, unknown> => {
+  if (!isRecordValue(options)) return {}
+  const routing = options.routing
+  const raw = options.provider
+  if (!isRecordValue(routing) && !isRecordValue(raw)) return {}
+  // `routing` overlays `provider` so routing.* wins on conflict.
+  const picked = { ...(isRecordValue(raw) ? raw : {}), ...(isRecordValue(routing) ? routing : {}) }
+  return Object.fromEntries(
+    openrouterRoutingKeys.filter((key) => picked[key] !== undefined).map((key) => [key, picked[key]]),
+  )
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -238,6 +269,14 @@ const layer = Layer.effect(
         ? undefined
         : yield* tools.materialize(agent.info?.permissions, { hidden: hiddenTools })
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
+      const openrouterOptions: Record<string, unknown> = { promptCacheKey }
+      if (model.provider === "openrouter") {
+        // Config `options` reach this runner merged into the catalog model's
+        // providerOptions defaults, so read them back from there.
+        const configured = model.defaults?.providerOptions?.openrouter
+        const routing = openrouterRouting(configured)
+        if (Object.keys(routing).length > 0) Object.assign(openrouterOptions, routing)
+      }
       const request = LLM.request({
         model,
         http: {
@@ -249,7 +288,7 @@ const layer = Layer.effect(
         },
         providerOptions: {
           openai: { promptCacheKey },
-          openrouter: { promptCacheKey },
+          openrouter: openrouterOptions,
         },
         system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)

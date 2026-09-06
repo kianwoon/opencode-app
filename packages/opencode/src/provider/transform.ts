@@ -1308,8 +1308,7 @@ export function options(input: {
   model: Provider.Model
   sessionID: string
   providerOptions?: Record<string, any>
-}): Record<string, any> {
-  const result: Record<string, any> = {}
+}): Record<string, any> {  const result: Record<string, any> = {}
 
   if (
     input.model.api.npm === "@ai-sdk/google-vertex/anthropic" ||
@@ -1343,12 +1342,34 @@ export function options(input: {
   }
 
   // Provider-level routing preference for aggregator providers (OpenRouter).
-  // Config: provider.<id>.options.routing.sort = price | throughput | latency.
-  // Model-level options merge over this via mergeOptions, so per-model overrides still win.
+  // Config: provider.<id>.options.routing = { sort, only, order, allow_fallbacks, ... }
+  // or the raw OpenRouter shape provider.<id>.options.provider = { only, order, ... }.
+  // `routing` overlays `provider` so routing.* wins on conflict. Model-level options
+  // merge over this via mergeOptions, so per-model overrides still win.
   if (input.model.api.npm === "@openrouter/ai-sdk-provider") {
-    const sort = input.providerOptions?.routing?.sort
-    if (sort === "price" || sort === "throughput" || sort === "latency") {
-      result["provider"] = { ...result["provider"], sort }
+    const routing = input.providerOptions?.routing
+    const raw = input.providerOptions?.provider
+    const picked: Record<string, any> = {
+      ...(isPlainObject(raw) ? raw : {}),
+      ...(isPlainObject(routing) ? routing : {}),
+    }
+    if (isPlainObject(routing) || isPlainObject(raw)) {
+      const result2: Record<string, any> = {}
+      if (picked.sort === "price" || picked.sort === "throughput" || picked.sort === "latency")
+        result2.sort = picked.sort
+      const only = asStringArray(picked.only)
+      if (only) result2.only = only
+      const order = asStringArray(picked.order)
+      if (order) result2.order = order
+      if (typeof picked.allow_fallbacks === "boolean") result2.allow_fallbacks = picked.allow_fallbacks
+      if (typeof picked.require_parameters === "boolean") result2.require_parameters = picked.require_parameters
+      if (typeof picked.data_collection === "string") result2.data_collection = picked.data_collection
+      if (typeof picked.zdr === "boolean") result2.zdr = picked.zdr
+      if (typeof picked.ignore === "string") result2.ignore = picked.ignore
+      if (Array.isArray(picked.quantizations))
+        result2.quantizations = picked.quantizations.filter((item: unknown) => typeof item === "string")
+      if (isPlainObject(picked.max_price)) result2.max_price = picked.max_price
+      if (Object.keys(result2).length > 0) result["provider"] = { ...result["provider"], ...result2 }
     }
   }
 
@@ -1583,6 +1604,14 @@ type JsonRecord = Record<string, unknown>
 
 function isPlainObject(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+// Accepts string[] or a single comma-separated string ("streamlake, together").
+function asStringArray(value: unknown): string[] | undefined {
+  const list = typeof value === "string" ? value.split(",") : value
+  if (!Array.isArray(list)) return undefined
+  const result = list.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  return result.length > 0 ? result.map((item) => item.trim()) : undefined
 }
 
 // Mirrors Codex's Rust JSON schema compatibility lowering for OpenAI tool schemas.

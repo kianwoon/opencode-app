@@ -9,6 +9,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { generateText, jsonSchema, type ModelMessage } from "ai"
+import { mergeDeep } from "remeda"
 import { createAmazonBedrock, type AmazonBedrockLanguageModelOptions } from "@ai-sdk/amazon-bedrock"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
@@ -358,6 +359,64 @@ describe("ProviderTransform.options - openrouter routing", () => {
       providerOptions: { routing: { sort: "cheapest-gpu" } },
     })
     expect(result.provider).toBeUndefined()
+  })
+
+  test("passes routing.only through to providerOptions", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { only: ["streamlake"], allow_fallbacks: false } },
+    })
+    expect(result.provider).toEqual({ only: ["streamlake"], allow_fallbacks: false })
+  })
+
+  test("passes routing.order and allow_fallbacks through to providerOptions", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { order: ["streamlake", "together"], allow_fallbacks: true } },
+    })
+    expect(result.provider).toEqual({ order: ["streamlake", "together"], allow_fallbacks: true })
+  })
+
+  test("accepts comma-separated strings for only and order", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { only: "streamlake, together", order: "deepinfra" } },
+    })
+    expect(result.provider).toEqual({ only: ["streamlake", "together"], order: ["deepinfra"] })
+  })
+
+  test("passes the raw provider object through with routing overlaying it", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: {
+        provider: { only: ["streamlake"], sort: "bogus", zdr: true },
+        routing: { allow_fallbacks: false },
+      },
+    })
+    expect(result.provider).toEqual({ only: ["streamlake"], zdr: true, allow_fallbacks: false })
+  })
+
+  test("drops unknown routing keys", () => {
+    const result = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { only: ["streamlake"], rogue: "x" } },
+    })
+    expect(result.provider).toEqual({ only: ["streamlake"] })
+  })
+
+  test("model-level provider object merges over base options", () => {
+    const base = ProviderTransform.options({
+      model,
+      sessionID,
+      providerOptions: { routing: { only: ["streamlake"], allow_fallbacks: false } },
+    })
+    const merged = mergeDeep(base, { provider: { only: ["together"] } }) as Record<string, any>
+    expect(merged.provider).toEqual({ only: ["together"], allow_fallbacks: false })
   })
 
   test("does not apply openrouter routing to other providers", () => {
