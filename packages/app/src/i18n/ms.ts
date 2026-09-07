@@ -1165,10 +1165,19 @@ export const dict = {
   "settings.providers.routing.price": "Harga terendah",
   "settings.providers.routing.throughput": "Nilai pemprosesan tertinggi",
   "settings.providers.routing.latency": "Kependaman terendah",
+  "settings.providers.routing.fallbacks.title": "Allow fallbacks",
+  "settings.providers.routing.fallbacks.description":
+    "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Model",
   "settings.models.description": "Tetapan model boleh dikonfigurasi di sini.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
+  "settings.models.routing.fallbacks.label": "Fallbacks",
+  "settings.models.routing.fallbacks.hint":
+    "When off, OpenRouter stays on the pinned provider. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
+  "settings.models.routing.floor.label": "Floor price",
+  "settings.models.routing.floor.hint":
+    "Pin this model to its cheapest provider so prompt caching stays warm across requests — repeat turns get faster and cheaper. Ignored when a provider pin is set.",
   "settings.agents.title": "Ejen",
   "settings.agents.description": "Tetapan ejen boleh dikonfigurasi di sini.",
   "settings.commands.title": "Arahan",

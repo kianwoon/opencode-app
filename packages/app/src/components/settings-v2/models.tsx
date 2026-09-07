@@ -187,8 +187,58 @@ export const SettingsModelsV2: Component = () => {
                             const isOpenRouter = group.category === "openrouter"
                             const pinnedOnly = () => {
                               const routing = serverSync().data.config.provider?.openrouter?.models?.[item.id]
-                                ?.options?.routing as { only?: unknown } | undefined
+                                ?.options?.routing as { only?: unknown; allow_fallbacks?: unknown } | undefined
                               return Array.isArray(routing?.only) ? (routing.only as string[]).join(", ") : ""
+                            }
+                            // OpenRouter defaults to fallbacks ON when the key is absent.
+                            const fallbacksEnabled = () => {
+                              const routing = serverSync().data.config.provider?.openrouter?.models?.[item.id]
+                                ?.options?.routing as { allow_fallbacks?: unknown } | undefined
+                              return routing?.allow_fallbacks !== false
+                            }
+                            const floorEnabled = () => {
+                              const routing = serverSync().data.config.provider?.openrouter?.models?.[item.id]
+                                ?.options?.routing as { sort?: unknown } | undefined
+                              return routing?.sort === "price"
+                            }
+                            // A provider pin already fixes the route, so floor is redundant.
+                            const pinSet = () => {
+                              const routing = serverSync().data.config.provider?.openrouter?.models?.[item.id]
+                                ?.options?.routing as { only?: unknown } | undefined
+                              return Array.isArray(routing?.only) && (routing.only as unknown[]).length > 0
+                            }
+                            const setFloor = (value: boolean) => {
+                              void serverSync()
+                                .updateConfig({
+                                  provider: {
+                                    openrouter: {
+                                      models: {
+                                        // sort: undefined removes the key via mergeDeep.
+                                        [item.id]: { options: { routing: { sort: value ? "price" : undefined } } },
+                                      },
+                                    },
+                                  },
+                                })
+                                .catch((err: unknown) => {
+                                  const message = err instanceof Error ? err.message : String(err)
+                                  showToast({ title: language.t("common.requestFailed"), description: message })
+                                })
+                            }
+                            const setFallbacks = (value: boolean) => {
+                              void serverSync()
+                                .updateConfig({
+                                  provider: {
+                                    openrouter: {
+                                      models: {
+                                        [item.id]: { options: { routing: { allow_fallbacks: value } } },
+                                      },
+                                    },
+                                  },
+                                })
+                                .catch((err: unknown) => {
+                                  const message = err instanceof Error ? err.message : String(err)
+                                  showToast({ title: language.t("common.requestFailed"), description: message })
+                                })
                             }
                             const pinValue = () => draftStore.drafts[item.id] ?? pinnedOnly()
                             // Entries containing "/" are dropped server-side; flag them
@@ -215,7 +265,7 @@ export const SettingsModelsV2: Component = () => {
                                   provider: {
                                     openrouter: {
                                       models: {
-                                        [item.id]: { options: { routing: { only } } },
+                                        [item.id]: { options: { routing: { only, sort: undefined } } },
                                       },
                                     },
                                   },
@@ -239,8 +289,27 @@ export const SettingsModelsV2: Component = () => {
                                     : ""
                                 }
                               >
-                                <div>
+                                <div class="settings-v2-models-row-controls">
                                   <Show when={isOpenRouter}>
+                                    <Switch
+                                      class="settings-v2-models-fallbacks-toggle"
+                                      checked={floorEnabled()}
+                                      disabled={pinSet()}
+                                      onChange={setFloor}
+                                      data-action="settings-openrouter-floor"
+                                      title={language.t("settings.models.routing.floor.hint")}
+                                    >
+                                      {language.t("settings.models.routing.floor.label")}
+                                    </Switch>
+                                    <Switch
+                                      class="settings-v2-models-fallbacks-toggle"
+                                      checked={fallbacksEnabled()}
+                                      onChange={setFallbacks}
+                                      data-action="settings-openrouter-fallbacks"
+                                      title={language.t("settings.models.routing.fallbacks.hint")}
+                                    >
+                                      {language.t("settings.models.routing.fallbacks.label")}
+                                    </Switch>
                                     <TextInputV2
                                       type="text"
                                       appearance="base"

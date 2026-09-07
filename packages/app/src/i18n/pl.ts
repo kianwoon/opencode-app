@@ -1091,10 +1091,19 @@ export const dict = {
   "settings.providers.routing.price": "Najniższa cena",
   "settings.providers.routing.throughput": "Największa przepustowość",
   "settings.providers.routing.latency": "Najniższe opóźnienie",
+  "settings.providers.routing.fallbacks.title": "Allow fallbacks",
+  "settings.providers.routing.fallbacks.description":
+    "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Modele",
   "settings.models.description": "Ustawienia modeli będą tutaj konfigurowalne.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
+  "settings.models.routing.fallbacks.label": "Fallbacks",
+  "settings.models.routing.fallbacks.hint":
+    "When off, OpenRouter stays on the pinned provider. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
+  "settings.models.routing.floor.label": "Floor price",
+  "settings.models.routing.floor.hint":
+    "Pin this model to its cheapest provider so prompt caching stays warm across requests — repeat turns get faster and cheaper. Ignored when a provider pin is set.",
   "settings.agents.title": "Agenci",
   "settings.agents.description": "Ustawienia agentów będą tutaj konfigurowalne.",
   "settings.commands.title": "Polecenia",

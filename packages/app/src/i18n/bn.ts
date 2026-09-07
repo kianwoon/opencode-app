@@ -1160,10 +1160,19 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.price": "সর্বনিম্ন মূল্য",
   "settings.providers.routing.throughput": "সর্বোচ্চ থ্রুপুট",
   "settings.providers.routing.latency": "সর্বনিম্ন লেটেন্সি",
+  "settings.providers.routing.fallbacks.title": "Allow fallbacks",
+  "settings.providers.routing.fallbacks.description":
+    "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "মডেল",
   "settings.models.description": "মডেল সেটিংস এখানে কনফিগারযোগ্য হবে।",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
+  "settings.models.routing.fallbacks.label": "Fallbacks",
+  "settings.models.routing.fallbacks.hint":
+    "When off, OpenRouter stays on the pinned provider. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
+  "settings.models.routing.floor.label": "Floor price",
+  "settings.models.routing.floor.hint":
+    "Pin this model to its cheapest provider so prompt caching stays warm across requests — repeat turns get faster and cheaper. Ignored when a provider pin is set.",
   "settings.agents.title": "এজেন্ট",
   "settings.agents.description": "এজেন্ট সেটিংস এখানে কনফিগারযোগ্য হবে।",
   "settings.commands.title": "কমান্ড",

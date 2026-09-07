@@ -1183,10 +1183,19 @@ export const dict = {
   "settings.providers.routing.price": "အနိမ့်ဆုံး ကျသင့်ငွေ",
   "settings.providers.routing.throughput": "အမြင့်ဆုံး ထုတ်လုပ်မှု",
   "settings.providers.routing.latency": "အနိမ့်ဆုံး နှောင့်နှေးမှု",
+  "settings.providers.routing.fallbacks.title": "Allow fallbacks",
+  "settings.providers.routing.fallbacks.description":
+    "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "မော်ဒယ်များ",
   "settings.models.description": "မော်ဒယ်လ်ဆက်တင်များကို ဤနေရာတွင် စီစဉ်သတ်မှတ်နိုင်မည်ဖြစ်သည်။",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
+  "settings.models.routing.fallbacks.label": "Fallbacks",
+  "settings.models.routing.fallbacks.hint":
+    "When off, OpenRouter stays on the pinned provider. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
+  "settings.models.routing.floor.label": "Floor price",
+  "settings.models.routing.floor.hint":
+    "Pin this model to its cheapest provider so prompt caching stays warm across requests — repeat turns get faster and cheaper. Ignored when a provider pin is set.",
   "settings.agents.title": "အေးဂျင့်များ",
   "settings.agents.description": "အေးဂျင့်ဆက်တင်များကို ဤနေရာတွင် ပြင်ဆင်သတ်မှတ်နိုင်ပါမည်။",
   "settings.commands.title": "အမိန့်များ",

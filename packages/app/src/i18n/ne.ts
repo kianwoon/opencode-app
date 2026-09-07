@@ -1165,10 +1165,19 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.price": "सबैभन्दा कम मूल्य",
   "settings.providers.routing.throughput": "सबैभन्दा उच्च थ्रुपुट",
   "settings.providers.routing.latency": "सबैभन्दा कम विलम्ब",
+  "settings.providers.routing.fallbacks.title": "Allow fallbacks",
+  "settings.providers.routing.fallbacks.description":
+    "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "मोडेलहरू",
   "settings.models.description": "मोडेल सेटिङहरू यहाँ कन्फिगर योग्य हुनेछ।",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
+  "settings.models.routing.fallbacks.label": "Fallbacks",
+  "settings.models.routing.fallbacks.hint":
+    "When off, OpenRouter stays on the pinned provider. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
+  "settings.models.routing.floor.label": "Floor price",
+  "settings.models.routing.floor.hint":
+    "Pin this model to its cheapest provider so prompt caching stays warm across requests — repeat turns get faster and cheaper. Ignored when a provider pin is set.",
   "settings.agents.title": "एजेन्टहरू",
   "settings.agents.description": "एजेन्ट सेटिङहरू यहाँ कन्फिगर योग्य हुनेछ।",
   "settings.commands.title": "आदेशहरू",

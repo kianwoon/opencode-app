@@ -1,6 +1,7 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
+import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
@@ -53,7 +54,7 @@ const OpenRouterRoutingSection: Component = () => {
   ]
 
   const routing = () => serverSync().data.config.provider?.openrouter?.options?.routing as
-    | { sort?: unknown }
+    | { sort?: unknown; allow_fallbacks?: unknown }
     | undefined
 
   const currentSort = (): RoutingSort | undefined => {
@@ -64,6 +65,18 @@ const OpenRouterRoutingSection: Component = () => {
   const setRoutingSort = async (sort: RoutingSort | undefined) => {
     await serverSync()
       .updateConfig({ provider: { openrouter: { options: { routing: sort ? { sort } : {} } } } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
+  // OpenRouter defaults to fallbacks ON when the key is absent.
+  const fallbacksEnabled = () => routing()?.allow_fallbacks !== false
+
+  const setAllowFallbacks = (value: boolean) => {
+    void serverSync()
+      .updateConfig({ provider: { openrouter: { options: { routing: { allow_fallbacks: value } } } } })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })
@@ -89,6 +102,19 @@ const OpenRouterRoutingSection: Component = () => {
             label={(option) => option.label()}
             onSelect={(option) => option && void setRoutingSort(option.value === "default" ? undefined : option.value)}
           />
+        </SettingsRowV2>
+        <SettingsRowV2
+          title={language.t("settings.providers.routing.fallbacks.title")}
+          description={language.t("settings.providers.routing.fallbacks.description")}
+        >
+          <Switch
+            checked={fallbacksEnabled()}
+            onChange={setAllowFallbacks}
+            data-action="settings-openrouter-fallbacks"
+            hideLabel
+          >
+            {language.t("settings.providers.routing.fallbacks.title")}
+          </Switch>
         </SettingsRowV2>
       </SettingsListV2>
     </div>
