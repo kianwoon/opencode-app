@@ -814,7 +814,7 @@ describe("session.message-v2.toModelMessage", () => {
             toolName: "bash",
             output: {
               type: "text",
-              value: "abcd\n[Tool output truncated for compaction: omitted 6 chars]",
+              value: "abcd\n[Tool output truncated for context: full output retained]",
             },
           },
         ],
@@ -864,7 +864,7 @@ describe("session.message-v2.toModelMessage", () => {
     const value = (toolResult?.content as Array<{ type: string; output?: { type: string; value?: string } }>).find(
       (part) => part.type === "tool-result",
     )?.output?.value
-    expect(value).toBe("x".repeat(8000) + "\n[Tool output truncated for compaction: omitted 2000 chars]")
+    expect(value).toBe("x".repeat(8000) + "\n[Tool output truncated for context: full output retained]")
   })
 
   test("converts assistant tool error into error-text tool result", async () => {

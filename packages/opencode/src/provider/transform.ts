@@ -1447,6 +1447,8 @@ export function options(input: {
       input.model.api.npm === "@ai-sdk/xai" ||
       input.model.api.npm === "@ai-sdk/mistral" ||
       input.model.api.npm === "venice-ai-sdk-provider" ||
+      input.model.api.npm === "@openrouter/ai-sdk-provider" ||
+      input.model.api.npm === "@ai-sdk/openai-compatible" ||
       input.providerOptions?.setCacheKey === true
     ) {
       result["promptCacheKey"] = input.sessionID

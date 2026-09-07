@@ -51,6 +51,7 @@ export function provider(model: Provider.Model) {
 
 export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
+  readonly environmentDate: () => Effect.Effect<string>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
   readonly workflow: (agent: Agent.Info) => Effect.Effect<string | undefined>
@@ -82,7 +83,6 @@ const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
-            `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
             // Early salience pointer: the skills list sits far below after all
             // instruction files; this stable one-liner keeps it discoverable
@@ -108,6 +108,14 @@ const layer = Layer.effect(
                 "</available_references>",
               ].join("\n"),
         ].filter((part): part is string => part !== undefined)
+      }),
+
+      // Volatile date anchor, rendered as the LAST system entry so a midnight
+      // rollover only re-misses the short trailing tail instead of the entire
+      // stable prompt prefix (which must stay byte-identical across turns for
+      // implicit provider prefix caching to hit).
+      environmentDate: Effect.fn("SystemPrompt.environmentDate")(function* () {
+        return `Today's date: ${new Date().toDateString()}`
       }),
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {

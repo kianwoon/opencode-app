@@ -616,6 +616,36 @@ withMcpInstructions.instance(
   15_000,
 )
 
+it.instance(
+  "system context keeps the volatile date out of the leading env block and appends it as the last system entry",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.hang
+      yield* user(chat.id, "hello")
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(llm.wait(1), "timed out waiting for model request", "10 seconds")
+
+      const hits = yield* llm.hits
+      const body = hits[0]?.body as { messages?: Array<{ role?: string; content?: string }> }
+      const systemMsgs = (body?.messages ?? []).filter((m) => m.role === "system")
+      expect(systemMsgs.length).toBeGreaterThan(0)
+      // The volatile date must appear only as the LAST system entry so a day
+      // rollover re-misses only the short trailing tail, not the stable prefix.
+      expect(systemMsgs[systemMsgs.length - 1]?.content ?? "").toContain("Today's date")
+      for (const msg of systemMsgs.slice(0, -1)) expect(msg.content ?? "").not.toContain("Today's date")
+      yield* Fiber.interrupt(fiber)
+    }),
+  15_000,
+)
+
 it.instance("legacy prompt emits message events without session.next events", () =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service

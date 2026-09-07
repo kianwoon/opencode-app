@@ -108,7 +108,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
-  test("should not set promptCacheKey for the OpenAI-compatible SDK by provider name", () => {
+  test("should set promptCacheKey for the OpenAI-compatible SDK by default", () => {
     const result = ProviderTransform.options({
       model: {
         ...mockModel,
@@ -118,7 +118,20 @@ describe("ProviderTransform.options - setCacheKey", () => {
       sessionID,
       providerOptions: {},
     })
-    expect(result.promptCacheKey).toBeUndefined()
+    expect(result.promptCacheKey).toBe(sessionID)
+  })
+
+  test("should set promptCacheKey for the OpenRouter SDK by default", () => {
+    const result = ProviderTransform.options({
+      model: {
+        ...mockModel,
+        providerID: "openrouter",
+        api: { id: "openrouter/auto", url: "https://openrouter.ai/api/v1", npm: "@openrouter/ai-sdk-provider" },
+      },
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.promptCacheKey).toBe(sessionID)
   })
 
   test("should not set promptCacheKey for openai when explicitly disabled", () => {
@@ -1071,6 +1084,26 @@ describe("ProviderTransform.providerOptions", () => {
 
     expect(ProviderTransform.providerOptions(model, { promptCacheKey: "session" })).toEqual({
       xai: { promptCacheKey: "session" },
+    })
+  })
+
+  test("places promptCacheKey under the openai-compatible provider namespace", () => {
+    const model = createModel({
+      providerID: "deepseek",
+      api: { id: "deepseek-chat", url: "https://api.deepseek.com", npm: "@ai-sdk/openai-compatible" },
+    })
+    expect(ProviderTransform.providerOptions(model, { promptCacheKey: "session" })).toEqual({
+      deepseek: { promptCacheKey: "session" },
+    })
+  })
+
+  test("places promptCacheKey under the openrouter namespace", () => {
+    const model = createModel({
+      providerID: "openrouter",
+      api: { id: "openrouter/auto", url: "https://openrouter.ai/api/v1", npm: "@openrouter/ai-sdk-provider" },
+    })
+    expect(ProviderTransform.providerOptions(model, { promptCacheKey: "session" })).toEqual({
+      openrouter: { promptCacheKey: "session" },
     })
   })
 

@@ -62,8 +62,7 @@ export const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 8000
 function truncateToolOutput(text: string, maxChars?: number) {
   const cap = maxChars ?? DEFAULT_TOOL_OUTPUT_MAX_CHARS
   if (cap <= 0 || text.length <= cap) return text
-  const omitted = text.length - cap
-  return `${text.slice(0, cap)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
+  return `${text.slice(0, cap)}\n[Tool output truncated for context: full output retained]`
 }
 
 export const Event = {

@@ -1859,6 +1859,10 @@ const layer = Layer.effect(
               ...(skills ? [skills] : []),
               ...(workflowGuidance ? [workflowGuidance] : []),
               ...(ruleAnchor ? [ruleAnchor] : []),
+              // Volatile date goes AFTER the stable anchors so a day rollover
+              // only re-misses the short trailing tail, keeping the long stable
+              // prefix byte-identical across turns for implicit prefix caching.
+              yield* sys.environmentDate(),
             ]
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
