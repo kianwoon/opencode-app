@@ -53,8 +53,39 @@ export const protocol = Protocol.make({
   stream: OpenAIChat.protocol.stream,
 })
 
+// Whitelisted OpenRouter `provider` routing object (mirrors
+// packages/core/src/session/runner/llm.ts openrouterRouting — keep in sync).
+// Invalid values are dropped; slugs must be bare (no "/" — those are model IDs).
+const providerObject = (value: unknown): Record<string, unknown> => {
+  const input = isRecord(value) ? value : {}
+  const output: Record<string, unknown> = {}
+  if (input.sort === "price" || input.sort === "throughput" || input.sort === "latency") output.sort = input.sort
+  for (const key of ["only", "order"] as const) {
+    const list = input[key]
+    if (!Array.isArray(list)) continue
+    const slugs = list.filter(
+      (item): item is string => typeof item === "string" && item.length > 0 && !item.includes("/"),
+    )
+    if (slugs.length > 0) output[key] = slugs
+  }
+  for (const key of ["allow_fallbacks", "require_parameters", "zdr"] as const) {
+    if (typeof input[key] === "boolean") output[key] = input[key]
+  }
+  for (const key of ["data_collection", "ignore"] as const) {
+    const entry = input[key]
+    if (typeof entry === "string" && entry.length > 0) output[key] = entry
+  }
+  if (Array.isArray(input.quantizations)) {
+    const quantizations = input.quantizations.filter((item): item is string => typeof item === "string")
+    if (quantizations.length > 0) output.quantizations = quantizations
+  }
+  if (isRecord(input.max_price)) output.max_price = input.max_price
+  return output
+}
+
 const bodyOptions = (input: unknown) => {
   const openrouter = isRecord(input) ? input : {}
+  const provider = providerObject(openrouter.provider)
   return {
     ...(openrouter.usage === true
       ? { usage: { include: true } }
@@ -63,6 +94,7 @@ const bodyOptions = (input: unknown) => {
         : {}),
     ...(isRecord(openrouter.reasoning) ? { reasoning: openrouter.reasoning } : {}),
     ...(typeof openrouter.promptCacheKey === "string" ? { prompt_cache_key: openrouter.promptCacheKey } : {}),
+    ...(Object.keys(provider).length > 0 ? { provider } : {}),
   }
 }
 

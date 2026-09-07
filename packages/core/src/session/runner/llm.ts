@@ -284,10 +284,17 @@ const layer = Layer.effect(
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const openrouterOptions: Record<string, unknown> = { promptCacheKey }
       if (model.provider === "openrouter") {
-        // Config `options` reach this runner merged into the catalog model's
-        // providerOptions defaults, so read them back from there.
-        const configured = model.defaults?.providerOptions?.openrouter
-        const routing = openrouterRouting(configured)
+        // Config `options` land in two places: catalog model providerOptions
+        // defaults, and the route's http body defaults (see withDefaults in
+        // runner/model.ts). Merge both; body entries overlay defaults. Either
+        // source may carry the raw `routing`/`provider` shapes that
+        // openrouterRouting() accepts.
+        const defaults = model.defaults?.providerOptions?.openrouter
+        const body = model.route.defaults?.http?.body
+        const routing = openrouterRouting({
+          ...(isRecordValue(defaults) ? defaults : {}),
+          ...(isRecordValue(body) ? body : {}),
+        })
         if (Object.keys(routing).length > 0) Object.assign(openrouterOptions, routing)
       }
       const request = LLM.request({
