@@ -206,6 +206,10 @@ export function ContentMarkdown(props: Props) {
         reset.addEventListener("click", () => applyZoom(100))
         toolbar.appendChild(reset)
         block.appendChild(toolbar)
+        if (!host.dataset.panWired) {
+          host.dataset.panWired = "true"
+          setupMermaidPan(host)
+        }
       }),
     )
   })
@@ -234,6 +238,46 @@ export function ContentMarkdown(props: Props) {
       <CopyButton text={props.text} />
     </div>
   )
+}
+
+function setupMermaidPan(container: HTMLElement): () => void {
+  let start: { x: number; y: number; scrollLeft: number; scrollTop: number } | undefined
+  const down = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    if (
+      e.target instanceof Element &&
+      e.target.closest(
+        '[data-slot^="markdown-mermaid-zoom"], [data-slot="markdown-mermaid-toggle"], [data-slot="markdown-copy-button"]',
+      )
+    )
+      return
+    if (container.scrollWidth <= container.clientWidth && container.scrollHeight <= container.clientHeight) return
+    start = { x: e.clientX, y: e.clientY, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop }
+    container.setPointerCapture(e.pointerId)
+    container.setAttribute("data-panning", "")
+  }
+  const move = (e: PointerEvent) => {
+    if (!start) return
+    container.scrollLeft = start.scrollLeft - (e.clientX - start.x)
+    container.scrollTop = start.scrollTop - (e.clientY - start.y)
+  }
+  const up = (e: PointerEvent) => {
+    if (!start) return
+    start = undefined
+    if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId)
+    container.removeAttribute("data-panning")
+  }
+  container.addEventListener("pointerdown", down)
+  container.addEventListener("pointermove", move)
+  container.addEventListener("pointerup", up)
+  container.addEventListener("pointercancel", up)
+  return () => {
+    container.removeEventListener("pointerdown", down)
+    container.removeEventListener("pointermove", move)
+    container.removeEventListener("pointerup", up)
+    container.removeEventListener("pointercancel", up)
+    container.removeAttribute("data-panning")
+  }
 }
 
 function strip(text: string): string {

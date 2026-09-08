@@ -193,6 +193,16 @@
   overflow: auto;
   max-height: 560px;
   margin: 8px 0;
+  cursor: auto;
+}
+
+[data-component="markdown-mermaid"][data-panning] {
+  cursor: grabbing;
+  user-select: none;
+}
+
+[data-component="markdown-mermaid"] svg {
+  user-select: none;
 }
 
 [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"] {

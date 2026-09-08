@@ -243,6 +243,57 @@ function createMermaidToolbar() {
   return toolbar
 }
 
+const mermaidPanCleanups = new WeakMap<Element, () => void>()
+
+function setupMermaidPan(container: HTMLElement): () => void {
+  mermaidPanCleanups.get(container)?.()
+  let start: { x: number; y: number; scrollLeft: number; scrollTop: number } | undefined
+  const down = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    if (
+      e.target instanceof Element &&
+      e.target.closest(
+        '[data-slot^="markdown-mermaid-zoom"], [data-slot="markdown-mermaid-toggle"], [data-slot="markdown-copy-button"]',
+      )
+    )
+      return
+    if (container.scrollWidth <= container.clientWidth && container.scrollHeight <= container.clientHeight) return
+    start = { x: e.clientX, y: e.clientY, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop }
+    container.setPointerCapture(e.pointerId)
+    container.setAttribute("data-panning", "")
+  }
+  const move = (e: PointerEvent) => {
+    if (!start) return
+    container.scrollLeft = start.scrollLeft - (e.clientX - start.x)
+    container.scrollTop = start.scrollTop - (e.clientY - start.y)
+  }
+  const up = (e: PointerEvent) => {
+    if (!start) return
+    start = undefined
+    if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId)
+    container.removeAttribute("data-panning")
+  }
+  container.addEventListener("pointerdown", down)
+  container.addEventListener("pointermove", move)
+  container.addEventListener("pointerup", up)
+  container.addEventListener("pointercancel", up)
+  const cleanup = () => {
+    container.removeEventListener("pointerdown", down)
+    container.removeEventListener("pointermove", move)
+    container.removeEventListener("pointerup", up)
+    container.removeEventListener("pointercancel", up)
+    container.removeAttribute("data-panning")
+    mermaidPanCleanups.delete(container)
+  }
+  mermaidPanCleanups.set(container, cleanup)
+  return cleanup
+}
+
+function disposeMermaidPan(root: Element) {
+  if (root.getAttribute("data-component") === "markdown-mermaid") mermaidPanCleanups.get(root)?.()
+  root.querySelectorAll<HTMLElement>('[data-component="markdown-mermaid"]').forEach((el) => mermaidPanCleanups.get(el)?.())
+}
+
 // Updated whenever the markdown effect reruns so toggle buttons pick up
 // localized labels without being re-created.
 const mermaidToggleLabels = { showCode: "", showDiagram: "" }
@@ -389,6 +440,7 @@ function decorateMermaid(root: HTMLDivElement, blockKey: string) {
     next.setAttribute("data-component", "markdown-mermaid")
     next.dataset.mermaidCode = src
     container.appendChild(next)
+    setupMermaidPan(next)
     render(() => <MermaidIsland code={src} id={islandId} />, next)
   }
 }
@@ -654,6 +706,7 @@ export function Markdown(
       const child = container.lastElementChild
       if (!child) break
       disposeCopyButtons(child)
+      disposeMermaidPan(child)
       child.remove()
     }
     container
@@ -763,7 +816,10 @@ function updateBlock(container: HTMLDivElement, index: number, block: RenderedBl
       return true
     },
     onBeforeNodeDiscarded: (node) => {
-      if (node instanceof Element) disposeCopyButtons(node)
+      if (node instanceof Element) {
+        disposeCopyButtons(node)
+        disposeMermaidPan(node)
+      }
       return true
     },
   })
@@ -789,7 +845,9 @@ function updateCodeBlock(
     const text = mermaidHost.dataset.mermaidCode
     if (text === block.src) return
     mermaidHost.dataset.mermaidCode = block.src
+    mermaidPanCleanups.get(mermaidHost)?.()
     mermaidHost.replaceChildren()
+    setupMermaidPan(mermaidHost)
     render(() => <MermaidIsland code={block.src} id={mermaidId(`mermaid-${next.dataset.markdownKey}`)} />, mermaidHost)
     return
   }
@@ -812,6 +870,7 @@ function updateCodeBlock(
     const island = document.createElement("div")
     island.setAttribute("data-component", "markdown-mermaid")
     island.dataset.mermaidCode = block.src
+    setupMermaidPan(island)
     render(() => <MermaidIsland code={block.src} id={mermaidId(`mermaid-${next.dataset.markdownKey}`)} />, island)
     blockContainer.appendChild(wrapper)
     blockContainer.appendChild(island)
@@ -819,6 +878,7 @@ function updateCodeBlock(
     next.replaceChildren(blockContainer)
     if (current) {
       disposeCopyButtons(current)
+      disposeMermaidPan(current)
       current.replaceWith(next)
       return
     }
@@ -827,6 +887,7 @@ function updateCodeBlock(
   }
 
   if (mermaidHost) {
+    mermaidPanCleanups.get(mermaidHost)?.()
     next.replaceChildren()
     renderedCodeTokens.delete(next)
   }
@@ -884,6 +945,7 @@ function updateCodeBlock(
   })
   if (current) {
     disposeCopyButtons(current)
+    disposeMermaidPan(current)
     current.replaceWith(next)
     return
   }
