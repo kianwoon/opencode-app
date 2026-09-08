@@ -49,8 +49,12 @@ const markedWithShiki = marked.use(
       },
     },
   },
+  // Bypass shiki for mermaid: shiki output has no language class, so the
+  // scanner below would never match. markedShiki uses the highlight result as
+  // the raw html for the block.
   markedShiki({
     highlight(code, lang) {
+      if (lang?.trim().toLowerCase() === "mermaid") return escapeMermaid(code)
       return codeToHtml(code, {
         lang: lang || "text",
         themes: {
@@ -61,6 +65,15 @@ const markedWithShiki = marked.use(
     },
   }),
 )
+
+function escapeMermaid(code: string) {
+  const escaped = code
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+  return `<pre data-language="mermaid"><code class="language-mermaid">${escaped}</code></pre>`
+}
 
 interface Props {
   text: string

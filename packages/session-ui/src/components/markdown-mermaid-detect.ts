@@ -6,5 +6,7 @@ export function isMermaidLanguage(className: string): boolean {
 }
 
 export function isMermaidCodeElement(code: Element): boolean {
-  return code instanceof HTMLElement && isMermaidLanguage(code.className)
+  if (!(code instanceof HTMLElement)) return false
+  if (isMermaidLanguage(code.className)) return true
+  return code.parentElement?.getAttribute("data-language")?.toLowerCase() === "mermaid"
 }

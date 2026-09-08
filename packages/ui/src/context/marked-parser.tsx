@@ -13,8 +13,25 @@ export function createMarkdownParser(highlight: (code: string, language: string)
       },
     },
     katexExtension,
-    markedShiki({ highlight }),
+    // Bypass shiki for mermaid: shiki output has no language class, so
+    // decorateMermaid would never match. markedShiki uses the highlight result
+    // as the raw html for the block, so this escapes into the DOM untouched.
+    markedShiki({
+      highlight(code, lang) {
+        if (lang?.trim().toLowerCase() === "mermaid") return escapeMermaid(code)
+        return highlight(code, lang)
+      },
+    }),
   )
+}
+
+function escapeMermaid(code: string) {
+  const escaped = code
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+  return `<pre data-language="mermaid"><code class="language-mermaid">${escaped}</code></pre>`
 }
 
 const inlineMathRegex = /^\\\(((?:\\.|[^\\\n])*?)\\\)/
