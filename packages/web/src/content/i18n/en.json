@@ -36,6 +36,8 @@
   "share.mermaid_zoom_in": "Zoom in",
   "share.mermaid_zoom_out": "Zoom out",
   "share.mermaid_reset": "Reset zoom",
+  "share.mermaid_fullscreen_on": "Enter fullscreen",
+  "share.mermaid_fullscreen_off": "Exit fullscreen",
   "share.mermaid_show_diagram": "Show diagram",
   "share.show_results": "Show results",
   "share.hide_results": "Hide results",

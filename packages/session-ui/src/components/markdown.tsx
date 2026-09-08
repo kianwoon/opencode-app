@@ -240,6 +240,32 @@ function createMermaidToolbar() {
     applyZoom(block, 100)
   })
   toolbar.appendChild(reset)
+  const fullscreen = document.createElement("button")
+  fullscreen.type = "button"
+  fullscreen.setAttribute("data-slot", "markdown-mermaid-fullscreen")
+  fullscreen.setAttribute("aria-label", mermaidToolbarLabels.fullscreenOn)
+  fullscreen.textContent = "⛶"
+  fullscreen.addEventListener("click", () => {
+    const block = fullscreen.closest('[data-component="markdown-mermaid-block"]')
+    if (!(block instanceof HTMLElement)) return
+    const exit = () => {
+      block.removeAttribute("data-fullscreen")
+      fullscreen.setAttribute("aria-label", mermaidToolbarLabels.fullscreenOn)
+      document.removeEventListener("keydown", onKey)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      exit()
+    }
+    if (block.hasAttribute("data-fullscreen")) {
+      exit()
+      return
+    }
+    block.setAttribute("data-fullscreen", "")
+    fullscreen.setAttribute("aria-label", mermaidToolbarLabels.fullscreenOff)
+    document.addEventListener("keydown", onKey)
+  })
+  toolbar.appendChild(fullscreen)
   return toolbar
 }
 
@@ -253,7 +279,7 @@ function setupMermaidPan(container: HTMLElement): () => void {
     if (
       e.target instanceof Element &&
       e.target.closest(
-        '[data-slot^="markdown-mermaid-zoom"], [data-slot="markdown-mermaid-toggle"], [data-slot="markdown-copy-button"]',
+        '[data-slot^="markdown-mermaid-zoom"], [data-slot="markdown-mermaid-toggle"], [data-slot="markdown-mermaid-fullscreen"], [data-slot="markdown-copy-button"]',
       )
     )
       return
@@ -297,7 +323,7 @@ function disposeMermaidPan(root: Element) {
 // Updated whenever the markdown effect reruns so toggle buttons pick up
 // localized labels without being re-created.
 const mermaidToggleLabels = { showCode: "", showDiagram: "" }
-const mermaidToolbarLabels = { zoomIn: "", zoomOut: "", reset: "" }
+const mermaidToolbarLabels = { zoomIn: "", zoomOut: "", reset: "", fullscreenOn: "", fullscreenOff: "" }
 
 
 function disposeCopyButtons(root: Element) {
@@ -686,6 +712,8 @@ export function Markdown(
     mermaidToolbarLabels.zoomIn = i18n.t("ui.markdown.mermaidZoomIn")
     mermaidToolbarLabels.zoomOut = i18n.t("ui.markdown.mermaidZoomOut")
     mermaidToolbarLabels.reset = i18n.t("ui.markdown.mermaidReset")
+    mermaidToolbarLabels.fullscreenOn = i18n.t("ui.markdown.mermaidFullscreenOn")
+    mermaidToolbarLabels.fullscreenOff = i18n.t("ui.markdown.mermaidFullscreenOff")
     container
       .querySelectorAll<HTMLElement>('[data-slot="markdown-mermaid-toggle"]')
       .forEach((button) => {

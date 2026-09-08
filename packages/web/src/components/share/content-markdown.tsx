@@ -205,6 +205,30 @@ export function ContentMarkdown(props: Props) {
         reset.textContent = "1:1"
         reset.addEventListener("click", () => applyZoom(100))
         toolbar.appendChild(reset)
+        const fullscreen = document.createElement("button")
+        fullscreen.type = "button"
+        fullscreen.setAttribute("data-slot", "markdown-mermaid-fullscreen")
+        fullscreen.setAttribute("aria-label", messages.mermaid_fullscreen_on)
+        fullscreen.textContent = "⛶"
+        fullscreen.addEventListener("click", () => {
+          const exit = () => {
+            block.removeAttribute("data-fullscreen")
+            fullscreen.setAttribute("aria-label", messages.mermaid_fullscreen_on)
+            document.removeEventListener("keydown", onKey)
+          }
+          const onKey = (e: KeyboardEvent) => {
+            if (e.key !== "Escape") return
+            exit()
+          }
+          if (block.hasAttribute("data-fullscreen")) {
+            exit()
+            return
+          }
+          block.setAttribute("data-fullscreen", "")
+          fullscreen.setAttribute("aria-label", messages.mermaid_fullscreen_off)
+          document.addEventListener("keydown", onKey)
+        })
+        toolbar.appendChild(fullscreen)
         block.appendChild(toolbar)
         if (!host.dataset.panWired) {
           host.dataset.panWired = "true"

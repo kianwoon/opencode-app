@@ -219,6 +219,44 @@
   max-height: 520px;
 }
 
+[data-component="markdown-mermaid-block"][data-fullscreen] {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--sl-color-bg);
+  margin: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  padding-top: 48px;
+}
+
+[data-component="markdown-mermaid-block"][data-fullscreen] [data-component="markdown-mermaid"] {
+  flex: 1;
+  max-height: none;
+  overflow: auto;
+}
+
+[data-component="markdown-mermaid-block"][data-fullscreen] [data-slot="markdown-mermaid-svg"] {
+  width: 100% !important;
+  height: 100%;
+}
+
+[data-component="markdown-mermaid-block"][data-fullscreen] svg {
+  max-width: none !important;
+  max-height: none !important;
+  width: 100%;
+  height: auto;
+}
+
+[data-component="markdown-mermaid-block"][data-fullscreen] [data-slot="markdown-mermaid-toolbar"] {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  opacity: 1;
+}
+
 /* Belt-and-braces: DOMPurify renames the svg id (user-content-*) but leaves
    mermaid's <style> targeting the old id, so its fill rules never match.
    Force readable fills from our own stylesheet instead. */
