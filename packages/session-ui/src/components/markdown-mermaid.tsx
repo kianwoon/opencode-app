@@ -34,12 +34,21 @@ function remember(key: string, svg: string) {
   cache.delete(first)
 }
 
+// Mermaid passes the id to document.querySelector('#'+id) internally, so it
+// must only contain querySelector-safe characters. Collapse repeats and append
+// a checksum suffix to preserve uniqueness after sanitization.
+export function mermaidId(raw: string) {
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-")
+  const prefixed = /^[A-Za-z]/.test(cleaned) ? cleaned : `m-${cleaned}`
+  return `${prefixed}-${checksum(raw)}`
+}
+
 export async function renderMermaidSvg(id: string, code: string, themeName: "dark" | "base") {
   const cacheKey = `${themeName}:${checksum(code)}`
   const cached = cache.get(cacheKey)
   if (cached) return cached
   const mermaid = await load(themeName)
-  const { svg } = await mermaid.render(id, code)
+  const { svg } = await mermaid.render(mermaidId(id), code)
   const safe = sanitizeMarkdown(svg)
   if (safe) remember(cacheKey, safe)
   return safe
