@@ -471,6 +471,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         "--message-width-ch",
         typeof messageWidth === "number" && messageWidth > 0 ? `${messageWidth}ch` : "",
       )
+      root.style.setProperty(
+        "--message-width-pct",
+        typeof messageWidth === "number" && messageWidth >= 160 ? "90%" : "82%",
+      )
       // Alignment uses logical properties downstream, so left/right follow the
       // writing direction. Empty strings restore the CSS defaults (right).
       const messageAlign =

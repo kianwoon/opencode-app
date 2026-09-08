@@ -271,7 +271,10 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 if (!s) return
                 const sessionId = s.parentID ?? s.id
                 const next = { server: route.server ?? server.key, sessionId }
-                tabsStoreActions.addSessionTab(next)
+                const tab = tabsStoreActions.addSessionTab(next)
+                // Warm the tab info cache so later project closes can
+                // attribute this tab even if the sync cache evicts the session.
+                if (tab.type === "session") tabs.rememberSessionInfo(tab, s)
               }
             })
 

@@ -10,6 +10,7 @@ import { ServerConnection } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { closeHomeProject, errorMessage, homeProjectDirectories } from "@/pages/layout/helpers"
 import { Persist, persisted } from "@/utils/persist"
+import { pathKey } from "@/utils/path-key"
 import { showToast } from "@/utils/toast"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createResource } from "solid-js"
@@ -101,12 +102,22 @@ export function createHomeProjectsController(home: HomeController) {
         const key = ServerConnection.key(conn)
         const serverCtx = home.server.context(conn)
         // Closing a project also closes its title-bar tabs.
-        const project = serverCtx.projects.list().find((item) => item.worktree === directory)
+        const project = serverCtx.projects.list().find((item) => pathKey(item.worktree) === pathKey(directory))
         if (project) {
+          // Server-truth worktree/sandboxes may diverge from the enriched local
+          // project; merge both so directory matching catches every session.
+          const truth = project.id ? serverCtx.sync.data.project.find((item) => item.id === project.id) : undefined
           tabs.removeProjectTabs({
             server: key,
-            directories: [project.worktree, ...(project.sandboxes ?? [])],
+            directories: [
+              project.worktree,
+              ...(project.sandboxes ?? []),
+              ...(truth?.worktree ? [truth.worktree] : []),
+              ...(truth?.sandboxes ?? []),
+            ],
+            projectId: project.id,
             sessionDirectory: (sessionId) => serverCtx.sync.session.peek(sessionId)?.directory,
+            sessionProjectId: (sessionId) => serverCtx.sync.session.peek(sessionId)?.projectID,
           })
         }
         const next = closeHomeProject(home.selection.value(), key, serverCtx.projects, directory)

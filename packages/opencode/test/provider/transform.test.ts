@@ -308,7 +308,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
-  test("should not send an undocumented OpenRouter prompt_cache_key", () => {
+  test("should send snake_case sticky keys for the OpenRouter SDK", () => {
     const result = ProviderTransform.options({
       model: {
         ...mockModel,
@@ -318,7 +318,9 @@ describe("ProviderTransform.options - setCacheKey", () => {
       sessionID,
       providerOptions: {},
     })
-    expect(result.prompt_cache_key).toBeUndefined()
+    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.prompt_cache_key).toBe(sessionID)
+    expect(result.session_id).toBe(sessionID)
   })
 })
 

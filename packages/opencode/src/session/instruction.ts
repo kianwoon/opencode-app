@@ -93,6 +93,8 @@ const layer: Layer.Layer<
       s.nestedGuides = found
         .map((item) => path.resolve(item))
         .filter((resolved) => !resolved.includes(`${path.sep}node_modules${path.sep}`))
+        // Glob order is FS-dependent; index rides the wire so sort for byte stability.
+        .toSorted()
       return s.nestedGuides
     })
 
@@ -191,7 +193,10 @@ const layer: Layer.Layer<
         (item) => item.startsWith("https://") || item.startsWith("http://"),
       )
 
-      const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
+      // Sort: Set insertion order follows FS glob/findUp discovery order,
+      // which is nondeterministic; the wire body must be byte-stable.
+      const ordered = Array.from(paths).toSorted()
+      const files = yield* Effect.forEach(ordered, read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
       // Compact index of package-level guides whose full text is NOT loaded.
@@ -220,7 +225,7 @@ const layer: Layer.Layer<
               ].join("\n"),
             ]
           : []),
-        ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
+        ...ordered.flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
         ...(nestedIndex.length > 0 ? [nestedIndex.join("\n")] : []),
       ]
@@ -231,11 +236,11 @@ const layer: Layer.Layer<
       yield* Effect.logInfo("instruction files loaded", {
         count: loaded.length,
         discovered: paths.size + urls.length,
-        files: Array.from(paths).length,
+        files: ordered.length,
         urls: urls.length,
         nestedIndexed: nested.length,
         bytes,
-        paths: Array.from(paths),
+        paths: ordered,
       })
 
       return loaded

@@ -281,6 +281,7 @@ export const SettingsGeneral: Component = () => {
       { value: "88", label: language.t("settings.general.row.messageWidth.option.wider") },
       { value: "102", label: language.t("settings.general.row.messageWidth.option.full") },
       { value: "128", label: language.t("settings.general.row.messageWidth.option.max") },
+      { value: "160", label: language.t("settings.general.row.messageWidth.option.maxPlus") },
     ].map((option) => ({
       ...option,
       label: `${option.label} (${option.value}ch)`,

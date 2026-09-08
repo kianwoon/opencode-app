@@ -35,6 +35,7 @@ export type Tab = SessionTab | DraftTab
 export type TabInfo = {
   title?: string
   directory?: string
+  projectID?: string
 }
 
 type RecentTab = {
@@ -298,35 +299,59 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         if (server.key === key) navigate("/")
       },
       // Closes every title-bar tab belonging to a closed project: session tabs
-      // whose session directory is one of the project's directories, plus draft
-      // tabs opened against those directories. `sessionDirectory` resolves a
+      // whose session directory is one of the project's directories (or whose
+      // session projectID matches when `projectId` is passed), plus draft tabs
+      // opened against those directories. `sessionDirectory` resolves a
       // session tab's directory when the persisted info cache misses.
       removeProjectTabs(input: {
         server: ServerConnection.Key
         directories: string[]
-        sessionDirectory: (sessionId: string) => string | undefined
+        sessionDirectory?: (sessionId: string) => string | undefined
+        projectId?: string
+        sessionProjectId?: (sessionId: string) => string | undefined
       }) {
-        const sessionIDs = projectSessionIDs(store, input.server, input.directories, (sessionId) => {
-          const cached = info[`${input.server}\n${sessionHref(input.server, sessionId)}`]?.directory
-          return cached ?? input.sessionDirectory(sessionId)
+        const sessionIDs = projectSessionIDs(store, {
+          server: input.server,
+          directories: input.directories,
+          projectId: input.projectId,
+          sessionDirectory: (sessionId) => {
+            const key = `${input.server}\n${sessionHref(input.server, sessionId)}`
+            const cached = info[key]?.directory
+            return cached ?? input.sessionDirectory?.(sessionId)
+          },
+          sessionProjectId: (sessionId) => {
+            const key = `${input.server}\n${sessionHref(input.server, sessionId)}`
+            return info[key]?.projectID ?? input.sessionProjectId?.(sessionId)
+          },
+        })
+        // Orphan GC: tabs whose session can't be resolved via peek/API and have
+        // no cached info (directory/projectID) can never be attributed to any
+        // project, so they linger as grey "unknown" tabs. Remove them together
+        // with the matched tabs — on the closing server only, never touching
+        // other servers' tabs.
+        const orphans = store.flatMap((tab) => {
+          if (tab.type !== "session" || tab.server !== input.server || sessionIDs.includes(tab.sessionId)) return []
+          const key = `${input.server}\n${sessionHref(input.server, tab.sessionId)}`
+          if (info[key]?.directory) return []
+          if (input.sessionDirectory?.(tab.sessionId) || input.sessionProjectId?.(tab.sessionId)) return []
+          return [tab.sessionId]
         })
         actions.removeDraftsForDirectories(input.directories)
-        if (sessionIDs.length > 0)
-          actions.removeSessions({ server: input.server, directory: input.directories[0] ?? "", sessionIDs })
+        const all = [...sessionIDs, ...orphans]
+        if (all.length > 0)
+          actions.removeSessions({ server: input.server, directory: input.directories[0] ?? "", sessionIDs: all })
       },
       // Removes draft tabs (plus their persisted prompt state) whose directory
-      // belongs to one of the given directories. Session tabs for a closed
-      // project go through removeSessions instead.
+      // or worktree belongs to one of the given directories. Session tabs for a
+      // closed project go through removeSessions instead.
       removeDraftsForDirectories(directories: string[]) {
         const keys = new Set(directories.map(pathKey))
-        const drafts = store.flatMap((tab) =>
-          tab.type === "draft" && keys.has(pathKey(tab.directory)) ? [tab.draftID] : [],
-        )
+        const matches = (tab: Tab): tab is Extract<Tab, { type: "draft" }> =>
+          tab.type === "draft" && (keys.has(pathKey(tab.directory)) || (tab.worktree ? keys.has(pathKey(tab.worktree)) : false))
+        const drafts = store.flatMap((tab) => (matches(tab) ? [tab.draftID] : []))
         if (drafts.length === 0) return
-        const removed = store.filter(
-          (tab) => tab.type === "draft" && keys.has(pathKey(tab.directory)),
-        ).map(tabKey)
-        setStore((tabs) => tabs.filter((tab) => tab.type !== "draft" || !keys.has(pathKey(tab.directory))))
+        const removed = store.filter(matches).map(tabKey)
+        setStore((tabs) => tabs.filter((tab) => !matches(tab)))
         for (const key of removed) memory.remove(key)
         for (const key of removed) removeInfo(key)
         if (recent.key && removed.includes(recent.key)) setRecentKey(undefined)
@@ -358,10 +383,16 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
                   )
                 : -1
               const currentTab = tabs[currentIndex]
+              // Legacy routes expose the active session via params; new-layout
+              // routes (/server/:key/session/:id) do not, so also match the raw
+              // location against removed sessions — otherwise closing the
+              // active tab would leave the route on a dead session.
               const removedCurrent =
-                currentTab?.type === "session" &&
-                currentTab.server === targetServer &&
-                sessionIDs.has(currentTab.sessionId)
+                (currentTab?.type === "session" &&
+                  currentTab.server === targetServer &&
+                  sessionIDs.has(currentTab.sessionId)) ||
+                (targetServer === server.key &&
+                  [...sessionIDs].some((id) => id && location.pathname === sessionHref(targetServer, id)))
 
               for (let i = tabs.length - 1; i >= 0; i--) {
                 const tab = tabs[i]
@@ -386,9 +417,14 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
       rememberSessionInfo(tab: SessionTab, session: Session) {
         const key = tabKey(tab)
-        const next = { title: session.title, directory: session.directory }
+        const next = { title: session.title, directory: session.directory, projectID: session.projectID }
         const current = info[key]
-        if (current?.title === next.title && current.directory === next.directory) return
+        if (
+          current?.title === next.title &&
+          current.directory === next.directory &&
+          current.projectID === next.projectID
+        )
+          return
         setInfo(key, next)
       },
       select: navigateTab,

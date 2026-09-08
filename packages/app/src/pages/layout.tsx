@@ -1397,10 +1397,20 @@ export default function LegacyLayout(props: ParentProps) {
   // session directory belongs to the project (root or a sandbox/workspace),
   // and draft tabs opened against those directories.
   function closeProjectTabs(project: LocalProject) {
+    // Server-truth worktree/sandboxes may diverge from the enriched local
+    // project (enrich spread order keeps the local worktree); merge both.
+    const truth = project.id ? serverSync().data.project.find((item) => item.id === project.id) : undefined
     tabs.removeProjectTabs({
       server: server.key,
-      directories: [project.worktree, ...(project.sandboxes ?? [])],
+      directories: [
+        project.worktree,
+        ...(project.sandboxes ?? []),
+        ...(truth?.worktree ? [truth.worktree] : []),
+        ...(truth?.sandboxes ?? []),
+      ],
+      projectId: project.id,
       sessionDirectory: (sessionId) => serverSync().session.peek(sessionId)?.directory,
+      sessionProjectId: (sessionId) => serverSync().session.peek(sessionId)?.projectID,
     })
   }
   function toggleProjectWorkspaces(project: LocalProject) {

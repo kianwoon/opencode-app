@@ -127,9 +127,9 @@
 
   [data-slot="user-message-body"] {
     /* Bubble always fills the configured width; short text stretches instead of shrink-to-fit. */
-    width: min(82%, var(--message-width-ch, 64ch));
+    width: min(var(--message-width-pct, 82%), var(--message-width-ch, 64ch));
     /* Width cap is user-configurable via --message-width-ch (Settings → Appearance). */
-    max-width: min(82%, var(--message-width-ch, 64ch));
+    max-width: min(var(--message-width-pct, 82%), var(--message-width-ch, 64ch));
     margin-inline-start: var(--message-align-start, auto);
     margin-inline-end: var(--message-align-end, 0);
     display: flex;

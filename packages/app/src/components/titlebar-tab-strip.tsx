@@ -95,7 +95,7 @@ function SessionTabEntry(props: {
   )
   const session = createMemo(() => cachedSession() ?? loadedSession())
   const missingSession = createMemo(() => !!props.serverCtx() && !loadedSession.loading && !session())
-  const visible = createMemo(() => !!session() || missingSession() || !!persisted()?.title)
+  const visible = createMemo(() => !!session() || !!persisted()?.title)
   let prefetched = false
 
   const rename = async (title: string) => {

@@ -85,6 +85,7 @@ const messageWidthOptions = [
   { value: "88", label: "settings.general.row.messageWidth.option.wider" },
   { value: "102", label: "settings.general.row.messageWidth.option.full" },
   { value: "128", label: "settings.general.row.messageWidth.option.max" },
+  { value: "160", label: "settings.general.row.messageWidth.option.maxPlus" },
 ]
 const messageAlignOptions: { value: "left" | "center" | "right"; label: string }[] = [
   { value: "left", label: "settings.general.row.messageAlign.option.left" },

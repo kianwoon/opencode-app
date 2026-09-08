@@ -225,12 +225,18 @@ export function NewSidebar() {
     const directory = session.directory
     serverCtx.projects.open(directory)
     if (options?.background) {
-      tabs.addSessionTab({ server: key, sessionId: session.id })
+      const tab = tabs.addSessionTab({ server: key, sessionId: session.id })
+      if (tab.type === "session") {
+        // Warm the tab info cache so later project closes can attribute this
+        // tab even if the sync cache evicts the session.
+        tabs.rememberSessionInfo(tab, session)
+      }
       return
     }
     serverCtx.projects.touch(directory)
     void startTransition(() => {
       const tab = tabs.addSessionTab({ server: key, sessionId: session.id })
+      if (tab.type === "session") tabs.rememberSessionInfo(tab, session)
       tabs.select(tab)
     })
   }
@@ -273,10 +279,21 @@ export function NewSidebar() {
     // Closing a project also closes its title-bar tabs.
     const project = global.ensureServerCtx(conn).projects.list().find((item) => pathKey(item.worktree) === pathKey(directory))
     if (project) {
+      // Server-truth worktree/sandboxes may diverge from the enriched local
+      // project (symlinks, metadata); merge both so directory matching catches
+      // every session of the project.
+      const truth = project.id ? global.ensureServerCtx(conn).sync.data.project.find((item) => item.id === project.id) : undefined
       tabs.removeProjectTabs({
         server: ServerConnection.key(conn),
-        directories: [project.worktree, ...(project.sandboxes ?? [])],
+        directories: [
+          project.worktree,
+          ...(project.sandboxes ?? []),
+          ...(truth?.worktree ? [truth.worktree] : []),
+          ...(truth?.sandboxes ?? []),
+        ],
+        projectId: project.id,
         sessionDirectory: (sessionId) => sync().session.peek(sessionId)?.directory,
+        sessionProjectId: (sessionId) => sync().session.peek(sessionId)?.projectID,
       })
     }
     global.ensureServerCtx(conn).projects.close(directory)

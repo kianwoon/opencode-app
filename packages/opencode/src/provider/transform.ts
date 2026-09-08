@@ -1452,6 +1452,12 @@ export function options(input: {
       input.providerOptions?.setCacheKey === true
     ) {
       result["promptCacheKey"] = input.sessionID
+      if (input.model.api.npm === "@openrouter/ai-sdk-provider") {
+        // SDK spreads providerOptions.openrouter verbatim into the wire body;
+        // OpenRouter reads snake_case `prompt_cache_key` + top-level `session_id` (session_id takes precedence as sticky key).
+        result["prompt_cache_key"] = input.sessionID
+        result["session_id"] = input.sessionID
+      }
     }
   }
 

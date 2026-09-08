@@ -94,3 +94,9 @@ Core workflow:
 ## Settings dialog is ALWAYS settings-v2 (2026-09-06 lesson)
 
 - `settings-dialog.tsx` unconditionally loads `settings-v2/general.tsx`; the old dialog (`dialog-settings.tsx` → `settings-general.tsx`) is only reachable when `newLayoutDesigns` is OFF (via the v2 interface-transition toggle). Adding a Settings row to only ONE file means users silently never see it (messageAlign/messageBorder/messageBackground shipped old-dialog-only on 2026-09-06). Any Settings UI change must be mirrored in BOTH `settings-general.tsx` AND `settings-v2/general.tsx` (with its controller in `settings-v2/general-controllers.ts`), or verified which dialog actually renders for the target layout. Acceptance gate: `grep` the new `data-action` string in BOTH `settings-general.tsx` AND `settings-v2/general.tsx` — both must match.
+
+## Project-close tab gotcha
+
+- `projectSessionIDs` in `src/context/project-tabs.ts` must match by BOTH directory AND session projectID. Directory-only matching leaks grey "unknown" titlebar tabs when `sync.session.peek` misses (unloaded session) — `SessionTabEntry` then renders a placeholder that never closes.
+- Always pass `projectId` + `sessionProjectId: (id) => sync.session.peek(id)?.projectID` at every `removeProjectTabs` call site (sidebar-v2, layout, home-projects-controller). Draft matching must check both `tab.directory` and `tab.worktree`.
+- Acceptance gate: `bun test src/context/tabs.test.ts` from `packages/app` (18 pass).

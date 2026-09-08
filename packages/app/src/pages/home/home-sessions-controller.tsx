@@ -195,12 +195,16 @@ export function createHomeSessionsController(home: HomeController) {
         if (!ctx) return
         ctx.projects.open(directory)
         if (options?.background) {
-          tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
+          const tab = tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
+          // Warm the tab info cache so later project closes can attribute this
+          // tab even if the sync cache evicts the session.
+          if (tab.type === "session") tabs.rememberSessionInfo(tab, session)
           return
         }
         ctx.projects.touch(directory)
         void startTransition(() => {
           const tab = tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
+          if (tab.type === "session") tabs.rememberSessionInfo(tab, session)
           tabs.select(tab)
         })
       },

@@ -1844,7 +1844,8 @@ const layer = Layer.effect(
                 sys.mcp(agent, session.permission),
                 sys.workflow(agent),
                 instruction.systemPaths().pipe(
-                  Effect.map((paths) => Array.from(paths)),
+                  // Set order is FS-discovery order; rules anchor rides the wire, so sort.
+                  Effect.map((paths) => Array.from(paths).toSorted()),
                   Effect.catch(() => Effect.succeed([] as string[])),
                 ),
                 MessageV2.toModelMessagesEffect(msgs, model),

@@ -128,19 +128,22 @@ describe("closed tab stack", () => {
 describe("project session tab matching", () => {
   test("matches sessions whose directory is a project directory", () => {
     const tabs: Tab[] = [sessionTab("/repo/a"), sessionTab("/other")]
-    const ids = projectSessionIDs(tabs, server, ["/repo"], (id) => (id === "/repo/a" ? "/repo" : "/other"))
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/repo"],
+      sessionDirectory: (id) => (id === "/repo/a" ? "/repo" : "/other"),
+    })
 
     expect(ids).toEqual(["/repo/a"])
   })
 
   test("matches sandbox directories and normalizes trailing slashes", () => {
     const tabs: Tab[] = [sessionTab("sandbox"), sessionTab("trailing")]
-    const ids = projectSessionIDs(
-      tabs,
+    const ids = projectSessionIDs(tabs, {
       server,
-      ["/repo", "/repo/sandbox"],
-      (id) => (id === "sandbox" ? "/repo/sandbox/" : "/repo/"),
-    )
+      directories: ["/repo", "/repo/sandbox"],
+      sessionDirectory: (id) => (id === "sandbox" ? "/repo/sandbox/" : "/repo/"),
+    })
 
     expect(ids).toEqual(["sandbox", "trailing"])
   })
@@ -152,15 +155,105 @@ describe("project session tab matching", () => {
       { type: "session", server: otherServer, sessionId: "remote-session" },
       { type: "draft", draftID: "d1", server, directory: "/repo" },
     ]
-    const ids = projectSessionIDs(tabs, server, ["/repo"], () => "/repo")
+    const ids = projectSessionIDs(tabs, { server, directories: ["/repo"], sessionDirectory: () => "/repo" })
 
     expect(ids).toEqual(["local-session"])
   })
 
-  test("drops sessions without a resolvable directory", () => {
+  test("drops sessions without a resolvable directory and no project match", () => {
     const tabs: Tab[] = [sessionTab("known"), sessionTab("unknown")]
-    const ids = projectSessionIDs(tabs, server, ["/repo"], (id) => (id === "known" ? "/repo" : undefined))
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/repo"],
+      sessionDirectory: (id) => (id === "known" ? "/repo" : undefined),
+    })
 
     expect(ids).toEqual(["known"])
+  })
+
+  test("matches unresolvable-directory sessions by projectID", () => {
+    const tabs: Tab[] = [sessionTab("known"), sessionTab("orphan")]
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/repo"],
+      projectId: "proj-1",
+      sessionDirectory: (id) => (id === "known" ? "/repo" : undefined),
+      sessionProjectId: (id) => (id === "orphan" ? "proj-1" : undefined),
+    })
+
+    expect(ids).toEqual(["known", "orphan"])
+  })
+
+  test("does not match unresolvable-directory sessions from another project", () => {
+    const tabs: Tab[] = [sessionTab("orphan")]
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/repo"],
+      projectId: "proj-1",
+      sessionDirectory: () => undefined,
+      sessionProjectId: () => "proj-2",
+    })
+
+    expect(ids).toEqual([])
+  })
+
+  test("matches by projectID even when the directory resolves to a different path", () => {
+    const tabs: Tab[] = [sessionTab("diverged")]
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/repo"],
+      projectId: "proj-1",
+      sessionDirectory: () => "/private/tmp/repo",
+      sessionProjectId: () => "proj-1",
+    })
+
+    expect(ids).toEqual(["diverged"])
+  })
+
+  test("closes via cached info directory when the live peek misses", () => {
+    // Simulates the tabs.info cache holding a directory warmed at tab
+    // creation while sync.session.peek returns undefined (evicted session).
+    const cached = new Map([
+      ["cached-a", "/Users/kianwoonwong/Downloads/biology"],
+      ["cached-b", "/Users/kianwoonwong/Downloads/other"],
+    ])
+    const tabs: Tab[] = [sessionTab("cached-a"), sessionTab("cached-b")]
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/Users/kianwoonwong/Downloads/biology"],
+      sessionDirectory: (id) => cached.get(id),
+    })
+
+    expect(ids).toEqual(["cached-a"])
+  })
+
+  test("closes via projectID when the cached directory diverges from the worktree", () => {
+    const tabs: Tab[] = [sessionTab("biology-1"), sessionTab("unrelated")]
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/Users/kianwoonwong/Downloads/biology"],
+      projectId: "proj-biology",
+      sessionDirectory: (id) => (id === "biology-1" ? "/private/tmp/biology-sandbox" : "/other/project"),
+      sessionProjectId: (id) => (id === "biology-1" ? "proj-biology" : "proj-other"),
+    })
+
+    expect(ids).toEqual(["biology-1"])
+  })
+
+  test("leaves orphans alone when they resolve on another server", () => {
+    const otherServer = "local\nhttp://localhost:9999" as ServerConnection.Key
+    const tabs: Tab[] = [
+      { type: "session", server: otherServer, sessionId: "remote-orphan" },
+      sessionTab("local-orphan"),
+    ]
+    const ids = projectSessionIDs(tabs, {
+      server,
+      directories: ["/repo"],
+      projectId: "proj-1",
+      sessionDirectory: () => undefined,
+      sessionProjectId: () => undefined,
+    })
+
+    expect(ids).toEqual([])
   })
 })
