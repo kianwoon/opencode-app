@@ -259,7 +259,9 @@
   stroke: #8b949e !important;
 }
 
-[data-component="markdown-mermaid"] svg marker path {
+[data-component="markdown-mermaid"] svg marker path,
+[data-component="markdown-mermaid"] svg marker polygon,
+[data-component="markdown-mermaid"] svg marker circle {
   fill: #8b949e !important;
   stroke: #8b949e !important;
 }
@@ -310,7 +312,9 @@
 
 :global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .flowchart-link,
 :global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .edgePath path,
-:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg marker path {
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg marker path,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg marker polygon,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg marker circle {
   stroke: #57606a !important;
   fill: #57606a !important;
 }
