@@ -214,8 +214,8 @@ function createMermaidToolbar() {
   toolbar.setAttribute("data-slot", "markdown-mermaid-toolbar")
   toolbar.appendChild(createMermaidToggleButton())
   for (const [action, delta, label] of [
-    ["in", 25, () => mermaidToolbarLabels.zoomIn],
-    ["out", -25, () => mermaidToolbarLabels.zoomOut],
+    ["in", 5, () => mermaidToolbarLabels.zoomIn],
+    ["out", -5, () => mermaidToolbarLabels.zoomOut],
   ] as const) {
     const button = document.createElement("button")
     button.type = "button"

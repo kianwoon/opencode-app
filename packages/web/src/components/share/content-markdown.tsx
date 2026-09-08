@@ -185,8 +185,8 @@ export function ContentMarkdown(props: Props) {
         })
         toolbar.appendChild(button)
         for (const [action, delta, label] of [
-          ["in", 25, messages.mermaid_zoom_in],
-          ["out", -25, messages.mermaid_zoom_out],
+          ["in", 5, messages.mermaid_zoom_in],
+          ["out", -5, messages.mermaid_zoom_out],
         ] as const) {
           const zoom = document.createElement("button")
           zoom.type = "button"
