@@ -524,6 +524,7 @@ body:not([data-new-layout]) [data-component="markdown"] {
 [data-component="markdown-mermaid"] svg line,
 [data-component="markdown-mermaid"] svg path.arrowheadPath {
   stroke: #8b949e !important;
+  fill: none !important;
 }
 
 [data-component="markdown-mermaid"] svg marker path,
@@ -578,7 +579,11 @@ body:not([data-new-layout]) [data-component="markdown"] {
 }
 
 [data-color-scheme="light"] [data-component="markdown-mermaid"] svg .flowchart-link,
-[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .edgePath path,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .edgePath path {
+  stroke: #57606a !important;
+  fill: none !important;
+}
+
 [data-color-scheme="light"] [data-component="markdown-mermaid"] svg marker path,
 [data-color-scheme="light"] [data-component="markdown-mermaid"] svg marker polygon,
 [data-color-scheme="light"] [data-component="markdown-mermaid"] svg marker circle {
