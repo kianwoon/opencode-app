@@ -160,6 +160,8 @@ export const dict: Record<Keys, string> = {
   "ui.permission.allowOnce": "Tillat én gang",
 
   "ui.markdown.mermaidError": 'Kunne ikke gjengi diagrammet',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Utvid melding",
   "ui.message.collapse": "Skjul melding",
   "ui.message.copy": "Kopier",

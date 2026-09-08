@@ -32,6 +32,8 @@
   "share.copy": "Копировать",
   "share.show_more": "Показать больше",
   "share.show_less": "Показать меньше",
+  "share.mermaid_show_code": "Show code",
+  "share.mermaid_show_diagram": "Show diagram",
   "share.show_results": "Показать результаты",
   "share.hide_results": "Скрыть результаты",
   "share.show_details": "Показать детали",

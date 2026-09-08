@@ -32,6 +32,8 @@
   "share.copy": "Kopiér",
   "share.show_more": "Vis mere",
   "share.show_less": "Vis mindre",
+  "share.mermaid_show_code": "Show code",
+  "share.mermaid_show_diagram": "Show diagram",
   "share.show_results": "Vis resultater",
   "share.hide_results": "Skjul resultater",
   "share.show_details": "Vis detaljer",

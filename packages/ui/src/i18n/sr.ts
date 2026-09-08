@@ -178,6 +178,8 @@ export const dict = {
   "ui.permission.allowAlways": "Дозволи увек",
   "ui.permission.allowOnce": "Дозволи једном",
   "ui.markdown.mermaidError": 'Није могуће приказати дијаграм',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Проширите поруку",
   "ui.message.collapse": "Скупи поруку",
   "ui.message.copy": "Копирај",

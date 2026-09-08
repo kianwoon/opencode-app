@@ -177,6 +177,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Permetre sempre",
   "ui.permission.allowOnce": "Permet una vegada",
   "ui.markdown.mermaidError": "No s'ha pogut renderitzar el diagrama",
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Amplia el missatge",
   "ui.message.collapse": "Replega el missatge",
   "ui.message.copy": "Còpia",

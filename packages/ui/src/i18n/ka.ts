@@ -173,6 +173,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "ყოველთვის ნებადართული",
   "ui.permission.allowOnce": "დაშვება ერთხელ",
   "ui.markdown.mermaidError": 'დიაგრამის რენდერი ვერ მოხერხდა',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "გაფართოვდეს შეტყობინება",
   "ui.message.collapse": "წერილის ჩაკეცვა",
   "ui.message.copy": "ასლი",

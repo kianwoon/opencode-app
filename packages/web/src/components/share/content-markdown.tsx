@@ -14,8 +14,8 @@ let mermaidPromise: Promise<typeof import("mermaid")["default"]> | undefined
 const mermaidSanitizeConfig = {
   USE_PROFILES: { html: true, mathMl: true, svg: true, svgFilters: true },
   SANITIZE_NAMED_PROPS: true,
-  FORBID_TAGS: ["style", "script"],
-  FORBID_CONTENTS: ["style", "script"],
+  FORBID_TAGS: ["script"],
+  FORBID_CONTENTS: ["script"],
   ADD_TAGS: ["svg", "path", "g", "rect", "circle", "ellipse", "line", "polygon", "polyline", "text", "tspan", "marker", "defs", "foreignObject", "use", "symbol", "title", "desc", "clipPath", "pattern", "image", "lineargradient", "radialgradient", "stop", "switch", "flowshape"],
   ADD_ATTR: ["d", "viewBox", "preserveAspectRatio", "xmlns", "transform", "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity", "stroke-opacity", "class", "id", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "points", "marker-end", "marker-start", "marker-mid", "refX", "refY", "markerWidth", "markerHeight", "orient", "offset", "stop-color", "stop-opacity", "gradientUnits", "patternUnits", "text-anchor", "dominant-baseline", "font-family", "font-size", "font-weight", "font-style", "text-decoration", "white-space", "aria-roledescription", "role"],
 }
@@ -33,6 +33,26 @@ function loadMermaid() {
         startOnLoad: false,
         securityLevel: "strict",
         theme: document.documentElement.classList.contains("dark") ? "dark" : "base",
+        themeVariables:
+          document.documentElement.classList.contains("dark")
+            ? {
+                background: "transparent",
+                primaryTextColor: "#e6edf3",
+                secondaryTextColor: "#e6edf3",
+                tertiaryTextColor: "#e6edf3",
+                textColor: "#e6edf3",
+                mainBkg: "#21262d",
+                nodeBorder: "#30363d",
+                lineColor: "#8b949e",
+                fontFamily: "inherit",
+              }
+            : {
+                primaryTextColor: "#1f2328",
+                secondaryTextColor: "#1f2328",
+                tertiaryTextColor: "#1f2328",
+                textColor: "#1f2328",
+                fontFamily: "inherit",
+              },
       })
       return module.default
     })
@@ -100,17 +120,35 @@ export function ContentMarkdown(props: Props) {
       blocks.map(async (code, index) => {
         if (!(code.parentElement instanceof HTMLElement)) return
         const source = code.textContent ?? ""
+        const pre = code.parentElement
         const host = document.createElement("div")
         host.setAttribute("data-component", "markdown-mermaid")
         try {
           const mermaid = await loadMermaid()
-          const { svg } = await mermaid.render(`mermaid-share-${index}`, source)
+          const { svg } = await mermaid.render(`mermaid-share-${index}`.replace(/[^A-Za-z0-9_-]+/g, "-"), source)
           host.innerHTML = sanitizeMermaidSvg(svg)
         } catch {
           // Render failed: keep the raw code block in place.
           return
         }
-        code.parentElement.replaceWith(host)
+        // Single bordered block: original pre + island + toggle. data-view
+        // picks which half is visible.
+        const block = document.createElement("div")
+        block.setAttribute("data-component", "markdown-mermaid-block")
+        block.setAttribute("data-view", "diagram")
+        pre.replaceWith(block)
+        block.appendChild(pre)
+        block.appendChild(host)
+        const button = document.createElement("button")
+        button.type = "button"
+        button.setAttribute("data-slot", "markdown-mermaid-toggle")
+        button.textContent = messages.mermaid_show_code
+        button.addEventListener("click", () => {
+          const toCode = block.getAttribute("data-view") === "diagram"
+          block.setAttribute("data-view", toCode ? "code" : "diagram")
+          button.textContent = toCode ? messages.mermaid_show_diagram : messages.mermaid_show_code
+        })
+        block.appendChild(button)
       }),
     )
   })

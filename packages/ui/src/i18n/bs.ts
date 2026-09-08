@@ -189,6 +189,8 @@ export const dict = {
   "ui.permission.allowOnce": "Dozvoli jednom",
 
   "ui.markdown.mermaidError": 'Nije moguće prikazati dijagram',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Proširi poruku",
   "ui.message.collapse": "Sažmi poruku",
   "ui.message.copy": "Kopiraj",

@@ -155,6 +155,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Salli aina",
   "ui.permission.allowOnce": "Salli kerran",
   "ui.markdown.mermaidError": 'Kaavion piirtäminen epäonnistui',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Laajenna viesti",
   "ui.message.collapse": "Kutista viesti",
   "ui.message.copy": "Kopioi",

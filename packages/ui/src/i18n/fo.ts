@@ -173,6 +173,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Loyva altíð",
   "ui.permission.allowOnce": "Loyva einaferð",
   "ui.markdown.mermaidError": 'Kundi ikki tekna diagram',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Víðka boðini",
   "ui.message.collapse": "Kollaps boð",
   "ui.message.copy": "Avrit",

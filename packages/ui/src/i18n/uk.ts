@@ -202,6 +202,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowOnce": "Дозволити один раз",
 
   "ui.markdown.mermaidError": 'Не вдалося відрендерити діаграму',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Розгорнути повідомлення",
   "ui.message.collapse": "Згорнути повідомлення",
   "ui.message.copy": "Копіювати",

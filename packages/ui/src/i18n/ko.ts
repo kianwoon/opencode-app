@@ -157,6 +157,8 @@ export const dict = {
   "ui.permission.allowOnce": "한 번만 허용",
 
   "ui.markdown.mermaidError": '다이어그램을 렌더링하지 못했습니다',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "메시지 펼치기",
   "ui.message.collapse": "메시지 접기",
   "ui.message.copy": "복사",

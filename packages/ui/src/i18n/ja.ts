@@ -180,6 +180,8 @@ export const dict = {
   "ui.permission.allowOnce": "今回のみ許可",
 
   "ui.markdown.mermaidError": 'ダイアグラムをレンダリングできませんでした',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "メッセージを展開",
   "ui.message.collapse": "メッセージを折りたたむ",
   "ui.message.copy": "コピー",

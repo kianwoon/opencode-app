@@ -32,6 +32,8 @@
   "share.copy": "نسخ",
   "share.show_more": "عرض المزيد",
   "share.show_less": "عرض أقل",
+  "share.mermaid_show_code": "Show code",
+  "share.mermaid_show_diagram": "Show diagram",
   "share.show_results": "عرض النتائج",
   "share.hide_results": "إخفاء النتائج",
   "share.show_details": "عرض التفاصيل",

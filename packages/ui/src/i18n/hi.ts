@@ -175,6 +175,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "हमेशा अनुमति दें",
   "ui.permission.allowOnce": "एक बार की अनुमति दें",
   "ui.markdown.mermaidError": 'आरेख रेंडर नहीं कर सका',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "संदेश का विस्तार करें",
   "ui.message.collapse": "संदेश संक्षिप्त करें",
   "ui.message.copy": "कॉपी करें",

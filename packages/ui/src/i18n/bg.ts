@@ -173,6 +173,8 @@ export const dict = {
   "ui.permission.allowAlways": "Разрешавайте винаги",
   "ui.permission.allowOnce": "Разрешете веднъж",
   "ui.markdown.mermaidError": 'Диаграммата не може да се визуализира',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Разгъване на съобщението",
   "ui.message.collapse": "Свиване на съобщението",
   "ui.message.copy": "копие",

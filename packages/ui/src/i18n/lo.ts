@@ -173,6 +173,8 @@ export const dict = {
   "ui.permission.allowAlways": "ອະນຸຍາດສະເໝີ",
   "ui.permission.allowOnce": "ອະນຸຍາດຄັ້ງດຽວ",
   "ui.markdown.mermaidError": 'ໄມ່ສາມາດສະແດງແຜນວາດໄດ້',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "ຂະຫຍາຍຂໍ້ຄວາມ",
   "ui.message.collapse": "ຫຍໍ້ຂໍ້ຄວາມ",
   "ui.message.copy": "ສຳເນົາ",

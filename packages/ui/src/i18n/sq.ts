@@ -173,6 +173,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Lejo gjithmonë",
   "ui.permission.allowOnce": "Lejo një herë",
   "ui.markdown.mermaidError": 'Nuk mund të renderohet diagrami',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Zgjero mesazhin",
   "ui.message.collapse": "Palos mesazhin",
   "ui.message.copy": "Kopjo",

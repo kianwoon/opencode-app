@@ -32,6 +32,8 @@
   "share.copy": "复制",
   "share.show_more": "显示更多",
   "share.show_less": "显示更少",
+  "share.mermaid_show_code": "Show code",
+  "share.mermaid_show_diagram": "Show diagram",
   "share.show_results": "显示结果",
   "share.hide_results": "隐藏结果",
   "share.show_details": "显示详情",

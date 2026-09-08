@@ -187,6 +187,8 @@ export const dict = {
   "ui.permission.allowOnce": "Bir kez izin ver",
 
   "ui.markdown.mermaidError": 'Diyagram oluşturulamadı',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Mesajı genişlet",
   "ui.message.collapse": "Mesajı daralt",
   "ui.message.copy": "Kopyala",

@@ -185,6 +185,8 @@ export const dict = {
   "ui.permission.allowOnce": "Permitir uma vez",
 
   "ui.markdown.mermaidError": 'Ne oa ket posub laoskañ ar skeudenn',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Expandir mensagem",
   "ui.message.collapse": "Recolher mensagem",
   "ui.message.copy": "Copiar",

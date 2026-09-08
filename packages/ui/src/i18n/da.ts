@@ -160,6 +160,8 @@ export const dict = {
   "ui.permission.allowOnce": "Tillad én gang",
 
   "ui.markdown.mermaidError": 'Kunne ikke gengive diagrammet',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Udvid besked",
   "ui.message.collapse": "Skjul besked",
   "ui.message.copy": "Kopier",

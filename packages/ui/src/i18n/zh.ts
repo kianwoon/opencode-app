@@ -183,6 +183,8 @@ export const dict = {
   "ui.permission.allowOnce": "允许一次",
 
   "ui.markdown.mermaidError": '无法渲染图表',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "展开消息",
   "ui.message.collapse": "收起消息",
   "ui.message.copy": "复制",

@@ -32,6 +32,8 @@
   "share.copy": "コピー",
   "share.show_more": "もっと見る",
   "share.show_less": "表示を減らす",
+  "share.mermaid_show_code": "Show code",
+  "share.mermaid_show_diagram": "Show diagram",
   "share.show_results": "結果を表示",
   "share.hide_results": "結果を非表示",
   "share.show_details": "詳細を表示",

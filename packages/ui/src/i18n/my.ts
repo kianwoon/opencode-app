@@ -174,6 +174,8 @@ export const dict = {
   "ui.permission.allowAlways": "အမြဲခွင့်ပြုပါ။",
   "ui.permission.allowOnce": "တစ်ကြိမ်ခွင့်ပြုပါ။",
   "ui.markdown.mermaidError": 'ဒိုင်ယာဂရမ်ကို ရေးဆွဲမရပါ',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "မက်ဆေ့ချ်ကို ချဲ့ပါ။",
   "ui.message.collapse": "မက်ဆေ့ဂျ်ကို ခေါက်သိမ်းပါ။",
   "ui.message.copy": "မိတ္တူ",

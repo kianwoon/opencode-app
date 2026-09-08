@@ -181,6 +181,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Leiskite visada",
   "ui.permission.allowOnce": "Leisti vieną kartą",
   "ui.markdown.mermaidError": 'Nepavyko atvaizduoti diagramos',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Išskleisti pranešimą",
   "ui.message.collapse": "Sutraukti pranešimą",
   "ui.message.copy": "Kopijuoti",

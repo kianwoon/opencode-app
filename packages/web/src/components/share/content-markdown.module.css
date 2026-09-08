@@ -153,15 +153,51 @@
   }
 }
 
+[data-component="markdown-mermaid-block"] {
+  position: relative;
+  border: 1px solid var(--sl-color-border);
+  border-radius: 6px;
+  margin: 8px 0;
+  direction: ltr;
+}
+
+[data-slot="markdown-mermaid-toggle"] {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  font-size: 0.857em;
+  padding: 2px 8px;
+  border: 1px solid var(--sl-color-border);
+  border-radius: 4px;
+  background: var(--sl-color-bg-surface);
+  color: var(--sl-color-text);
+  cursor: pointer;
+}
+
 [data-component="markdown-mermaid"] {
   position: relative;
   overflow: auto;
-  direction: ltr;
-  border-radius: 6px;
+  max-height: 560px;
   margin: 8px 0;
 }
 
 [data-component="markdown-mermaid"] svg {
-  max-width: 100%;
+  width: 100%;
+  max-width: 860px;
   height: auto;
+  max-height: 520px;
+}
+
+[data-component="markdown-mermaid-block"][data-view="diagram"]
+  > [data-component="markdown-mermaid"] {
+  display: block;
+}
+
+[data-component="markdown-mermaid-block"][data-view="diagram"] > pre {
+  display: none;
+}
+
+[data-component="markdown-mermaid-block"][data-view="code"] > [data-component="markdown-mermaid"] {
+  display: none;
 }

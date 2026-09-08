@@ -194,6 +194,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowOnce": "Allow once",
 
   "ui.markdown.mermaidError": 'Could not render diagram',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Expand message",
   "ui.message.collapse": "Collapse message",
   "ui.message.copy": "Copy",

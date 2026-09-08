@@ -176,6 +176,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Har doim ruxsat bering",
   "ui.permission.allowOnce": "Bir marta ruxsat bering",
   "ui.markdown.mermaidError": 'Diagrammani renderlash imkonsiz',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Xabarni kengaytirish",
   "ui.message.collapse": "Xabarni yigʻish",
   "ui.message.copy": "Nusxalash",

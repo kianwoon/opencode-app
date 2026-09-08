@@ -385,11 +385,54 @@ body:not([data-new-layout]) [data-component="markdown"] {
   text-underline-offset: 2px;
 }
 
+/* One bordered block per mermaid fence: code wrapper + island + toggle
+   live inside the container; data-view switches between them. */
+[data-component="markdown-mermaid-block"] {
+  position: relative;
+  margin: 8px 0;
+}
+
+[data-component="markdown-mermaid-block"] > [data-component="markdown-code"] {
+  margin: 0;
+}
+
+[data-component="markdown-mermaid-block"][data-view="diagram"] > [data-component="markdown-code"] {
+  display: none;
+}
+
+[data-component="markdown-mermaid-block"][data-view="code"] > [data-component="markdown-mermaid"],
+[data-component="markdown-mermaid-block"][data-view="code"] > [data-slot="markdown-mermaid-toggle"] {
+  display: none;
+}
+
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toggle"] {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 36px;
+  z-index: 1;
+  padding: 2px 8px;
+  border: 0.5px solid var(--v2-border-border-muted);
+  border-radius: 4px;
+  background: var(--v2-background-bg-layer-01);
+  color: var(--v2-text-text-base);
+  font-size: 11px;
+  font-weight: 530;
+  line-height: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+[data-component="markdown-mermaid-block"]:hover > [data-slot="markdown-mermaid-toggle"],
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toggle"]:focus-visible {
+  opacity: 1;
+}
+
 [data-component="markdown-mermaid"] {
   direction: ltr;
   unicode-bidi: isolate;
-  position: relative;
   overflow: auto;
+  max-height: 560px;
   border-radius: 6px;
   border: 0.5px solid var(--v2-border-border-base);
   background: var(--markdown-shell-code-background);
@@ -399,12 +442,13 @@ body:not([data-new-layout]) [data-component="markdown"] {
   display: flex;
   justify-content: center;
   padding: 12px;
-  min-width: min-content;
 }
 
 [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"] svg {
-  max-width: 100%;
+  width: 100%;
+  max-width: 860px;
   height: auto;
+  max-height: 520px;
 }
 
 [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-status"] {
@@ -415,14 +459,6 @@ body:not([data-new-layout]) [data-component="markdown"] {
 [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-status"][data-status="loading"] {
   min-height: 48px;
   animation: markdown-mermaid-pulse 1.2s ease-in-out infinite;
-}
-
-/* Once the SVG renders, hide the raw code fallback beside it. On render
-   failure only the error status shows, so the code stays visible. */
-[data-component="markdown"]
-  div:has(> [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"])
-  > [data-component="markdown-code"] {
-  display: none;
 }
 
 @keyframes markdown-mermaid-pulse {

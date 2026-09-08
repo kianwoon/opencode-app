@@ -173,6 +173,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Luba alati",
   "ui.permission.allowOnce": "Luba üks kord",
   "ui.markdown.mermaidError": 'Diagrammi renderdamine nurjus',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Laienda sõnumit",
   "ui.message.collapse": "Ahenda sõnum",
   "ui.message.copy": "Kopeeri",

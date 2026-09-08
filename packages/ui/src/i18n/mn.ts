@@ -173,6 +173,8 @@ export const dict = {
   "ui.permission.allowAlways": "Үргэлж зөвшөөрөх",
   "ui.permission.allowOnce": "Нэг удаа зөвшөөрнө үү",
   "ui.markdown.mermaidError": 'Could not render diagram',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Зурвасыг дэлгэх",
   "ui.message.collapse": "Зурвасыг буулгах",
   "ui.message.copy": "Хуулбарлах",

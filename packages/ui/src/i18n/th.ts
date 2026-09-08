@@ -181,6 +181,8 @@ export const dict = {
   "ui.permission.allowOnce": "อนุญาตครั้งเดียว",
 
   "ui.markdown.mermaidError": 'ไม่สามารถเรนเดอร์ไดอะแกรม',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "ขยายข้อความ",
   "ui.message.collapse": "ย่อข้อความ",
   "ui.message.copy": "คัดลอก",

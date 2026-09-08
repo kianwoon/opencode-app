@@ -4,7 +4,8 @@ import { expect, test } from "bun:test"
 // markdown-mermaid-detect.ts relies on.
 import { GlobalRegistrator } from "../../../../node_modules/.bun/@happy-dom+global-registrator@20.12.0/node_modules/@happy-dom/global-registrator/lib/index.js"
 
-GlobalRegistrator.register()
+// Other test files may already have registered (bun runs files in one process).
+if (typeof window === "undefined") GlobalRegistrator.register()
 
 import { isMermaidCodeElement } from "./markdown-mermaid-detect"
 

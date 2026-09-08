@@ -173,6 +173,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Altijd toestaan",
   "ui.permission.allowOnce": "Eén keer toestaan",
   "ui.markdown.mermaidError": 'Kan diagram niet weergeven',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Bericht uitvouwen",
   "ui.message.collapse": "Bericht samenvouwen",
   "ui.message.copy": "Kopiëren",

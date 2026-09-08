@@ -189,6 +189,8 @@ export const dict = {
   "ui.permission.allowOnce": "Zezwól raz",
 
   "ui.markdown.mermaidError": 'Nie udało się wyrenderować diagramu',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Rozwiń wiadomość",
   "ui.message.collapse": "Zwiń wiadomość",
   "ui.message.copy": "Kopiuj",

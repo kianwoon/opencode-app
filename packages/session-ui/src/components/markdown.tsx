@@ -33,7 +33,7 @@ import { shouldResetCodeTokens, type RenderedCodeState } from "./markdown-code-s
 import { getCachedMarkdown, sanitizeMarkdown, touchCachedMarkdown, type MarkdownCacheEntry } from "./markdown-cache"
 import { absolutePathHref, isDesktopRenderer } from "./markdown-desktop"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
-import { MermaidIsland } from "./markdown-mermaid"
+import { MermaidIsland, mermaidId } from "./markdown-mermaid"
 import { isMermaidCodeElement } from "./markdown-mermaid-detect"
 
 type RenderedBlock =
@@ -180,6 +180,29 @@ function disposeCopyButton(host: HTMLElement) {
   copyButtonState.delete(host)
 }
 
+function createMermaidToggleButton() {
+  const button = document.createElement("button")
+  button.type = "button"
+  button.setAttribute("data-slot", "markdown-mermaid-toggle")
+  button.setAttribute("aria-label", mermaidToggleLabels.showCode)
+  button.textContent = mermaidToggleLabels.showCode
+  button.addEventListener("click", () => {
+    const block = button.closest('[data-component="markdown-mermaid-block"]')
+    if (!(block instanceof HTMLElement)) return
+    const toCode = block.getAttribute("data-view") !== "code"
+    block.setAttribute("data-view", toCode ? "code" : "diagram")
+    const label = toCode ? mermaidToggleLabels.showDiagram : mermaidToggleLabels.showCode
+    button.textContent = label
+    button.setAttribute("aria-label", label)
+  })
+  return button
+}
+
+// Updated whenever the markdown effect reruns so toggle buttons pick up
+// localized labels without being re-created.
+const mermaidToggleLabels = { showCode: "", showDiagram: "" }
+
+
 function disposeCopyButtons(root: Element) {
   const hosts = [
     ...(root instanceof HTMLElement && root.getAttribute("data-slot") === "markdown-copy-button" ? [root] : []),
@@ -298,16 +321,29 @@ function decorateMermaid(root: HTMLDivElement, blockKey: string) {
     const wrapper = pre.parentElement
     if (!wrapper) continue
     const src = code.textContent ?? ""
-    const islandId = `mermaid-${blockKey}-${index}`
+    const islandId = mermaidId(`mermaid-${blockKey}-${index}`)
     index++
-    const existing = wrapper.querySelector(':scope > [data-component="markdown-mermaid"]')
-    if (existing instanceof HTMLElement && existing.dataset.mermaidCode === src) continue
-    if (existing) existing.remove()
-    const island = document.createElement("div")
-    island.setAttribute("data-component", "markdown-mermaid")
-    island.dataset.mermaidCode = src
-    wrapper.appendChild(island)
-    render(() => <MermaidIsland code={src} id={islandId} />, island)
+    // Mermaid fences render as ONE block: code wrapper + island + toggle
+    // inside a shared container, switched via data-view (diagram/code).
+    let container: HTMLElement
+    if (wrapper.parentElement?.dataset.component === "markdown-mermaid-block") {
+      container = wrapper.parentElement
+    } else {
+      container = document.createElement("div")
+      container.setAttribute("data-component", "markdown-mermaid-block")
+      container.setAttribute("data-view", "diagram")
+      wrapper.replaceWith(container)
+      container.appendChild(wrapper)
+      container.appendChild(createMermaidToggleButton())
+    }
+    const island = container.querySelector(':scope > [data-component="markdown-mermaid"]')
+    if (island instanceof HTMLElement && island.dataset.mermaidCode === src) continue
+    island?.remove()
+    const next = document.createElement("div")
+    next.setAttribute("data-component", "markdown-mermaid")
+    next.dataset.mermaidCode = src
+    container.appendChild(next)
+    render(() => <MermaidIsland code={src} id={islandId} />, next)
   }
 }
 
@@ -547,6 +583,17 @@ export function Markdown(
       copy: i18n.t("ui.message.copy"),
       copied: i18n.t("ui.message.copied"),
     }
+    mermaidToggleLabels.showCode = i18n.t("ui.markdown.mermaidShowCode")
+    mermaidToggleLabels.showDiagram = i18n.t("ui.markdown.mermaidShowDiagram")
+    container
+      .querySelectorAll<HTMLElement>('[data-slot="markdown-mermaid-toggle"]')
+      .forEach((button) => {
+        const block = button.closest('[data-component="markdown-mermaid-block"]')
+        const isCode = block instanceof HTMLElement && block.getAttribute("data-view") === "code"
+        const label = isCode ? mermaidToggleLabels.showDiagram : mermaidToggleLabels.showCode
+        button.textContent = label
+        button.setAttribute("aria-label", label)
+      })
     const nextCodeKeys = new Set(content.filter((block) => block.mode === "code").map((block) => block.key))
     activeCodeKeys.forEach((key) => {
       if (!nextCodeKeys.has(key)) disposeCode(key)
@@ -694,11 +741,14 @@ function updateCodeBlock(
     if (text === block.src) return
     mermaidHost.dataset.mermaidCode = block.src
     mermaidHost.replaceChildren()
-    render(() => <MermaidIsland code={block.src} id={`mermaid-${next.dataset.markdownKey}`} />, mermaidHost)
+    render(() => <MermaidIsland code={block.src} id={mermaidId(`mermaid-${next.dataset.markdownKey}`)} />, mermaidHost)
     return
   }
 
   if (block.mermaid && block.complete) {
+    const blockContainer = document.createElement("div")
+    blockContainer.setAttribute("data-component", "markdown-mermaid-block")
+    blockContainer.setAttribute("data-view", "diagram")
     const wrapper = document.createElement("div")
     wrapper.setAttribute("data-component", "markdown-code")
     applyCodeMetadata(wrapper, block.language)
@@ -713,8 +763,11 @@ function updateCodeBlock(
     const island = document.createElement("div")
     island.setAttribute("data-component", "markdown-mermaid")
     island.dataset.mermaidCode = block.src
-    render(() => <MermaidIsland code={block.src} id={`mermaid-${next.dataset.markdownKey}`} />, island)
-    next.replaceChildren(wrapper, island)
+    render(() => <MermaidIsland code={block.src} id={mermaidId(`mermaid-${next.dataset.markdownKey}`)} />, island)
+    blockContainer.appendChild(wrapper)
+    blockContainer.appendChild(island)
+    blockContainer.appendChild(createMermaidToggleButton())
+    next.replaceChildren(blockContainer)
     if (current) {
       disposeCopyButtons(current)
       current.replaceWith(next)

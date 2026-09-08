@@ -173,6 +173,8 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Benarkan sentiasa",
   "ui.permission.allowOnce": "Benarkan sekali",
   "ui.markdown.mermaidError": 'Tidak dapat merender rajah',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "Kembangkan mesej",
   "ui.message.collapse": "Runtuhkan mesej",
   "ui.message.copy": "Salin",

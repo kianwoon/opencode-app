@@ -174,6 +174,8 @@ export const dict = {
   "ui.permission.allowAlways": "អនុញ្ញាតជានិច្ច",
   "ui.permission.allowOnce": "អនុញ្ញាតម្តង",
   "ui.markdown.mermaidError": 'មិនអាចបង្ហាញតំរែ ensuing ទេ',
+  "ui.markdown.mermaidShowCode": 'Show code',
+  "ui.markdown.mermaidShowDiagram": 'Show diagram',
   "ui.message.expand": "ពង្រីកសារ",
   "ui.message.collapse": "បង្រួមសារ",
   "ui.message.copy": "ចម្លង",
