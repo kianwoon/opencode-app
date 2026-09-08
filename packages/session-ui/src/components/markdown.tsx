@@ -34,6 +34,7 @@ import { getCachedMarkdown, sanitizeMarkdown, touchCachedMarkdown, type Markdown
 import { absolutePathHref, isDesktopRenderer } from "./markdown-desktop"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 import { MermaidIsland } from "./markdown-mermaid"
+import { isMermaidCodeElement } from "./markdown-mermaid-detect"
 
 type RenderedBlock =
   | (MarkdownCacheEntry & { key: string; mode: Exclude<Block["mode"], "code"> })
@@ -285,6 +286,28 @@ function markInlineCode(root: HTMLDivElement) {
     delete code.dataset.inlineCodeKind
     const kind = inlineCodeKind(code.textContent ?? "")
     if (kind) code.dataset.inlineCodeKind = kind
+  }
+}
+
+function decorateMermaid(root: HTMLDivElement, blockKey: string) {
+  const blocks = Array.from(root.querySelectorAll("pre"))
+  let index = 0
+  for (const pre of blocks) {
+    const code = pre.querySelector("code")
+    if (!code || !isMermaidCodeElement(code)) continue
+    const wrapper = pre.parentElement
+    if (!wrapper) continue
+    const src = code.textContent ?? ""
+    const islandId = `mermaid-${blockKey}-${index}`
+    index++
+    const existing = wrapper.querySelector(':scope > [data-component="markdown-mermaid"]')
+    if (existing instanceof HTMLElement && existing.dataset.mermaidCode === src) continue
+    if (existing) existing.remove()
+    const island = document.createElement("div")
+    island.setAttribute("data-component", "markdown-mermaid")
+    island.dataset.mermaidCode = src
+    wrapper.appendChild(island)
+    render(() => <MermaidIsland code={src} id={islandId} />, island)
   }
 }
 
@@ -626,6 +649,7 @@ function updateBlock(container: HTMLDivElement, index: number, block: RenderedBl
 
   if (!(current instanceof HTMLDivElement)) {
     container.appendChild(next)
+    decorateMermaid(next, block.key)
     return
   }
 
@@ -647,6 +671,7 @@ function updateBlock(container: HTMLDivElement, index: number, block: RenderedBl
       return true
     },
   })
+  decorateMermaid(current, block.key)
 }
 
 function updateCodeBlock(
