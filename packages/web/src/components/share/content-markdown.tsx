@@ -16,7 +16,7 @@ const mermaidSanitizeConfig = {
   SANITIZE_NAMED_PROPS: true,
   FORBID_TAGS: ["script"],
   FORBID_CONTENTS: ["script"],
-  ADD_TAGS: ["svg", "path", "g", "rect", "circle", "ellipse", "line", "polygon", "polyline", "text", "tspan", "marker", "defs", "foreignObject", "use", "symbol", "title", "desc", "clipPath", "pattern", "image", "lineargradient", "radialgradient", "stop", "switch", "flowshape"],
+  ADD_TAGS: ["style", "svg", "path", "g", "rect", "circle", "ellipse", "line", "polygon", "polyline", "text", "tspan", "marker", "defs", "foreignObject", "use", "symbol", "title", "desc", "clipPath", "pattern", "image", "lineargradient", "radialgradient", "stop", "switch", "flowshape"],
   ADD_ATTR: ["d", "viewBox", "preserveAspectRatio", "xmlns", "transform", "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity", "stroke-opacity", "class", "id", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "points", "marker-end", "marker-start", "marker-mid", "refX", "refY", "markerWidth", "markerHeight", "orient", "offset", "stop-color", "stop-opacity", "gradientUnits", "patternUnits", "text-anchor", "dominant-baseline", "font-family", "font-size", "font-weight", "font-style", "text-decoration", "white-space", "aria-roledescription", "role"],
 }
 
@@ -27,14 +27,18 @@ function sanitizeMermaidSvg(svg: string) {
 }
 
 function loadMermaid() {
+  const dark = document.documentElement.classList.contains("dark")
   if (!mermaidPromise) {
     mermaidPromise = import("mermaid").then((module) => {
       module.default.initialize({
         startOnLoad: false,
         securityLevel: "strict",
-        theme: document.documentElement.classList.contains("dark") ? "dark" : "base",
+        theme: dark ? "dark" : "base",
+        themeCSS: dark
+          ? `.node text,.label,.cluster-label{fill:#e6edf3 !important;font-family:inherit !important} .edgeLabel{fill:#8b949e !important}`
+          : `.node text,.label,.cluster-label{fill:#1f2328 !important;font-family:inherit !important} .edgeLabel{fill:#57606a !important}`,
         themeVariables:
-          document.documentElement.classList.contains("dark")
+          dark
             ? {
                 background: "transparent",
                 primaryTextColor: "#e6edf3",

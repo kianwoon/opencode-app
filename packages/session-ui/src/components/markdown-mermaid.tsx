@@ -38,6 +38,11 @@ const baseThemeVariables = {
   fontFamily: "inherit",
 }
 
+const themeCSS = {
+  dark: `.node text,.label,.cluster-label{fill:#e6edf3 !important;font-family:inherit !important} .edgeLabel{fill:#8b949e !important}`,
+  base: `.node text,.label,.cluster-label{fill:#1f2328 !important;font-family:inherit !important} .edgeLabel{fill:#57606a !important}`,
+}
+
 function load(themeName: "dark" | "base") {
   if (promise && theme === themeName) return promise
   theme = themeName
@@ -47,6 +52,7 @@ function load(themeName: "dark" | "base") {
       securityLevel: "strict",
       theme: themeName,
       themeVariables: themeName === "dark" ? darkThemeVariables : baseThemeVariables,
+      themeCSS: themeCSS[themeName],
     })
     return module.default
   })

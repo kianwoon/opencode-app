@@ -17,6 +17,8 @@ describe("sanitizeMermaidSvg", () => {
     // retention cannot be asserted here — verified in a real browser instead.
     // Pin the production fix at config level: style is not forbidden.
     expect(!mermaidConfig.FORBID_TAGS.includes("style")).toBe(true)
+    expect(mermaidConfig.ADD_TAGS.includes("style")).toBe(true)
+    expect((mermaidConfig.USE_PROFILES as Record<string, boolean>).svg).toBe(true)
     const svg = `<svg xmlns="http://www.w3.org/2000/svg"><style>.node rect { fill: #21262d; color: #e6edf3; }</style><g><rect fill="#21262d"/><text fill="#e6edf3">ok</text></g></svg>`
     const clean = sanitizeMermaidSvg(svg)
     expect(clean).toContain("<svg")

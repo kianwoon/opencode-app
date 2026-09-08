@@ -29,6 +29,8 @@ if (typeof window !== "undefined" && DOMPurify.isSupported) {
 // stays forbidden.
 export const mermaidConfig = {
   ...config,
+  USE_PROFILES: { html: true, mathMl: true, svg: true },
+  ADD_TAGS: [...config.ADD_TAGS, "style"],
   FORBID_TAGS: ["script"],
   FORBID_CONTENTS: ["script"],
 }
