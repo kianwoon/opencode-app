@@ -900,6 +900,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "أعرض",
   "settings.general.row.messageWidth.option.full": "كامل",
   "settings.general.row.messageWidth.option.max": "الأقصى",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "محاذاة الرسائل",
   "settings.general.row.messageAlign.description": "تعيين محاذاة رسائل المستخدم في المحادثة",
   "settings.general.row.messageAlign.option.left": "يسار",

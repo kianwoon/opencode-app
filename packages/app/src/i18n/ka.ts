@@ -979,6 +979,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "უფრო ფართო",
   "settings.general.row.messageWidth.option.full": "სრული",
   "settings.general.row.messageWidth.option.max": "მაქსიმალური",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "შეტყობინებების გასწორება",
   "settings.general.row.messageAlign.description": "დააზუსტეთ, სად ესწორება მომხმარებლის შეტყობინებები მიმოწერაში",
   "settings.general.row.messageAlign.option.left": "მარცხნივ",

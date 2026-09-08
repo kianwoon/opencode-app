@@ -984,6 +984,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Širše",
   "settings.general.row.messageWidth.option.full": "Polno",
   "settings.general.row.messageWidth.option.max": "Največ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Poravnava sporočil",
   "settings.general.row.messageAlign.description": "Nastavite, kje se poravnajo uporabnikova sporočila v zapisu",
   "settings.general.row.messageAlign.option.left": "Levo",

@@ -945,6 +945,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "更寬",
   "settings.general.row.messageWidth.option.full": "全寬",
   "settings.general.row.messageWidth.option.max": "最大",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "訊息對齊",
   "settings.general.row.messageAlign.description": "設定使用者訊息在對話中的對齊位置",
   "settings.general.row.messageAlign.option.left": "左",

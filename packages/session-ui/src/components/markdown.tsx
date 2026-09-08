@@ -198,9 +198,56 @@ function createMermaidToggleButton() {
   return button
 }
 
+function clampZoom(value: number) {
+  return Math.min(250, Math.max(50, value))
+}
+
+function applyZoom(block: HTMLElement, zoom: number) {
+  block.dataset.zoom = String(zoom)
+  const target = block.querySelector('[data-slot="markdown-mermaid-svg"]')
+  if (!(target instanceof HTMLElement)) return
+  target.style.width = `${zoom}%`
+  target.style.maxWidth = "none"
+}
+
+function createMermaidToolbar() {
+  const toolbar = document.createElement("div")
+  toolbar.setAttribute("data-slot", "markdown-mermaid-toolbar")
+  toolbar.appendChild(createMermaidToggleButton())
+  for (const [action, delta, label] of [
+    ["in", 25, () => mermaidToolbarLabels.zoomIn],
+    ["out", -25, () => mermaidToolbarLabels.zoomOut],
+  ] as const) {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.setAttribute("data-slot", `markdown-mermaid-zoom-${action}`)
+    button.setAttribute("aria-label", label())
+    button.textContent = action === "in" ? "+" : "−"
+    button.addEventListener("click", () => {
+      const block = button.closest('[data-component="markdown-mermaid-block"]')
+      if (!(block instanceof HTMLElement)) return
+      applyZoom(block, clampZoom(Number(block.dataset.zoom ?? 100) + delta))
+    })
+    toolbar.appendChild(button)
+  }
+  const reset = document.createElement("button")
+  reset.type = "button"
+  reset.setAttribute("data-slot", "markdown-mermaid-zoom-reset")
+  reset.setAttribute("aria-label", mermaidToolbarLabels.reset)
+  reset.textContent = "1:1"
+  reset.addEventListener("click", () => {
+    const block = reset.closest('[data-component="markdown-mermaid-block"]')
+    if (!(block instanceof HTMLElement)) return
+    applyZoom(block, 100)
+  })
+  toolbar.appendChild(reset)
+  return toolbar
+}
+
 // Updated whenever the markdown effect reruns so toggle buttons pick up
 // localized labels without being re-created.
 const mermaidToggleLabels = { showCode: "", showDiagram: "" }
+const mermaidToolbarLabels = { zoomIn: "", zoomOut: "", reset: "" }
 
 
 function disposeCopyButtons(root: Element) {
@@ -334,7 +381,7 @@ function decorateMermaid(root: HTMLDivElement, blockKey: string) {
       container.setAttribute("data-view", "diagram")
       wrapper.replaceWith(container)
       container.appendChild(wrapper)
-      container.appendChild(createMermaidToggleButton())
+      container.appendChild(createMermaidToolbar())
     }
     const island = container.querySelector(':scope > [data-component="markdown-mermaid"]')
     if (island instanceof HTMLElement && island.dataset.mermaidCode === src) continue
@@ -585,6 +632,9 @@ export function Markdown(
     }
     mermaidToggleLabels.showCode = i18n.t("ui.markdown.mermaidShowCode")
     mermaidToggleLabels.showDiagram = i18n.t("ui.markdown.mermaidShowDiagram")
+    mermaidToolbarLabels.zoomIn = i18n.t("ui.markdown.mermaidZoomIn")
+    mermaidToolbarLabels.zoomOut = i18n.t("ui.markdown.mermaidZoomOut")
+    mermaidToolbarLabels.reset = i18n.t("ui.markdown.mermaidReset")
     container
       .querySelectorAll<HTMLElement>('[data-slot="markdown-mermaid-toggle"]')
       .forEach((button) => {
@@ -766,7 +816,7 @@ function updateCodeBlock(
     render(() => <MermaidIsland code={block.src} id={mermaidId(`mermaid-${next.dataset.markdownKey}`)} />, island)
     blockContainer.appendChild(wrapper)
     blockContainer.appendChild(island)
-    blockContainer.appendChild(createMermaidToggleButton())
+    blockContainer.appendChild(createMermaidToolbar())
     next.replaceChildren(blockContainer)
     if (current) {
       disposeCopyButtons(current)

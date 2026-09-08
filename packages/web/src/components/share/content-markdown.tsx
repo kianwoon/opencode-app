@@ -35,6 +35,7 @@ function loadMermaid() {
         securityLevel: "strict",
         flowchart: { htmlLabels: false },
         htmlLabels: false,
+        arrowMarkerAbsolute: false,
         theme: dark ? "dark" : "base",
         themeCSS: dark
           ? `.node text,.label,.cluster-label{fill:#e6edf3 !important;font-family:inherit !important} .edgeLabel{fill:#8b949e !important}`
@@ -137,14 +138,29 @@ export function ContentMarkdown(props: Props) {
           // Render failed: keep the raw code block in place.
           return
         }
-        // Single bordered block: original pre + island + toggle. data-view
+        // Single bordered block: original pre + island + toolbar. data-view
         // picks which half is visible.
         const block = document.createElement("div")
         block.setAttribute("data-component", "markdown-mermaid-block")
         block.setAttribute("data-view", "diagram")
+        block.dataset.zoom = "100"
         pre.replaceWith(block)
         block.appendChild(pre)
         block.appendChild(host)
+        const svgSlot = host.firstElementChild
+        if (svgSlot instanceof HTMLElement) {
+          svgSlot.setAttribute("data-slot", "markdown-mermaid-svg")
+        }
+        const clampZoom = (value: number) => Math.min(250, Math.max(50, value))
+        const applyZoom = (zoom: number) => {
+          block.dataset.zoom = String(zoom)
+          const target = block.querySelector('[data-slot="markdown-mermaid-svg"]')
+          if (!(target instanceof HTMLElement)) return
+          target.style.width = `${zoom}%`
+          target.style.maxWidth = "none"
+        }
+        const toolbar = document.createElement("div")
+        toolbar.setAttribute("data-slot", "markdown-mermaid-toolbar")
         const button = document.createElement("button")
         button.type = "button"
         button.setAttribute("data-slot", "markdown-mermaid-toggle")
@@ -154,7 +170,29 @@ export function ContentMarkdown(props: Props) {
           block.setAttribute("data-view", toCode ? "code" : "diagram")
           button.textContent = toCode ? messages.mermaid_show_diagram : messages.mermaid_show_code
         })
-        block.appendChild(button)
+        toolbar.appendChild(button)
+        for (const [action, delta, label] of [
+          ["in", 25, messages.mermaid_zoom_in],
+          ["out", -25, messages.mermaid_zoom_out],
+        ] as const) {
+          const zoom = document.createElement("button")
+          zoom.type = "button"
+          zoom.setAttribute("data-slot", `markdown-mermaid-zoom-${action}`)
+          zoom.setAttribute("aria-label", label)
+          zoom.textContent = action === "in" ? "+" : "−"
+          zoom.addEventListener("click", () => {
+            applyZoom(clampZoom(Number(block.dataset.zoom ?? 100) + delta))
+          })
+          toolbar.appendChild(zoom)
+        }
+        const reset = document.createElement("button")
+        reset.type = "button"
+        reset.setAttribute("data-slot", "markdown-mermaid-zoom-reset")
+        reset.setAttribute("aria-label", messages.mermaid_reset)
+        reset.textContent = "1:1"
+        reset.addEventListener("click", () => applyZoom(100))
+        toolbar.appendChild(reset)
+        block.appendChild(toolbar)
       }),
     )
   })

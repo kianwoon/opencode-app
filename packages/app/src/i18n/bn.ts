@@ -978,6 +978,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.messageWidth.option.wider": "আরও চওড়া",
   "settings.general.row.messageWidth.option.full": "সম্পূর্ণ",
   "settings.general.row.messageWidth.option.max": "সর্বোচ্চ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "বার্তা সারিবদ্ধকরণ",
   "settings.general.row.messageAlign.description": "কথোপকথনে ব্যবহারকারীর বার্তা কোথায় সারিবদ্ধ হবে তা নির্ধারণ করুন",
   "settings.general.row.messageAlign.option.left": "বাম",

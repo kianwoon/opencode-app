@@ -994,6 +994,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": " Platesnis",
   "settings.general.row.messageWidth.option.full": "Pilnas",
   "settings.general.row.messageWidth.option.max": "Didžiausias",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Pranešimų lygiavimas",
   "settings.general.row.messageAlign.description": "Nustatykite, kur vartotojo pranešimai lygiuojami įraše",
   "settings.general.row.messageAlign.option.left": "Kairėje",

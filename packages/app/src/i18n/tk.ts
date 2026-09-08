@@ -981,6 +981,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Has in",
   "settings.general.row.messageWidth.option.full": "Doly",
   "settings.general.row.messageWidth.option.max": "Iň uly",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Habar deňizlänişi",
   "settings.general.row.messageAlign.description": "Söhbetde ulanyjy habarlarynyň nirede deňizleşjekdigini kesgitleň",
   "settings.general.row.messageAlign.option.left": "Çep",

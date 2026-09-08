@@ -950,6 +950,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "更宽",
   "settings.general.row.messageWidth.option.full": "全宽",
   "settings.general.row.messageWidth.option.max": "最大",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "消息对齐",
   "settings.general.row.messageAlign.description": "设置用户消息在会话中的对齐位置",
   "settings.general.row.messageAlign.option.left": "左",

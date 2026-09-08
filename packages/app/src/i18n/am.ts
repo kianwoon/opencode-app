@@ -961,6 +961,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "የበለጠ ሰፊ",
   "settings.general.row.messageWidth.option.full": "ሙሉ",
   "settings.general.row.messageWidth.option.max": "ከፍተኛ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "የመልዕክት አሰላለፍ",
   "settings.general.row.messageAlign.description": "ተጠቃሚ መልዕክቶች በክፍለ-ጊዜው ውስጥ የት እንደሚሰለፉ ያስተካክሉ",
   "settings.general.row.messageAlign.option.left": "ግራ",

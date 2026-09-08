@@ -988,6 +988,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Yaqiroq keng",
   "settings.general.row.messageWidth.option.full": "To'liq",
   "settings.general.row.messageWidth.option.max": "Maksimal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Xabar tekislash",
   "settings.general.row.messageAlign.description": "Suhbatda foydalanuvchi xabarlari qayerda tekislanishini belgilang",
   "settings.general.row.messageAlign.option.left": "Chap",

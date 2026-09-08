@@ -1059,6 +1059,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Lebih lebar",
   "settings.general.row.messageWidth.option.full": "Penuh",
   "settings.general.row.messageWidth.option.max": "Maksimal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Perataan pesan",
   "settings.general.row.messageAlign.description": "Atur posisi pesan pengguna sejajar di transkrip",
   "settings.general.row.messageAlign.option.left": "Kiri",

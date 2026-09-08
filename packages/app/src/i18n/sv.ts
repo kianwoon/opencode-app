@@ -985,6 +985,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Bredare",
   "settings.general.row.messageWidth.option.full": "Full",
   "settings.general.row.messageWidth.option.max": "Maximal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Meddelandejustering",
   "settings.general.row.messageAlign.description": "Ställ in var användarmeddelanden justeras i transkriptet",
   "settings.general.row.messageAlign.option.left": "Vänster",

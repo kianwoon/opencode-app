@@ -984,6 +984,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Širšia",
   "settings.general.row.messageWidth.option.full": "Plná",
   "settings.general.row.messageWidth.option.max": "Maximálna",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Zarovnanie správ",
   "settings.general.row.messageAlign.description": "Nastavte, kde sa správy používateľa v prepise zarovnávajú",
   "settings.general.row.messageAlign.option.left": "Vľavo",

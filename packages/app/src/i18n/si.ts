@@ -976,6 +976,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.messageWidth.option.wider": "වඩා පළල්",
   "settings.general.row.messageWidth.option.full": "සම්පූර්ණ",
   "settings.general.row.messageWidth.option.max": "උපරිම",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "පණිවිඩ පෙළගැස්ම",
   "settings.general.row.messageAlign.description": "සංවාදයේ පරිශීලක පණිවිඩ කොහෙද පෙළගැසෙන්නේ කියා සකසන්න",
   "settings.general.row.messageAlign.option.left": "වම",

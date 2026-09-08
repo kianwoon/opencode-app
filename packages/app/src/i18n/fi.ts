@@ -880,6 +880,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Leveämpi",
   "settings.general.row.messageWidth.option.full": "Täysi",
   "settings.general.row.messageWidth.option.max": "Enimmäis",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Viestien tasaus",
   "settings.general.row.messageAlign.description": "Määritä, mihin käyttäjän viestit tasataan keskustelussa",
   "settings.general.row.messageAlign.option.left": "Vasen",

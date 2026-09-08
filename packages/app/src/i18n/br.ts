@@ -903,6 +903,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Ledanoc'h",
   "settings.general.row.messageWidth.option.full": "Klok",
   "settings.general.row.messageWidth.option.max": "Brasañ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Desteudadur ar c'hemennadoù",
   "settings.general.row.messageAlign.description": "Arventennañ pelec'h a dest etre kemennadoù an implijer en treuzskrivadur",
   "settings.general.row.messageAlign.option.left": "Kleiz",

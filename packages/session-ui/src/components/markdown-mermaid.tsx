@@ -52,6 +52,7 @@ function load(themeName: "dark" | "base") {
       securityLevel: "strict",
       flowchart: { htmlLabels: false },
       htmlLabels: false,
+      arrowMarkerAbsolute: false,
       theme: themeName,
       themeVariables: themeName === "dark" ? darkThemeVariables : baseThemeVariables,
       themeCSS: themeCSS[themeName],

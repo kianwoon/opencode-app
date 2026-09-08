@@ -984,6 +984,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Пошироко",
   "settings.general.row.messageWidth.option.full": "Целосно",
   "settings.general.row.messageWidth.option.max": "Максимално",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Порамнување на пораките",
   "settings.general.row.messageAlign.description": "Поставете каде се порамнуваат пораките на корисникот во записот",
   "settings.general.row.messageAlign.option.left": "Лево",

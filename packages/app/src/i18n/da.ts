@@ -844,6 +844,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Bredere",
   "settings.general.row.messageWidth.option.full": "Fuld",
   "settings.general.row.messageWidth.option.max": "Maksimal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Beskedjustering",
   "settings.general.row.messageAlign.description": "Angiv, hvor brugerbeskeder justeres i transskriptionen",
   "settings.general.row.messageAlign.option.left": "Venstre",

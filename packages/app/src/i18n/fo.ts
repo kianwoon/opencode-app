@@ -979,6 +979,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Breiðari",
   "settings.general.row.messageWidth.option.full": "Fullt",
   "settings.general.row.messageWidth.option.max": "Mest",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Boðaligned",
   "settings.general.row.messageAlign.description": "Settu, hvørji boð frá brúkara standa í samrøðuni",
   "settings.general.row.messageAlign.option.left": "Vinstru",

@@ -986,6 +986,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Platāks",
   "settings.general.row.messageWidth.option.full": "Pilns",
   "settings.general.row.messageWidth.option.max": "Maksimāls",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Ziņņu līdzināšana",
   "settings.general.row.messageAlign.description": "Norādiet, kur lietotāja ziņas līdzinās ierakstā",
   "settings.general.row.messageAlign.option.left": "Pa kreisi",

@@ -977,6 +977,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "ធំជាង",
   "settings.general.row.messageWidth.option.full": "ពេញលេញ",
   "settings.general.row.messageWidth.option.max": "អតិបរមា",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "ការតម្រឹមសារ",
   "settings.general.row.messageAlign.description": "កំណត់កន្លែងដែលសាររបស់អ្នកប្រើតម្រឹមក្នុងកំណត់ហេតុ",
   "settings.general.row.messageAlign.option.left": "ឆ្វេង",

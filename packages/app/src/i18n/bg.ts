@@ -986,6 +986,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "По-широко",
   "settings.general.row.messageWidth.option.full": "Пълно",
   "settings.general.row.messageWidth.option.max": "Максимално",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Подравняване на съобщенията",
   "settings.general.row.messageAlign.description": "Задайте къде се подравняват потребителските съобщения в записа",
   "settings.general.row.messageAlign.option.left": "Ляво",

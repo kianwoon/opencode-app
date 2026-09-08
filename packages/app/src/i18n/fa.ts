@@ -977,6 +977,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "عریض‌تر",
   "settings.general.row.messageWidth.option.full": "کامل",
   "settings.general.row.messageWidth.option.max": "بیشینه",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "تراز پیام‌ها",
   "settings.general.row.messageAlign.description": "تعیین کنید پیام‌های کاربر در گفتگو کجا تراز شوند",
   "settings.general.row.messageAlign.option.left": "چپ",

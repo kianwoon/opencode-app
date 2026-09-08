@@ -988,6 +988,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Илүү өргөн",
   "settings.general.row.messageWidth.option.full": "Бүтэн",
   "settings.general.row.messageWidth.option.max": "Хамгийн их",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Мессежийн зэрэгцүүлэлт",
   "settings.general.row.messageAlign.description": "Хэрэглэгчийн мессежүүд яаж зэрэгцэхийг тохируулна",
   "settings.general.row.messageAlign.option.left": "Зүүн",

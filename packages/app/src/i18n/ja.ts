@@ -888,6 +888,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "より広い",
   "settings.general.row.messageWidth.option.full": "全幅",
   "settings.general.row.messageWidth.option.max": "最大",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "メッセージの配置",
   "settings.general.row.messageAlign.description": "チャット内でユーザーメッセージを揃える位置を設定",
   "settings.general.row.messageAlign.option.left": "左",

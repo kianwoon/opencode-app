@@ -905,6 +905,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Szersze",
   "settings.general.row.messageWidth.option.full": "Pełne",
   "settings.general.row.messageWidth.option.max": "Maksymalne",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Wyrównywanie wiadomości",
   "settings.general.row.messageAlign.description": "Ustaw, gdzie wyrównują się wiadomości użytkownika w transkrypcji",
   "settings.general.row.messageAlign.option.left": "Lewo",

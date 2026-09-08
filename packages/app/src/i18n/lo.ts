@@ -974,6 +974,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "ກວ້າງກວ່າ",
   "settings.general.row.messageWidth.option.full": "ເຕັມ",
   "settings.general.row.messageWidth.option.max": "ສູງສຸດ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "ການຈັດຕຳແໜ່ງຂໍ້ຄວາມ",
   "settings.general.row.messageAlign.description": "ຕັ້ງຄ່າວ່າຂໍ້ຄວາມຂອງຜູ້ໃຊ້ຈັດຕຳແໜ່ງຢູ່ໃສໃນບົດບັນທຶກ",
   "settings.general.row.messageAlign.option.left": "ຊ້າຍ",

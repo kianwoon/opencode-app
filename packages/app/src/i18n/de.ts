@@ -795,6 +795,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Breiter",
   "settings.general.row.messageWidth.option.full": "Voll",
   "settings.general.row.messageWidth.option.max": "Maximal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Nachrichtenausrichtung",
   "settings.general.row.messageAlign.description": "Festlegen, wo Nutzernachrichten im Verlauf ausgerichtet werden",
   "settings.general.row.messageAlign.option.left": "Links",

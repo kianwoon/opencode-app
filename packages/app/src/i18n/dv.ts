@@ -995,6 +995,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "އިތުރަށް ފުޅާ",
   "settings.general.row.messageWidth.option.full": "ފުރިހަމަ",
   "settings.general.row.messageWidth.option.max": "އެންމެ ބޮޑު",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "މެސެޖުގެ ފަރުމާ",
   "settings.general.row.messageAlign.description": "އެއްމެ ދިމާއަށް",
   "settings.general.row.messageAlign.option.left": "ވާތު",

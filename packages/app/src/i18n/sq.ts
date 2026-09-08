@@ -984,6 +984,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Më e gjerë",
   "settings.general.row.messageWidth.option.full": "E plotë",
   "settings.general.row.messageWidth.option.max": "Maksimale",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Vendosja e mesazheve",
   "settings.general.row.messageAlign.description": "Caktoni ku vendosen mesazhet e përdoruesit në transkriptim",
   "settings.general.row.messageAlign.option.left": "Majtas",

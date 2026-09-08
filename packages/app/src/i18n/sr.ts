@@ -983,6 +983,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Шире",
   "settings.general.row.messageWidth.option.full": "Пуно",
   "settings.general.row.messageWidth.option.max": "Максимално",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Поравнање порука",
   "settings.general.row.messageAlign.description": "Поставите где се поруке корисника поравнавају у запису",
   "settings.general.row.messageAlign.option.left": "Лево",

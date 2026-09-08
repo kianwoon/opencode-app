@@ -400,16 +400,27 @@ body:not([data-new-layout]) [data-component="markdown"] {
   display: none;
 }
 
-[data-component="markdown-mermaid-block"][data-view="code"] > [data-component="markdown-mermaid"],
-[data-component="markdown-mermaid-block"][data-view="code"] > [data-slot="markdown-mermaid-toggle"] {
+[data-component="markdown-mermaid-block"][data-view="code"] > [data-component="markdown-mermaid"] {
   display: none;
 }
 
-[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toggle"] {
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toolbar"] {
   position: absolute;
   top: 6px;
   inset-inline-end: 36px;
   z-index: 1;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+[data-component="markdown-mermaid-block"]:hover > [data-slot="markdown-mermaid-toolbar"],
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toolbar"]:focus-within {
+  opacity: 1;
+}
+
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toolbar"] > button {
   padding: 2px 8px;
   border: 0.5px solid var(--v2-border-border-muted);
   border-radius: 4px;
@@ -419,13 +430,25 @@ body:not([data-new-layout]) [data-component="markdown"] {
   font-weight: 530;
   line-height: 16px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease;
 }
 
-[data-component="markdown-mermaid-block"]:hover > [data-slot="markdown-mermaid-toggle"],
-[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toggle"]:focus-visible {
-  opacity: 1;
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toolbar"] > button:hover {
+  border-color: var(--v2-border-border-base);
+}
+
+[data-component="markdown-mermaid-block"][data-zoom] [data-slot="markdown-mermaid-svg"] svg {
+  max-width: none;
+}
+
+/* Exploded arrowheads on long edges: cap edge stroke so marker scaling
+   (markerUnits: strokeWidth) keeps arrowheads at a sane size. */
+[data-component="markdown-mermaid"] svg .flowchart-link,
+[data-component="markdown-mermaid"] svg path[class*="flowchart-link"] {
+  stroke-width: 1.5px !important;
+}
+
+[data-component="markdown-mermaid"] svg marker path {
+  stroke-width: 1.5px !important;
 }
 
 [data-component="markdown-mermaid"] {

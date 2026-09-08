@@ -990,6 +990,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Daha enli",
   "settings.general.row.messageWidth.option.full": "Tam",
   "settings.general.row.messageWidth.option.max": "Maksimal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Mesajların düzülüşü",
   "settings.general.row.messageAlign.description": "Söhbətdə istifadəçi mesajlarının harada düzüləcəyini təyin edin",
   "settings.general.row.messageAlign.option.left": "Sol",

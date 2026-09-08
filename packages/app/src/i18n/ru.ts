@@ -969,6 +969,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Шире",
   "settings.general.row.messageWidth.option.full": "Полная",
   "settings.general.row.messageWidth.option.max": "Максимальная",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Выравнивание сообщений",
   "settings.general.row.messageAlign.description": "Задать расположение сообщений пользователя в переписке",
   "settings.general.row.messageAlign.option.left": "Слева",

@@ -985,6 +985,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Васеътар",
   "settings.general.row.messageWidth.option.full": "Пурра",
   "settings.general.row.messageWidth.option.max": "Ҳадди аксар",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Мувофиқкунии паёмҳо",
   "settings.general.row.messageAlign.description": "Таъин кунед, ки паёмҳои корбар дар гуфтугӯ куҷо мувофиқ мешаванд",
   "settings.general.row.messageAlign.option.left": "Чап",

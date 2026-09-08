@@ -997,6 +997,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.messageWidth.option.wider": "དེ་ལས་ལྷག་སྟེ་རྒྱ་ཆེཝ།",
   "settings.general.row.messageWidth.option.full": "ཆ་ཚང་།",
   "settings.general.row.messageWidth.option.max": "མང་མཐའ།",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "འཕྲིན་དོན་གི་གཞི་སྒྲིག",
   "settings.general.row.messageAlign.description": "ཕྲ་ཐིག་ནང་ལག་ལེན་པའི་འཕྲིན་དོན་ག་དེ་སོ་སྒྲིག་འབད་ནི་གཞི་སྒྲིག་འབད།",
   "settings.general.row.messageAlign.option.left": "གཡོན",

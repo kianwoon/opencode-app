@@ -989,6 +989,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Més ample",
   "settings.general.row.messageWidth.option.full": "Complet",
   "settings.general.row.messageWidth.option.max": "Màxim",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Alineació dels missatges",
   "settings.general.row.messageAlign.description": "Defineix on s'alineen els missatges de l'usuari a la transcripció",
   "settings.general.row.messageAlign.option.left": "Esquerra",

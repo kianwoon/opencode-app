@@ -991,6 +991,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Rộng hơn",
   "settings.general.row.messageWidth.option.full": "Đầy đủ",
   "settings.general.row.messageWidth.option.max": "Tối đa",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Căn chỉnh tin nhắn",
   "settings.general.row.messageAlign.description": "Đặt vị trí căn của tin nhắn người dùng trong bản ghi",
   "settings.general.row.messageAlign.option.left": "Trái",

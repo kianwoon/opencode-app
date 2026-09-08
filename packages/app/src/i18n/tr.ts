@@ -973,6 +973,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Daha geniş",
   "settings.general.row.messageWidth.option.full": "Tam",
   "settings.general.row.messageWidth.option.max": "En fazla",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Mesaj hizalama",
   "settings.general.row.messageAlign.description": "Kullanıcı mesajlarının dökümante nerede hizalanacağını ayarlayın",
   "settings.general.row.messageAlign.option.left": "Sol",

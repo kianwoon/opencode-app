@@ -161,11 +161,16 @@
   direction: ltr;
 }
 
-[data-slot="markdown-mermaid-toggle"] {
+[data-slot="markdown-mermaid-toolbar"] {
   position: absolute;
   top: 4px;
   right: 4px;
   z-index: 1;
+  display: flex;
+  gap: 4px;
+}
+
+[data-component="markdown-mermaid-block"] > [data-slot="markdown-mermaid-toolbar"] > button {
   font-size: 0.857em;
   padding: 2px 8px;
   border: 1px solid var(--sl-color-border);
@@ -173,6 +178,21 @@
   background: var(--sl-color-bg-surface);
   color: var(--sl-color-text);
   cursor: pointer;
+}
+
+[data-component="markdown-mermaid-block"][data-zoom] [data-slot="markdown-mermaid-svg"] svg {
+  max-width: none;
+}
+
+/* Exploded arrowheads on long edges: cap edge stroke so marker scaling
+   (markerUnits: strokeWidth) keeps arrowheads at a sane size. */
+[data-component="markdown-mermaid"] svg .flowchart-link,
+[data-component="markdown-mermaid"] svg path[class*="flowchart-link"] {
+  stroke-width: 1.5px !important;
+}
+
+[data-component="markdown-mermaid"] svg marker path {
+  stroke-width: 1.5px !important;
 }
 
 [data-component="markdown-mermaid"] {

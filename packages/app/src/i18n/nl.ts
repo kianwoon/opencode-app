@@ -990,6 +990,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Breder",
   "settings.general.row.messageWidth.option.full": "Volledig",
   "settings.general.row.messageWidth.option.max": "Maximaal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Berichtuitlijning",
   "settings.general.row.messageAlign.description": "Stel in waar gebruikersberichten in het transcript uitgelijnd worden",
   "settings.general.row.messageAlign.option.left": "Links",

@@ -991,6 +991,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Πιο φαρδύ",
   "settings.general.row.messageWidth.option.full": "Πλήρες",
   "settings.general.row.messageWidth.option.max": "Μέγιστο",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Στοίχιση μηνυμάτων",
   "settings.general.row.messageAlign.description": "Ορίστε πού στοιχίζονται τα μηνύματα χρήστη στη συνομιλία",
   "settings.general.row.messageAlign.option.left": "Αριστερά",

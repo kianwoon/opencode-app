@@ -990,6 +990,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "مزید چوڑا",
   "settings.general.row.messageWidth.option.full": "مکمل",
   "settings.general.row.messageWidth.option.max": "زیادہ سے زیادہ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "پیغام کی سیدھ",
   "settings.general.row.messageAlign.description": "ٹرانسکرپٹ میں صارف پیغامات کہاں سیدھ میں ہوں یہ مقرر کریں",
   "settings.general.row.messageAlign.option.left": "بائیں",

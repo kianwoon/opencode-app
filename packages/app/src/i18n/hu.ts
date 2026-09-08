@@ -989,6 +989,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Szélesebb",
   "settings.general.row.messageWidth.option.full": "Teljes",
   "settings.general.row.messageWidth.option.max": "Maximális",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Üzenetek igazítása",
   "settings.general.row.messageAlign.description": "Állítsa be, hová igazodnak a felhasználó üzenetei az átiratban",
   "settings.general.row.messageAlign.option.left": "Bal",

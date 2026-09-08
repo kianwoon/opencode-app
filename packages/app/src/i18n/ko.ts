@@ -621,6 +621,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "더 넓게",
   "settings.general.row.messageWidth.option.full": "전체",
   "settings.general.row.messageWidth.option.max": "최대",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "메시지 정렬",
   "settings.general.row.messageAlign.description": "채트에서 사용자 메시지가 정렬되는 위치 설정",
   "settings.general.row.messageAlign.option.left": "왼쪽",

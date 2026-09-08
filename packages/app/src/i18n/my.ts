@@ -993,6 +993,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "ပိုကျယ်",
   "settings.general.row.messageWidth.option.full": "အပြည့်",
   "settings.general.row.messageWidth.option.max": "အများဆုံး",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "စာတို့ ညှိခြင်း",
   "settings.general.row.messageAlign.description": "စကားဝိုင်းတွင် အသုံးပြုသူ စာများ မည်သို့ ညှိမည်ကို သတ်မှတ်ပါ",
   "settings.general.row.messageAlign.option.left": "ဘယ်",

@@ -984,6 +984,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Mai late",
   "settings.general.row.messageWidth.option.full": "Completă",
   "settings.general.row.messageWidth.option.max": "Maximă",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Alinierea mesajelor",
   "settings.general.row.messageAlign.description": "Stabiliți unde se aliniază mesajele utilizatorului în transcriere",
   "settings.general.row.messageAlign.option.left": "Stânga",

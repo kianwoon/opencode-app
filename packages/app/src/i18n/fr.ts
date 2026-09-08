@@ -908,6 +908,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Plus large",
   "settings.general.row.messageWidth.option.full": "Plein",
   "settings.general.row.messageWidth.option.max": "Maximal",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Alignement des messages",
   "settings.general.row.messageAlign.description": "Définir la position des messages utilisateur dans la conversation",
   "settings.general.row.messageAlign.option.left": "Gauche",

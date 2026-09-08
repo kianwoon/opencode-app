@@ -982,6 +982,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Breiðari",
   "settings.general.row.messageWidth.option.full": "Fullt",
   "settings.general.row.messageWidth.option.max": "Hámark",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Jöfnun skilaboða",
   "settings.general.row.messageAlign.description": "Stilltu hvar skilaboð notanda jafnast í samtalinu",
   "settings.general.row.messageAlign.option.left": "Vinstri",

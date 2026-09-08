@@ -974,6 +974,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Wider",
   "settings.general.row.messageWidth.option.full": "Full",
   "settings.general.row.messageWidth.option.max": "Max",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Message alignment",
   "settings.general.row.messageAlign.description": "Set where user messages line up in the transcript",
   "settings.general.row.messageAlign.option.left": "Left",

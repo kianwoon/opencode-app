@@ -971,6 +971,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Más ancho",
   "settings.general.row.messageWidth.option.full": "Completo",
   "settings.general.row.messageWidth.option.max": "Máximo",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Alineación de mensajes",
   "settings.general.row.messageAlign.description": "Definir dónde se alinean los mensajes del usuario en la conversación",
   "settings.general.row.messageAlign.option.left": "Izquierda",

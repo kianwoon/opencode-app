@@ -1074,6 +1074,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Ширша",
   "settings.general.row.messageWidth.option.full": "Повна",
   "settings.general.row.messageWidth.option.max": "Максимальна",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Вирівнювання повідомлень",
   "settings.general.row.messageAlign.description": "Задайте, де вирівнюються повідомлення користувача у записі",
   "settings.general.row.messageAlign.option.left": "Ліворуч",

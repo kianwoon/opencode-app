@@ -987,6 +987,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Ավելի լայն",
   "settings.general.row.messageWidth.option.full": "Ամբողջական",
   "settings.general.row.messageWidth.option.max": "Առավելագույն",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Հաղորդագրությունների հավասարեցում",
   "settings.general.row.messageAlign.description": "Սահմանեք, թե որտեղ հավասարեցվեն օգտագործողի հաղորդագրությունները",
   "settings.general.row.messageAlign.option.left": "Ձախ",

@@ -986,6 +986,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "ਹੋਰ ਚੌੜਾ",
   "settings.general.row.messageWidth.option.full": "ਪੂਰਾ",
   "settings.general.row.messageWidth.option.max": "ਵੱਧ ਤੋਂ ਵੱਧ",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "ਸੁਨੇਹਾ ਇਕਸਾਰਤਾ",
   "settings.general.row.messageAlign.description": "ਟ੍ਰਾਂਸਕ੍ਰਿਪਟ ਵਿੱਚ ਉਪਭੋਗਤਾ ਸੁਨੇਹੇ ਕਿੱਥੇ ਇਕਸਾਰ ਹੋਣ, ਨਿਰਧਾਰਤ ਕਰੋ",
   "settings.general.row.messageAlign.option.left": "ਖੱਬੇ",

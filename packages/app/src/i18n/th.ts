@@ -954,6 +954,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "กว้างขึ้น",
   "settings.general.row.messageWidth.option.full": "เต็ม",
   "settings.general.row.messageWidth.option.max": "สูงสุด",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "การจัดวางข้อความ",
   "settings.general.row.messageAlign.description": "ตั้งค่าว่าข้อความของผู้ใช้จะจัดวางที่ตำแหน่งใดในบันทึกการสนทนา",
   "settings.general.row.messageAlign.option.left": "ซ้าย",

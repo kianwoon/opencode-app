@@ -980,6 +980,7 @@ export const dict: Record<string, string> = {
   "settings.general.row.messageWidth.option.wider": "अझ चौडा",
   "settings.general.row.messageWidth.option.full": "पूर्ण",
   "settings.general.row.messageWidth.option.max": "अधिकतम",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "सन्देश मिलान",
   "settings.general.row.messageAlign.description": "कुराकानीमा प्रयोगकर्ता सन्देश कता मिल्ने सेट गर्नुहोस्",
   "settings.general.row.messageAlign.option.left": "बायाँ",

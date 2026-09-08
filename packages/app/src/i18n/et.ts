@@ -976,6 +976,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Laiem",
   "settings.general.row.messageWidth.option.full": "Täis",
   "settings.general.row.messageWidth.option.max": "Maksimaalne",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Sõnumite joondus",
   "settings.general.row.messageAlign.description": "Määra, kuhu kasutaja sõnumid kirjas joonduvad",
   "settings.general.row.messageAlign.option.left": "Vasakul",

@@ -900,6 +900,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Più largo",
   "settings.general.row.messageWidth.option.full": "Completo",
   "settings.general.row.messageWidth.option.max": "Massimo",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Allineamento messaggi",
   "settings.general.row.messageAlign.description": "Imposta dove si allineano i messaggi utente nella conversazione",
   "settings.general.row.messageAlign.option.left": "Sinistra",

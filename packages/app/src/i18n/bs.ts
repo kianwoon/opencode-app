@@ -967,6 +967,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "Šire",
   "settings.general.row.messageWidth.option.full": "Puno",
   "settings.general.row.messageWidth.option.max": "Maksimalno",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "Poravnanje poruka",
   "settings.general.row.messageAlign.description": "Postavite gdje se poruke korisnika poravnavaju u zapisu",
   "settings.general.row.messageAlign.option.left": "Lijevo",

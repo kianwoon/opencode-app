@@ -988,6 +988,7 @@ export const dict = {
   "settings.general.row.messageWidth.option.wider": "और चौड़ा",
   "settings.general.row.messageWidth.option.full": "पूर्ण",
   "settings.general.row.messageWidth.option.max": "अधिकतम",
+  "settings.general.row.messageWidth.option.maxPlus": "Max+",
   "settings.general.row.messageAlign.title": "संदेश संरेखण",
   "settings.general.row.messageAlign.description": "चैट में उपयोगकर्ता संदेश कहाँ संरेखित हों, यह सेट करें",
   "settings.general.row.messageAlign.option.left": "बाएँ",
