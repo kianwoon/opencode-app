@@ -33,6 +33,9 @@ export const mermaidConfig = {
   ADD_TAGS: [...config.ADD_TAGS, "style"],
   FORBID_TAGS: ["script"],
   FORBID_CONTENTS: ["script"],
+  // Without this DOMPurify empties <foreignObject> entirely (its contents are
+  // HTML inside SVG), which is exactly where mermaid's htmlLabels text lives.
+  HTML_INTEGRATION_POINTS: { foreignobject: true },
 }
 
 export function sanitizeMermaidSvg(html: string) {

@@ -249,8 +249,9 @@
   fill: #e6edf3 !important;
   background: transparent !important;
   font-family: inherit !important;
-  font-size: 12px !important;
-  line-height: 1.35 !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  text-align: center !important;
 }
 
 [data-component="markdown-mermaid"] svg .edgeLabel rect,
@@ -310,8 +311,9 @@
   fill: #1f2328 !important;
   background: transparent !important;
   font-family: inherit !important;
-  font-size: 12px !important;
-  line-height: 1.35 !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  text-align: center !important;
 }
 
 :global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .flowchart-link,
