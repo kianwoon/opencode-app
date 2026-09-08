@@ -211,7 +211,26 @@
 [data-component="markdown-mermaid"] svg .label {
   fill: #e6edf3 !important;
   color: #e6edf3 !important;
+  stroke: none !important;
   font-family: inherit !important;
+}
+
+/* Mermaid 11 renders flowchart labels as HTML inside <foreignObject>, not
+   svg <text>; style those divs too or text is invisible. */
+[data-component="markdown-mermaid"] svg foreignObject div,
+[data-component="markdown-mermaid"] svg .label,
+[data-component="markdown-mermaid"] svg .label div,
+[data-component="markdown-mermaid"] svg .nodeLabel,
+[data-component="markdown-mermaid"] svg .edgeLabel div,
+[data-component="markdown-mermaid"] svg .cluster-label div,
+[data-component="markdown-mermaid"] svg foreignObject span,
+[data-component="markdown-mermaid"] svg foreignObject p {
+  color: #e6edf3 !important;
+  fill: #e6edf3 !important;
+  background: transparent !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
 }
 
 [data-component="markdown-mermaid"] svg .edgeLabel rect,
@@ -255,7 +274,24 @@
 :global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .label {
   fill: #1f2328 !important;
   color: #1f2328 !important;
+  stroke: none !important;
   font-family: inherit !important;
+}
+
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg foreignObject div,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .label,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .label div,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .nodeLabel,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .edgeLabel div,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .cluster-label div,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg foreignObject span,
+:global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg foreignObject p {
+  color: #1f2328 !important;
+  fill: #1f2328 !important;
+  background: transparent !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
 }
 
 :global([data-color-scheme="light"]) [data-component="markdown-mermaid"] svg .flowchart-link,
