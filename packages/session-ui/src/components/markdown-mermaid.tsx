@@ -83,13 +83,28 @@ export function mermaidId(raw: string) {
   return `${prefixed}-${checksum(raw)}`
 }
 
+// Giant filled wedge arrowheads: when a marker loses markerUnits (sanitizer or
+// svg defaults) it falls back to strokeWidth units and scales with edge
+// stroke. Force userSpaceOnUse and clamp marker dimensions so arrowheads stay
+// a fixed sane size regardless of stroke-width.
+export function clampMermaidMarkers(svg: string) {
+  return svg
+    .replace(/(<marker\b[^>]*?)\bmarkerUnits="[^"]*"/g, "$1")
+    .replace(/<marker\b([^>]*)>/g, (match, attrs: string) => {
+      const clamped = attrs
+        .replace(/\bmarkerWidth="(\d+(\.\d+)?)"/g, (_, n: string) => `markerWidth="${Math.min(Number(n), 10)}"`)
+        .replace(/\bmarkerHeight="(\d+(\.\d+)?)"/g, (_, n: string) => `markerHeight="${Math.min(Number(n), 12)}"`)
+      return `<marker${clamped} markerUnits="userSpaceOnUse">`
+    })
+}
+
 export async function renderMermaidSvg(id: string, code: string, themeName: "dark" | "base") {
   const cacheKey = `${themeName}:${checksum(code)}`
   const cached = cache.get(cacheKey)
   if (cached) return cached
   const mermaid = await load(themeName)
   const { svg } = await mermaid.render(mermaidId(id), code)
-  const safe = sanitizeMermaidSvg(svg)
+  const safe = sanitizeMermaidSvg(clampMermaidMarkers(svg))
   if (safe) remember(cacheKey, safe)
   return safe
 }

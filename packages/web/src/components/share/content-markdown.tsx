@@ -21,8 +21,21 @@ const mermaidSanitizeConfig = {
   ADD_ATTR: ["d", "viewBox", "preserveAspectRatio", "xmlns", "transform", "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity", "stroke-opacity", "class", "id", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "points", "marker-end", "marker-start", "marker-mid", "refX", "refY", "markerWidth", "markerHeight", "orient", "offset", "stop-color", "stop-opacity", "gradientUnits", "patternUnits", "text-anchor", "dominant-baseline", "font-family", "font-size", "font-weight", "font-style", "text-decoration", "white-space", "aria-roledescription", "role", "colspan", "rowspan", "style"],
 }
 
+// Mirror of session-ui clampMermaidMarkers: without markerUnits a marker
+// falls back to strokeWidth units and scales into giant wedges.
+function clampMermaidMarkers(svg: string) {
+  return svg
+    .replace(/(<marker\b[^>]*?)\bmarkerUnits="[^"]*"/g, "$1")
+    .replace(/<marker\b([^>]*)>/g, (_match: string, attrs: string) => {
+      const clamped = attrs
+        .replace(/\bmarkerWidth="(\d+(\.\d+)?)"/g, (_, n: string) => `markerWidth="${Math.min(Number(n), 10)}"`)
+        .replace(/\bmarkerHeight="(\d+(\.\d+)?)"/g, (_, n: string) => `markerHeight="${Math.min(Number(n), 12)}"`)
+      return `<marker${clamped} markerUnits="userSpaceOnUse">`
+    })
+}
+
 function sanitizeMermaidSvg(svg: string) {
-  const clean = DOMPurify.sanitize(svg, mermaidSanitizeConfig)
+  const clean = DOMPurify.sanitize(clampMermaidMarkers(svg), mermaidSanitizeConfig)
   if (!clean.includes("<svg")) throw new Error("mermaid svg rejected by sanitizer")
   return clean
 }

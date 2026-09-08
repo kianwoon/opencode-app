@@ -184,16 +184,8 @@
   max-width: none;
 }
 
-/* Exploded arrowheads on long edges: cap edge stroke so marker scaling
-   (markerUnits: strokeWidth) keeps arrowheads at a sane size. */
-[data-component="markdown-mermaid"] svg .flowchart-link,
-[data-component="markdown-mermaid"] svg path[class*="flowchart-link"] {
-  stroke-width: 1.5px !important;
-}
-
-[data-component="markdown-mermaid"] svg marker path {
-  stroke-width: 1.5px !important;
-}
+/* Arrowheads are kept a fixed size via markerUnits="userSpaceOnUse" +
+   clamped markerWidth/Height (mirror of session-ui clampMermaidMarkers). */
 
 [data-component="markdown-mermaid"] {
   position: relative;
