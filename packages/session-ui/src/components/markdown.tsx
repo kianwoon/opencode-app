@@ -204,10 +204,9 @@ function clampZoom(value: number) {
 
 function applyZoom(block: HTMLElement, zoom: number) {
   block.dataset.zoom = String(zoom)
-  const target = block.querySelector('[data-slot="markdown-mermaid-svg"]')
-  if (!(target instanceof HTMLElement)) return
-  target.style.width = `${zoom}%`
-  target.style.maxWidth = "none"
+  const svg = block.querySelector('[data-slot="markdown-mermaid-svg"] svg')
+  if (!(svg instanceof SVGElement)) return
+  svg.style.width = zoom === 100 ? "" : `${zoom}%`
 }
 
 function createMermaidToolbar() {

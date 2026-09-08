@@ -438,6 +438,7 @@ body:not([data-new-layout]) [data-component="markdown"] {
 
 [data-component="markdown-mermaid-block"][data-zoom] [data-slot="markdown-mermaid-svg"] svg {
   max-width: none;
+  max-height: none;
 }
 
 /* Arrowheads are kept a fixed size via markerUnits="userSpaceOnUse" +
@@ -455,8 +456,9 @@ body:not([data-new-layout]) [data-component="markdown"] {
 }
 
 [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"] {
-  display: flex;
-  justify-content: center;
+  width: fit-content;
+  min-width: min(100%, 860px);
+  margin: 0 auto;
   padding: 12px;
 }
 
