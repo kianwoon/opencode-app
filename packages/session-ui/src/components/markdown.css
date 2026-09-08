@@ -451,6 +451,83 @@ body:not([data-new-layout]) [data-component="markdown"] {
   max-height: 520px;
 }
 
+/* Belt-and-braces: DOMPurify renames the svg id (user-content-*) but leaves the
+   mermaid <style> block targeting the old id, so every fill rule inside it is
+   dead. Re-assert readable fills from our own stylesheet, scoped by component
+   attribute so sanitization cannot touch them. */
+[data-component="markdown-mermaid"] svg .node rect,
+[data-component="markdown-mermaid"] svg .node circle,
+[data-component="markdown-mermaid"] svg .node ellipse,
+[data-component="markdown-mermaid"] svg .node polygon,
+[data-component="markdown-mermaid"] svg .node path,
+[data-component="markdown-mermaid"] svg .cluster rect {
+  fill: #21262d !important;
+  stroke: #8b949e !important;
+  font-family: inherit !important;
+}
+
+[data-component="markdown-mermaid"] svg text,
+[data-component="markdown-mermaid"] svg tspan,
+[data-component="markdown-mermaid"] svg .nodeLabel,
+[data-component="markdown-mermaid"] svg .edgeLabel,
+[data-component="markdown-mermaid"] svg .cluster-label,
+[data-component="markdown-mermaid"] svg .label {
+  fill: #e6edf3 !important;
+  color: #e6edf3 !important;
+  font-family: inherit !important;
+}
+
+[data-component="markdown-mermaid"] svg .edgeLabel rect,
+[data-component="markdown-mermaid"] svg .edgeLabel p {
+  fill: #21262d !important;
+  background-color: #21262d !important;
+}
+
+[data-component="markdown-mermaid"] svg .flowchart-link,
+[data-component="markdown-mermaid"] svg .edgePath path,
+[data-component="markdown-mermaid"] svg line,
+[data-component="markdown-mermaid"] svg path.arrowheadPath {
+  stroke: #8b949e !important;
+}
+
+[data-component="markdown-mermaid"] svg marker path {
+  fill: #8b949e !important;
+  stroke: #8b949e !important;
+}
+
+[data-component="markdown-mermaid"] svg {
+  background: transparent;
+}
+
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .node rect,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .node circle,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .node ellipse,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .node polygon,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .node path,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .cluster rect,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .edgeLabel rect {
+  fill: #ffffff !important;
+  stroke: #57606a !important;
+}
+
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg text,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg tspan,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .nodeLabel,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .edgeLabel,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .cluster-label,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .label {
+  fill: #1f2328 !important;
+  color: #1f2328 !important;
+  font-family: inherit !important;
+}
+
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .flowchart-link,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg .edgePath path,
+[data-color-scheme="light"] [data-component="markdown-mermaid"] svg marker path {
+  stroke: #57606a !important;
+  fill: #57606a !important;
+}
+
 [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-status"] {
   padding: 12px;
   color: var(--v2-text-text-base);

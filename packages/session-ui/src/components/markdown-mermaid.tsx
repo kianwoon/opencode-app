@@ -109,7 +109,18 @@ export function MermaidIsland(props: { code: string; id: string }) {
           {String(i18n.t("ui.markdown.mermaidError"))}
         </div>
       </Show>
-      <Show when={svg()}>{(value) => <div data-slot="markdown-mermaid-svg" innerHTML={value()} />}</Show>
+      <Show when={svg()}>
+        {(value) => (
+          <div
+            data-slot="markdown-mermaid-svg"
+            innerHTML={value()}
+            ref={(el) => {
+              const svgEl = el.querySelector("svg")
+              if (svgEl && !svgEl.getAttribute("background")) svgEl.setAttribute("background", "transparent")
+            }}
+          />
+        )}
+      </Show>
     </>
   )
 }
