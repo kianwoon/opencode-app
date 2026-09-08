@@ -172,6 +172,7 @@ export const dict = {
   "ui.permission.deny": "Откажи",
   "ui.permission.allowAlways": "Разрешавайте винаги",
   "ui.permission.allowOnce": "Разрешете веднъж",
+  "ui.markdown.mermaidError": 'Диаграммата не може да се визуализира',
   "ui.message.expand": "Разгъване на съобщението",
   "ui.message.collapse": "Свиване на съобщението",
   "ui.message.copy": "копие",

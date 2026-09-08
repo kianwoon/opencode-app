@@ -33,6 +33,7 @@ import { shouldResetCodeTokens, type RenderedCodeState } from "./markdown-code-s
 import { getCachedMarkdown, sanitizeMarkdown, touchCachedMarkdown, type MarkdownCacheEntry } from "./markdown-cache"
 import { absolutePathHref, isDesktopRenderer } from "./markdown-desktop"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
+import { MermaidIsland } from "./markdown-mermaid"
 
 type RenderedBlock =
   | (MarkdownCacheEntry & { key: string; mode: Exclude<Block["mode"], "code"> })
@@ -40,13 +41,21 @@ type RenderedBlock =
       key: string
       mode: "code"
       raw: string
+      src: string
       hash: string
       language: string
       complete: boolean
       generation: number
       stable: MarkdownToken[]
       unstable: MarkdownToken[]
+      mermaid?: boolean
     }
+
+const mermaidLanguages = new Set(["mermaid"])
+
+function isMermaid(block: Block) {
+  return block.mode === "code" && block.complete === true && mermaidLanguages.has(block.language?.toLowerCase() ?? "")
+}
 
 type RenderResult = {
   text: string
@@ -445,8 +454,10 @@ export function Markdown(
               key: blockKey,
               mode: block.mode,
               raw: block.raw,
+              src: block.src,
               hash: String(block.raw.length),
               complete: !!block.complete,
+              mermaid: isMermaid(block) ? true : undefined,
               ...result,
             }
             if (block.complete) completedCode.set(blockKey, rendered)
@@ -576,12 +587,14 @@ function pendingBlocks(
       key,
       mode: block.mode,
       raw: block.raw,
+      src: block.src,
       hash: String(block.raw.length),
       language: block.language ?? "text",
       complete: !!block.complete,
       stable: [],
       generation: 0,
       unstable: [[block.src, ""] as MarkdownToken],
+      mermaid: block.complete === true && mermaidLanguages.has(block.language?.toLowerCase() ?? "") ? true : undefined,
     }
   })
 }
@@ -649,6 +662,47 @@ function updateCodeBlock(
   next.dataset.markdownHash = block.hash
   next.dataset.markdownComplete = block.complete ? "true" : "false"
   next.style.display = "contents"
+
+  const mermaidHost = existing?.querySelector('[data-component="markdown-mermaid"]')
+  if (block.mermaid && block.complete && mermaidHost instanceof HTMLElement) {
+    const text = mermaidHost.dataset.mermaidCode
+    if (text === block.src) return
+    mermaidHost.dataset.mermaidCode = block.src
+    mermaidHost.replaceChildren()
+    render(() => <MermaidIsland code={block.src} id={`mermaid-${next.dataset.markdownKey}`} />, mermaidHost)
+    return
+  }
+
+  if (block.mermaid && block.complete) {
+    const wrapper = document.createElement("div")
+    wrapper.setAttribute("data-component", "markdown-code")
+    applyCodeMetadata(wrapper, block.language)
+    const pre = document.createElement("pre")
+    pre.className = "shiki OpenCode"
+    const codeElement = document.createElement("code")
+    codeElement.className = `language-${block.language}`
+    ;[...block.stable, ...block.unstable].map(createTokenSpan).forEach((span) => codeElement.appendChild(span))
+    pre.appendChild(codeElement)
+    wrapper.appendChild(pre)
+    wrapper.appendChild(createCopyButton(labels))
+    const island = document.createElement("div")
+    island.setAttribute("data-component", "markdown-mermaid")
+    island.dataset.mermaidCode = block.src
+    render(() => <MermaidIsland code={block.src} id={`mermaid-${next.dataset.markdownKey}`} />, island)
+    next.replaceChildren(wrapper, island)
+    if (current) {
+      disposeCopyButtons(current)
+      current.replaceWith(next)
+      return
+    }
+    container.appendChild(next)
+    return
+  }
+
+  if (mermaidHost) {
+    next.replaceChildren()
+    renderedCodeTokens.delete(next)
+  }
 
   const code = existing?.querySelector("code")
   if (code instanceof HTMLElement) {

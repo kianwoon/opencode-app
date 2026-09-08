@@ -176,6 +176,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "Liegt",
   "ui.permission.allowAlways": "Atļaut vienmēr",
   "ui.permission.allowOnce": "Atļaut vienreiz",
+  "ui.markdown.mermaidError": 'Nevarēja attēlot diagrammu',
   "ui.message.expand": "Izvērst ziņu",
   "ui.message.collapse": "Sakļaut ziņu",
   "ui.message.copy": "Kopēt",

@@ -174,6 +174,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "ཁས༌མི༌ལེན",
   "ui.permission.allowAlways": "ཨ་རྟག་ར་གནང་བཅུག།",
   "ui.permission.allowOnce": "ཚར་གཅིག་འབད་བཅུག།",
+  "ui.markdown.mermaidError": 'དབྱིབས་འབྲི་སྟོན་མ་ཚུགས།',
   "ui.message.expand": "འཕྲིན་དོན་རྒྱ་བསྐྱེད།",
   "ui.message.collapse": "བརྡབ་པའི་འཕྲིན་དོན།",
   "ui.message.copy": "འདྲ་བཤུས།",

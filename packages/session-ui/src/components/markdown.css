@@ -384,3 +384,53 @@ body:not([data-new-layout]) [data-component="markdown"] {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+[data-component="markdown-mermaid"] {
+  direction: ltr;
+  unicode-bidi: isolate;
+  position: relative;
+  overflow: auto;
+  border-radius: 6px;
+  border: 0.5px solid var(--v2-border-border-base);
+  background: var(--markdown-shell-code-background);
+}
+
+[data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"] {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  min-width: min-content;
+}
+
+[data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"] svg {
+  max-width: 100%;
+  height: auto;
+}
+
+[data-component="markdown-mermaid"] [data-slot="markdown-mermaid-status"] {
+  padding: 12px;
+  color: var(--v2-text-text-base);
+}
+
+[data-component="markdown-mermaid"] [data-slot="markdown-mermaid-status"][data-status="loading"] {
+  min-height: 48px;
+  animation: markdown-mermaid-pulse 1.2s ease-in-out infinite;
+}
+
+/* Once the SVG renders, hide the raw code fallback beside it. On render
+   failure only the error status shows, so the code stays visible. */
+[data-component="markdown"]
+  div:has(> [data-component="markdown-mermaid"] [data-slot="markdown-mermaid-svg"])
+  > [data-component="markdown-code"] {
+  display: none;
+}
+
+@keyframes markdown-mermaid-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}

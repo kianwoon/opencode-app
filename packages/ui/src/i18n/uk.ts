@@ -201,6 +201,7 @@ export const dict: Record<string, string> = {
   "ui.permission.allowAlways": "Дозволяти завжди",
   "ui.permission.allowOnce": "Дозволити один раз",
 
+  "ui.markdown.mermaidError": 'Не вдалося відрендерити діаграму',
   "ui.message.expand": "Розгорнути повідомлення",
   "ui.message.collapse": "Згорнути повідомлення",
   "ui.message.copy": "Копіювати",

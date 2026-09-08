@@ -33,6 +33,7 @@
     "@types/bun": "catalog:",
     "@types/luxon": "catalog:",
     "@typescript/native-preview": "catalog:",
+    "mermaid": "^11",
     "typescript": "catalog:",
     "vite": "catalog:"
   },

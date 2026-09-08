@@ -172,6 +172,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "Մերժել",
   "ui.permission.allowAlways": "Թույլատրել միշտ",
   "ui.permission.allowOnce": "Թույլատրել մեկ անգամ",
+  "ui.markdown.mermaidError": 'Չհաջողվեց պատկերել դիագրամը',
   "ui.message.expand": "Ընդարձակել հաղորդագրություն",
   "ui.message.collapse": "Ծալել հաղորդագրություն",
   "ui.message.copy": "Պատճեն",

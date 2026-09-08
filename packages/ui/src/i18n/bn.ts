@@ -174,6 +174,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "অস্বীকার করুন",
   "ui.permission.allowAlways": "সর্বদা অনুমতি দিন",
   "ui.permission.allowOnce": "একবার অনুমতি দিন",
+  "ui.markdown.mermaidError": 'চিত্র রেন্ডার করা যায়নি',
   "ui.message.expand": "বার্তা প্রসারিত করুন",
   "ui.message.collapse": "বার্তা সঙ্কুচিত করুন",
   "ui.message.copy": "কপি",

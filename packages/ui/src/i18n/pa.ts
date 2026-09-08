@@ -173,6 +173,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "منع کرو",
   "ui.permission.allowAlways": "ہمیشہ اجازت دیو",
   "ui.permission.allowOnce": "اک واری اجازت دیو",
+  "ui.markdown.mermaidError": 'ਡਾਇਗਰਾਮ ਰੈਂਡਰ ਨਹੀਂ ਹੋ ਸਕਿਆ',
   "ui.message.expand": "سنیہا ودھاؤ",
   "ui.message.collapse": "سنیہا سمیٹو",
   "ui.message.copy": "کاپی کرو",

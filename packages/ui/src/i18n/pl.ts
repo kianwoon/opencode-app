@@ -188,6 +188,7 @@ export const dict = {
   "ui.permission.allowAlways": "Zezwalaj zawsze",
   "ui.permission.allowOnce": "Zezwól raz",
 
+  "ui.markdown.mermaidError": 'Nie udało się wyrenderować diagramu',
   "ui.message.expand": "Rozwiń wiadomość",
   "ui.message.collapse": "Zwiń wiadomość",
   "ui.message.copy": "Kopiuj",

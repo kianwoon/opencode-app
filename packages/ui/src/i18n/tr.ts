@@ -186,6 +186,7 @@ export const dict = {
   "ui.permission.allowAlways": "Her zaman izin ver",
   "ui.permission.allowOnce": "Bir kez izin ver",
 
+  "ui.markdown.mermaidError": 'Diyagram oluşturulamadı',
   "ui.message.expand": "Mesajı genişlet",
   "ui.message.collapse": "Mesajı daralt",
   "ui.message.copy": "Kopyala",

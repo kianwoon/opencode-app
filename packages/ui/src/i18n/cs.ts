@@ -180,6 +180,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "Odmítnout",
   "ui.permission.allowAlways": "Vždy povolit",
   "ui.permission.allowOnce": "Povolit jednou",
+  "ui.markdown.mermaidError": 'Diagram se nepodařilo vykreslit',
   "ui.message.expand": "Rozbalte zprávu",
   "ui.message.collapse": "Sbalit zprávu",
   "ui.message.copy": "Kopírovat",

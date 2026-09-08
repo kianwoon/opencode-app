@@ -17,8 +17,8 @@ const config = {
   SANITIZE_NAMED_PROPS: true,
   FORBID_TAGS: ["style"],
   FORBID_CONTENTS: ["style", "script"],
-  ADD_TAGS: ["svg", "path"],
-  ADD_ATTR: ["d", "viewBox", "preserveAspectRatio", "xmlns", "target"],
+  ADD_TAGS: ["svg", "path", "g", "rect", "circle", "ellipse", "line", "polygon", "polyline", "text", "tspan", "marker", "defs", "foreignObject", "use", "symbol", "title", "desc", "clipPath", "pattern", "image", "lineargradient", "radialgradient", "stop", "switch", "flowshape", "span", "div", "p", "br"],
+  ADD_ATTR: ["d", "viewBox", "preserveAspectRatio", "xmlns", "target", "transform", "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity", "stroke-opacity", "class", "id", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "points", "marker-end", "marker-start", "marker-mid", "refX", "refY", "markerWidth", "markerHeight", "orient", "offset", "stop-color", "stop-opacity", "gradientUnits", "patternUnits", "text-anchor", "dominant-baseline", "font-family", "font-size", "font-weight", "font-style", "text-decoration", "white-space", "aria-roledescription", "role", "colspan", "rowspan", "style"],
 }
 
 if (typeof window !== "undefined" && DOMPurify.isSupported) {

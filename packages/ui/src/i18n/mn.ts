@@ -172,6 +172,7 @@ export const dict = {
   "ui.permission.deny": "Үгүйсгэх",
   "ui.permission.allowAlways": "Үргэлж зөвшөөрөх",
   "ui.permission.allowOnce": "Нэг удаа зөвшөөрнө үү",
+  "ui.markdown.mermaidError": 'Could not render diagram',
   "ui.message.expand": "Зурвасыг дэлгэх",
   "ui.message.collapse": "Зурвасыг буулгах",
   "ui.message.copy": "Хуулбарлах",

@@ -152,3 +152,16 @@
     right: 0;
   }
 }
+
+[data-component="markdown-mermaid"] {
+  position: relative;
+  overflow: auto;
+  direction: ltr;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+[data-component="markdown-mermaid"] svg {
+  max-width: 100%;
+  height: auto;
+}

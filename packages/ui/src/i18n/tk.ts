@@ -172,6 +172,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "Inkär et",
   "ui.permission.allowAlways": "Elmydama rugsat beriň",
   "ui.permission.allowOnce": "Bir gezek rugsat beriň",
+  "ui.markdown.mermaidError": 'Diagrammany görkezmek ýagdaýy bolmady',
   "ui.message.expand": "Habary giňeltmek",
   "ui.message.collapse": "Collykmak habary",
   "ui.message.copy": "Göçüriň",

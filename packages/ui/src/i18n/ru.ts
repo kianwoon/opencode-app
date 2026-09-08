@@ -187,6 +187,7 @@ export const dict = {
   "ui.permission.allowAlways": "Разрешить всегда",
   "ui.permission.allowOnce": "Разрешить один раз",
 
+  "ui.markdown.mermaidError": 'Не удалось отрисовать диаграмму',
   "ui.message.expand": "Развернуть сообщение",
   "ui.message.collapse": "Свернуть сообщение",
   "ui.message.copy": "Копировать",

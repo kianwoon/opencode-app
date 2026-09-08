@@ -174,6 +174,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "Megtagadás",
   "ui.permission.allowAlways": "Mindig engedje meg",
   "ui.permission.allowOnce": "Engedje meg egyszer",
+  "ui.markdown.mermaidError": 'A diagram renderelése sikertelen',
   "ui.message.expand": "Üzenet kibontása",
   "ui.message.collapse": "Üzenet összecsukása",
   "ui.message.copy": "Másolás",

@@ -184,6 +184,7 @@ export const dict = {
   "ui.permission.allowAlways": "Permitir siempre",
   "ui.permission.allowOnce": "Permitir una vez",
 
+  "ui.markdown.mermaidError": 'No se pudo renderizar el diagrama',
   "ui.message.expand": "Expandir mensaje",
   "ui.message.collapse": "Contraer mensaje",
   "ui.message.copy": "Copiar",

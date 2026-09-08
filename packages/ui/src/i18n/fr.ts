@@ -186,6 +186,7 @@ export const dict = {
   "ui.permission.allowAlways": "Toujours autoriser",
   "ui.permission.allowOnce": "Autoriser une fois",
 
+  "ui.markdown.mermaidError": 'Impossible de rendre le diagramme',
   "ui.message.expand": "Développer le message",
   "ui.message.collapse": "Réduire le message",
   "ui.message.copy": "Copier",

@@ -181,6 +181,7 @@ export const dict: Record<string, string> = {
   "ui.permission.deny": "Zavrni",
   "ui.permission.allowAlways": "Dovoli vedno",
   "ui.permission.allowOnce": "Dovolite enkrat",
+  "ui.markdown.mermaidError": 'Diagrama ni bilo mogoče izrisati',
   "ui.message.expand": "Razširi sporočilo",
   "ui.message.collapse": "Strni sporočilo",
   "ui.message.copy": "Kopiraj",

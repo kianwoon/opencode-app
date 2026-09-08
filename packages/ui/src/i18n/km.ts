@@ -173,6 +173,7 @@ export const dict = {
   "ui.permission.deny": "បដិសេធ",
   "ui.permission.allowAlways": "អនុញ្ញាតជានិច្ច",
   "ui.permission.allowOnce": "អនុញ្ញាតម្តង",
+  "ui.markdown.mermaidError": 'មិនអាចបង្ហាញតំរែ ensuing ទេ',
   "ui.message.expand": "ពង្រីកសារ",
   "ui.message.collapse": "បង្រួមសារ",
   "ui.message.copy": "ចម្លង",

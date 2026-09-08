@@ -166,6 +166,7 @@ export const dict = {
   "ui.permission.allowAlways": "Immer erlauben",
   "ui.permission.allowOnce": "Einmal erlauben",
 
+  "ui.markdown.mermaidError": 'Diagramm konnte nicht gerendert werden',
   "ui.message.expand": "Nachricht ausklappen",
   "ui.message.collapse": "Nachricht einklappen",
   "ui.message.copy": "Kopieren",

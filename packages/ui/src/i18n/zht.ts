@@ -182,6 +182,7 @@ export const dict = {
   "ui.permission.allowAlways": "永遠允許",
   "ui.permission.allowOnce": "允許一次",
 
+  "ui.markdown.mermaidError": '無法渲染圖表',
   "ui.message.expand": "展開訊息",
   "ui.message.collapse": "收合訊息",
   "ui.message.copy": "複製",

@@ -196,6 +196,7 @@ export const dict = {
   "ui.permission.allowAlways": "السماح دائمًا",
   "ui.permission.allowOnce": "السماح مرة واحدة",
 
+  "ui.markdown.mermaidError": 'تعذّر عرض المخطط',
   "ui.message.expand": "توسيع الرسالة",
   "ui.message.collapse": "طي الرسالة",
   "ui.message.copy": "نسخ",

@@ -172,6 +172,7 @@ export const dict = {
   "ui.permission.deny": "Негирајте",
   "ui.permission.allowAlways": "Дозволете секогаш",
   "ui.permission.allowOnce": "Дозволете еднаш",
+  "ui.markdown.mermaidError": 'Не може да се прикаже дијаграмот',
   "ui.message.expand": "Проширете ја пораката",
   "ui.message.collapse": "Собери порака",
   "ui.message.copy": "Копирај",

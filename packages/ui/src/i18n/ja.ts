@@ -179,6 +179,7 @@ export const dict = {
   "ui.permission.allowAlways": "常に許可",
   "ui.permission.allowOnce": "今回のみ許可",
 
+  "ui.markdown.mermaidError": 'ダイアグラムをレンダリングできませんでした',
   "ui.message.expand": "メッセージを展開",
   "ui.message.collapse": "メッセージを折りたたむ",
   "ui.message.copy": "コピー",

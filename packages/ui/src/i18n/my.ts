@@ -173,6 +173,7 @@ export const dict = {
   "ui.permission.deny": "ငြင်းဆို",
   "ui.permission.allowAlways": "အမြဲခွင့်ပြုပါ။",
   "ui.permission.allowOnce": "တစ်ကြိမ်ခွင့်ပြုပါ။",
+  "ui.markdown.mermaidError": 'ဒိုင်ယာဂရမ်ကို ရေးဆွဲမရပါ',
   "ui.message.expand": "မက်ဆေ့ချ်ကို ချဲ့ပါ။",
   "ui.message.collapse": "မက်ဆေ့ဂျ်ကို ခေါက်သိမ်းပါ။",
   "ui.message.copy": "မိတ္တူ",
