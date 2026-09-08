@@ -50,6 +50,8 @@ function load(themeName: "dark" | "base") {
     module.default.initialize({
       startOnLoad: false,
       securityLevel: "strict",
+      flowchart: { htmlLabels: false },
+      htmlLabels: false,
       theme: themeName,
       themeVariables: themeName === "dark" ? darkThemeVariables : baseThemeVariables,
       themeCSS: themeCSS[themeName],

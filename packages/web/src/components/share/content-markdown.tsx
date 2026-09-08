@@ -33,6 +33,8 @@ function loadMermaid() {
       module.default.initialize({
         startOnLoad: false,
         securityLevel: "strict",
+        flowchart: { htmlLabels: false },
+        htmlLabels: false,
         theme: dark ? "dark" : "base",
         themeCSS: dark
           ? `.node text,.label,.cluster-label{fill:#e6edf3 !important;font-family:inherit !important} .edgeLabel{fill:#8b949e !important}`
