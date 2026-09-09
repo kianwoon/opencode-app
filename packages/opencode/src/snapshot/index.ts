@@ -49,6 +49,19 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Snapshot") {}
 
+// Ancestor directories of `file` that fall inside `worktree`, nearest first.
+// The walk terminates at the filesystem root — `dirname("/") === "/"` — so a
+// degenerate worktree ("/" or "") can no longer spin forever inside markDirty
+// (2026-09-09 halt: one watcher event at worktree "/" pegged the event loop).
+export const dirtyAncestors = (file: string, worktree: string) => {
+  const ancestors = new Set<string>()
+  for (let parent = path.dirname(file); parent !== path.dirname(parent); parent = path.dirname(parent)) {
+    if (!parent.startsWith(worktree)) break
+    ancestors.add(parent)
+  }
+  return ancestors
+}
+
 const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | Config.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -85,11 +98,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         let dirtyConsumer = false
         const markDirty = (file: string) => {
           dirty.add(file)
-          // A deleted path may have been a directory: mark ancestors so their
-          // directory listings are re-evaluated on the next staged add.
-          for (let parent = path.dirname(file); parent.startsWith(state.worktree); parent = path.dirname(parent)) {
-            dirty.add(parent)
-          }
+          for (const parent of dirtyAncestors(file, state.worktree)) dirty.add(parent)
         }
 
         const bridge = Option.getOrUndefined(yield* Effect.serviceOption(EventV2Bridge.Service))
@@ -97,7 +106,11 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           dirtyConsumer = true
           const unsubscribe = yield* bridge.listen((event) => {
             if (event.type !== Watcher.Event.Updated.type) return Effect.void
-            if (event.location && event.location.directory !== ctx.directory) return Effect.void
+            // Events without a location (published outside an instance scope, e.g.
+            // from a drain fiber) cannot be attributed to this worktree — and
+            // trusting them here once spun the server forever when worktree was
+            // "/" (2026-09-09 halt). Same strict filter as project/vcs.ts.
+            if (event.location?.directory !== ctx.directory) return Effect.void
             const data = event.data as EventV2.Data<typeof Watcher.Event.Updated>
             const file = path.isAbsolute(data.file) ? data.file : path.resolve(state.worktree, data.file)
             markDirty(file)
