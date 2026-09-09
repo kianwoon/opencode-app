@@ -355,4 +355,10 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
   orphaned by construction. The projector sweeps them to error at boot
   (packages/core/src/session/projector.ts `sweepOrphanedParts`); acceptance:
   packages/core/test/session-projector.test.ts "orphan sweep".
-  Last-line-before-silence "llm runtime selected" in opencode.log = flood death.
+- Log-silence + 100% CPU after an edit-tool publish = snapshot markDirty spin,
+  NOT a stream flood (2026-09-09 misdiagnosis cost two rebuilds): drain-fiber
+  publishes carry no location, and the "/"-worktree instance spun in the
+  unbounded dirty-ancestor walk. Guards: dirtyAncestors root termination +
+  strict event.location filter (packages/opencode/src/snapshot/index.ts);
+  acceptance: test/snapshot/index.test.ts. Inspect a live hang via
+  `kill -USR1 <utility-pid>` then CDP Debugger.pause for the JS stack.
