@@ -1084,13 +1084,13 @@ export default {
   it.live("handles no-entrypoint tui packages via missing callback", () =>
     withTmp(
       async (dir) => {
-        const mod = path.join(dir, "mods", "acme-plugin")
+        const mod = path.join(dir, "mods", "acme-missing-tui")
         await fs.mkdir(path.join(mod, "themes"), { recursive: true })
         await Bun.write(
           path.join(mod, "package.json"),
           JSON.stringify(
             {
-              name: "acme-plugin",
+              name: "acme-missing-tui",
               version: "1.0.0",
               "oc-themes": ["themes/night.json"],
             },
@@ -1111,7 +1111,7 @@ export default {
               PluginLoader.loadExternal({
                 items: [
                   {
-                    spec: "acme-plugin@1.0.0",
+                    spec: "acme-missing-tui@1.0.0",
                     scope: "local" as const,
                     source: tmp.path,
                   },
@@ -1137,7 +1137,7 @@ export default {
 
             expect(loaded).toEqual([
               {
-                spec: "acme-plugin@1.0.0",
+                spec: "acme-missing-tui@1.0.0",
                 target: tmp.extra.mod,
                 themes: [FSUtil.resolve(path.join(tmp.extra.mod, "themes", "night.json"))],
               },
@@ -1153,13 +1153,13 @@ export default {
   it.live("passes package metadata for entrypoint tui plugins", () =>
     withTmp(
       async (dir) => {
-        const mod = path.join(dir, "mods", "acme-plugin")
+        const mod = path.join(dir, "mods", "acme-meta-tui")
         await fs.mkdir(path.join(mod, "themes"), { recursive: true })
         await Bun.write(
           path.join(mod, "package.json"),
           JSON.stringify(
             {
-              name: "acme-plugin",
+              name: "acme-meta-tui",
               version: "1.0.0",
               exports: {
                 "./tui": "./tui.js",
@@ -1183,7 +1183,7 @@ export default {
               PluginLoader.loadExternal({
                 items: [
                   {
-                    spec: "acme-plugin@1.0.0",
+                    spec: "acme-meta-tui@1.0.0",
                     scope: "local" as const,
                     source: tmp.path,
                   },
@@ -1201,7 +1201,7 @@ export default {
 
             expect(loaded).toEqual([
               {
-                spec: "acme-plugin@1.0.0",
+                spec: "acme-meta-tui@1.0.0",
                 themes: [FSUtil.resolve(path.join(tmp.extra.mod, "themes", "night.json"))],
               },
             ])
@@ -1380,7 +1380,7 @@ export default {
           PluginLoader.loadExternal({
             items: [
               {
-                spec: "acme-plugin@1.0.0",
+                spec: "acme-fail-noretry@1.0.0",
                 scope: "local" as const,
                 source: "test",
               },

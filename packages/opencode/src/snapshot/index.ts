@@ -328,7 +328,17 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
 
         let dirtyAdds = 0
 
+        // Coalesce add passes: automation loops call track()/patch() every few
+        // seconds and each pass costs a burst of git subprocesses. With dirty
+        // tracking active and no new marks, the index from a recent pass is
+        // still authoritative, so skip. The wall-clock bound keeps external
+        // (unwatched) edit visibility within TTL regardless of pass volume.
+        const addCoalesceMs = 10_000
+        let lastAddAt = 0
+
         const add = Effect.fnUntraced(function* () {
+          if (dirtyConsumer && dirty.size === 0 && Date.now() - lastAddAt < addCoalesceMs) return
+          lastAddAt = Date.now()
           yield* sync()
           // Dirty pathspecs are relative to the worktree; anything that escapes it
           // (or exceeds the cap) falls back to the full scan. The set is cleared

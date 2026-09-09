@@ -76,6 +76,27 @@ describe("session.llm.repetition-guard.Guard", () => {
     // consumer never sees the loop as healthy again.
     expect(guard.update(" Moving on to the tests now.")).toBe("Let me commit.")
   })
+
+  test("matches batch detection over a long per-character stream", () => {
+    // Regression: the incremental rewrite tokenizes per delta and must reach
+    // the same verdict as feeding the whole text at once.
+    const guard = new RepetitionGuard.Guard()
+    const text =
+      Array.from({ length: 500 }, (_, i) => `Step ${i} finished cleanly. `).join("") +
+      "Let me commit. Let me commit. Let me commit."
+    let result: string | undefined
+    for (const char of text) result = guard.update(char)
+    expect(result).toBe("Let me commit.")
+  })
+
+  test("still detects after the window has trimmed old sentences", () => {
+    const guard = new RepetitionGuard.Guard()
+    let result: string | undefined
+    for (let i = 0; i < 600; i++) result = guard.update(`Unique sentence number ${i} marches on. `)
+    expect(result).toBeUndefined()
+    result = guard.update("Let me commit. Let me commit. Let me commit.")
+    expect(result).toBe("Let me commit.")
+  })
 })
 
 describe("session.llm.repetition-guard.guardStream", () => {

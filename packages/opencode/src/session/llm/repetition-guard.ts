@@ -45,8 +45,16 @@ const DEFAULT_OPTIONS: Required<RepetitionGuardOptions> = {
   maxWindowChars: 16_000,
 }
 
+// Backward scan bound: degenerate repeats are adjacent, so anything older than
+// a few sentences cannot contribute. Without this the per-delta scan is O(window)
+// and a fast stream re-walks thousands of sentences per delta.
+const maxScanSentences = 64
+
 export class Guard {
-  private text = ""
+  private sentences: string[] = []
+  private pending = ""
+  private chars = 0
+  private triggered: string | undefined
   private options: Required<RepetitionGuardOptions>
 
   constructor(options: RepetitionGuardOptions = {}) {
@@ -55,30 +63,54 @@ export class Guard {
 
   /** Feed accumulated assistant text; returns the repeated sentence if degenerate. */
   update(chunk: string): string | undefined {
-    this.text += chunk
-    if (this.text.length > this.options.maxWindowChars) {
-      this.text = this.text.slice(-this.options.maxWindowChars)
+    // Sticky once hot: the stream is aborted on first trigger, so a lagging
+    // consumer must never see the loop as healthy again.
+    if (this.triggered !== undefined) return this.triggered
+
+    this.pending += chunk
+    let start = 0
+    for (let i = 0; i < this.pending.length; i++) {
+      const char = this.pending[i]
+      if (char === "." || char === "!" || char === "?" || char === "\n") {
+        const token = this.pending.slice(start, i + 1).trim()
+        if (token.length > 0) {
+          this.sentences.push(token)
+          this.chars += token.length
+        }
+        start = i + 1
+      }
     }
-    return detectRepetition(this.text, this.options)
+    this.pending = this.pending.slice(start)
+    while (this.chars > this.options.maxWindowChars && this.sentences.length > 0) {
+      this.chars -= this.sentences[0]!.length
+      this.sentences.shift()
+    }
+
+    this.triggered = scanRepetition(this.sentences, this.options)
+    return this.triggered
   }
 }
 
 /**
  * Detects a degenerate repetition loop in accumulated assistant text.
  *
- * Splits the text into sentences (on sentence boundaries: `.`, `!`, `?`, or
- * newline) and checks whether any sentence appears `minRepeats`+ consecutive
- * times in the most recent window.
- *
  * Exported separately so it can be unit-tested without the stream machinery.
  */
 export function detectRepetition(text: string, options: RepetitionGuardOptions = {}): string | undefined {
+  return scanRepetition(tokenize(text), options)
+}
+
+/**
+ * Detects a degenerate repetition loop in pre-tokenized sentences, scanning
+ * backward from the most recent sentence within a bounded window.
+ */
+function scanRepetition(sentences: string[], options: RepetitionGuardOptions): string | undefined {
   const { minRepeats, minSentenceLength } = { ...DEFAULT_OPTIONS, ...options }
-  const sentences = tokenize(text)
   if (sentences.length < minRepeats) return undefined
 
   let repeatCount = 1
-  for (let i = sentences.length - 1; i >= 1; i--) {
+  const floor = Math.max(1, sentences.length - maxScanSentences)
+  for (let i = sentences.length - 1; i >= floor; i--) {
     const sentence = sentences[i]
     const prev = sentences[i - 1]
     if (sentence === undefined || prev === undefined) break

@@ -174,14 +174,27 @@ export namespace PluginLoader {
   const resolvedCache = new Map<string, Promise<Awaited<ReturnType<typeof resolve>>>>()
   const moduleCache = new Map<string, Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }>>()
 
+  // Settled failures are kept (not just in-flight ones): a broken plugin would
+  // otherwise re-resolve/re-import — and re-log — on every consumer call
+  // (observed 2026-09-09: 8,892 duplicate ERROR logs in one day from two
+  // failing plugins). Resolve failures expire so a fixed install can recover;
+  // load failures stay until their key changes — the mtime-busted entry means
+  // editing the file lands on a fresh key automatically.
+  const RESOLVE_FAILURE_TTL = 60_000
+
   function resolveCached(plan: Plan, kind: PluginKind, scope: string) {
     const key = `${scope}\u0000${plan.spec}`
     const inFlight = resolvedCache.get(key)
     if (inFlight) return inFlight
     const promise = resolve(plan, kind)
     resolvedCache.set(key, promise)
-    void promise.then(() => {
-      if (resolvedCache.get(key) === promise) resolvedCache.delete(key)
+    void promise.then((settled) => {
+      if (resolvedCache.get(key) !== promise) return
+      if (settled.ok) resolvedCache.delete(key)
+      else
+        setTimeout(() => {
+          if (resolvedCache.get(key) === promise) resolvedCache.delete(key)
+        }, RESOLVE_FAILURE_TTL).unref?.()
     })
     return promise
   }
@@ -201,8 +214,9 @@ export namespace PluginLoader {
       (error: unknown): { ok: false; error: unknown } => ({ ok: false, error }),
     )
     moduleCache.set(key, promise)
-    void promise.then(() => {
-      if (moduleCache.get(key) === promise) moduleCache.delete(key)
+    void promise.then((settled) => {
+      if (moduleCache.get(key) !== promise) return
+      if (settled.ok) moduleCache.delete(key)
     })
     return promise
   }
