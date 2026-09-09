@@ -104,7 +104,7 @@ describe("ScheduleTaskTool", () => {
         registry,
         call({ title: "Nightly", prompt: "run checks", cron: "daily" }),
       )
-      const taskID = Task.ID.make(JSON.parse(result.value).taskID)
+      const taskID = Task.ID.make(JSON.parse(String(result.value)).taskID)
       const stored = yield* tasks.get(taskID)
 
       expect(stored?.title).toBe("Nightly")
