@@ -345,3 +345,14 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
   in systemPaths and skips resolve" — now asserts on-demand attach) and
   test/tool/read.test.ts "reads file content and attaches nearby nested
   AGENTS.md".
+
+## Streaming guards (post-mortem 2026-09-09)
+- Flash-tier gateway models (glm-5.3-flash, deepseek-v4-flash) can flood
+  unbounded SSE deltas with no inter-chunk gaps: the idle guard (ChunkStallError)
+  never fires, the event loop pegs, and the process OOM-aborts with no logs.
+  Acceptance: test/provider/stream-volume.test.ts (StreamVolumeError, non-retryable).
+- Streams are process-local: after a crash, every pending/running tool part is
+  orphaned by construction. The projector sweeps them to error at boot
+  (packages/core/src/session/projector.ts `sweepOrphanedParts`); acceptance:
+  packages/core/test/session-projector.test.ts "orphan sweep".
+  Last-line-before-silence "llm runtime selected" in opencode.log = flood death.
