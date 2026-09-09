@@ -241,4 +241,22 @@ describe("background.job", () => {
       expect((yield* jobs.get(job.id))?.metadata?.value).toBe("initial")
     }),
   )
+
+  it.instance("foreground race is bounded by timeoutOption when job never settles", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const job = yield* jobs.start({
+        type: "test",
+        run: Effect.never,
+      })
+
+      const result = yield* Effect.raceFirst(
+        jobs.wait({ id: job.id }).pipe(Effect.map((waited) => waited.info)),
+        jobs.waitForPromotion(job.id),
+      ).pipe(Effect.timeoutOption(5))
+
+      expect(result._tag).toBe("None")
+      yield* jobs.cancel(job.id)
+    }),
+  )
 })

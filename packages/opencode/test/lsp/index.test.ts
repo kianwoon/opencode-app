@@ -6,6 +6,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { LSP } from "@/lsp/lsp"
+import * as LSPClient from "@/lsp/client"
 import * as LSPServer from "@/lsp/server"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { TestInstance } from "../fixture/fixture"
@@ -112,6 +113,42 @@ describe("lsp.spawn", () => {
         yield* lsp.touchFile(file)
         yield* awaitWithTimeout(Deferred.await(updated), "lsp.updated event was not published")
       }),
+    {
+      config: {
+        lsp: {
+          fake: {
+            command: [process.execPath, fakeServerPath],
+            extensions: [".repro"],
+          },
+        },
+      },
+    },
+  )
+
+  it.instance(
+    "touchFile returns within bound even when LSP never pushes diagnostics",
+    () =>
+      LSP.Service.use((lsp) =>
+        Effect.gen(function* () {
+          const dir = (yield* TestInstance).directory
+          const file = path.join(dir, "sample.repro")
+          yield* Effect.promise(() => Bun.write(file, "sample\n"))
+          const neverResolves = new Promise<never>(() => {})
+          const spy = spyOn(LSPClient, "create").mockResolvedValue({
+            root: dir,
+            serverID: "fake",
+            notify: { open: async () => 1 },
+            waitForDiagnostics: () => neverResolves,
+            shutdown: async () => {},
+          } as unknown as LSPClient.Info)
+          try {
+            // A short timeout keeps the test fast; the production default stays 30s.
+            yield* awaitWithTimeout(lsp.touchFile(file, "document", 100), "touchFile did not return on timeout")
+          } finally {
+            spy.mockRestore()
+          }
+        }),
+      ),
     {
       config: {
         lsp: {

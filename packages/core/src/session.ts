@@ -18,7 +18,7 @@ import { SessionMessageTable, SessionTable } from "./session/sql"
 import { SessionSchema } from "./session/schema"
 import { AbsolutePath, PositiveInt, RelativePath } from "./schema"
 import { AgentV2 } from "./agent"
-import { SessionV1 } from "./v1/session"
+import { SessionV1, MessageID, PartID } from "./v1/session"
 import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
@@ -139,6 +139,7 @@ export interface Interface {
     after?: number
     limit: number
   }) => Effect.Effect<{ events: ReadonlyArray<SessionEvent.DurableEvent>; hasMore: boolean }, NotFoundError>
+  readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly switchAgent: (input: { sessionID: SessionSchema.ID; agent: string }) => Effect.Effect<void, NotFoundError>
   readonly switchModel: (input: {
     sessionID: SessionSchema.ID
@@ -398,6 +399,58 @@ const layer = Layer.effect(
       }),
       skill: Effect.fn("V2Session.skill")(function* () {
         return yield* new OperationUnavailableError({ operation: "skill" })
+      }),
+      remove: Effect.fn("V2Session.remove")(function* (sessionID) {
+        const row = yield* db
+          .select()
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        const session = yield* result.get(sessionID)
+        const children = yield* db
+          .select({ id: SessionTable.id })
+          .from(SessionTable)
+          .where(eq(SessionTable.parent_id, sessionID))
+          .all()
+          .pipe(Effect.orDie)
+        for (const child of children) {
+          yield* result.remove(child.id).pipe(Effect.catchTag("Session.NotFoundError", () => Effect.void))
+        }
+        // Publish before purging durable events so the projector deletes the
+        // session/message/part rows, then remove the durable event log itself.
+        if (row) {
+          yield* events.publish(
+            SessionV1.Event.Deleted,
+            {
+              sessionID,
+              info: SessionV1.SessionInfo.make({
+                ...session,
+                slug: row.slug,
+                directory: row.directory,
+                version: row.version,
+                path: row.path ?? undefined,
+                share: row.share_url ? { url: row.share_url } : undefined,
+                summary: undefined,
+                revert: session.revert
+                  ? {
+                      messageID: MessageID.make(session.revert.messageID),
+                      partID: session.revert.partID ? PartID.make(session.revert.partID) : undefined,
+                      snapshot: session.revert.snapshot,
+                      diff: session.revert.diff,
+                    }
+                  : undefined,
+                time: {
+                  created: row.time_created,
+                  updated: row.time_updated,
+                  compacting: row.time_compacting ?? undefined,
+                  archived: row.time_archived ?? undefined,
+                },
+              }),
+            },
+          )
+        }
+        yield* events.remove(sessionID)
       }),
       switchAgent: Effect.fn("V2Session.switchAgent")(function* (input) {
         yield* result.get(input.sessionID)

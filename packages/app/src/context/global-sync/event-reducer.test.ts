@@ -71,6 +71,7 @@ const baseState = (input: Partial<State> = {}) =>
     session: [],
     sessionTotal: 0,
     session_status: {},
+    session_status_at: {},
     session_diff: {},
     todo: {},
     permission: {},
@@ -662,5 +663,23 @@ describe("applyDirectoryEvent", () => {
 
     expect(pushes).toEqual(["/tmp"])
     expect(lspLoads).toBe(1)
+  })
+
+  test("stamps session_status_at when session.status arrives", () => {
+    const [store, setStore] = createStore(baseState())
+    const before = Date.now()
+
+    applyDirectoryEvent({
+      event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session_status.ses_1).toEqual({ type: "busy" })
+    expect(typeof store.session_status_at.ses_1).toBe("number")
+    expect(store.session_status_at.ses_1).toBeGreaterThanOrEqual(before)
   })
 })

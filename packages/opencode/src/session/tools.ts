@@ -15,7 +15,7 @@ import { ToolResultCache } from "./tool-result-cache"
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
@@ -25,6 +25,12 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+
+// Backstop that bounds ANY tool execution (edit/LSP/MCP/custom) so one hung
+// tool can never park the session forever. Individual tools keep their own,
+// tighter timeouts (shell, MCP, etc.); this is a ceiling, not a behavior change.
+// The tool's abort signal still cancels earlier when present.
+export const TOOL_EXECUTION_TIMEOUT_MS = 10 * 60_000
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -115,7 +121,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             // Read-only result cache: hits skip only the canonical execution;
             // plugin hooks, attachment re-wrap, and abort handling always run.
             const cached = ToolResultCache.lookup(ctx.sessionID, item.id, args)
-            const result = cached ?? (yield* item.execute(args, ctx))
+            const result =
+              cached ??
+              Option.getOrThrowWith(
+                yield* item.execute(args, ctx).pipe(Effect.timeoutOption(TOOL_EXECUTION_TIMEOUT_MS)),
+                () => new Error(`Tool '${item.id}' timed out after 10 minutes without returning.`),
+              )
             if (!cached) ToolResultCache.store(ctx.sessionID, item.id, args, result)
             const output = {
               ...result,

@@ -47,6 +47,7 @@ export type State = {
   session_status: {
     [sessionID: string]: SessionStatus
   }
+  session_status_at: Record<string, number>
   session_working(id: string): boolean
   session_diff: {
     [sessionID: string]: FileDiffInfo[]
@@ -127,6 +128,9 @@ export type DisposeCheck = {
 }
 
 export const MAX_DIR_STORES = 30
+
+// Busy/spinner staleness cap: a session stuck non-idle past this is treated as idle.
+export const STALE_BUSY_MS = 10 * 60_000
 export const DIR_IDLE_TTL_MS = 20 * 60 * 1000
 export const SESSION_RECENT_WINDOW = 4 * 60 * 60 * 1000
 export const SESSION_RECENT_LIMIT = 50

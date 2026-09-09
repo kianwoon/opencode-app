@@ -5,6 +5,7 @@ import type { VcsInfo } from "@opencode-ai/sdk/v2/client"
 import {
   DIR_IDLE_TTL_MS,
   MAX_DIR_STORES,
+  STALE_BUSY_MS,
   type ChildOptions,
   type DirState,
   type IconCache,
@@ -229,9 +230,11 @@ export function createChildStoreManager(input: {
             session: [],
             sessionTotal: 0,
             session_status: {},
+            session_status_at: {},
             session_working(id: string) {
               const type = this.session_status[id]?.type
-              return (type ?? "idle") !== "idle"
+              if ((type ?? "idle") === "idle") return false
+              return Date.now() - (this.session_status_at[id] ?? Date.now()) < STALE_BUSY_MS
             },
             session_diff: {},
             todo: {},

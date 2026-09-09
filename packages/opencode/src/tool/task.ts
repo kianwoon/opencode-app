@@ -40,6 +40,11 @@ const BACKGROUND_UPDATED = [
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
 
+// Bounds the foreground parent join so one never-settling child (dead drain
+// fiber, silent provider, stuck tool dispatch) can't park the session forever.
+// Background tasks stay unbounded; the user polls those intentionally.
+export const FOREGROUND_SUBAGENT_TIMEOUT_MS = 30 * 60_000
+
 const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
@@ -346,6 +351,17 @@ export const TaskTool = Tool.define(
             const result = yield* Effect.raceFirst(
               background.wait({ id: nextSession.id }).pipe(Effect.map((waited) => waited.info)),
               background.waitForPromotion(nextSession.id),
+            ).pipe(
+              Effect.timeoutOption(FOREGROUND_SUBAGENT_TIMEOUT_MS),
+              Effect.flatMap((option) =>
+                option._tag === "Some"
+                  ? Effect.succeed(option.value)
+                  : Effect.fail(
+                      new Error(
+                        `Subagent timed out after 30 minutes without settling (task_id: ${nextSession.id}). The child session may still be running; check its session or retry.`,
+                      ),
+                    ),
+              ),
             )
             if (result?.metadata?.background === true) return backgroundResult()
             if (result?.status === "error") return yield* Effect.fail(new Error(result.error ?? "Task failed"))
@@ -358,7 +374,8 @@ export const TaskTool = Tool.define(
           }),
         (_, exit) =>
           Effect.gen(function* () {
-            if (Exit.hasInterrupts(exit))
+            // Timeout-failure must also cancel the orphan (parent already settled as error; child would otherwise run unbounded).
+            if (Exit.hasInterrupts(exit) || Exit.isFailure(exit))
               yield* Effect.all([cancel, background.cancel(nextSession.id)], { discard: true })
           }).pipe(
             Effect.ensuring(

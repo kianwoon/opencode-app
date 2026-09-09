@@ -8,7 +8,7 @@ import * as LSPServer from "./server"
 import { Config } from "@/config/config"
 import { Process } from "@/util/process"
 import { spawn as lspspawn } from "./launch"
-import { Effect, Layer, Context, Schema } from "effect"
+import { Effect, Layer, Context, Schema, Duration, Option } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { containsPath } from "@/project/instance-context"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
@@ -120,7 +120,11 @@ export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Status[]>
   readonly hasClients: (file: string) => Effect.Effect<boolean>
-  readonly touchFile: (input: string, diagnostics?: "document" | "full") => Effect.Effect<void>
+  readonly touchFile: (
+    input: string,
+    diagnostics?: "document" | "full",
+    timeoutMs?: number,
+  ) => Effect.Effect<void>
   readonly diagnostics: () => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
   readonly hover: (input: LocInput) => Effect.Effect<any>
   readonly definition: (input: LocInput) => Effect.Effect<any[]>
@@ -341,9 +345,15 @@ const layer = Layer.effect(
       })
     })
 
-    const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, diagnostics?: "document" | "full") {
+    const touchFile = Effect.fn("LSP.touchFile")(function* (
+      input: string,
+      diagnostics?: "document" | "full",
+      timeoutMs = 30_000,
+    ) {
       yield* Effect.logInfo("touching file", { file: input })
       const clients = yield* getClients(input)
+      // Diagnostics are best-effort after the write; a stuck LSP server must not
+      // let touchFile hang edit's completion path, so bound the wait and continue.
       yield* Effect.promise(() =>
         Promise.all(
           clients.map(async (client) => {
@@ -358,6 +368,14 @@ const layer = Layer.effect(
             })
           }),
         ).catch(() => {}),
+      ).pipe(
+        Effect.timeoutOption(Duration.millis(timeoutMs)),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.logWarning("LSP touchFile diagnostics wait timed out", { file: input }),
+            onSome: () => Effect.void,
+          }),
+        ),
       )
     })
 

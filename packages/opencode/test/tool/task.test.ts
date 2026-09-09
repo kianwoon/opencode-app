@@ -327,6 +327,56 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("foreground failure cancels the orphaned child session", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const cancelled: SessionID[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps({
+          text: "",
+          error: new SessionV1.APIError({ message: "Network connection lost", isRetryable: false }).toObject(),
+        }),
+        cancel: (sessionID) =>
+          Effect.sync(() => {
+            cancelled.push(sessionID)
+          }),
+      }
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const child = (yield* sessions.children(chat.id))[0]
+      expect(child).toBeDefined()
+      if (!child) throw new Error("expected child session")
+      // Failure exits (timeout included) must run the release cancel; the
+      // already-settled job keeps its error status instead of running orphaned.
+      expect(cancelled).toContain(child.id)
+      expect((yield* jobs.get(child.id))?.status).not.toBe("running")
+    }),
+  )
+
   it.instance("execute surfaces terminal child tool errors with a resumable task_id", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

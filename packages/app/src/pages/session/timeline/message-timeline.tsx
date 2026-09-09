@@ -824,8 +824,10 @@ export function MessageTimeline(props: {
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    const result = await sdk()
-      .api.session.remove({ sessionID })
+    // Promise.resolve().then defers the call so a missing method or sync throw
+    // from an older server SDK flows into .catch instead of rejecting unhandled.
+    const result = await Promise.resolve(sdk())
+      .then((client) => client.api.session.remove({ sessionID }))
       .then(() => true)
       .catch((err) => {
         showToast({

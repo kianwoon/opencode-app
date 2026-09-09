@@ -35,5 +35,6 @@
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "effect": "catalog:"
-  }
+  },
+  "version": "1.17.14-v2"
 }

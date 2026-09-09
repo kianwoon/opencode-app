@@ -5,7 +5,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -2982,3 +2982,16 @@ it.instance(
     }),
   15_000,
 )
+
+describe("drain wall ceiling", () => {
+  test("drainCeilingExceeded trips only past the ceiling", async () => {
+    const { drainCeilingExceeded, DRAIN_WALL_CEILING_MS, DRAIN_WALL_CEILING_MESSAGE } = await import(
+      "../../src/session/prompt"
+    )
+    expect(DRAIN_WALL_CEILING_MS).toBe(45 * 60_000)
+    expect(DRAIN_WALL_CEILING_MESSAGE).toContain("45 minutes")
+    expect(drainCeilingExceeded(1000, 1000)).toBe(false)
+    expect(drainCeilingExceeded(1000, 1000 + DRAIN_WALL_CEILING_MS - 1)).toBe(false)
+    expect(drainCeilingExceeded(1000, 1000 + DRAIN_WALL_CEILING_MS)).toBe(true)
+  })
+})

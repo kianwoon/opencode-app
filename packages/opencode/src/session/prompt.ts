@@ -94,6 +94,19 @@ const reentries = new Map<SessionID, { count: number; windowStart: number }>()
 // The map only needs recent sessions; once it grows past this many entries,
 // drop entries whose window has expired to bound memory on long-lived servers.
 const REENTRY_PRUNE_MIN = 128
+// Wall-clock backstop for a single drain: a drain that makes no
+// user-visible progress for 45 minutes is failed, not slow. The ceiling is
+// checked between steps (never mid-stream) so healthy long single steps are
+// never killed — expiry publishes Session.Event.Error, exits the loop via
+// lastAssistant, and lets the runner settle to idle so a later prompt
+// re-drives fresh.
+export const DRAIN_WALL_CEILING_MS = 45 * 60_000
+export const DRAIN_WALL_CEILING_MESSAGE =
+  "Session drain exceeded 45 minutes without completing; stopped to keep the app responsive. Send a new prompt to continue."
+/** @internal Exported for testing */
+export function drainCeilingExceeded(start: number, now: number = Date.now()) {
+  return now - start >= DRAIN_WALL_CEILING_MS
+}
 // Grace steps granted after the soft max-steps wall for the model to produce
 // its text-only summary. If it still calls tools past the grace window, the
 // loop is force-broken with an error instead of continuing forever.
@@ -1538,8 +1551,17 @@ const layer = Layer.effect(
           }
         }
 
+        const drainStart = Date.now()
+        const findLastAssistant = lastAssistant
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
+          if (drainCeilingExceeded(drainStart)) {
+            const error = new NamedError.Unknown({ message: DRAIN_WALL_CEILING_MESSAGE })
+            yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+            yield* status.set(sessionID, { type: "idle" })
+            yield* Effect.logWarning("drain wall ceiling exceeded", { "session.id": sessionID })
+            return yield* findLastAssistant(sessionID)
+          }
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(

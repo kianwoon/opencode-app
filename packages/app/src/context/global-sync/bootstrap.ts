@@ -390,6 +390,11 @@ export async function bootstrapDirectory(input: {
             const x = await input.sdk.session.status()
             if (!input.session) {
               input.setStore("session_status", x.data!)
+              const now = Date.now()
+              input.setStore(
+                "session_status_at",
+                Object.fromEntries(Object.keys(x.data ?? {}).map((sessionID) => [sessionID, now])),
+              )
               return
             }
             const statuses = x.data ?? {}

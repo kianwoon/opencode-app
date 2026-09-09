@@ -10,13 +10,14 @@ import { Provider } from "@/provider/provider"
 import { Session } from "@/session/session"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { SessionProcessor } from "@/session/processor"
-import { SessionTools } from "@/session/tools"
+import { SessionTools, TOOL_EXECUTION_TIMEOUT_MS } from "@/session/tools"
 import { Tool } from "@/tool/tool"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Schema, Cause, Duration, Exit, Fiber } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 
@@ -92,6 +93,13 @@ const layer = Layer.mergeAll(
                 yield* ctx.metadata({ metadata: { output: "second" } })
                 return { title: "timing", metadata: {}, output: "done" }
               }),
+          } satisfies Tool.Def,
+          {
+            id: "hang",
+            description: "never settles",
+            parameters: Schema.Struct({}),
+            jsonSchema: { type: "object", properties: {} },
+            execute: () => Effect.never,
           } satisfies Tool.Def,
         ]),
     }),
@@ -169,6 +177,75 @@ it.effect("preserves running tool start time across metadata updates", () =>
     expect(state.state.status).toBe("running")
     if (state.state.status === "running") {
       expect(state.state.time.start).toBe(100)
+    }
+  }),
+)
+
+it.effect("a tool whose execute never settles fails with the timeout error", () =>
+  Effect.gen(function* () {
+    const state: SessionV1.ToolPart = {
+      id: partID,
+      sessionID,
+      messageID,
+      type: "tool",
+      tool: "hang",
+      callID,
+      state: { status: "running", input: {}, time: { start: 1 } },
+    }
+    const processor = {
+      message: {
+        id: messageID,
+        sessionID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        agent: "build",
+        mode: "build",
+        path: { cwd: "/tmp", root: "/tmp" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ModelV2.ID.make("test-model"),
+        providerID: ProviderV2.ID.make("test"),
+        time: { created: 1 },
+      } satisfies SessionV1.Assistant,
+      updateToolCall: (_toolCallID, update) =>
+        Effect.sync(() => {
+          state.state = update(state).state
+          return state
+        }),
+      completeToolCall: () => Effect.void,
+    } satisfies Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+
+    const tools = yield* SessionTools.resolve({
+      agent,
+      model,
+      session: { id: sessionID, permission: [] } as unknown as Session.Info,
+      processor,
+      bypassAgentCheck: false,
+      messages: [],
+      promptOps: {} as never,
+      mcpConfig: {},
+    })
+    const execute = tools.hang.execute
+    if (!execute) throw new Error("hang tool is missing execute")
+
+    const outcome = yield* Effect.promise(() =>
+      execute(
+        {},
+        {
+          toolCallId: callID,
+          abortSignal: new AbortController().signal,
+          messages: [],
+        },
+      ),
+    ).pipe(Effect.forkScoped)
+
+    // The execute never settles; advancing the clock trips the execution ceiling.
+    yield* TestClock.adjust(Duration.millis(TOOL_EXECUTION_TIMEOUT_MS))
+    const exit = yield* Fiber.await(outcome)
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Cause.prettyErrors(exit.cause).join(" ")).toContain("timed out after 10 minutes")
     }
   }),
 )
