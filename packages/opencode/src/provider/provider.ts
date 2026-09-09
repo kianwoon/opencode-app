@@ -35,46 +35,69 @@ import { ProviderError } from "./error"
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
 // Default idle guard for providers that configure no timeout at all. Without
-// it, a provider that silently stops sending SSE chunks (observed: z.ai GLM
-// behind a gateway, 15-minute silent stall on a ~200k-token turn) parks the
-// session until a manual abort. The value only ever fires on a *gap* between
-// chunks (or missing headers), never on total turn duration, so long healthy
-// reasoning turns are unaffected.
+// it, a provider that silently stops sending streamed chunks (observed: z.ai
+// GLM behind a gateway, 15-minute silent stall on a ~200k-token turn) parks
+// the session until a manual abort. The value only ever fires on a *gap*
+// between chunks (or missing headers), never on total turn duration, so long
+// healthy reasoning turns are unaffected. Applies to ANY streamed body — the
+// content-type gate was removed because gateways (and the
+// fetchFreshConnection node-stream bridge, which builds a Response with no
+// content-type at all) can omit `text/event-stream` on streaming responses.
 export const DEFAULT_IDLE_TIMEOUT = 180_000
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
-  if (typeof ms !== "number" || ms <= 0) return res
+// Volume guard for streamed bodies: caps total bytes per response regardless of
+// chunk gaps. The idle guard above only fires on silence, so a gateway that
+// floods chunks (observed 2026-09-09: flash-tier models OOM-aborting the
+// process seconds into a turn) passes straight through it. The cap is far above
+// any legitimate turn (a max-length output with SSE/JSON overhead is a few MB)
+// and only exists to keep a degenerate stream from exhausting the heap.
+export const DEFAULT_STREAM_MAX_BYTES = 64 * 1024 * 1024
+
+function wrapSSE(res: Response, ms: number, ctl: AbortController, maxBytes = 0) {
+  if ((typeof ms !== "number" || ms <= 0) && maxBytes <= 0) return res
   if (!res.body) return res
-  if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
+  let received = 0
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
-      const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
-        const id = setTimeout(() => {
-          const err = new ProviderError.ChunkStallError(ms)
-          ctl.abort(err)
-          reader.cancel(err).catch(() => {})
-          reject(err)
-        }, ms)
+      const read =
+        typeof ms === "number" && ms > 0
+          ? new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
+              const id = setTimeout(() => {
+                const err = new ProviderError.ChunkStallError(ms)
+                ctl.abort(err)
+                reader.cancel(err).catch(() => {})
+                reject(err)
+              }, ms)
 
-        reader.read().then(
-          (part) => {
-            clearTimeout(id)
-            resolve(part)
-          },
-          (err) => {
-            clearTimeout(id)
-            reject(err)
-          },
-        )
-      })
+              reader.read().then(
+                (part) => {
+                  clearTimeout(id)
+                  resolve(part)
+                },
+                (err) => {
+                  clearTimeout(id)
+                  reject(err)
+                },
+              )
+            })
+          : reader.read()
+      const part = await read
 
       if (part.done) {
         ctrl.close()
         return
       }
 
+      received += part.value.byteLength
+      if (maxBytes > 0 && received > maxBytes) {
+        const err = new ProviderError.StreamVolumeError(maxBytes)
+        ctl.abort(err)
+        void reader.cancel(err).catch(() => {})
+        ctrl.error(err)
+        return
+      }
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
@@ -1916,8 +1939,10 @@ const layer = Layer.effect(
         const chunkTimeout = options["chunkTimeout"]
         const headerTimeout = options["headerTimeout"]
         const requestTimeout = options["timeout"]
+        const streamMaxBytes = options["streamMaxBytes"]
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
+        delete options["streamMaxBytes"]
         // Some providers (observed: z.ai GLM) serve implicit-prefix-cache reads
         // per connection: a pooled keep-alive socket reads a cache snapshot
         // frozen at connection establishment, so a long-lived socket parked in
@@ -1945,6 +1970,13 @@ const layer = Layer.effect(
           })
           const chunkAbortCtl = effectiveChunkMs ? new AbortController() : undefined
           const headerTimeoutCtl = effectiveHeaderMs ? timeoutController(effectiveHeaderMs) : undefined
+          // streamMaxBytes: false — disables the volume guard entirely
+          const effectiveMaxBytes =
+            streamMaxBytes === false
+              ? 0
+              : typeof streamMaxBytes === "number" && streamMaxBytes > 0
+                ? streamMaxBytes
+                : DEFAULT_STREAM_MAX_BYTES
           const signals: AbortSignal[] = []
 
           if (opts.signal) signals.push(opts.signal)
@@ -1964,8 +1996,17 @@ const layer = Layer.effect(
                 })
           ).finally(() => headerTimeoutCtl?.clear())
 
-          if (!chunkAbortCtl || !effectiveChunkMs) return res
-          return wrapSSE(res, effectiveChunkMs, chunkAbortCtl)
+          const idleGuard = chunkAbortCtl !== undefined && effectiveChunkMs !== undefined
+          if (!idleGuard && effectiveMaxBytes <= 0) return res
+          // The volume guard must not impose the idle timeout on bodies that
+          // never opted into it (e.g. non-streaming responses), so ms is 0
+          // unless the chunk guard is active.
+          return wrapSSE(
+            res,
+            idleGuard ? effectiveChunkMs! : 0,
+            chunkAbortCtl ?? new AbortController(),
+            effectiveMaxBytes,
+          )
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]

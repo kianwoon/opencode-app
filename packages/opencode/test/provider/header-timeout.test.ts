@@ -174,6 +174,43 @@ it.live("idle guard raises ChunkStallError when the SSE body stalls", () =>
   }),
 )
 
+it.live("idle guard raises ChunkStallError even without SSE content-type", () =>
+  Effect.gen(function* () {
+    // Regression: wrapSSE used to skip the guard unless content-type included
+    // `text/event-stream`, so a gateway response with a streamed (or
+    // unlabelled) body that goes silent mid-body parked the session forever.
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => stalledChunksServer({ after: 0, stall: 60_000, contentType: "application/json" })),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            onError() {},
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          const error = yield* Effect.promise(async () => {
+            try {
+              for await (const part of result.fullStream) {
+                if (part.type === "error") return part.error
+              }
+            } catch (error) {
+              return error
+            }
+          })
+          expect(error).toBeInstanceOf(ProviderError.ChunkStallError)
+        }),
+      { config: providerConfig(server.url, { timeout: 50 }) },
+    )
+  }),
+)
+
 it.live("timeout: false disables the default idle guard", () =>
   Effect.gen(function* () {
     // Explicit escape hatch: a 250ms inter-chunk gap must pass untouched even
@@ -390,9 +427,10 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
 async function stalledChunksServer(options: {
   after: number
   stall: number
+  contentType?: string
 }): Promise<{ server: Server; url: string }> {
   const server = createServer((_, res) => {
-    res.writeHead(200, { "content-type": "text/event-stream" })
+    res.writeHead(200, { "content-type": options.contentType ?? "text/event-stream" })
     res.write('data: {"choices":[{"delta":{"content":"a"}}]}\n\n')
     setTimeout(() => {
       res.write('data: {"choices":[{"delta":{"content":"b"}}]}\n\n')

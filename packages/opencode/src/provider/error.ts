@@ -34,6 +34,19 @@ export class ChunkStallError extends ResponseStreamError {
   }
 }
 
+// Distinct subclass so a degenerate flood (observed 2026-09-09: flash-tier
+// gateway models streaming unbounded deltas within seconds of turn start,
+// pegging the event loop and OOM-aborting the process) is diagnosable from the
+// error alone. Unlike ChunkStallError this must NOT be retried: re-issuing the
+// request re-floods.
+export class StreamVolumeError extends ResponseStreamError {
+  public override readonly name = "ProviderStreamVolumeError"
+
+  constructor(public readonly bytes: number) {
+    super(`SSE stream exceeded ${bytes} bytes; the response flooded and was aborted`)
+  }
+}
+
 function isOpenAiErrorRetryable(e: APICallError) {
   const status = e.statusCode
   if (!status) return e.isRetryable

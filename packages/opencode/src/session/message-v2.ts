@@ -784,6 +784,21 @@ export function fromError(
         },
         { cause: e },
       ).toObject()
+    case e instanceof ProviderError.StreamVolumeError:
+      // A flooded response is a provider-side defect; retrying re-issues the
+      // same request and floods again, so unlike ChunkStallError this is fatal
+      // for the turn.
+      return new APIError(
+        {
+          message: e.message,
+          isRetryable: false,
+          metadata: {
+            code: e.name,
+            maxBytes: String(e.bytes),
+          },
+        },
+        { cause: e },
+      ).toObject()
     case e instanceof ProviderError.ResponseStreamError:
       // ChunkStallError (idle-guard abort) must be retried: a silent stall is
       // a transient provider-side condition. Bounded by RETRY_MAX_RETRIES in

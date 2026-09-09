@@ -207,10 +207,51 @@ function insertMessage(db: DatabaseService, event: SessionEvent.Event, message: 
     .pipe(Effect.orDie)
 }
 
+const ORPHAN_ERROR =
+  "Orphaned by restart: owning execution fiber did not survive process restart; marked failed at boot. Re-send your prompt to retry."
+
+export function sweepOrphanedParts(db: DatabaseService) {
+  return Effect.gen(function* () {
+    // Boot orphan sweep: part rows left in-flight by a dead process (fibers are
+    // process-local; DB rows are durable). No live fiber can exist before layer
+    // build, so every pending/running row at this point is orphaned by
+    // construction. This includes `task` parts in parent sessions waiting on a
+    // dead subagent drain — without it the parent timeline spins forever after
+    // a crash (2026-09-09 halt: glm-5.3-flash flood OOM-killed the process
+    // mid-edit and the parent task part stayed running across restarts).
+    // Idempotent: re-boot with none in-flight = zero rows touched.
+    const orphans = yield* db
+      .select({ id: PartTable.id, data: PartTable.data })
+      .from(PartTable)
+      .where(sql`json_extract(${PartTable.data}, '$.state.status') IN ('pending','running')`)
+      .all()
+      .pipe(Effect.orDie)
+    for (const row of orphans) {
+      const data = row.data as Record<string, unknown>
+      const state: Record<string, unknown> =
+        typeof data.state === "object" && data.state !== null ? { ...data.state } : {}
+      const time: Record<string, unknown> =
+        typeof state.time === "object" && state.time !== null ? { ...state.time } : {}
+      state.status = "error"
+      state.error = ORPHAN_ERROR
+      state.time = { ...time, end: Date.now() }
+      yield* db
+        .update(PartTable)
+        .set({ data: { ...data, state } as unknown as typeof PartTable.$inferInsert.data, time_updated: Date.now() })
+        .where(eq(PartTable.id, row.id))
+        .run()
+        .pipe(Effect.orDie)
+    }
+    if (orphans.length > 0) yield* Effect.logInfo("orphan sweep", { count: orphans.length })
+    return orphans.length
+  })
+}
+
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const { db } = yield* Database.Service
+    yield* sweepOrphanedParts(db)
     yield* events.project(SessionV1.Event.Created, (event) =>
       Effect.gen(function* () {
         const stored = yield* db

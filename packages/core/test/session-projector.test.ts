@@ -19,7 +19,8 @@ import { SessionMessageUpdater } from "@opencode-ai/core/session/message-updater
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { MessageID, PartID } from "@opencode-ai/core/v1/session"
+import { SessionInputTable, SessionMessageTable, SessionTable, MessageTable, PartTable } from "@opencode-ai/core/session/sql"
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Location } from "@opencode-ai/core/location"
@@ -562,6 +563,68 @@ describe("SessionProjector", () => {
           time: { created },
         }),
       ])
+    }),
+  )
+})
+
+describe("SessionProjector.sweepOrphanedParts", () => {
+  it.effect("fails pending and running parts orphaned by restart, leaves completed parts alone", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+      const childID = SessionV2.ID.make("ses_sweep_child")
+      const parentID = SessionV2.ID.make("ses_sweep_parent")
+      for (const id of [childID, parentID]) {
+        yield* db
+          .insert(SessionTable)
+          .values({ id, project_id: Project.ID.global, slug: id, directory: "/project", title: id, version: "test" })
+          .run()
+        yield* db
+          .insert(MessageTable)
+          .values({
+            id: MessageID.make(`msg_sweep_${id}`),
+            session_id: id,
+            time_created: 0,
+            data: { role: "assistant", agent: "build", model, cost: 0, tokens: {}, time: { created: 0 } } as never,
+          })
+          .run()
+      }
+      const part = (sessionID: SessionV2.ID, suffix: string, status: string) => ({
+        id: PartID.make(`prt_sweep_${suffix}`),
+        message_id: MessageID.make(`msg_sweep_${sessionID}`),
+        session_id: sessionID,
+        data: { type: "tool", tool: "edit", state: { status, input: {} } } as never,
+      })
+      yield* db
+        .insert(PartTable)
+        .values([
+          part(childID, "running", "running"),
+          part(childID, "pending", "pending"),
+          part(childID, "completed", "completed"),
+          // parent session's `task` part waiting on the dead child drain —
+          // the cross-session spinner from the 2026-09-09 halt
+          part(parentID, "task", "running"),
+        ])
+        .run()
+
+      const swept = yield* SessionProjector.sweepOrphanedParts(db)
+      expect(swept).toBe(3)
+
+      const rows = yield* db.select().from(PartTable).all().pipe(Effect.orDie)
+      const byID = new Map(rows.map((row) => [row.id, row]))
+      const state = (suffix: string) => (byID.get(PartID.make(`prt_sweep_${suffix}`))?.data as unknown as { state: { status: string; error?: string; time?: { end?: number } } }).state
+      expect(state("running").status).toBe("error")
+      expect(state("running").error).toContain("Orphaned by restart")
+      expect(state("running").time?.end).toBeGreaterThan(0)
+      expect(state("pending").status).toBe("error")
+      expect(state("task").status).toBe("error")
+      expect(state("completed").status).toBe("completed")
+      expect(state("completed").error).toBeUndefined()
+
+      expect(yield* SessionProjector.sweepOrphanedParts(db)).toBe(0)
     }),
   )
 })

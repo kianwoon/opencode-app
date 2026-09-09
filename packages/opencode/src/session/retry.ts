@@ -40,8 +40,15 @@ const RETRYABLE_MESSAGE_PATTERNS = [
   /\btry again (?:later|in\b)|\b(?:currently|temporarily) at capacity\b/i,
 ]
 
-function cap(ms: number) {
-  return Math.min(ms, RETRY_MAX_DELAY)
+function cap(ms: number, max = RETRY_MAX_DELAY) {
+  return Math.min(ms, max)
+}
+
+// Header-derived delays come from untrusted provider input; a single absurd
+// retry-after must never park the session for days. Attempt count stays
+// bounded by RETRY_MAX_RETRIES, so each sleep is capped to 30s here.
+function capHeader(ms: number) {
+  return cap(ms, RETRY_MAX_DELAY_NO_HEADERS)
 }
 
 export function delay(attempt: number, error?: SessionV1.APIError, random = Math.random()) {
@@ -52,7 +59,7 @@ export function delay(attempt: number, error?: SessionV1.APIError, random = Math
       if (retryAfterMs) {
         const parsedMs = Number.parseFloat(retryAfterMs)
         if (!Number.isNaN(parsedMs)) {
-          return cap(parsedMs)
+          return capHeader(parsedMs)
         }
       }
 
@@ -61,12 +68,12 @@ export function delay(attempt: number, error?: SessionV1.APIError, random = Math
         const parsedSeconds = Number.parseFloat(retryAfter)
         if (!Number.isNaN(parsedSeconds)) {
           // convert seconds to milliseconds
-          return cap(Math.ceil(parsedSeconds * 1000))
+          return capHeader(Math.ceil(parsedSeconds * 1000))
         }
         // Try parsing as HTTP date format
         const parsed = Date.parse(retryAfter) - Date.now()
         if (!Number.isNaN(parsed) && parsed > 0) {
-          return cap(Math.ceil(parsed))
+          return capHeader(Math.ceil(parsed))
         }
       }
 
