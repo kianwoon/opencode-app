@@ -6,7 +6,7 @@ import { type Accessor, type Component, For, Show, createMemo, createSignal } fr
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
-import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
+import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { fileManagerApp } from "@/utils/file-manager"
 import { SettingsListV2 } from "./parts/list"
@@ -33,12 +33,9 @@ const pluginTitle = (spec: PluginSpec) => pluginFilePath(spec)?.split("/").pop()
 export const SettingsPluginsV2: Component = () => {
   const language = useLanguage()
   const serverSdk = useServerSDK()
-  const protocol = useServerProtocol()
   const serverSync = useServerSync()
 
-  // Plugin editing is config-driven and only available on v1 servers; v2 has no
-  // local plugin write API yet.
-  const editable = createMemo(() => protocol() === "v1")
+  // Plugin editing is config-driven via global.config.update and works on any protocol.
   const plugins = createMemo(() => (serverSync().data.config.plugin ?? []) as PluginSpec[])
 
   const savePlugins = async (next: PluginSpec[], errorKey: string) => {
@@ -102,8 +99,7 @@ export const SettingsPluginsV2: Component = () => {
                         </Show>
                       }
                     >
-                      <Show when={editable()}>
-                        <div data-action="settings-plugin-remove">
+                      <div data-action="settings-plugin-remove">
                           <ButtonV2
                             size="small"
                             variant="neutral"
@@ -113,15 +109,12 @@ export const SettingsPluginsV2: Component = () => {
                             {language.t("settings.plugins.plugins.remove")}
                           </ButtonV2>
                         </div>
-                      </Show>
-                    </SettingsRowV2>
+                      </SettingsRowV2>
                   )
                 }}
               </For>
             </Show>
-            <Show when={editable()}>
-              <PluginAdd onAdd={addPlugin} />
-            </Show>
+            <PluginAdd onAdd={addPlugin} />
           </SettingsListV2>
           <p class="settings-v2-plugins-hint">{language.t("settings.plugins.plugins.hint")}</p>
         </div>

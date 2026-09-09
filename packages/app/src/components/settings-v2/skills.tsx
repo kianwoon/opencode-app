@@ -217,6 +217,23 @@ export const SettingsSkillsV2: Component<{ directory: Accessor<string | undefine
     await afterConfigWrite()
   }
 
+  const removeSkill = async (skill: SkillItem) => {
+    try {
+      if (protocol() === "v1") {
+        await serverSdk().client.app.skill.remove({ name: skill.name, directory: props.directory() })
+      } else {
+        await serverSdk().client.v2.skill.remove({
+          name: skill.name,
+          location: { directory: props.directory() },
+        })
+      }
+      await refetchSkills()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("settings.plugins.skills.remove.failed"), description: message })
+    }
+  }
+
   const count = createMemo(() => {
     const list = skills.latest
     return list ? list.length : undefined
@@ -281,6 +298,7 @@ export const SettingsSkillsV2: Component<{ directory: Accessor<string | undefine
               skills={skills.latest ?? []}
               skillDisabled={skillDisabled}
               onToggle={(skill) => void toggleSkill(skill)}
+              onRemove={(skill) => void removeSkill(skill)}
             />
           </Show>
           <p class="settings-v2-plugins-hint">{language.t("settings.plugins.skills.hint")}</p>
@@ -352,6 +370,7 @@ const SkillsList: Component<{
   skills: SkillItem[]
   skillDisabled: (skill: SkillItem) => boolean
   onToggle: (skill: SkillItem) => void
+  onRemove: (skill: SkillItem) => void
 }> = (props) => {
   const language = useLanguage()
   const [filter, setFilter] = createStore({ value: "" })
@@ -427,6 +446,16 @@ const SkillsList: Component<{
                     <Tag>{language.t("settings.plugins.skills.slash")}</Tag>
                   </Show>
                   <Show when={!builtin}>
+                    <div data-action="settings-skill-remove">
+                      <ButtonV2
+                        size="small"
+                        variant="neutral"
+                        title={language.t("settings.plugins.skills.remove")}
+                        onClick={() => props.onRemove(skill)}
+                      >
+                        {language.t("settings.plugins.skills.remove")}
+                      </ButtonV2>
+                    </div>
                     <Switch checked={!disabled} onChange={() => props.onToggle(skill)} hideLabel>
                       {language.t("settings.plugins.skills.toggle", { skill: skill.name })}
                     </Switch>
