@@ -47,11 +47,13 @@ export const DEFAULT_IDLE_TIMEOUT = 180_000
 
 // Volume guard for streamed bodies: caps total bytes per response regardless of
 // chunk gaps. The idle guard above only fires on silence, so a gateway that
-// floods chunks (observed 2026-09-09: flash-tier models OOM-aborting the
-// process seconds into a turn) passes straight through it. The cap is far above
-// any legitimate turn (a max-length output with SSE/JSON overhead is a few MB)
-// and only exists to keep a degenerate stream from exhausting the heap.
-export const DEFAULT_STREAM_MAX_BYTES = 64 * 1024 * 1024
+// floods chunks (observed 2026-09-09: flash-tier models degenerating mid-turn)
+// passes straight through it. The bound must stay small enough that even a
+// fully-degenerate response costs seconds of downstream accumulation, not
+// minutes: quadratic concat/parse over an in-memory payload starved the whole
+// server at a 64MB cap while staying under it. 4MB is ~16x the largest
+// legitimate turn (max-length output + SSE/JSON overhead).
+export const DEFAULT_STREAM_MAX_BYTES = 4 * 1024 * 1024
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController, maxBytes = 0) {
   if ((typeof ms !== "number" || ms <= 0) && maxBytes <= 0) return res
