@@ -1,4 +1,5 @@
 import { Formatter, Logger, type LogLevel } from "effect"
+import fs from "node:fs"
 import path from "path"
 import { Global } from "../global"
 import { runID } from "./shared"
@@ -46,7 +47,38 @@ function format(input: unknown) {
   return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value)
 }
 
+// Log rotation: opencode.log grows unbounded across restarts (202MB over one
+// month on the dev machine), slowing every log search and risking disk. Rotate
+// once per process at logger creation when the file exceeds the threshold, and
+// prune the oldest rotations. In-run growth is bounded by process lifetime;
+// long-lived processes re-rotate on their next boot.
+const rotateBytes = 50 * 1024 * 1024
+const rotateKeep = 5
+let rotated = false
+
+function rotateLog(file: string) {
+  if (rotated) return
+  rotated = true
+  try {
+    if (!fs.existsSync(file) || fs.statSync(file).size < rotateBytes) return
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+    const rotatedFile = file.replace(/\.log$/, `-${stamp}.log`)
+    fs.renameSync(file, rotatedFile)
+    const prefix = path.basename(file, ".log")
+    const rotations = fs
+      .readdirSync(path.dirname(file))
+      .filter((item) => item.startsWith(`${prefix}-`) && item.endsWith(".log"))
+      .sort()
+    for (const item of rotations.slice(0, Math.max(0, rotations.length - rotateKeep))) {
+      fs.unlinkSync(path.join(path.dirname(file), item))
+    }
+  } catch {
+    // Rotation is best-effort; never block the logging pipeline on it.
+  }
+}
+
 export function fileLogger(file = path.join(Global.Path.log, "opencode.log"), id: string = runID) {
+  rotateLog(file)
   // Do not set batchWindow to 0; it causes high idle CPU usage.
   return Logger.toFile(formatter(id), file, { flag: "a" })
 }

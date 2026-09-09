@@ -214,10 +214,10 @@ export namespace PluginLoader {
       (error: unknown): { ok: false; error: unknown } => ({ ok: false, error }),
     )
     moduleCache.set(key, promise)
-    void promise.then((settled) => {
-      if (moduleCache.get(key) !== promise) return
-      if (settled.ok) moduleCache.delete(key)
-    })
+    // Settled entries stay cached under the mtime-busted key: N project
+    // instances bootstrapping at once share one import per exact entry, and a
+    // file edit (new mtime) or npm update (new versioned dir) lands on a fresh
+    // key automatically, so reload-re-evaluation is preserved.
     return promise
   }
 
