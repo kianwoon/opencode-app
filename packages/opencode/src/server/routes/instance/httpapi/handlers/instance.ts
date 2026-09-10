@@ -119,6 +119,11 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       }
       const spec = ConfigPlugin.pluginSpecifier(origin.spec)
       const result = yield* ConfigPlugin.removePluginFile(spec).pipe(
+        Effect.catchTag("ConfigPlugin.NotFoundError", () =>
+          Effect.logInfo("plugin file already absent", { spec }).pipe(
+            Effect.as({ fileMissing: true as const }),
+          ),
+        ),
         Effect.catch((error) =>
           error._tag === "PlatformError"
             ? Effect.die(error)
