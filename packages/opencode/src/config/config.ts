@@ -129,6 +129,10 @@ export interface Interface {
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
+  readonly writeConfigPlugins: (
+    file: string,
+    plugin: ConfigPluginV1.Spec[],
+  ) => Effect.Effect<{ changed: boolean }>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
@@ -659,6 +663,25 @@ const layer = Layer.effect(
       yield* invalidateGlobal
     })
 
+    // Write the plugin array of an arbitrary config file (the file that
+    // declared the entry) without touching any other file. JSON files are
+    // rewritten wholesale; jsonc goes through patchJsonc so comments survive.
+    const writeConfigPlugins = Effect.fn("Config.writeConfigPlugins")(function* (file: string, plugin: ConfigPluginV1.Spec[]) {
+      const before = (yield* readConfigFile(file)) ?? "{}"
+      const parsed = ConfigParse.jsonc(before, file)
+      const existing = isRecord(parsed) ? parsed : {}
+      let updated: string
+      if (file.endsWith(".jsonc")) {
+        updated = patchJsonc(before, { plugin })
+      } else {
+        updated = JSON.stringify(mergeDeep(existing, { plugin }), null, 2)
+      }
+      if (updated === before) return { changed: false }
+      yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+      yield* invalidate()
+      return { changed: true }
+    })
+
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
@@ -691,6 +714,7 @@ const layer = Layer.effect(
       getConsoleState,
       update,
       updateGlobal,
+      writeConfigPlugins,
       invalidate,
       directories,
       waitForDependencies,

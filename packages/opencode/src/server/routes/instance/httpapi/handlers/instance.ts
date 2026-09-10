@@ -114,19 +114,16 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
           data: { message: `Plugin "${spec}" not found` },
         })
       }
-      // Remove the first matching spec whose file actually exists on disk (npm
-      // specs fall through to the arrayOnly path), then strip ALL entries
-      // resolving to the same plugin.
-      const fileSpec = (cfg.plugin ?? [])
-        .map(ConfigPlugin.pluginSpecifier)
-        .filter(isSamePlugin)
-        .find((item) => item.startsWith("file://"))
-      const result = yield* ConfigPlugin.removePluginFile(fileSpec ?? spec).pipe(
-        Effect.catchTag("ConfigPlugin.NotFoundError", () =>
-          Effect.logInfo("plugin file already absent", { spec }).pipe(
-            Effect.as({ fileMissing: true as const }),
-          ),
-        ),
+      // Delete the plugin file, falling back to candidate bases other than the
+      // declaring config dir (some relative specs were authored home-relative).
+      // Then strip ALL same-plugin entries from the declaring file — otherwise
+      // the declaration resurrects the plugin on next load.
+      const instanceCtx = yield* InstanceState.context
+      const result = yield* ConfigPlugin.removePluginFileWithFallback(origin, [
+        Global.Path.home,
+        instanceCtx.directory,
+        instanceCtx.worktree,
+      ]).pipe(
         Effect.catch((error) =>
           error._tag === "PlatformError"
             ? Effect.die(error)
@@ -134,14 +131,20 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
         ),
       )
       const remaining = (cfg.plugin ?? []).filter((item) => !isSamePlugin(ConfigPlugin.pluginSpecifier(item)))
-      if (!("file" in result)) {
-        yield* config.updateGlobal({ ...cfg, plugin: remaining })
+      if ("file" in result && remaining.length === (cfg.plugin ?? []).length) {
+        yield* config.invalidate()
+        return { name: spec, location: spec }
+      }
+      if (origin.scope === "local" && origin.source.startsWith("file")) {
+        yield* config.writeConfigPlugins(origin.source, remaining).pipe(
+          Effect.catch(() =>
+            Effect.logWarning("failed to strip plugin from project config", { file: origin.source }).pipe(
+              Effect.as({ changed: false }),
+            ),
+          ),
+        )
       } else {
-        const dir = path.dirname(result.file ?? "file://")
-        ConfigPlugin.invalidate(dir)
-        if (remaining.length !== (cfg.plugin ?? []).length) {
-          yield* config.updateGlobal({ ...cfg, plugin: remaining })
-        }
+        yield* config.updateGlobal({ ...cfg, plugin: remaining })
       }
       yield* config.invalidate()
       return { name: spec, location: spec }

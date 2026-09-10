@@ -73,6 +73,38 @@ export const removePluginFile = Effect.fn("ConfigPlugin.removePluginFile")(funct
   return { file }
 })
 
+// Remove a file-backed plugin declared by `origin`, with a fallback for specs
+// that were meant relative to a base directory other than the declaring file
+// (e.g. home-relative specs inside a project config). Tries the exact resolved
+// path first, then the spec's path relative to each candidate base. When no
+// candidate exists, returns fileMissing so callers still strip declarations.
+export const removePluginFileWithFallback = Effect.fn("ConfigPlugin.removePluginFileWithFallback")(function* (
+  origin: Origin,
+  bases: string[],
+) {
+  const raw = pluginSpecifier(origin.spec)
+  if (!raw.startsWith("file://")) return { arrayOnly: true as const }
+  const resolved = path.resolve(decodeURIComponent(raw.slice("file://".length).split("?")[0]!))
+  const rel = path.relative(path.dirname(origin.source), resolved)
+  const candidates = new Set([resolved])
+  if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+    for (const base of bases) candidates.add(path.resolve(base, rel))
+  }
+  const fsys = yield* FSUtil.Service
+  let file: string | undefined
+  for (const candidate of candidates) {
+    if (yield* fsys.existsSafe(candidate)) {
+      file = candidate
+      break
+    }
+  }
+  if (!file) return { fileMissing: true as const }
+  yield* fsys.remove(file, { force: true })
+  invalidate(path.dirname(file))
+  yield* Effect.logInfo("plugin file removed", { file })
+  return { file }
+})
+
 export function pluginSpecifier(plugin: ConfigPluginV1.Spec): string {
   return Array.isArray(plugin) ? plugin[0] : plugin
 }
