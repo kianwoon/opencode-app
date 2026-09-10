@@ -2,7 +2,6 @@ import { Agent } from "@/agent/agent"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
 import * as ConfigPlugin from "@/config/plugin"
-import { parsePluginSpecifier } from "@/plugin/shared"
 import * as InstanceState from "@/effect/instance-state"
 import { Format } from "@/format"
 import { Global } from "@opencode-ai/core/global"
@@ -103,21 +102,16 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       )
     })
 
-    const removePlugin = Effect.fn("InstanceHttpApi.pluginRemove")(function* (ctx: { params: { name: string } }) {
+    const removePlugin = Effect.fn("InstanceHttpApi.pluginRemove")(function* (ctx: { query: { spec: string } }) {
       const cfg = yield* config.get()
-      const name = ctx.params.name
-      const origin = (cfg.plugin_origins ?? []).find((item) => {
-        const spec = ConfigPlugin.pluginSpecifier(item.spec)
-        const identity = spec.startsWith("file://") ? spec : parsePluginSpecifier(spec).pkg
-        return identity === name
-      })
+      const spec = ctx.query.spec
+      const origin = (cfg.plugin_origins ?? []).find((item) => ConfigPlugin.pluginSpecifier(item.spec) === spec)
       if (!origin) {
         return yield* new ApiPluginRemoveError({
           name: "ConfigPlugin.NotFoundError",
-          data: { message: `Plugin "${name}" not found` },
+          data: { message: `Plugin "${spec}" not found` },
         })
       }
-      const spec = ConfigPlugin.pluginSpecifier(origin.spec)
       const result = yield* ConfigPlugin.removePluginFile(spec).pipe(
         Effect.catchTag("ConfigPlugin.NotFoundError", () =>
           Effect.logInfo("plugin file already absent", { spec }).pipe(
@@ -130,11 +124,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
             : new ApiPluginRemoveError({ name: error._tag, data: { message: error.message } }),
         ),
       )
-      const remaining = (cfg.plugin ?? []).filter((item) => {
-        const itemSpec = ConfigPlugin.pluginSpecifier(item)
-        const identity = itemSpec.startsWith("file://") ? itemSpec : parsePluginSpecifier(itemSpec).pkg
-        return identity !== name
-      })
+      const remaining = (cfg.plugin ?? []).filter((item) => ConfigPlugin.pluginSpecifier(item) !== spec)
       if (!("file" in result)) {
         yield* config.updateGlobal({ ...cfg, plugin: remaining })
       } else {
@@ -145,7 +135,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
         }
       }
       yield* config.invalidate()
-      return { name, location: spec }
+      return { name: spec, location: spec }
     })
 
     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {

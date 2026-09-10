@@ -73,7 +73,7 @@ export const InstancePaths = {
   skill: "/skill",
   skillDirectories: "/skill/directories",
   skillRemove: "/skill/:name",
-  pluginRemove: "/plugin/:name",
+  pluginRemove: "/plugin",
   lsp: "/lsp",
   formatter: "/formatter",
 } as const
@@ -216,8 +216,7 @@ export const InstanceApi = HttpApi.make("instance")
           }),
         ),
         HttpApiEndpoint.delete("pluginRemove", InstancePaths.pluginRemove, {
-          params: { name: Schema.String },
-          query: WorkspaceRoutingQuery,
+          query: { ...WorkspaceRoutingQueryFields, spec: Schema.String },
           success: described(Schema.Struct({ name: Schema.String, location: Schema.String }), "Removed plugin"),
           error: ApiPluginRemoveError,
         }).annotateMerge(

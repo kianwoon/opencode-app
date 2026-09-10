@@ -54,11 +54,11 @@ export const SettingsPluginsV2: Component = () => {
 
   // Removal goes through the v1 pluginRemove endpoint, which deletes the
   // plugin file (file-backed) or strips npm specs from global config.
-  const removePlugin = async (name: string) => {
+  const removePlugin = async (spec: string) => {
     const before = plugins()
-    serverSync().set("config", "plugin", before.filter((spec) => !pluginEqual(spec, name)))
+    serverSync().set("config", "plugin", before.filter((item) => !pluginEqual(item, spec)))
     try {
-      await serverSdk().client.app.plugin.remove({ name })
+      await serverSdk().client.app.plugin.remove({ spec })
       await queryClient.refetchQueries({ queryKey: [serverSdk().scope, "config"] })
     } catch (err: unknown) {
       serverSync().set("config", "plugin", before)
@@ -113,8 +113,7 @@ export const SettingsPluginsV2: Component = () => {
                           <ButtonV2
                             size="small"
                             variant="neutral"
-                            onClick={() => void removePlugin(name)}
-                            title={language.t("settings.plugins.plugins.remove")}
+                            onClick={() => void removePlugin(name)}                            title={language.t("settings.plugins.plugins.remove")}
                           >
                             {language.t("settings.plugins.plugins.remove")}
                           </ButtonV2>

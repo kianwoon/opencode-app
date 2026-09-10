@@ -608,9 +608,9 @@ export class Plugin extends HeyApiClient {
    */
   public remove<ThrowOnError extends boolean = false>(
     parameters: {
-      name: string
       directory?: string
       workspace?: string
+      spec: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -619,15 +619,15 @@ export class Plugin extends HeyApiClient {
       [
         {
           args: [
-            { in: "path", key: "name" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "spec" },
           ],
         },
       ],
     )
     return (options?.client ?? this.client).delete<AppPluginRemoveResponses, AppPluginRemoveErrors, ThrowOnError>({
-      url: "/plugin/{name}",
+      url: "/plugin",
       ...options,
       ...params,
     })

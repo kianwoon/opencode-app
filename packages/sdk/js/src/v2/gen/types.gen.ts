@@ -8737,14 +8737,13 @@ export type AppSkillRemoveResponse = AppSkillRemoveResponses[keyof AppSkillRemov
 
 export type AppPluginRemoveData = {
   body?: never
-  path: {
-    name: string
-  }
-  query?: {
+  path?: never
+  query: {
     directory?: string
     workspace?: string
+    spec: string
   }
-  url: "/plugin/{name}"
+  url: "/plugin"
 }
 
 export type AppPluginRemoveErrors = {
