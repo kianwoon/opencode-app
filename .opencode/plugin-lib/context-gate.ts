@@ -596,16 +596,16 @@ const inflight = new Map<string, Promise<string | undefined>>()
  * populates the disk cache in the background — the next request gets the
  * real summary. Concurrent misses share one background flight.
  */
-export async function summarizeSection(section: Section, ctx: SummarizeContext, sessionID: string): Promise<Section> {
+export async function summarizeSection(
+  section: Section,
+  ctx: SummarizeContext,
+  sessionID: string,
+  options?: { spawnFlight?: boolean },
+): Promise<Section> {
   const config = loadConfig()
   const path = section.path!
   const key = summaryCacheKey(path, section.text)
   const words = wordCount(section.text)
-
-  // Within the pin window, keep serving the variant the session already saw —
-  // even if the LLM summary lands on disk mid-turn — so system[0] stays
-  // byte-identical across loop steps.
-  const pinned = pinnedToFallback(sessionID, key)
 
   const cached = await withTimeout(
     (async () => {
@@ -614,17 +614,26 @@ export async function summarizeSection(section: Section, ctx: SummarizeContext, 
     })(),
     5_000,
   )
-  if (cached && !pinned) {
+
+  // Within the pin window, keep serving the variant the session already saw —
+  // even if the LLM summary lands on disk mid-turn — so system[0] stays
+  // byte-identical across loop steps. Crucially, a pinned session must NOT
+  // respawn a flight for a summary that is already cached (or already
+  // in-flight): that was the source of the per-loop-step session storm.
+  const pinned = pinnedToFallback(sessionID, key)
+  if (cached) {
+    if (pinned) {
+      log("summarize", { path, words, cached: true, pinned: true, fallback: true })
+      return { path, text: provenance(extractiveFallback(section.text), path, words) }
+    }
     log("summarize", { path, words, cached: true, fallback: false })
     return { path, text: provenance(cached, path, words) }
   }
 
-  let flight: Promise<string | undefined>
-  const existing = inflight.get(key)
-  if (existing) {
-    flight = existing
-  } else {
-    flight = (async () => {
+  // True disk miss: only spawn a new flight when the caller allows it
+  // (gateSystem caps this at one per transform) and none is already running.
+  if (!inflight.has(key) && options?.spawnFlight !== false) {
+    const flight = (async () => {
       const model = resolveSummarizerModel(ctx, sessionID)
       const llm = await withTimeout(llmSummarize(ctx.client, model, path, section.text), SUMMARIZE_TIMEOUT_MS)
       if (!llm) return undefined
@@ -736,13 +745,20 @@ async function gateSystem(
   // original text and the gate proceeds normally.
   const config = loadConfig()
   const expanded: Section[] = []
+  // Cap LLM flights at one per transform call: later true-miss sections serve
+  // fallback without spawning, so a single loop-step can never fan out into a
+  // storm of helper sessions.
+  let flightSpawned = false
   for (const section of sections) {
     if (!isSummarizable(section, config)) {
       expanded.push(section)
       continue
     }
     try {
-      expanded.push(await summarizeSection(section, summarizeCtx, sessionID))
+      expanded.push(await summarizeSection(section, summarizeCtx, sessionID, { spawnFlight: !flightSpawned }))
+      // A cached hit consumes no flight; only a miss that spawned one counts
+      // against the per-transform cap.
+      if (inflight.has(summaryCacheKey(section.path!, section.text))) flightSpawned = true
     } catch (error) {
       log("summarize-error", { sessionID, path: section.path, message: String(error) })
       expanded.push(section)

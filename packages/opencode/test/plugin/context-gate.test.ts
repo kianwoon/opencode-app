@@ -523,6 +523,46 @@ describe("summarization", () => {
     await fs.rm(`${dir}/${key}.md`, { force: true })
   })
 
+  test("summarizeSection: pinned repeat serves fallback without spawning a new flight", async () => {
+    let creates = 0
+    const client = {
+      session: {
+        create: async () => {
+          creates++
+          return { data: { id: "ses_helper" } }
+        },
+        prompt: async () => ({
+          data: { parts: [{ type: "text", text: "LLM SUMMARY CONTENT" }] },
+        }),
+        delete: async () => ({}),
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const sessionID = "ses_storm"
+    const original = { path: "/repo/STORM.md", text: "# Title\n\n- bullet one\n- bullet two\n" + longText(2500) }
+    const key = summaryCacheKey(original.path, original.text)
+    const fs = await import("node:fs/promises")
+    const dir = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/context-gate-cache`
+    await fs.rm(`${dir}/${key}.md`, { force: true })
+    try {
+      // First call: true miss → one background flight (create + prompt).
+      const first = await summarizeSection(original, ctx, sessionID)
+      expect(first.text).not.toContain("LLM SUMMARY CONTENT")
+      for (let i = 0; i < 50 && creates < 1; i++) await new Promise((r) => setTimeout(r, 100))
+      expect(creates).toBe(1)
+
+      // Second sequential call within the pin window, no cache hit allowed
+      // (file removed again): must serve fallback WITHOUT spawning a new
+      // flight — this is the regression guard for the session storm.
+      await fs.rm(`${dir}/${key}.md`, { force: true })
+      const second = await summarizeSection(original, ctx, sessionID)
+      expect(second.text).toBe(first.text)
+      expect(creates).toBe(1)
+    } finally {
+      await fs.rm(`${dir}/${key}.md`, { force: true })
+    }
+  })
+
   test("summarizeSection: LLM failure falls back to extractive, never throws", async () => {
     let systems: string[] = []
     const client = {

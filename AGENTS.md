@@ -46,3 +46,4 @@
 ## Learnings (MANDATORY)
 - After non-obvious rework-causing issues, immediately write concise gotcha + correct command + acceptance gate into relevant package `AGENTS.md` (or root if cross-cutting); repeat mistake = must document.
 - Future sessions load `AGENTS.md` automatically; do not rely on memory.
+- `context-gate` summarizer must never spawn an LLM helper session when a disk-cached summary exists (pinned-to-fallback window serves fallback text without a flight); cap background summarize flights to 1 per transform. Symptom of violation: a `context-gate summary:` sidebar session per oversize section per LLM loop-step.
