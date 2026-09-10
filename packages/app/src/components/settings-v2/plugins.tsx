@@ -19,7 +19,15 @@ type PluginSpec = string | [string, Record<string, unknown>]
 // Plugin specs are npm package names, file:// paths, or [name, options] tuples.
 const pluginName = (spec: PluginSpec) => (typeof spec === "string" ? spec : spec[0])
 
-const pluginEqual = (spec: PluginSpec, name: string) => pluginName(spec) === name
+// Identity that collapses different spellings of the same plugin: normalized
+// filesystem path for file:// specs, npm package name (strip @version) otherwise.
+const pluginIdentity = (spec: PluginSpec) => {
+  const name = pluginName(spec)
+  if (name.startsWith("file://")) return "/" + pluginFilePath(spec)!.replace(/^\/+/, "")
+  return name.replace(/@[^@/]+$/, "")
+}
+
+const pluginEqual = (spec: PluginSpec, name: string) => pluginIdentity(spec) === pluginIdentity(name)
 
 // Local plugin specs are normalized to file:// URLs by the server when the config is loaded.
 const pluginFilePath = (spec: PluginSpec) => {

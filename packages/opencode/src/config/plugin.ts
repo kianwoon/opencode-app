@@ -77,6 +77,16 @@ export function pluginSpecifier(plugin: ConfigPluginV1.Spec): string {
   return Array.isArray(plugin) ? plugin[0] : plugin
 }
 
+// Identity for duplicate matching: normalized filesystem path for file:// specs,
+// npm package name otherwise. Different spellings of the same plugin (extra
+// "./", double slashes, percent-encoding) collapse to one identity.
+export function pluginIdentity(spec: string): string {
+  if (spec.startsWith("file://")) {
+    return path.resolve(decodeURIComponent(spec.slice("file://".length).split("?")[0]!))
+  }
+  return parsePluginSpecifier(spec).pkg
+}
+
 export function pluginOptions(plugin: ConfigPluginV1.Spec): ConfigPluginV1.Options | undefined {
   return Array.isArray(plugin) ? plugin[1] : undefined
 }

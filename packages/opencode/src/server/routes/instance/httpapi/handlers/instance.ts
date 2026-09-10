@@ -105,14 +105,23 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     const removePlugin = Effect.fn("InstanceHttpApi.pluginRemove")(function* (ctx: { query: { spec: string } }) {
       const cfg = yield* config.get()
       const spec = ctx.query.spec
-      const origin = (cfg.plugin_origins ?? []).find((item) => ConfigPlugin.pluginSpecifier(item.spec) === spec)
+      const identity = ConfigPlugin.pluginIdentity(spec)
+      const isSamePlugin = (item: string) => ConfigPlugin.pluginIdentity(item) === identity
+      const origin = (cfg.plugin_origins ?? []).find((item) => isSamePlugin(ConfigPlugin.pluginSpecifier(item.spec)))
       if (!origin) {
         return yield* new ApiPluginRemoveError({
           name: "ConfigPlugin.NotFoundError",
           data: { message: `Plugin "${spec}" not found` },
         })
       }
-      const result = yield* ConfigPlugin.removePluginFile(spec).pipe(
+      // Remove the first matching spec whose file actually exists on disk (npm
+      // specs fall through to the arrayOnly path), then strip ALL entries
+      // resolving to the same plugin.
+      const fileSpec = (cfg.plugin ?? [])
+        .map(ConfigPlugin.pluginSpecifier)
+        .filter(isSamePlugin)
+        .find((item) => item.startsWith("file://"))
+      const result = yield* ConfigPlugin.removePluginFile(fileSpec ?? spec).pipe(
         Effect.catchTag("ConfigPlugin.NotFoundError", () =>
           Effect.logInfo("plugin file already absent", { spec }).pipe(
             Effect.as({ fileMissing: true as const }),
@@ -124,7 +133,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
             : new ApiPluginRemoveError({ name: error._tag, data: { message: error.message } }),
         ),
       )
-      const remaining = (cfg.plugin ?? []).filter((item) => ConfigPlugin.pluginSpecifier(item) !== spec)
+      const remaining = (cfg.plugin ?? []).filter((item) => !isSamePlugin(ConfigPlugin.pluginSpecifier(item)))
       if (!("file" in result)) {
         yield* config.updateGlobal({ ...cfg, plugin: remaining })
       } else {
