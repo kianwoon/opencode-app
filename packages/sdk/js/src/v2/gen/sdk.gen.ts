@@ -8,6 +8,8 @@ import type {
   AppAgentsResponses,
   AppLogErrors,
   AppLogResponses,
+  AppPluginRemoveErrors,
+  AppPluginRemoveResponses,
   AppSkillDirectoriesErrors,
   AppSkillDirectoriesResponses,
   AppSkillRemoveErrors,
@@ -391,6 +393,8 @@ import type {
   V2SessionQuestionRejectResponses,
   V2SessionQuestionReplyErrors,
   V2SessionQuestionReplyResponses,
+  V2SessionRemoveErrors,
+  V2SessionRemoveResponses,
   V2SessionRevertClearErrors,
   V2SessionRevertClearResponses,
   V2SessionRevertCommitErrors,
@@ -596,6 +600,40 @@ export class Skill extends HeyApiClient {
   }
 }
 
+export class Plugin extends HeyApiClient {
+  /**
+   * Remove plugin
+   *
+   * Remove a plugin, deleting its file when file-backed or stripping it from global config.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<AppPluginRemoveResponses, AppPluginRemoveErrors, ThrowOnError>({
+      url: "/plugin/{name}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class App extends HeyApiClient {
   /**
    * Write log
@@ -705,6 +743,11 @@ export class App extends HeyApiClient {
   private _skill?: Skill
   get skill(): Skill {
     return (this._skill ??= new Skill({ client: this.client }))
+  }
+
+  private _plugin?: Plugin
+  get plugin(): Plugin {
+    return (this._plugin ??= new Plugin({ client: this.client }))
   }
 }
 
@@ -5844,6 +5887,25 @@ export class Session3 extends HeyApiClient {
     return (options?.client ?? this.client).get<V2SessionActiveResponses, V2SessionActiveErrors, ThrowOnError>({
       url: "/api/session/active",
       ...options,
+    })
+  }
+
+  /**
+   * Delete session
+   *
+   * Delete a session and permanently remove all associated data, including messages and history.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).delete<V2SessionRemoveResponses, V2SessionRemoveErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}",
+      ...options,
+      ...params,
     })
   }
 

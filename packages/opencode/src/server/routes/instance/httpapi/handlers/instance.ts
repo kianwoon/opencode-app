@@ -1,5 +1,8 @@
 import { Agent } from "@/agent/agent"
 import { Command } from "@/command"
+import { Config } from "@/config/config"
+import * as ConfigPlugin from "@/config/plugin"
+import { parsePluginSpecifier } from "@/plugin/shared"
 import * as InstanceState from "@/effect/instance-state"
 import { Format } from "@/format"
 import { Global } from "@opencode-ai/core/global"
@@ -7,15 +10,17 @@ import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
 import { Effect } from "effect"
+import path from "path"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { ApiSkillRemoveError, ApiVcsApplyError } from "../groups/instance"
+import { ApiPluginRemoveError, ApiSkillRemoveError, ApiVcsApplyError } from "../groups/instance"
 import { markInstanceForDisposal } from "../lifecycle"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
   Effect.gen(function* () {
     const agent = yield* Agent.Service
     const command = yield* Command.Service
+    const config = yield* Config.Service
     const format = yield* Format.Service
     const lsp = yield* LSP.Service
     const skill = yield* Skill.Service
@@ -98,6 +103,46 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       )
     })
 
+    const removePlugin = Effect.fn("InstanceHttpApi.pluginRemove")(function* (ctx: { params: { name: string } }) {
+      const cfg = yield* config.get()
+      const name = ctx.params.name
+      const origin = (cfg.plugin_origins ?? []).find((item) => {
+        const spec = ConfigPlugin.pluginSpecifier(item.spec)
+        const identity = spec.startsWith("file://") ? spec : parsePluginSpecifier(spec).pkg
+        return identity === name
+      })
+      if (!origin) {
+        return yield* new ApiPluginRemoveError({
+          name: "ConfigPlugin.NotFoundError",
+          data: { message: `Plugin "${name}" not found` },
+        })
+      }
+      const spec = ConfigPlugin.pluginSpecifier(origin.spec)
+      const result = yield* ConfigPlugin.removePluginFile(spec).pipe(
+        Effect.catch((error) =>
+          error._tag === "PlatformError"
+            ? Effect.die(error)
+            : new ApiPluginRemoveError({ name: error._tag, data: { message: error.message } }),
+        ),
+      )
+      const remaining = (cfg.plugin ?? []).filter((item) => {
+        const itemSpec = ConfigPlugin.pluginSpecifier(item)
+        const identity = itemSpec.startsWith("file://") ? itemSpec : parsePluginSpecifier(itemSpec).pkg
+        return identity !== name
+      })
+      if (!("file" in result)) {
+        yield* config.updateGlobal({ ...cfg, plugin: remaining })
+      } else {
+        const dir = path.dirname(result.file ?? "file://")
+        ConfigPlugin.invalidate(dir)
+        if (remaining.length !== (cfg.plugin ?? []).length) {
+          yield* config.updateGlobal({ ...cfg, plugin: remaining })
+        }
+      }
+      yield* config.invalidate()
+      return { name, location: spec }
+    })
+
     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {
       return yield* lsp.status()
     })
@@ -119,6 +164,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("skill", getSkill)
       .handle("skillDirectories", getSkillDirectories)
       .handle("skillRemove", removeSkill)
+      .handle("pluginRemove", removePlugin)
       .handle("lsp", getLsp)
       .handle("formatter", getFormatter)
   }),

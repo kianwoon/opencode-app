@@ -3,6 +3,7 @@ import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { showToast } from "@/utils/toast"
 import { type Accessor, type Component, For, Show, createMemo, createSignal } from "solid-js"
+import { useQueryClient } from "@tanstack/solid-query"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
@@ -34,6 +35,7 @@ export const SettingsPluginsV2: Component = () => {
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const serverSync = useServerSync()
+  const queryClient = useQueryClient()
 
   // Plugin editing is config-driven via global.config.update and works on any protocol.
   const plugins = createMemo(() => (serverSync().data.config.plugin ?? []) as PluginSpec[])
@@ -50,11 +52,19 @@ export const SettingsPluginsV2: Component = () => {
       })
   }
 
-  const removePlugin = (name: string) => {
-    void savePlugins(
-      plugins().filter((spec) => !pluginEqual(spec, name)),
-      "settings.plugins.plugins.remove.failed",
-    )
+  // Removal goes through the v1 pluginRemove endpoint, which deletes the
+  // plugin file (file-backed) or strips npm specs from global config.
+  const removePlugin = async (name: string) => {
+    const before = plugins()
+    serverSync().set("config", "plugin", before.filter((spec) => !pluginEqual(spec, name)))
+    try {
+      await serverSdk().client.app.plugin.remove({ name })
+      await queryClient.refetchQueries({ queryKey: [serverSdk().scope, "config"] })
+    } catch (err: unknown) {
+      serverSync().set("config", "plugin", before)
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("settings.plugins.plugins.remove.failed"), description: message })
+    }
   }
 
   const addPlugin = async (spec: string) => {
@@ -103,7 +113,7 @@ export const SettingsPluginsV2: Component = () => {
                           <ButtonV2
                             size="small"
                             variant="neutral"
-                            onClick={() => removePlugin(name)}
+                            onClick={() => void removePlugin(name)}
                             title={language.t("settings.plugins.plugins.remove")}
                           >
                             {language.t("settings.plugins.plugins.remove")}

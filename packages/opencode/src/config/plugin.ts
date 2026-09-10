@@ -1,6 +1,8 @@
 import { Glob } from "@opencode-ai/core/util/glob"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
-import { pathToFileURL } from "url"
+import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Effect, Schema } from "effect"
+import { fileURLToPath, pathToFileURL } from "url"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
 import path from "path"
 
@@ -38,6 +40,38 @@ export async function load(dir: string) {
 
 const discoveryCache = new Map<string, readonly ConfigPluginV1.Spec[]>()
 const MAX_CACHED_DIRS = 64
+
+// Drop memoized plugin-file discovery so the next load() re-scans disk. Per-dir
+// when a dir is given, everything otherwise (config writes may affect any dir).
+export function invalidate(dir?: string) {
+  if (dir === undefined) discoveryCache.clear()
+  else discoveryCache.delete(dir)
+}
+
+export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("ConfigPlugin.NotFoundError", {
+  spec: Schema.String,
+}) {
+  override get message() {
+    return `Plugin "${this.spec}" not found or not file-backed`
+  }
+}
+
+// Removes a file-backed plugin spec from disk. npm specs live in
+// node_modules/config arrays, so callers must handle them by editing config
+// instead ({arrayOnly:true}). Only the single plugin file is removed — never
+// recursive — so a spec pointing at a directory fails rather than nuking it.
+export const removePluginFile = Effect.fn("ConfigPlugin.removePluginFile")(function* (spec: string) {
+  if (!spec.startsWith("file://")) {
+    if (!spec) return yield* new NotFoundError({ spec })
+    return { arrayOnly: true as const }
+  }
+  const file = fileURLToPath(spec)
+  const fsys = yield* FSUtil.Service
+  if (!(yield* fsys.existsSafe(file))) return yield* new NotFoundError({ spec })
+  yield* fsys.remove(file, { force: true })
+  yield* Effect.logInfo("plugin file removed", { file })
+  return { file }
+})
 
 export function pluginSpecifier(plugin: ConfigPluginV1.Spec): string {
   return Array.isArray(plugin) ? plugin[0] : plugin

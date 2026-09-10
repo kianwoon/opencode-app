@@ -50,6 +50,16 @@ export class ApiSkillRemoveError extends Schema.ErrorClass<ApiSkillRemoveError>(
   { httpApiStatus: 400 },
 ) {}
 
+export class ApiPluginRemoveError extends Schema.ErrorClass<ApiPluginRemoveError>("PluginRemoveError")(
+  {
+    name: Schema.Literals(["ConfigPlugin.NotFoundError"]),
+    data: Schema.Struct({
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const InstancePaths = {
   dispose: "/instance/dispose",
   path: "/path",
@@ -63,6 +73,7 @@ export const InstancePaths = {
   skill: "/skill",
   skillDirectories: "/skill/directories",
   skillRemove: "/skill/:name",
+  pluginRemove: "/plugin/:name",
   lsp: "/lsp",
   formatter: "/formatter",
 } as const
@@ -202,6 +213,18 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "app.skill.remove",
             summary: "Remove skill",
             description: "Delete a file-backed skill by removing its SKILL.md directory.",
+          }),
+        ),
+        HttpApiEndpoint.delete("pluginRemove", InstancePaths.pluginRemove, {
+          params: { name: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Struct({ name: Schema.String, location: Schema.String }), "Removed plugin"),
+          error: ApiPluginRemoveError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.plugin.remove",
+            summary: "Remove plugin",
+            description: "Remove a plugin, deleting its file when file-backed or stripping it from global config.",
           }),
         ),
         HttpApiEndpoint.get("lsp", InstancePaths.lsp, {
