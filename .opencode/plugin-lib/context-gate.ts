@@ -62,6 +62,8 @@ export interface GateConfig {
   summarizeWordLimit: number
   /** "provider/model" override for the summarizer; defaults to the session's model. */
   summarizerModel: string
+  /** A file-read of a withheld guide path pins it for the rest of the session (default on). */
+  retrievalPromotion: boolean
 }
 
 const DEFAULTS: GateConfig = {
@@ -73,6 +75,7 @@ const DEFAULTS: GateConfig = {
   summarizeEnabled: true,
   summarizeWordLimit: 2_000,
   summarizerModel: "",
+  retrievalPromotion: true,
 }
 
 const CONFIG_PATHS = () => {
@@ -104,6 +107,7 @@ function loadConfig(): GateConfig {
         if (typeof parsed.summarizeEnabled === "boolean") next.summarizeEnabled = parsed.summarizeEnabled
         if (typeof parsed.summarizeWordLimit === "number") next.summarizeWordLimit = parsed.summarizeWordLimit
         if (typeof parsed.summarizerModel === "string") next.summarizerModel = parsed.summarizerModel
+        if (typeof parsed.retrievalPromotion === "boolean") next.retrievalPromotion = parsed.retrievalPromotion
         break
       }
       configCache = next
@@ -260,9 +264,17 @@ export function packageScopeOf(path: string): string | undefined {
 
 const tokensOf = (text: string) => Math.ceil(text.length / 4)
 
+export interface WithheldEntry {
+  path: string
+  scope: string | undefined
+  reason: "no-activity" | "over-budget" | "oversize"
+  tokens: number
+}
+
 export interface GateDecision {
   kept: Section[]
   dropped: Section[]
+  withheld: WithheldEntry[]
   output: string
   tokensBefore: number
   tokensAfter: number
@@ -286,6 +298,7 @@ export function applyGate(
   inputSections: Section[],
   activeScopes: Set<string>,
   config: GateConfig,
+  pinnedOverride: Set<string> = new Set(),
 ): GateDecision {
   let sections = inputSections
   const alarms = sections
@@ -314,7 +327,7 @@ export function applyGate(
 
   if (!config.scopingEnabled) {
     const output = joinSections(prologue, sections)
-    return { kept: sections, dropped: [], output, tokensBefore: tokensOf(output), tokensAfter: tokensOf(output), alarms, deduped }
+    return { kept: sections, dropped: [], withheld: [], output, tokensBefore: tokensOf(output), tokensAfter: tokensOf(output), alarms, deduped }
   }
 
   const pinned: Section[] = []
@@ -322,6 +335,12 @@ export function applyGate(
   for (const section of sections) {
     const path = section.path ?? ""
     const scope = section.path ? packageScopeOf(section.path) : undefined
+    // A previously-retrieved guide (model read the file) is pinned for the
+    // rest of the session regardless of scope state.
+    if (path && pinnedOverride.has(path)) {
+      pinned.push(section)
+      continue
+    }
     if (scope && !isPinnedPath(path, config.pinnedPaths, config.evictablePaths)) {
       scoped.push({ section, active: activeScopes.has(scope) })
       continue
@@ -339,10 +358,18 @@ export function applyGate(
   const droppedScoped = scoped.filter((s) => !s.active)
 
   // Budget: if pinned + active sections still exceed the cap, evict active
-  // sections largest-first. Pinned sections are never evicted.
+  // sections lowest-relevance first. Eviction order (deterministic, no LLM):
+  //   1. Bigger section (tokens) — largest footprint freed first.
+  //   2. Deeper path (more segments = more specific guide = less shared).
+  //   3. Path string — final tiebreak so the order is fully deterministic.
+  // Pinned sections are never evicted.
+  const evictOrder = (a: Section, b: Section) =>
+    tokensOf(b.text) - tokensOf(a.text) ||
+    (b.path ?? "").split("/").length - (a.path ?? "").split("/").length ||
+    (a.path ?? "").localeCompare(b.path ?? "")
   const kept = [...pinned]
   let budget = config.maxSystemTokens - tokensOf(prologue) - pinned.reduce((sum, s) => sum + tokensOf(s.text), 0)
-  for (const { section } of [...keptScoped].sort((a, b) => tokensOf(b.section.text) - tokensOf(a.section.text))) {
+  for (const section of [...keptScoped.map((s) => s.section)].sort(evictOrder)) {
     const t = tokensOf(section.text)
     if (t <= budget) {
       kept.push(section)
@@ -350,14 +377,35 @@ export function applyGate(
     }
   }
 
-  const dropped = [...droppedScoped.map((s) => s.section), ...keptScoped.filter((s) => !kept.includes(s.section)).map((s) => s.section)]
+  const overBudget = new Set(keptScoped.filter((s) => !kept.includes(s.section)).map((s) => s.section.path))
+  const withheld: WithheldEntry[] = [
+    ...droppedScoped.map((s) => ({
+      path: s.section.path ?? "(prologue)",
+      scope: s.section.path ? packageScopeOf(s.section.path) : undefined,
+      reason: "no-activity" as const,
+      tokens: tokensOf(s.section.text),
+    })),
+    ...keptScoped
+      .filter((s) => !kept.includes(s.section))
+      .map((s) => ({
+        path: s.section.path ?? "(prologue)",
+        scope: s.section.path ? packageScopeOf(s.section.path) : undefined,
+        reason: "over-budget" as const,
+        tokens: tokensOf(s.section.text),
+      })),
+  ].sort((a, b) => a.path.localeCompare(b.path))
+  const dropped = [...droppedScoped.map((s) => s.section), ...keptScoped.filter((s) => overBudget.has(s.section.path)).map((s) => s.section)]
   const ordered = sections.filter((s) => kept.includes(s))
   let output = joinSections(prologue, ordered)
-  if (dropped.length > 0) {
-    const scopes = Array.from(
-      new Set(dropped.map((s) => packageScopeOf(s.path ?? "")).filter((v): v is string => v !== undefined)),
-    )
-    output += `\nContext gate: instruction guides withheld for ${scopes.join(", ")} — read the file if you need them.`
+  if (withheld.length > 0) {
+    // Machine-readable disclosure: one line per withheld guide so the model
+    // can read the exact path back with its file tools. Human-readable
+    // summary line retained below.
+    output += "\nContext gate: withheld guides:"
+    for (const w of withheld) {
+      output += `\nwithheld: ${w.path} (scope: ${w.scope ?? "none"}, reason: ${w.reason}, tokens: ~${w.tokens})`
+    }
+    output += "\nContext gate: read a withheld file if you need it — it stays in context for the rest of the session."
   }
   if (deduped.length > 0) {
     const note = deduped.map((d) => `deduped: ${d.path} (= ${d.keptPath})`).join("; ")
@@ -367,6 +415,7 @@ export function applyGate(
   return {
     kept: ordered,
     dropped,
+    withheld,
     output,
     tokensBefore: tokensOf(prologue) + inputSections.reduce((sum, s) => sum + tokensOf(s.text), 0),
     tokensAfter: tokensOf(output),
@@ -463,6 +512,25 @@ function turnScopes(sessionID: string): Set<string> {
   if (scopeSnapshots.size >= MAX_SESSIONS) scopeSnapshots.delete(scopeSnapshots.keys().next().value!)
   scopeSnapshots.set(sessionID, { scopes, at: Date.now() })
   return scopes
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval promotion: paths of withheld guides the model actually read via
+// its file tools. A read is a strong relevance signal — the guide is pinned
+// (kept regardless of scope activity) for the rest of the session. Paths
+// listed here bypass scoping in applyGate (pinnedOverride).
+// ---------------------------------------------------------------------------
+
+export const retrievedPaths = new Map<string, Set<string>>()
+
+function recordRetrieval(sessionID: string, path: string) {
+  let paths = retrievedPaths.get(sessionID)
+  if (!paths) {
+    if (retrievedPaths.size >= MAX_SESSIONS) retrievedPaths.delete(retrievedPaths.keys().next().value!)
+    paths = new Set()
+    retrievedPaths.set(sessionID, paths)
+  }
+  paths.add(path)
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +795,23 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
   const summarizeCtx: SummarizeContext = { client: input.client, sessionModel: new Map() }
 
   const hooks: Hooks = {
+    // Retrieval hook: when the model reads a withheld guide's file, promote
+    // it — the read is recorded as a pinned override so the NEXT gateSystem
+    // keeps the guide for the rest of the session. Read-only hook; fail-open.
+    "tool.execute.before": async (hookInput) => {
+      try {
+        if (!loadConfig().retrievalPromotion) return
+        if (!hookInput.sessionID) return
+        const tool = String((hookInput as { tool?: string }).tool ?? "").toLowerCase()
+        if (tool !== "read" && tool !== "cat") return
+        const args = (hookInput as { args?: Record<string, unknown> }).args ?? {}
+        const path = [args.filePath, args.file_path, args.path].find((v): v is string => typeof v === "string" && v.length > 0)
+        if (path) recordRetrieval(hookInput.sessionID, path)
+      } catch {
+        // Retrieval tracking must never break tool execution.
+      }
+    },
+
     "tool.execute.after": async (hookInput, hookOutput) => {
       try {
         const text =
@@ -818,7 +903,8 @@ async function gateSystem(
   sections.splice(0, sections.length, ...expanded)
 
   const scopes = turnScopes(sessionID)
-  const decision = applyGate(prologue, sections, scopes, config)
+  const pinned = retrievedPaths.get(sessionID)
+  const decision = applyGate(prologue, sections, scopes, config, pinned)
 
   const key = memoKey(sessionID, decision, sections, prologue, config)
   const cached = memo.get(key)
@@ -830,6 +916,9 @@ async function gateSystem(
   output.system[0] = decision.output
   if (memo.size >= MAX_MEMO) memo.delete(memo.keys().next().value!)
   memo.set(key, decision.output)
+  for (const w of decision.withheld) {
+    if (retrievedPaths.get(sessionID)?.has(w.path)) log("guide-retrieved", { sessionID, path: w.path })
+  }
 
   log("gate", {
     sessionID,

@@ -30,6 +30,7 @@ const CONFIG: GateConfig = {
   summarizeEnabled: false,
   summarizeWordLimit: 2_000,
   summarizerModel: "",
+  retrievalPromotion: true,
 }
 
 function section(path: string, words: number): Section {
@@ -121,7 +122,7 @@ describe("applyGate", () => {
     expect(keptPaths).toContain("/repo/packages/llm/AGENTS.md")
     expect(keptPaths).not.toContain("/repo/packages/ui/AGENTS.md")
     expect(decision.dropped).toHaveLength(1)
-    expect(decision.output).toContain("guides withheld for packages/ui")
+    expect(decision.output).toMatch(/withheld: \/repo\/packages\/ui\/AGENTS\.md \(scope: packages\/ui, reason: no-activity, tokens: ~\d+\)/)
   })
 
   test("keeps everything when all scopes active", () => {
@@ -270,9 +271,9 @@ describe("plugin hook", () => {
     )
     const system = [block, "Reasoning effort governor: ..."]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system })
-    expect(system[0]).not.toContain("packages/ui/AGENTS.md")
-    expect(system[0]).toContain("packages/llm/AGENTS.md")
-    expect(system[0]).toContain("guides withheld for packages/ui")
+    expect(system[0]).not.toContain("Instructions from: /repo/packages/ui/AGENTS.md")
+    expect(system[0]).toContain("Instructions from: /repo/packages/llm/AGENTS.md")
+    expect(system[0]).toMatch(/withheld: \/repo\/packages\/ui\/AGENTS\.md \(scope: packages\/ui, reason: no-activity/)
     expect(system[1]).toBe("Reasoning effort governor: ...")
   })
 
@@ -284,7 +285,7 @@ describe("plugin hook", () => {
     ])
     const before = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: before })
-    expect(before[0]).not.toContain("packages/ui/AGENTS.md")
+    expect(before[0]).not.toContain("Instructions from: /repo/packages/ui/AGENTS.md")
 
     await hooks["tool.execute.after"]!(
       { tool: "edit", sessionID, callID: "c1", args: { filePath: "/repo/packages/ui/src/button.tsx" } },
@@ -297,14 +298,14 @@ describe("plugin hook", () => {
 
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
-    expect(after[0]).toContain("packages/ui/AGENTS.md")
-    expect(after[0]).not.toContain("guides withheld for packages/ui")
+    expect(after[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
+    expect(after[0]).not.toContain(`withheld: /repo/packages/ui/AGENTS.md`)
   })
 
   test("no sessionID → no-op", async () => {
     const system = ["Instructions from: /x/packages/llm/AGENTS.md\nwords"]
     await hooks["experimental.chat.system.transform"]!({ model }, { system })
-    expect(system[0]).toContain("packages/llm/AGENTS.md")
+    expect(system[0]).toBe("Instructions from: /x/packages/llm/AGENTS.md\nwords")
   })
 
   test("tool OUTPUT text citing a path unlocks that scope (subagent summaries)", async () => {
@@ -315,7 +316,7 @@ describe("plugin hook", () => {
     ])
     const before = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: before })
-    expect(before[0]).not.toContain("packages/ui/AGENTS.md")
+    expect(before[0]).not.toContain("Instructions from: /repo/packages/ui/AGENTS.md")
 
     await hooks["tool.execute.after"]!(
       { tool: "task", sessionID, callID: "c2", args: { prompt: "review ui components" } },
@@ -326,7 +327,7 @@ describe("plugin hook", () => {
 
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
-    expect(after[0]).toContain("packages/ui/AGENTS.md")
+    expect(after[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
   })
 
   test("scope snapshot: activity added mid-window does not change output until window expires", async () => {
@@ -337,7 +338,7 @@ describe("plugin hook", () => {
     ])
     const before = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: before })
-    expect(before[0]).not.toContain("packages/ui/AGENTS.md")
+    expect(before[0]).not.toContain("Instructions from: /repo/packages/ui/AGENTS.md")
 
     // Tool fires, but the snapshot is still fresh → output unchanged.
     await hooks["tool.execute.after"]!(
@@ -353,7 +354,7 @@ describe("plugin hook", () => {
     scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
-    expect(after[0]).toContain("packages/ui/AGENTS.md")
+    expect(after[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
     expect(after[0]).not.toBe(before[0])
   })
 
@@ -365,6 +366,76 @@ describe("plugin hook", () => {
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system })
     // Must not throw; system entries remain as-is (gate skipped on bad input).
     expect(system[1]).toBe("rest")
+  })
+})
+
+describe("retrieval", () => {
+  const model = {
+    id: "test-model",
+    providerID: "test",
+  } as unknown as Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[0]["model"]
+
+  test("footer lists withheld with reason and tokens (machine-readable)", () => {
+    const tight: GateConfig = { ...CONFIG, maxSystemTokens: 300 }
+    const { prologue, sections } = parseSections(
+      joinedSystem([
+        ["/repo/packages/a/AGENTS.md", 80],
+        ["/repo/packages/b/AGENTS.md", 400],
+      ]),
+    )
+    const decision = applyGate(prologue, sections, new Set(["packages/a", "packages/b"]), tight)
+    expect(decision.withheld.find((w) => w.path === "/repo/packages/b/AGENTS.md")).toMatchObject({
+      scope: "packages/b",
+      reason: "over-budget",
+    })
+    expect(decision.output).toMatch(
+      /withheld: \/repo\/packages\/b\/AGENTS\.md \(scope: packages\/b, reason: over-budget, tokens: ~\d+\)/,
+    )
+    const noActivity = applyGate(prologue, sections, new Set(), CONFIG)
+    expect(noActivity.withheld.find((w) => w.path === "/repo/packages/a/AGENTS.md")).toMatchObject({
+      reason: "no-activity",
+    })
+  })
+
+  test("simulated file-read of withheld path promotes it to kept on next gate", async () => {
+    const sessionID = "ses_retrieval"
+    const block = joinedSystem([
+      ["/repo/packages/llm/AGENTS.md", 100],
+      ["/repo/packages/ui/AGENTS.md", 100],
+    ])
+    const before = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: before })
+    expect(before[0]).not.toContain("Instructions from: /repo/packages/ui/AGENTS.md")
+
+    // Model pulls the withheld guide back via its file tools.
+    await hooks["tool.execute.before"]!(
+      { tool: "read", sessionID, callID: "r0", args: { filePath: "/repo/packages/ui/AGENTS.md" } } as unknown as Parameters<NonNullable<Hooks["tool.execute.before"]>>[0],
+      {} as never,
+    )
+    // retrievedPaths bypasses the 90s scope-snapshot window by design.
+    const after = [block]
+    await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
+    expect(after[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
+    expect(after[0]).not.toContain("withheld: /repo/packages/ui/AGENTS.md")
+  })
+
+  test("eviction order deterministic: largest-unrelated evicted first, ties broken by path", () => {
+    const tight: GateConfig = { ...CONFIG, maxSystemTokens: 350 }
+    const { prologue, sections } = parseSections(
+      joinedSystem([
+        ["/repo/packages/a/AGENTS.md", 60],
+        ["/repo/packages/b/AGENTS.md", 300],
+        ["/repo/packages/c/AGENTS.md", 290],
+      ]),
+    )
+    const one = applyGate(prologue, sections, new Set(["packages/a", "packages/b", "packages/c"]), tight)
+    const two = applyGate(prologue, sections, new Set(["packages/a", "packages/b", "packages/c"]), tight)
+    // b (largest) evicted first; c may also fall to budget — but deterministically.
+    expect(one.output).toBe(two.output)
+    expect(one.kept.map((s) => s.path)).toEqual(two.kept.map((s) => s.path))
+    expect(one.kept.map((s) => s.path)).toContain("/repo/packages/a/AGENTS.md")
+    expect(one.kept.map((s) => s.path)).not.toContain("/repo/packages/b/AGENTS.md")
+    expect(one.withheld.map((w) => w.path)).toEqual([...one.withheld.map((w) => w.path)].sort())
   })
 })
 
