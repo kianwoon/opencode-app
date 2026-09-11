@@ -1,5 +1,6 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { createHash } from "node:crypto"
+import * as fs from "node:fs/promises"
 
 /**
  * Context Gate — a permanent policy engine for fixed context overhead.
@@ -86,23 +87,30 @@ let configCache: GateConfig | undefined
 function loadConfig(): GateConfig {
   if (configCache) return configCache
   configCache = { ...DEFAULTS }
+  // Build the complete new config, then swap the reference atomically —
+  // concurrent readers must never observe a half-applied config.
   void (async () => {
     try {
-      const fs = await import("node:fs/promises")
+      const next = { ...DEFAULTS }
       for (const p of CONFIG_PATHS()) {
         const raw = await fs.readFile(p, "utf8").catch(() => undefined)
         if (!raw) continue
         const parsed = JSON.parse(raw) as Partial<GateConfig>
-        if (typeof parsed.maxSystemTokens === "number") configCache!.maxSystemTokens = parsed.maxSystemTokens
-        if (typeof parsed.sectionWarnTokens === "number") configCache!.sectionWarnTokens = parsed.sectionWarnTokens
-        if (typeof parsed.scopingEnabled === "boolean") configCache!.scopingEnabled = parsed.scopingEnabled
-        if (Array.isArray(parsed.pinnedPaths)) configCache!.pinnedPaths = parsed.pinnedPaths
-        if (Array.isArray(parsed.evictablePaths)) configCache!.evictablePaths = parsed.evictablePaths
-        if (typeof parsed.summarizeEnabled === "boolean") configCache!.summarizeEnabled = parsed.summarizeEnabled
-        if (typeof parsed.summarizeWordLimit === "number") configCache!.summarizeWordLimit = parsed.summarizeWordLimit
-        if (typeof parsed.summarizerModel === "string") configCache!.summarizerModel = parsed.summarizerModel
+        if (typeof parsed.maxSystemTokens === "number") next.maxSystemTokens = parsed.maxSystemTokens
+        if (typeof parsed.sectionWarnTokens === "number") next.sectionWarnTokens = parsed.sectionWarnTokens
+        if (typeof parsed.scopingEnabled === "boolean") next.scopingEnabled = parsed.scopingEnabled
+        if (Array.isArray(parsed.pinnedPaths)) next.pinnedPaths = parsed.pinnedPaths
+        if (Array.isArray(parsed.evictablePaths)) next.evictablePaths = parsed.evictablePaths
+        if (typeof parsed.summarizeEnabled === "boolean") next.summarizeEnabled = parsed.summarizeEnabled
+        if (typeof parsed.summarizeWordLimit === "number") next.summarizeWordLimit = parsed.summarizeWordLimit
+        if (typeof parsed.summarizerModel === "string") next.summarizerModel = parsed.summarizerModel
         break
       }
+      configCache = next
+      precompiledEvictable = next.evictablePaths.map((p) => ({
+        path: p,
+        re: p ? new RegExp(`(^|[^\\w.-])${escapeRegExp(p)}([^\\w.-]|$)`) : undefined,
+      }))
     } catch {
       // Defaults are fine.
     }
@@ -138,10 +146,8 @@ function log(event: string, fields: Record<string, unknown>) {
   const line = JSON.stringify({ ts: Date.now(), event, ...fields }) + "\n"
   void (async () => {
     try {
-      const fs = await import("node:fs/promises")
       const dir = `${dataRoot()}/opencode`
       const file = `${dir}/context-gate.jsonl`
-      await fs.mkdir(dir, { recursive: true })
       await fs.appendFile(file, line)
       await rotateIfNeeded(fs, file)
     } catch {
@@ -168,6 +174,9 @@ const HEADER_RE = /^Instructions from: (.+)$/gm
  * examples like "Instructions from: /some/path") must not split a section.
  */
 function looksLikeHeaderPath(payload: string): boolean {
+  // Real headers carry the path and nothing else; trailing prose marks a
+  // body-text mention ("Instructions from: /abs/path.md for details").
+  if (/\s/.test(payload)) return false
   if (/^https?:\/\//.test(payload)) return true
   // Absolute or ~-rooted file path with an extension (instruction files are
   // .md/.mdx/.txt; section content rarely matches this shape at line start).
@@ -184,11 +193,15 @@ export function parseSections(systemBlock: string): { prologue: string; sections
   for (const match of systemBlock.matchAll(HEADER_RE)) {
     const payload = match[1]!.trim()
     if (!looksLikeHeaderPath(payload)) continue
-    const idx = match.index ?? 0
+    // A real header is emitted at column 0 by core's concatenation. Quoted,
+    // blockquoted, or list-indented mentions in body text are prose, not
+    // boundaries.
+    const lineStart = systemBlock.lastIndexOf("\n", (match.index ?? 0) - 1) + 1
+    if (/^\s*(>|-|\*|\d+\.)\s/.test(systemBlock.slice(lineStart, match.index ?? 0))) continue
     headers.push({
       path: payload,
-      start: idx,
-      textStart: idx + match[0].length + 1,
+      start: match.index ?? 0,
+      textStart: (match.index ?? 0) + match[0].length + 1,
       end: systemBlock.length,
     })
   }
@@ -220,6 +233,13 @@ const PINNED_SUFFIXES = [
   "/.claude/CLAUDE.md",
 ]
 
+// FIX 4 precompiled evictable regexes (rebuilt when config swaps atomically).
+interface PrecompiledEvictable {
+  path: string
+  re: RegExp | undefined
+}
+let precompiledEvictable: PrecompiledEvictable[] = []
+
 function isPinnedPath(path: string, extra: string[] = [], evictable: string[] = []): boolean {
   if (evictable.some((p) => path.includes(p))) return false
   if (extra.some((p) => path.includes(p))) return true
@@ -247,6 +267,7 @@ export interface GateDecision {
   tokensBefore: number
   tokensAfter: number
   alarms: { path: string; tokens: number }[]
+  deduped: { path: string; keptPath: string }[]
 }
 
 /**
@@ -262,10 +283,11 @@ export interface GateDecision {
  */
 export function applyGate(
   prologue: string,
-  sections: Section[],
+  inputSections: Section[],
   activeScopes: Set<string>,
   config: GateConfig,
 ): GateDecision {
+  let sections = inputSections
   const alarms = sections
     .filter((s) => tokensOf(s.text) > config.sectionWarnTokens)
     .map((s) => ({ path: s.path ?? "(prologue)", tokens: tokensOf(s.text) }))
@@ -273,9 +295,26 @@ export function applyGate(
     log("bloat-alarm", { sections: alarms })
   }
 
+  // Dedup pass: sections with byte-identical text carry no extra information.
+  // Keep the first occurrence, drop later ones and disclose in the footer.
+  const deduped: { path: string; keptPath: string }[] = []
+  const seenText = new Map<string, string>()
+  const unique: Section[] = []
+  for (const section of sections) {
+    const hash = hashOf(section.text.replace(/\n+$/, ""))
+    const keptPath = seenText.get(hash)
+    if (keptPath !== undefined) {
+      deduped.push({ path: section.path ?? "(prologue)", keptPath })
+      continue
+    }
+    seenText.set(hash, section.path ?? "(prologue)")
+    unique.push(section)
+  }
+  sections = unique
+
   if (!config.scopingEnabled) {
     const output = joinSections(prologue, sections)
-    return { kept: sections, dropped: [], output, tokensBefore: tokensOf(output), tokensAfter: tokensOf(output), alarms }
+    return { kept: sections, dropped: [], output, tokensBefore: tokensOf(output), tokensAfter: tokensOf(output), alarms, deduped }
   }
 
   const pinned: Section[] = []
@@ -320,14 +359,19 @@ export function applyGate(
     )
     output += `\nContext gate: instruction guides withheld for ${scopes.join(", ")} — read the file if you need them.`
   }
+  if (deduped.length > 0) {
+    const note = deduped.map((d) => `deduped: ${d.path} (= ${d.keptPath})`).join("; ")
+    output += `\nContext gate: ${note} — identical content kept once.`
+  }
 
   return {
     kept: ordered,
     dropped,
     output,
-    tokensBefore: tokensOf(prologue) + sections.reduce((sum, s) => sum + tokensOf(s.text), 0),
+    tokensBefore: tokensOf(prologue) + inputSections.reduce((sum, s) => sum + tokensOf(s.text), 0),
     tokensAfter: tokensOf(output),
     alarms,
+    deduped,
   }
 }
 
@@ -343,8 +387,6 @@ const activity = new Map<string, SessionActivity>()
 const MAX_SESSIONS = 1_000
 
 const SCOPE_RE = /(packages\/[^/\s"'`)]+)\//g
-
-let evictablePathsCache: string[] | undefined
 
 function recordActivity(sessionID: string, text: string) {
   let entry = activity.get(sessionID)
@@ -363,9 +405,9 @@ function recordActivity(sessionID: string, text: string) {
   // boundaries stop "packages/llm/AGENTS.md" from unlocking
   // "...packages/llm-extra/...". Scanned on args+title+output so e.g. a
   // subagent summary citing a guide path unlocks it.
-  for (const p of evictablePathsCache ?? []) {
-    if (p && new RegExp(`(^|[^\\w.-])${escapeRegExp(p)}([^\\w.-]|$)`).test(text)) {
-      entry.scopes.add(p)
+  for (const p of precompiledEvictable) {
+    if (p.re?.test(text)) {
+      entry.scopes.add(p.path)
     }
   }
 }
@@ -439,7 +481,7 @@ function hashOf(text: string): string {
   return (h >>> 0).toString(36)
 }
 
-function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sections: Section[], config: GateConfig) {
+function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sections: Section[], prologue: string, config: GateConfig) {
   const shape = sections
     .map((s) => `${s.path}:${hashOf(s.text)}`)
     .join("|")
@@ -447,6 +489,7 @@ function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sect
     sessionID,
     Array.from(decision.kept.map((s) => s.path)).join(","),
     decision.tokensBefore,
+    hashOf(prologue),
     shape,
     config.maxSystemTokens,
     String(config.scopingEnabled),
@@ -601,7 +644,7 @@ export async function summarizeSection(
   ctx: SummarizeContext,
   sessionID: string,
   options?: { spawnFlight?: boolean },
-): Promise<Section> {
+): Promise<Section & { cached: boolean; fallback: boolean; spawned: boolean }> {
   const config = loadConfig()
   const path = section.path!
   const key = summaryCacheKey(path, section.text)
@@ -609,7 +652,6 @@ export async function summarizeSection(
 
   const cached = await withTimeout(
     (async () => {
-      const fs = await import("node:fs/promises")
       return loadCachedSummary(fs, key)
     })(),
     5_000,
@@ -624,21 +666,22 @@ export async function summarizeSection(
   if (cached) {
     if (pinned) {
       log("summarize", { path, words, cached: true, pinned: true, fallback: true })
-      return { path, text: provenance(extractiveFallback(section.text), path, words) }
+      return { path, text: provenance(extractiveFallback(section.text), path, words), cached: true, fallback: true, spawned: false }
     }
     log("summarize", { path, words, cached: true, fallback: false })
-    return { path, text: provenance(cached, path, words) }
+    return { path, text: provenance(cached, path, words), cached: true, fallback: false, spawned: false }
   }
 
   // True disk miss: only spawn a new flight when the caller allows it
   // (gateSystem caps this at one per transform) and none is already running.
+  let spawned = false
   if (!inflight.has(key) && options?.spawnFlight !== false) {
+    spawned = true
     const flight = (async () => {
       const model = resolveSummarizerModel(ctx, sessionID)
       const llm = await withTimeout(llmSummarize(ctx.client, model, path, section.text), SUMMARIZE_TIMEOUT_MS)
       if (!llm) return undefined
       try {
-        const fs = await import("node:fs/promises")
         await storeSummary(fs, key, llm)
       } catch {
         // Cache write is best-effort.
@@ -653,7 +696,7 @@ export async function summarizeSection(
 
   log("summarize", { path, words, cached: false, fallback: true, model: resolveSummarizerModel(ctx, sessionID) })
   pinFallback(sessionID, key)
-  return { path, text: provenance(extractiveFallback(section.text), path, words) }
+  return { path, text: provenance(extractiveFallback(section.text), path, words), cached: false, fallback: true, spawned }
 }
 
 function resolveSummarizerModel(ctx: SummarizeContext, sessionID: string): { providerID: string; modelID: string } | undefined {
@@ -673,16 +716,23 @@ function provenance(summary: string, path: string, words: number): string {
 
 export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (input) => {
   const config = loadConfig()
-  evictablePathsCache = config.evictablePaths
+  // mkdir once at plugin init (log appends and cache writes assume it exists).
+  void fs.mkdir(`${dataRoot()}/opencode`, { recursive: true }).catch(() => {})
+  // Precompile evictable regexes from the init-time config; rebuilt when the
+  // async config swap lands (see loadConfig).
+  precompiledEvictable = config.evictablePaths.map((p) => ({
+    path: p,
+    re: p ? new RegExp(`(^|[^\\w.-])${escapeRegExp(p)}([^\\w.-]|$)`) : undefined,
+  }))
   const summarizeCtx: SummarizeContext = { client: input.client, sessionModel: new Map() }
 
   const hooks: Hooks = {
     "tool.execute.after": async (hookInput, hookOutput) => {
       try {
         const text =
-          JSON.stringify(hookInput.args ?? {}) +
+          JSON.stringify(hookInput.args ?? {}).slice(0, 4_000) +
           " " +
-          (hookOutput?.title ?? "") +
+          (hookOutput?.title ?? "").slice(0, 4_000) +
           " " +
           String(hookOutput?.output ?? "").slice(0, 2_000)
         recordActivity(hookInput.sessionID, text)
@@ -755,10 +805,11 @@ async function gateSystem(
       continue
     }
     try {
-      expanded.push(await summarizeSection(section, summarizeCtx, sessionID, { spawnFlight: !flightSpawned }))
-      // A cached hit consumes no flight; only a miss that spawned one counts
-      // against the per-transform cap.
-      if (inflight.has(summaryCacheKey(section.path!, section.text))) flightSpawned = true
+      const result = await summarizeSection(section, summarizeCtx, sessionID, { spawnFlight: !flightSpawned })
+      expanded.push(result)
+      // Only a call that actually created this flight counts against the
+      // per-transform cap (returned flag — no re-probing inflight state).
+      if (result.spawned) flightSpawned = true
     } catch (error) {
       log("summarize-error", { sessionID, path: section.path, message: String(error) })
       expanded.push(section)
@@ -769,7 +820,7 @@ async function gateSystem(
   const scopes = turnScopes(sessionID)
   const decision = applyGate(prologue, sections, scopes, config)
 
-  const key = memoKey(sessionID, decision, sections, config)
+  const key = memoKey(sessionID, decision, sections, prologue, config)
   const cached = memo.get(key)
   if (cached !== undefined) {
     output.system[0] = cached

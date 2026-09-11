@@ -33,7 +33,8 @@ const CONFIG: GateConfig = {
 }
 
 function section(path: string, words: number): Section {
-  return { path, text: Array.from({ length: words }, (_, i) => `word${i}`).join(" ") + "\n" }
+  // Path embedded so two sections never collide with the dedup pass.
+  return { path, text: `guide ${path}\n` + Array.from({ length: words }, (_, i) => `word${i}`).join(" ") + "\n" }
 }
 
 function joinedSystem(paths: [string, number][]): string {
@@ -75,6 +76,21 @@ describe("parseSections", () => {
     const block = `${joinedSystem([["/repo/packages/llm/AGENTS.md", 5]])}\nInstructions from: /repo/packages/ui/AGENTS.md\nui rules here`
     const { sections } = parseSections(block)
     expect(sections).toHaveLength(2)
+  })
+
+  test("quoted absolute .md path in a blockquote body line does not carve a section", () => {
+    const base = joinedSystem([["/repo/AGENTS.md", 20]])
+    const block = `${base}\nInstructions from: /abs/path.md for details`
+    const { sections } = parseSections(block)
+    expect(sections).toHaveLength(1)
+    expect(sections[0]!.path).toBe("/repo/AGENTS.md")
+  })
+
+  test("list/blockquote-prefixed header lookalike merges into previous section", () => {
+    const base = joinedSystem([["/repo/AGENTS.md", 20]])
+    const block = `${base}\n> See Instructions from: /abs/path.md for details`
+    const { sections } = parseSections(block)
+    expect(sections).toHaveLength(1)
   })
 })
 
@@ -188,7 +204,43 @@ describe("applyGate", () => {
     const decision = applyGate(prologue, sections, new Set(), CONFIG)
     expect(decision.kept).toHaveLength(1)
   })
+
+  test("dedup: two sections with identical text, different paths → first kept, footer names duplicate", () => {
+    const text = section("/repo/AGENTS.md", 80).text
+    const { prologue, sections } = parseSections(joinSections(prologueText, [
+      { path: "/repo/a/AGENTS.md", text },
+      { path: "/repo/b/AGENTS.md", text },
+    ]))
+    const decision = applyGate(prologue, sections, new Set(), CONFIG)
+    expect(decision.kept).toHaveLength(1)
+    expect(decision.kept[0]!.path).toBe("/repo/a/AGENTS.md")
+    expect(decision.output).toContain("deduped: /repo/b/AGENTS.md (= /repo/a/AGENTS.md)")
+  })
+
+  test("dedup: same file twice → single kept section", () => {
+    const text = section("/repo/AGENTS.md", 80).text
+    const { prologue, sections } = parseSections(joinSections(prologueText, [
+      { path: "/repo/AGENTS.md", text },
+      { path: "/repo/AGENTS.md", text },
+    ]))
+    const decision = applyGate(prologue, sections, new Set(), CONFIG)
+    expect(decision.kept).toHaveLength(1)
+    expect(decision.deduped).toHaveLength(1)
+  })
+
+  test("dedup: different text under same path shape → both kept (no false positive)", () => {
+    const { prologue, sections } = parseSections(joinedSystem([
+      ["/repo/packages/llm/AGENTS.md", 80],
+      ["/repo/packages/llm/AGENTS.md", 81],
+    ]))
+    const decision = applyGate(prologue, sections, new Set(["packages/llm"]), CONFIG)
+    expect(decision.kept).toHaveLength(2)
+    expect(decision.deduped).toHaveLength(0)
+    expect(decision.output).not.toContain("deduped:")
+  })
 })
+
+const prologueText = "You are opencode, a helpful coding agent.\n\n"
 
 describe("plugin hook", () => {
   const model = {
@@ -560,6 +612,44 @@ describe("summarization", () => {
       expect(creates).toBe(1)
     } finally {
       await fs.rm(`${dir}/${key}.md`, { force: true })
+    }
+  })
+
+  test("summarizeSection returns spawned=false when flight capped (spawnFlight:false) and spawned=true on a real miss", async () => {
+    let creates = 0
+    const client = {
+      session: {
+        create: async () => {
+          creates++
+          return { data: { id: "ses_helper" } }
+        },
+        prompt: async () => ({ data: { parts: [{ type: "text", text: "LLM SUMMARY CONTENT" }] } }),
+        delete: async () => ({}),
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const capped = { path: "/repo/CAPPED.md", text: longText(2500) }
+    const fs = await import("node:fs/promises")
+    const dir = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/context-gate-cache`
+    const cappedKey = summaryCacheKey(capped.path, capped.text)
+    await fs.rm(`${dir}/${cappedKey}.md`, { force: true })
+    try {
+      const cappedResult = await summarizeSection(capped, ctx, "ses_capped", { spawnFlight: false })
+      expect(cappedResult.spawned).toBe(false)
+      expect(cappedResult.fallback).toBe(true)
+      expect(cappedResult.cached).toBe(false)
+      expect(creates).toBe(0)
+
+      const miss = { path: "/repo/MISS.md", text: longText(2501) }
+      const missKey = summaryCacheKey(miss.path, miss.text)
+      await fs.rm(`${dir}/${missKey}.md`, { force: true })
+      const missResult = await summarizeSection(miss, ctx, "ses_capped")
+      expect(missResult.spawned).toBe(true)
+      for (let i = 0; i < 50 && creates < 1; i++) await new Promise((r) => setTimeout(r, 100))
+      expect(creates).toBe(1)
+      await fs.rm(`${dir}/${missKey}.md`, { force: true })
+    } finally {
+      await fs.rm(`${dir}/${cappedKey}.md`, { force: true })
     }
   })
 
