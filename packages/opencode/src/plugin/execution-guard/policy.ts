@@ -3,7 +3,9 @@
 // Two enforcement tiers, both fail-CLOSED for privileged shapes:
 //
 //   DENY  (throw from tool.execute.before):
-//     - `curl … | sh` / `wget … | bash` (remote code executed unseen)
+//     - `curl … | sh` / `wget … | bash` / `… |& sh` (remote code executed unseen)
+//     - `bash <(curl …)` / `sh -c "$(curl …)"` / `eval $(curl …)` (fetcher inside
+//       a process/command substitution feeding a shell)
 //     - a dependency resolved from a URL or git remote (`npm i github:…`,
 //       `pip install git+https://…`, `pip install https://…whl`). The plan's
 //       approval workflow needs the `permission.ask` trigger, which is DEAD
@@ -34,26 +36,53 @@ function tokens(segment: string): string[] {
   return (segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []).map((token) => token.replace(/^["']|["']$/g, ""))
 }
 
-/** `curl … | sh`-style: a fetcher piped into a shell interpreter. */
+/** Basename of a token so `/bin/sh` and `/usr/bin/curl` are recognised. */
+function basename(token: string): string {
+  return token.split("/").pop() ?? token
+}
+
+function isShell(token: string | undefined): boolean {
+  return token !== undefined && SHELLS.has(basename(token))
+}
+
+function isFetcher(token: string | undefined): boolean {
+  return token !== undefined && FETCHERS.has(basename(token))
+}
+
+/** `curl … | sh` / `|&` style: a fetcher piped into a shell interpreter. */
 function pipeToShell(command: string): boolean {
-  // Inspect per operator-pipe so a `;`-separated chain does not create a false
-  // positive (only a literal `|` connects producer to interpreter).
+  // Inspect per operator so a `;`-separated chain does not create a false
+  // positive (only a pipe connects producer to interpreter). `|&` (pipe stdout
+  // AND stderr) is treated identically to `|`.
   return command
-    .split(/[;\n&]/)
+    .split(/&&|[;\n]/)
     .filter((part) => part.includes("|"))
     .some((part) => {
-      const stages = part.split("|").map((stage) => tokens(stage.trim()))
+      const stages = part.split(/\|&?/).map((stage) => tokens(stage.trim()))
       let sawFetcher = false
       for (const stage of stages) {
         const head = stage[0]
         if (!head) continue
-        if (FETCHERS.has(head)) sawFetcher = true
+        if (isFetcher(head)) sawFetcher = true
         // A shell interpreter as a downstream stage of a fetcher is RCE.
-        if (sawFetcher && (SHELLS.has(head) || (head === "sudo" && stage[1] !== undefined && SHELLS.has(stage[1]))))
-          return true
+        if (sawFetcher && (isShell(head) || (basename(head) === "sudo" && isShell(stage[1])))) return true
       }
       return false
     })
+}
+
+/** `bash <(curl …)` — process substitution feeding a shell; or a fetcher inside
+ *  a `$(…)` command substitution adjacent to a shell/`eval` token
+ *  (`sh -c "$(curl …)"`, `eval $(curl …)`). Both execute remote code unseen. */
+function substitutionToShell(command: string): boolean {
+  const list = tokens(command)
+  const shellPresent = list.some((token) => isShell(basename(token)) || basename(token) === "eval")
+  if (!shellPresent) return false
+  // Process substitution: a `<(` (or `>(`) anywhere with a fetcher inside it.
+  if (/[<>]\([^)]*\b(?:curl|wget)\b/.test(command)) return true
+  // Command substitution: `$( … curl … )` or backtick form.
+  if (/\$\([^)]*\b(?:curl|wget)\b/.test(command)) return true
+  return false
 }
 
 /** A remote (git/URL) dependency in a package-manager install command. */
@@ -70,7 +99,7 @@ function remoteDependency(command: string): boolean {
 
 /** Evaluates the deny tier. Returns a Denial when the command must be blocked. */
 export function evaluate(command: string): Denial | undefined {
-  if (pipeToShell(command))
+  if (pipeToShell(command) || substitutionToShell(command))
     return {
       code: "pipe_to_shell",
       message:

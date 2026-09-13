@@ -21,7 +21,9 @@ export function zeroSecrets(cls: Class): boolean {
 
 /** Projects the broker's allowlisted subset down to what a class may receive.
  *  Zero-secret classes get `{}`; every other class passes the subset through
- *  unchanged (per-class narrowing is a documented follow-up). */
+ *  unchanged. Exported as the seam for future per-class config (e.g. a
+ *  `production` class receiving a narrower subset); kept even though the guard
+ *  currently branches only on `zeroSecrets`. */
 export function project(cls: Class, subset: Readonly<Record<string, string>>): Record<string, string> {
   if (zeroSecrets(cls)) return {}
   return { ...subset }

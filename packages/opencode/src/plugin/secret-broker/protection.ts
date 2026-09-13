@@ -3,7 +3,7 @@
 // sites, so it cannot enforce anything — this path is the real gate.
 
 import * as path from "path"
-import { realpathSync } from "node:fs"
+import { lstatSync, realpathSync } from "node:fs"
 
 const FILE_TOOLS = new Set(["read", "edit", "write"])
 
@@ -23,13 +23,26 @@ function isProtected(basename: string): boolean {
 }
 
 /** Best-effort realpath so a symlink whose target basename differs from its
- *  link basename (e.g. `readme.txt -> .env`) cannot bypass the check. Fails
- *  open to the literal basename check — never throws and never surfaces values. */
+ *  link basename (e.g. `readme.txt -> .env`) cannot bypass the check.
+ *  Fail-CLOSED: on ELOOP/ENOENT or any realpath error we return undefined and
+ *  the caller denies whenever the path looks symlinked or the literal basename
+ *  is itself protected. Never throws and never surfaces values. */
 function resolvedBasename(filePath: string): string | undefined {
   try {
     return path.basename(realpathSync(filePath))
   } catch {
     return undefined
+  }
+}
+
+/** True when the path is a symlink that realpath could NOT resolve (broken or
+ *  looping link). Its literal basename is then not the real file name, so the
+ *  caller must fail CLOSED rather than trust it. */
+function isUnresolvedSymlink(filePath: string): boolean {
+  try {
+    return lstatSync(filePath).isSymbolicLink()
+  } catch {
+    return false
   }
 }
 
@@ -45,9 +58,16 @@ export function check(tool: string, args: unknown): Denial | undefined {
   const filePath = typeof candidate === "string" ? candidate : undefined
   if (filePath === undefined || filePath.length === 0) return undefined
   const trimmed = filePath.trim()
-  if (isProtected(path.basename(trimmed))) return { tool, filePath }
+  const literal = path.basename(trimmed)
+  const literalProtected = isProtected(literal)
+  if (literalProtected) return { tool, filePath }
   const resolved = resolvedBasename(trimmed)
-  if (resolved !== undefined && isProtected(resolved)) return { tool, filePath }
+  // Fail CLOSED: realpath failed (ELOOP/ENOENT/…) on something that is itself a
+  // symlink — a broken/looping link named `readme.txt` pointing at the denied
+  // set must not slip through on its harmless link name.
+  if (resolved === undefined) return isUnresolvedSymlink(trimmed) ? { tool, filePath } : undefined
+  // The link resolves to a different real file: if EITHER name is protected, deny.
+  if (resolved !== literal && (isProtected(resolved) || literalProtected)) return { tool, filePath }
   return undefined
 }
 

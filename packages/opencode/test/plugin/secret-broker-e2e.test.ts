@@ -50,6 +50,9 @@ function encodings(secret: string): string[] {
     b64.toString("base64url"),
     b64.toString("base64").replace(/=+$/, ""),
     b64.toString("base64url").replace(/=+$/, ""),
+    // Hex is covered by the redactor (hexVariants) down to its 12-char floor;
+    // CANARY is long enough that its 2-chars-per-byte hex form clears it.
+    b64.toString("hex"),
   ]
 }
 

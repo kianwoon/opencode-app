@@ -142,6 +142,15 @@ export class Redactor {
    *  primitives untouched. Used for tool output metadata and error payloads. */
   redactDeep<T>(value: T): T {
     if (typeof value === "string") return this.redact(value) as unknown as T
+    // Error.message is NON-enumerable, so an Object.keys walk misses the very
+    // field a leak hides in. Project to a plain object with every text field redacted.
+    if (value instanceof Error) {
+      return {
+        name: this.redact(value.name),
+        message: this.redact(value.message),
+        stack: typeof value.stack === "string" ? this.redact(value.stack) : undefined,
+      } as unknown as T
+    }
     if (Array.isArray(value)) return value.map((item) => this.redactDeep(item)) as unknown as T
     if (value !== null && typeof value === "object") {
       const out: Record<string, unknown> = {}

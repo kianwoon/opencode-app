@@ -8,11 +8,41 @@
 import { existsSync, writeFileSync } from "node:fs"
 import { parse } from "./env-loader"
 
-// Keys safe to document with their real value in .env.example. Deliberately
-// small and additive-free: anything not matched is blanked. Anything carrying a
-// credential (URLs with embedded auth, DSNs, URIs, webhook endpoints) is NOT
-// safe and must stay blank.
-const SAFE_KEY = /^(APP_ENV|APP_PORT|PORT|HOST|NODE_ENV|DEBUG|LOG_LEVEL|.*_ENABLED|.*_DISABLED)$/i
+// Keys safe to document with their real value in .env.example. An EXACT literal
+// set (case-insensitive), no wildcards: a name like `FOO_ENABLED` is NOT safe
+// by suffix alone — it can carry a toggle-shaped credential. Anything not
+// matched is blanked. Anything carrying a credential (URLs with embedded auth,
+// DSNs, URIs, webhook endpoints) is NOT safe and must stay blank.
+const SAFE_KEYS = new Set([
+  "APP_ENV",
+  "APP_PORT",
+  "PORT",
+  "HOST",
+  "NODE_ENV",
+  "DEBUG",
+  "LOG_LEVEL",
+  "ENABLED",
+  "DISABLED",
+])
+
+// Even a safe-named key can carry a secret value. These value SHAPES are always
+// blanked: known token prefixes, credential-bearing URLs, and any value too long
+// to plausibly be a config scalar.
+const SECRET_VALUE = [
+  /^(sk|ghp|gho|xox|AKIA)[-_A-Za-z0-9]{8,}/,
+  /^postgres(ql)?:\/\//,
+  /:\/\/[^/\s]+:[^/\s]+@/,
+]
+const MAX_SAFE_VALUE_LENGTH = 64
+
+function isSafeValue(value: string): boolean {
+  if (value.length > MAX_SAFE_VALUE_LENGTH) return false
+  return !SECRET_VALUE.some((pattern) => pattern.test(value))
+}
+
+function isSafeKey(key: string, value: string): boolean {
+  return SAFE_KEYS.has(key.toUpperCase()) && isSafeValue(value)
+}
 
 export type BootstrapResult = {
   readonly created: boolean
@@ -24,7 +54,7 @@ function render(values: ReadonlyMap<string, string>): { text: string; redacted: 
   const lines: string[] = []
   let redacted = 0
   for (const [key, value] of values) {
-    if (SAFE_KEY.test(key)) {
+    if (isSafeKey(key, value)) {
       lines.push(`${key}=${value}`)
     } else {
       lines.push(`${key}=`)

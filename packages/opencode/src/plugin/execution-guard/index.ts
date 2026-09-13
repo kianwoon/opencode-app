@@ -16,8 +16,9 @@
 // — the guard then deletes those keys for zero-secret classes, so deletion wins.
 //
 // FAIL-CLOSED: a recognised privileged shape that cannot be classified is
-// denied (see policy.evaluate). A plain unclassifiable command is allowed with
-// the full broker subset and audited as class `other`.
+// denied (see policy.evaluate). A command that cannot be parsed/classified at
+// all is treated as `package_install` (ZERO secrets), never `other` — a false
+// install only withholds secrets, a false `other` would leak them.
 
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { Classify } from "./classify"

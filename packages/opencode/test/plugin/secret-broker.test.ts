@@ -110,6 +110,14 @@ describe("redactor", () => {
     expect(result.n).toBe(3)
   })
 
+  test("redactDeep redacts an Error's non-enumerable message", () => {
+    const redactor = new Redactor([{ key: "API_KEY", value: "sk-abcdefgh" }], 8)
+    const error = new Error("boom sk-abcdefgh leaked")
+    const result = redactor.redactDeep({ error }) as { error: { name: string; message: string; stack?: string } }
+    expect(result.error.message).toBe("boom secret://project/API_KEY leaked")
+    expect(JSON.stringify(result)).not.toContain("sk-abcdefgh")
+  })
+
   test("base64 (standard + url-safe, padded + unpadded) maps to the same handle", () => {
     const value = "sk-abcdefgh"
     const redactor = new Redactor([{ key: "API_KEY", value }], 8)
@@ -439,19 +447,46 @@ describe("bootstrap default-deny (Critical: credential-like values blanked)", ()
     expect(text).toContain("DATABASE_URL=\n")
   })
 
-  test("preserves only safe-config keys, blanks everything else", async () => {
+  test("preserves only exact safe-config keys, blanks everything else", async () => {
     const dir = tmp()
     const env = path.join(dir, ".env")
     const example = path.join(dir, ".env.example")
     writeFileSync(env, "APP_ENV=production\nPORT=8080\nNODE_ENV=dev\nFEATURE_ENABLED=true\nMYSTERY=leakme\n")
     const result = await bootstrap(env, example)
-    expect(result.redacted).toBe(1)
+    // FEATURE_ENABLED is NOT in the exact safe set (no *_ENABLED wildcard).
+    expect(result.redacted).toBe(2)
     const text = await Bun.file(example).text()
     expect(text).toContain("APP_ENV=production")
     expect(text).toContain("PORT=8080")
-    expect(text).toContain("FEATURE_ENABLED=true")
+    expect(text).toContain("FEATURE_ENABLED=\n")
+    expect(text).not.toContain("FEATURE_ENABLED=true")
     expect(text).toContain("MYSTERY=")
     expect(text).not.toContain("leakme")
+  })
+
+  test("safe key carrying a secret-shaped value is still blanked", async () => {
+    const dir = tmp()
+    const env = path.join(dir, ".env")
+    const example = path.join(dir, ".env.example")
+    writeFileSync(
+      env,
+      [
+        "APP_ENV=sk-live-token123",
+        "FOO_ENABLED=ghp_realtoken123",
+        "NODE_ENV=production",
+        "APP_PORT=postgres://user:pass@host/db",
+        "PORT=" + "x".repeat(80),
+      ].join("\n") + "\n",
+    )
+    await bootstrap(env, example)
+    const text = await Bun.file(example).text()
+    expect(text).toContain("APP_ENV=\n")
+    expect(text).not.toContain("sk-live-token123")
+    expect(text).toContain("FOO_ENABLED=\n")
+    expect(text).not.toContain("ghp_realtoken123")
+    expect(text).toContain("NODE_ENV=production")
+    expect(text).not.toContain("postgres://")
+    expect(text).not.toContain("x".repeat(80))
   })
 
   test("writes .env.example with mode 0o600", async () => {
@@ -486,7 +521,22 @@ describe("protection (High: case-fold, .envrc, symlink)", () => {
     expect(check("read", { filePath: path.join(dir, "readme.txt") })).toBeDefined()
   })
 
-  test("does not throw or block on a nonexistent path", () => {
+  test("blocks a broken symlink named readme.txt -> .env (fail-closed)", () => {
+    const dir = tmp()
+    const link = path.join(dir, "readme.txt")
+    symlinkSync(path.join(dir, ".env"), link) // target never created
+    expect(check("read", { filePath: link })).toBeDefined()
+    expect(check("write", { filePath: link })).toBeDefined()
+  })
+
+  test("blocks a self-referential (ELOOP) symlink", () => {
+    const dir = tmp()
+    const link = path.join(dir, "loop.txt")
+    symlinkSync(link, link)
+    expect(check("read", { filePath: link })).toBeDefined()
+  })
+
+  test("does not throw or block on a nonexistent plain path", () => {
     expect(check("read", { filePath: "/p/does-not-exist.txt" })).toBeUndefined()
   })
 })

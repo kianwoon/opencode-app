@@ -21,7 +21,7 @@
 // a feature works). Egress control and the permission ruleset remain separate.
 
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import { NEUTRALIZED_PREFIX, neutralize } from "./directives"
+import { NEUTRALIZED_PREFIX, isDirective, neutralize } from "./directives"
 import { trustForTool, type Trust } from "./provenance"
 
 /** Placeholder a whole message is replaced with when neutralization throws. */
@@ -35,6 +35,8 @@ function audit(event: "tag" | "neutralize" | "withheld", payload: Record<string,
 type PartLike = {
   type?: unknown
   tool?: unknown
+  text?: unknown
+  metadata?: Record<string, unknown>
   state?: {
     status?: unknown
     output?: unknown
@@ -43,15 +45,37 @@ type PartLike = {
   }
 }
 
-/** True if a message part carries untrusted content. Tool parts are classified
- *  by tool name; a missing tag defaults to untrusted (fail-safe). Non-tool
- *  parts (user/assistant prose) are never rewritten. */
-function isUntrustedPart(part: PartLike): boolean {
+/** True if a part is explicitly tagged authoritative (on the part or its tool
+ *  state). Such parts are NEVER neutralized — the tag is the operator's escape
+ *  hatch for content that may legitimately grant authority. */
+function isAuthoritative(part: PartLike): boolean {
+  if (part.metadata?.["trust"] === "authoritative") return true
+  return part.state?.metadata?.["trust"] === "authoritative"
+}
+
+/** True if a TOOL part carries untrusted content. Tool parts are classified by
+ *  their `trust` tag first, else by tool name; a missing tag defaults to
+ *  untrusted (fail-safe). */
+function isUntrustedToolPart(part: PartLike): boolean {
   if (part.type !== "tool") return false
   const tagged = part.state?.metadata?.["trust"]
   if (tagged === "untrusted") return true
   if (tagged === "authoritative" || tagged === "normal") return false
   return typeof part.tool === "string" ? trustForTool(part.tool) === "untrusted" : true
+}
+
+/** Heuristic: a TEXT part in a message that ALSO contains an untrusted tool part
+ *  is a model echo of tainted content, so it is a neutralization candidate when
+ *  it itself matches a directive. Tradeoff: this can over-mark benign assistant
+ *  prose that merely quotes a directive alongside untrusted tool output. We
+ *  accept that because over-marking only withholds authority (fail-safe) while
+ *  missing a real echo leaks it. Untagged text parts are candidates under this
+ *  heuristic; authoritative-tagged parts are never touched. */
+function isTaintedTextPart(part: PartLike, messageHasUntrustedTool: boolean): boolean {
+  if (part.type !== "text") return false
+  if (!messageHasUntrustedTool) return false
+  if (isAuthoritative(part)) return false
+  return typeof part.text === "string" && isDirective(part.text)
 }
 
 /** Neutralizes every string field of a part that can reach the model. Returns
@@ -64,6 +88,7 @@ function neutralizePart(part: PartLike): number {
     if (next !== value) count++
     return next
   }
+  if (typeof part.text === "string") part.text = rewrite(part.text)
   const state = part.state
   if (state) {
     if (typeof state.output === "string") state.output = rewrite(state.output)
@@ -101,8 +126,11 @@ export async function contextFirewallPlugin(_input: PluginInput): Promise<Hooks>
       for (let index = 0; index < output.messages.length; index++) {
         const message = output.messages[index] as { info: unknown; parts: PartLike[] }
         try {
+          const messageHasUntrustedTool = message.parts.some(isUntrustedToolPart)
           for (const part of message.parts) {
-            if (!isUntrustedPart(part)) continue
+            const untrusted = isUntrustedToolPart(part)
+            const tainted = isTaintedTextPart(part, messageHasUntrustedTool)
+            if (!untrusted && !tainted) continue
             neutralized += neutralizePart(part)
           }
         } catch {

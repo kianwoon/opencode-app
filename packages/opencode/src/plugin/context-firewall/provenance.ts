@@ -5,10 +5,16 @@
 // result, a RAG chunk) may inform reasoning but can NEVER grant authority:
 // permissions, secrets, DLP state, destructive ops, dependency approval or
 // broker policy. This module is PURE: it only classifies, never mutates.
+//
+// The `trust` tag this module feeds to `tool.execute.after` is ADVISORY: it
+// SELECTS which parts the enforcement pass scans. The enforcement itself is
+// the regex neutralization in `directives.ts`, applied at
+// `experimental.chat.messages.transform`. This module is not a lockout.
 
 /** Trust level of a piece of content. `authoritative` may grant authority;
  *  `untrusted` may never. `normal` is project content that informs but does
- *  not grant authority — treated as untrusted at the enforcement sink. */
+ *  not grant authority — at the sink it is treated as TRUSTED (not
+ *  neutralized), matching the tag check in `index.ts`. */
 export type Trust = "authoritative" | "normal" | "untrusted"
 
 /** Source label -> trust. Unknown labels default to `untrusted` (fail-safe). */
