@@ -986,7 +986,11 @@ function executeGit(binary: string, cwd: string, proc: AppProcess.Interface) {
 // When only the Command Line Tools are installed (no full Xcode), the shim
 // fails with `xcode-select: Failed to locate 'git'` unless `DEVELOPER_DIR` is
 // set. Probe known good binaries and use the first that answers `--version`.
+// The probe is memoized per process: the PATH shim alone costs ~430ms to fail,
+// and every layer build would otherwise re-probe all candidates.
+let resolvedBinary: string | undefined
 export function resolveBinary(proc: AppProcess.Interface): Effect.Effect<string> {
+  if (resolvedBinary) return Effect.succeed(resolvedBinary)
   const candidates = ["git", "/Library/Developer/CommandLineTools/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]
   const env = process.platform === "darwin" ? { DEVELOPER_DIR: "/Library/Developer/CommandLineTools" } : undefined
   return Effect.findFirst(candidates, (candidate) =>
@@ -996,7 +1000,10 @@ export function resolveBinary(proc: AppProcess.Interface): Effect.Effect<string>
         Effect.map((result) => result.exitCode === 0),
         Effect.catch(() => Effect.succeed(false)),
       ),
-  ).pipe(Effect.map((found) => (found._tag === "Some" ? found.value : "git")))
+  ).pipe(
+    Effect.map((found) => (found._tag === "Some" ? found.value : "git")),
+    Effect.tap((binary) => Effect.sync(() => (resolvedBinary = binary))),
+  )
 }
 
 function resolvePath(cwd: string, value: string) {
