@@ -22,6 +22,9 @@ import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { CerebrasPlugin } from "./cerebras"
 import { SnowflakeCortexAuthPlugin } from "./snowflake-cortex"
+import { secretBrokerPlugin as SecretBrokerPlugin } from "./secret-broker"
+import { executionGuardPlugin as ExecutionGuardPlugin } from "./execution-guard"
+import { contextFirewallPlugin as ContextFirewallPlugin } from "./context-firewall"
 import { Effect, Layer, Context } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -82,6 +85,17 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     SnowflakeCortexAuthPlugin,
     XaiAuthPlugin,
     CerebrasPlugin,
+    // Secret Broker: enabled by default (protects .env files and redacts secrets
+    // from tool I/O). Opt out with OPENCODE_DISABLE_SECRET_BROKER.
+    ...(flags.disableSecretBroker ? [] : [SecretBrokerPlugin]),
+    // Execution Guard: runs AFTER the Secret Broker so its `shell.env` deletes the
+    // broker's injected keys for zero-secret command classes (install/build/test).
+    // Co-gated with the broker (without it there are no broker keys to strip) and
+    // independently opt-out via OPENCODE_DISABLE_EXECUTION_GUARD.
+    ...(flags.disableSecretBroker || flags.disableExecutionGuard ? [] : [ExecutionGuardPlugin]),
+    // Context Firewall (plan §4): tagging + neutralizing untrusted content so it
+    // can never grant authority at the model sink. Independent of the broker.
+    ...(flags.disableContextFirewall ? [] : [ContextFirewallPlugin]),
   ]
 }
 

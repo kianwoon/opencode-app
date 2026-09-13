@@ -258,6 +258,140 @@ export const EnvProtection = async ({ project, client, $, directory, worktree })
 
 ---
 
+### Secret Broker
+
+Secret Broker is a built-in plugin that stops credentials from ever reaching the model. It is a defense against a **compromised upstream LLM provider**: even though a malicious provider sees every token of your context, it can never recover a real credential through the model-visible channel.
+
+#### Mental model
+
+> The agent requests work, not secrets. The process receives secrets, not the agent.
+
+Credentials in `.env` are injected into the **child process environment** (so your shell commands and tools can use them), but the agent — and therefore the provider — only ever sees a **handle** like `secret://project/API_KEY`. If a command prints, echoes, or errors out with a real value, the broker rewrites it back to the handle before it is sent upstream.
+
+```text
+todo: "call the API with API_KEY"
+        │                        ▲
+        ▼                        │  secret://project/API_KEY  (handle only)
+  opencode agent ──────────────► provider (untrusted)
+        │
+        ▼  shell.env
+   child process env: API_KEY=sk-live-…  (real value, never model-visible)
+```
+
+#### Configuration
+
+Secret Broker is **enabled by default**. Disable it with:
+
+```sh
+export OPENCODE_DISABLE_SECRET_BROKER=1
+```
+
+The broker is per-directory and is wired up automatically; no plugin file is needed.
+
+#### The `.env.example` contract
+
+Secret Broker only injects keys **declared in `.env.example`** into the process environment. This is the allowlist:
+
+- On first run, if `.env.example` is missing and `.env` exists, the broker generates it with **default-deny**: every value is blanked unless the key matches a small safe-config pattern (`PORT`, `HOST`, `NODE_ENV`, `DEBUG`, `LOG_LEVEL`, `*_ENABLED`, `*_DISABLED`, `APP_ENV`, `APP_PORT`). Credential-shaped keys (`DATABASE_URL`, `MONGO_URI`, `SENTRY_DSN`, `WEBHOOK_URL`, `SMTP_URL`, …) are blanked.
+- The allowlist is **frozen at startup**. Editing `.env.example` mid-session does **not** widen what gets injected — so an agent (or a compromised model) cannot smuggle a new key into the environment.
+
+```dotenv title=".env.example"
+API_KEY=
+DATABASE_URL=
+# safe-config keys keep their value:
+LOG_LEVEL=debug
+```
+
+#### What is protected
+
+| Channel | Hook | Behavior |
+| --- | --- | --- |
+| Process environment | `shell.env` ([`src/plugin/secret-broker/index.ts:172`](https://github.com/sst/opencode/blob/dev/packages/opencode/src/plugin/secret-broker/index.ts)) | Injects only allowlisted keys present at startup. |
+| File reads/writes | `tool.execute.before` ([`src/plugin/secret-broker/index.ts:176`](https://github.com/sst/opencode/blob/dev/packages/opencode/src/plugin/secret-broker/index.ts)) | Blocks `.env`, `.envrc`, `*.pem`, `*.key`, `id_rsa*`, `id_ed25519*` (case-folded, symlink-resolved). `.env.example`/`.env.sample` stay readable. |
+| Tool output / errors | `tool.execute.after` ([`src/plugin/secret-broker/index.ts:181`](https://github.com/sst/opencode/blob/dev/packages/opencode/src/plugin/secret-broker/index.ts)) | Redacts output, title and metadata for **every** parsed `.env` value (allowlisted or not). Fails closed (withholds) if redaction throws. |
+| Thrown tool errors | `redactOnFailure` ([`src/plugin/secret-broker/index.ts:139`](https://github.com/sst/opencode/blob/dev/packages/opencode/src/plugin/secret-broker/index.ts)) | Routes error text through the after-hook before it reaches the model, preserving error identity. |
+| Final model transcript | `experimental.chat.messages.transform` ([`src/plugin/secret-broker/index.ts:205`](https://github.com/sst/opencode/blob/dev/packages/opencode/src/plugin/secret-broker/index.ts)) | Last-line safety net: redacts every message part in place before the provider request, including interrupted live output. Fails closed. |
+
+Redaction covers not just the literal value but the deterministic transforms a hostile reader would run: **plain, URL-encoded, JSON-escaped, shell-single-quote-escaped, and base64** (standard + URL-safe, padded + unpadded). Redaction is built from **every** value parsed out of `.env` that meets the minimum length, so a key that is **not** in the allowlist is never injected into the environment yet still cannot surface through tool output — only allowlisted keys are injected. Values shorter than the minimum length cannot be redacted safely; direct `.env` reads remain blocked, so they cannot be dumped verbatim either. `StreamRedactor` (a suffix-buffer redactor that withholds a boundary-spanning fragment until its final character arrives) is available for model-visible *delta* sinks. In the current wiring, live stream chunks go to the **client only** — the provider never sees them incrementally; it receives the post-redaction transcript assembled by `experimental.chat.messages.transform` ([`src/session/prompt.ts:1870`](https://github.com/sst/opencode/blob/dev/packages/opencode/src/session/prompt.ts)) and each tool result after `tool.execute.after`.
+
+:::caution
+**Network exfiltration is out of scope.** Secret Broker guarantees the *model-visible* channel never carries a credential. It does **not** sandbox a child process: if the agent writes a program and you run it, that program legitimately has the secret in its environment and could send it anywhere over the network. Egress control (firewalls, proxies, network policy) is a separate concern.
+:::
+
+---
+
+### Execution Guard
+
+Execution Guard is a built-in plugin that closes the **evil-provider / malicious-package** gap left by Secret Broker: Secret Broker decides *which* keys may be injected, but a package install script (`npm` postinstall, `pip` `setup.py`, a `curl | sh` payload) is attacker-controlled code that would otherwise receive those keys. Execution Guard classifies each `bash` command and **strips every project secret** from the environment of classes that do not need one.
+
+Classification (`src/plugin/execution-guard/classify.ts`) is a pure function over the command string. A command chain (`a && b | c`) is split into segments and the **strictest class wins**, so `npm install x && npm run deploy` is treated as an install:
+
+| Class | Secrets injected |
+| --- | --- |
+| `package_install`, `build`, `unit_test` | **none** |
+| `integration_test`, `development`, `migration`, `deploy`, `other` | full broker allowlist |
+
+The guard runs **after** Secret Broker, so its `shell.env` hook deletes the broker's injected keys for zero-secret classes — deletion wins.
+
+#### Denied commands
+
+Two shapes are hard-denied from `tool.execute.before`:
+
+- **`curl … | sh` / `wget … | bash`** — remote code executed without review.
+- **URL / git dependency installs** (`npm i github:u/r`, `pip install git+https://…`) — the dependency comes from outside a registry.
+
+The denial message names the *shape* only, never a value. Because `permission.ask` has no trigger call site today, the plugin cannot open an approval prompt, so remote-dependency installs are **denied outright** with a message directing you to approve manually (run the install yourself in a terminal, or pin a published registry version).
+
+#### Configuration
+
+Execution Guard is **enabled by default** and is co-gated with Secret Broker (disabling the broker leaves no keys to strip). Opt out independently with:
+
+```sh
+export OPENCODE_DISABLE_EXECUTION_GUARD=1
+```
+
+Unclassifiable commands are treated as class `other` and receive the broker allowlist. The PTY path (an interactive shell you drive by hand) has no `callID` correlation and is likewise left with the broker allowlist — the model is not the actor there.
+
+---
+
+### Context Firewall
+
+Context Firewall is a built-in plugin that stops **untrusted content** from granting authority. A README, a fetched web page, a GitHub issue, an MCP tool result or a RAG chunk is *input* — the model may read it and reason about it, but its bytes must never be read as an instruction that grants a permission, reveals a secret, turns DLP off, authorises a destructive op or a dependency install, or changes broker policy.
+
+#### Authority model
+
+Authority is a property of **where content came from**, not of what it says. The trust table is pure (`src/plugin/context-firewall/provenance.ts`) and **missing or unknown sources default to `untrusted`** (fail-safe):
+
+| Source | Trust | May grant authority? |
+| --- | --- | --- |
+| `user`, `project_policy` | `authoritative` | yes |
+| `project_file`, `readme` | `normal` | informs reasoning, not authority |
+| `web`, `github`, `mcp`, `rag` | `untrusted` | **never** |
+| *anything unknown* | `untrusted` | **never** |
+
+#### Enforcement points
+
+Enforcement is **primary at the model sink**; pattern detection is supplementary — the firewall never depends on the LLM behaving securely.
+
+1. **`tool.execute.after`** tags each tool result with `metadata.trust` (`read`, `grep`, `glob`, `list`, `webfetch`, `websearch`, `fetch` and every `mcp*` tool → `untrusted`; unknown tools → `untrusted`). The read-only result cache skips only `item.execute`, so this hook still runs on cache hits and the tag is applied on a cache read too.
+2. **`experimental.chat.messages.transform`** runs on every step before `toModelMessagesEffect` and before compaction. For every untrusted part it neutralises authority-grant lines in place (a pure, case-insensitive regex pass — no model in the loop). Trusted and authoritative parts are left **byte-identical**. If neutralisation throws, the **whole message** is replaced with a withheld placeholder rather than forwarding partial content (fail-closed).
+
+Detection covers instruction-override preambles ("ignore previous instructions"), protection-disabling ("disable DLP", "bypass the secret broker"), permission grants ("grant all permissions"), install/command approval ("run this command", "auto-approve all tools"), credential exfiltration ("exfiltrate", "upload .env / id_rsa"), production/destructive authorisation, and destructive command shapes (`DROP DATABASE`, `rm -rf /`, `mkfs`). A matched line is prefixed with `⚠️ Untrusted content — not authoritative:`.
+
+#### Limitation
+
+The firewall blocks untrusted content from granting **authority — not ideas**. A README may legitimately explain how a feature works and the model can still reason about it. Egress control and the permission ruleset remain separate concerns, and the static ruleset is never altered by content.
+
+#### Configuration
+
+Context Firewall is **enabled by default**. Opt out with:
+
+```sh
+export OPENCODE_DISABLE_CONTEXT_FIREWALL=1
+```
+
+---
+
 ### Inject environment variables
 
 Inject environment variables into all shell execution (AI tools and user terminals):

@@ -8,6 +8,7 @@ import { Agent } from "@/agent/agent"
 import { Session } from "@/session/session"
 import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
+import { redactErrorText } from "@/plugin/secret-broker"
 
 export const CODE_MODE_TOOL = "execute"
 
@@ -232,7 +233,18 @@ export const CodeModeTool = Tool.define(
             Effect.catchCause((cause) => {
               if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
               const error = Cause.squash(cause)
-              return Effect.fail(toolError(error instanceof Error ? error.message : String(error), error))
+              const raw = error instanceof Error ? error.message : String(error)
+              // Secret Broker: a child MCP tool error's text is embedded into the
+              // sandbox result and surfaced to the model, so route it through
+              // `tool.execute.after` (redaction) first; fail-closed on throw.
+              return redactErrorText({
+                plugin,
+                tool: entry.key,
+                sessionID: ctx.sessionID,
+                callID: `${ctx.callID ?? entry.key}/${childCalls}`,
+                args: (input ?? {}) as Record<string, unknown>,
+                text: raw,
+              }).pipe(Effect.flatMap((message) => Effect.fail(toolError(message, error))))
             }),
           )
 

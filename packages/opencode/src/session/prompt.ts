@@ -19,6 +19,7 @@ import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
+import { redactErrorText } from "../plugin/secret-broker"
 import { MAX_STEPS_PROMPT } from "@opencode-ai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
 import { MCP } from "../mcp"
@@ -471,12 +472,28 @@ const layer = Layer.effect(
         .pipe(
           Effect.catchCause((cause) => {
             const defect = Cause.squash(cause)
-            error = defect instanceof Error ? defect : new Error(String(defect))
-            return Effect.logError("subagent task execution failed", {
-              error,
-              agent: task.agent,
-              description: task.description,
-            })
+            const failure = defect instanceof Error ? defect : new Error(String(defect))
+            error = failure
+            // Secret Broker: route the failure text through `tool.execute.after`
+            // (redaction) before it is embedded in the part/session error, so a
+            // secret in a subagent failure never reaches the model.
+            return redactErrorText({
+              plugin,
+              tool: TaskTool.id,
+              sessionID,
+              callID: part.id,
+              args: taskArgs,
+              text: failure.message,
+            }).pipe(
+              Effect.tap((text) => Effect.sync(() => void (failure.message = text))),
+              Effect.flatMap(() =>
+                Effect.logError("subagent task execution failed", {
+                  error: failure,
+                  agent: task.agent,
+                  description: task.description,
+                }),
+              ),
+            )
           }),
           Effect.onInterrupt(() =>
             Effect.gen(function* () {

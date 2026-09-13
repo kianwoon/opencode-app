@@ -249,3 +249,244 @@ it.effect("a tool whose execute never settles fails with the timeout error", () 
     }
   }),
 )
+
+// Secret Broker Critical: a tool that throws must still route its error text
+// through `tool.execute.after` so secrets in error messages are redacted, and
+// the ORIGINAL error must still propagate (identity preserved).
+const throwingRegistry = ToolRegistry.Service.of({
+  ids: () => Effect.succeed(["boom"]),
+  all: () => Effect.succeed([]),
+  named: () => Effect.die("unused"),
+  tools: () =>
+    Effect.succeed([
+      {
+        id: "boom",
+        description: "throws with a secret in the message",
+        parameters: Schema.Struct({}),
+        jsonSchema: { type: "object", properties: {} },
+        execute: () => Effect.die(new Error("boom leaked sk-abcdefgh")),
+      } satisfies Tool.Def,
+    ]),
+})
+
+const redactingPlugin = Plugin.Service.of({
+  init: () => Effect.void,
+  list: () => Effect.succeed([]),
+  trigger: (name, _input, output) => {
+    if (name === "tool.execute.after" && isRecordLike(output) && typeof output.output === "string") {
+      output.output = output.output.replaceAll("sk-abcdefgh", "secret://project/API_KEY")
+    }
+    return Effect.succeed(output)
+  },
+} satisfies Plugin.Interface)
+
+function isRecordLike(value: unknown): value is { output?: unknown; title?: unknown } {
+  return typeof value === "object" && value !== null
+}
+
+const errorPathLayer = Layer.mergeAll(
+  Layer.succeed(Plugin.Service, redactingPlugin),
+  Layer.mock(Agent.Service, { get: () => Effect.succeed(agent) }),
+  Layer.succeed(Config.Service, TestConfig.make()),
+  Layer.succeed(Permission.Service, fakePermission),
+  Layer.succeed(MCP.Service, fakeMcp()),
+  Layer.succeed(Truncate.Service, fakeTruncate),
+  RuntimeFlags.layer(),
+  Layer.succeed(ToolRegistry.Service, throwingRegistry),
+)
+
+const itErrorPath = testEffect(errorPathLayer)
+
+itErrorPath.effect("redacts a thrown tool error and preserves the original error", () =>
+  Effect.gen(function* () {
+    const state: SessionV1.ToolPart = {
+      id: partID,
+      sessionID,
+      messageID,
+      type: "tool",
+      tool: "boom",
+      callID,
+      state: { status: "running", input: {}, time: { start: 1 } },
+    }
+    const processor = {
+      message: {
+        id: messageID,
+        sessionID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        agent: "build",
+        mode: "build",
+        path: { cwd: "/tmp", root: "/tmp" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ModelV2.ID.make("test-model"),
+        providerID: ProviderV2.ID.make("test"),
+        time: { created: 1 },
+      } satisfies SessionV1.Assistant,
+      updateToolCall: (_toolCallID: string, update: (part: SessionV1.ToolPart) => SessionV1.ToolPart) =>
+        Effect.sync(() => {
+          state.state = update(state).state
+          return state
+        }),
+      completeToolCall: () => Effect.void,
+    } satisfies Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+
+    const tools = yield* SessionTools.resolve({
+      agent,
+      model,
+      session: { id: sessionID, permission: [] } as unknown as Session.Info,
+      processor,
+      bypassAgentCheck: false,
+      messages: [],
+      promptOps: {} as never,
+      mcpConfig: {},
+    })
+    const execute = tools.boom.execute
+    if (!execute) throw new Error("boom tool is missing execute")
+
+    // Capture the rejection value rather than letting Effect wrap it, so the
+    // test asserts on the exact error message the model would receive.
+    const failure = yield* Effect.promise(() =>
+      execute({}, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }).then(
+        () => undefined,
+        (error: unknown) => error,
+      ),
+    )
+
+    expect(failure).toBeDefined()
+    const message = failure instanceof Error ? failure.message : String(failure)
+    expect(message).not.toContain("sk-abcdefgh")
+    expect(message).toContain("secret://project/API_KEY")
+  }),
+)
+
+// Secret Broker: the MCP resource tool branches throw raw error text that must
+// also be routed through `tool.execute.after` (redaction) before it reaches the
+// model. Each branch is exercised with a canary secret in the thrown message.
+const resourceCapableClient = { getServerCapabilities: () => ({ resources: {} }) } as never
+
+function mcpLayer(overrides: Partial<MCP.Interface>) {
+  return Layer.succeed(MCP.Service, MCP.Service.of({ ...fakeMcp(), ...overrides } as MCP.Interface))
+}
+
+function mcpErrorPathLayer(overrides: Partial<MCP.Interface>) {
+  return Layer.mergeAll(
+    Layer.succeed(Plugin.Service, redactingPlugin),
+    Layer.mock(Agent.Service, { get: () => Effect.succeed(agent) }),
+    Layer.succeed(Config.Service, TestConfig.make()),
+    Layer.succeed(Permission.Service, fakePermission),
+    mcpLayer(overrides),
+    Layer.succeed(Truncate.Service, fakeTruncate),
+    RuntimeFlags.layer(),
+    Layer.succeed(ToolRegistry.Service, throwingRegistry),
+  )
+}
+
+function mcpProcessor() {
+  const state: SessionV1.ToolPart = {
+    id: partID,
+    sessionID,
+    messageID,
+    type: "tool",
+    tool: "mcp",
+    callID,
+    state: { status: "running", input: {}, time: { start: 1 } },
+  }
+  return {
+    message: {
+      id: messageID,
+      sessionID,
+      role: "assistant",
+      parentID: MessageID.ascending(),
+      agent: "build",
+      mode: "build",
+      path: { cwd: "/tmp", root: "/tmp" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID: ModelV2.ID.make("test-model"),
+      providerID: ProviderV2.ID.make("test"),
+      time: { created: 1 },
+    } satisfies SessionV1.Assistant,
+    updateToolCall: () => Effect.succeed(state),
+    completeToolCall: () => Effect.void,
+  } satisfies Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+}
+
+function mcpToolInput(name: string, overrides: Partial<MCP.Interface>) {
+  return Effect.gen(function* () {
+    const tools = yield* SessionTools.resolve({
+      agent,
+      model,
+      session: { id: sessionID, permission: [] } as unknown as Session.Info,
+      processor: mcpProcessor(),
+      bypassAgentCheck: false,
+      messages: [],
+      promptOps: {} as never,
+      mcpConfig: {},
+    })
+    const execute = tools[name]?.execute
+    if (!execute) throw new Error(`${name} tool is missing execute`)
+    return (args: Record<string, unknown>) =>
+      Effect.promise(() =>
+        execute(args, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }).then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+      )
+  }).pipe(Effect.provide(mcpErrorPathLayer(overrides)))
+}
+
+function expectRedacted(failure: unknown) {
+  expect(failure).toBeDefined()
+  const message = failure instanceof Error ? failure.message : String(failure)
+  expect(message).not.toContain("sk-abcdefgh")
+  expect(message).toContain("secret://project/API_KEY")
+}
+
+it.effect("redacts a thrown list_mcp_resources error", () =>
+  Effect.gen(function* () {
+    const run = yield* mcpToolInput("list_mcp_resources", {
+      clients: () => Effect.succeed({ srv: resourceCapableClient }),
+      resources: () => Effect.die(new Error("list failed sk-abcdefgh")),
+    })
+    expectRedacted(yield* run({ server: "srv" }))
+  }),
+)
+
+it.effect("redacts a thrown list_mcp_resource_templates error", () =>
+  Effect.gen(function* () {
+    const run = yield* mcpToolInput("list_mcp_resource_templates", {
+      clients: () => Effect.succeed({ srv: resourceCapableClient }),
+      resourceTemplates: () => Effect.die(new Error("templates failed sk-abcdefgh")),
+    })
+    expectRedacted(yield* run({ server: "srv" }))
+  }),
+)
+
+it.effect("redacts a thrown read_mcp_resource error", () =>
+  Effect.gen(function* () {
+    const run = yield* mcpToolInput("read_mcp_resource", {
+      clients: () => Effect.succeed({ srv: resourceCapableClient }),
+      readResource: () => Effect.die(new Error("read failed sk-abcdefgh")),
+    })
+    expectRedacted(yield* run({ server: "srv", uri: "file:///x" }))
+  }),
+)
+
+it.effect("redacts a thrown MCP tool error (inline deferral branch)", () =>
+  Effect.gen(function* () {
+    const mcpTool: MCP.McpTool = {
+      def: { name: "boom", description: "boom", inputSchema: { type: "object", properties: {} } } as never,
+      client: {
+        callTool: async () => {
+          throw new Error("inline mcp failed sk-abcdefgh")
+        },
+      } as never,
+    }
+    const execute = yield* mcpToolInput("mcp_srv_boom", {
+      clients: () => Effect.succeed({ srv: { getServerCapabilities: () => ({}) } as never }),
+      tools: () => Effect.succeed({ mcp_srv_boom: mcpTool }),
+    })
+    expectRedacted(yield* execute({}))
+  }),
+)
