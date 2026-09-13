@@ -15,6 +15,7 @@ import { Effect, Layer, Path, Schema, Scope, Context } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { AppProcess } from "@opencode-ai/core/process"
+import { resolveBinary } from "@opencode-ai/core/git"
 import { InstanceState } from "@/effect/instance-state"
 import { WorktreeEvent } from "@opencode-ai/schema/worktree-event"
 
@@ -146,6 +147,7 @@ const layer: Layer.Layer<
     const fs = yield* FSUtil.Service
     const pathSvc = yield* Path.Path
     const appProcess = yield* AppProcess.Service
+    const gitBinary = yield* resolveBinary(appProcess)
     const { db } = yield* Database.Service
     const gitSvc = yield* Git.Service
     const project = yield* Project.Service
@@ -154,7 +156,7 @@ const layer: Layer.Layer<
     const git = Effect.fnUntraced(
       function* (args: string[], opts?: { cwd?: string }) {
         const result = yield* appProcess.run(
-          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
+          ChildProcess.make(gitBinary, args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
         )
         return {
           code: result.exitCode,

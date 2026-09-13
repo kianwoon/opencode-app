@@ -109,7 +109,13 @@ const layer = Layer.effect(
 
     const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
       const repo = yield* git.repo.discover(input)
-      if (!repo) return { id: ID.global, directory: AbsolutePath.make(path.parse(input).root), vcs: undefined }
+      if (!repo) {
+        // git discovery fails (e.g. macOS CLT shim breakage). Fall back to any
+        // persisted directory mapping before collapsing to the global project.
+        const owner = yield* projectDirectories.findDirectory(input)
+        if (owner) return { id: owner.projectID, directory: owner.worktree, vcs: undefined }
+        return { id: ID.global, directory: AbsolutePath.make(path.parse(input).root), vcs: undefined }
+      }
 
       const previous = yield* cached(repo.commonDirectory)
       const id = (yield* remote(repo)) ?? previous ?? (yield* root(repo))

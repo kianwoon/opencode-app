@@ -178,6 +178,10 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const proc = yield* AppProcess.Service
     const locks = KeyedMutex.makeUnsafe<string>()
+    const gitBinary = yield* resolveBinary(proc)
+
+    const run = (cwd: string, process: AppProcess.Interface) => runGit(gitBinary, cwd, process)
+    const execute = (cwd: string, process: AppProcess.Interface) => executeGit(gitBinary, cwd, process)
     const locked = <A, E, R>(repository: Repository, effect: Effect.Effect<A, E, R>) =>
       locks.withLock(repository.gitDirectory)(effect)
 
@@ -329,7 +333,7 @@ const layer = Layer.effect(
     ) {
       const result = yield* proc
         .run(
-          ChildProcess.make("git", repositoryArgs(repository, args), {
+          ChildProcess.make(gitBinary, repositoryArgs(repository, args), {
             cwd: repository.worktree,
             env: options?.env,
             extendEnv: true,
@@ -495,7 +499,7 @@ const layer = Layer.effect(
       if (!input.paths.length) return new Set<RelativePath>()
       const result = yield* proc
         .run(
-          ChildProcess.make("git", repositoryArgs(input.repository, ["check-ignore", "--no-index", "--stdin", "-z"]), {
+          ChildProcess.make(gitBinary, repositoryArgs(input.repository, ["check-ignore", "--no-index", "--stdin", "-z"]), {
             cwd: input.repository.worktree,
             extendEnv: true,
           }),
@@ -793,7 +797,7 @@ const layer = Layer.effect(
     }) {
       const result = yield* proc
         .run(
-          ChildProcess.make("git", ["apply", "-"], {
+          ChildProcess.make(gitBinary, ["apply", "-"], {
             cwd: input.path,
             extendEnv: true,
             stdin: Stream.make(new TextEncoder().encode(input.changes)),
@@ -860,7 +864,7 @@ const layer = Layer.effect(
       cwd = repository.worktree,
     ) {
       const result = yield* proc
-        .run(ChildProcess.make("git", args, { cwd, extendEnv: true, stdin: "ignore" }))
+        .run(ChildProcess.make(gitBinary, args, { cwd, extendEnv: true, stdin: "ignore" }))
         .pipe(
           Effect.mapError(
             (cause) => new WorktreeError({ operation, directory: worktreeDirectory, message: cause.message, cause }),
@@ -951,16 +955,16 @@ interface Result {
   readonly stderr: string
 }
 
-function run(cwd: string, proc: AppProcess.Interface) {
+function runGit(binary: string, cwd: string, proc: AppProcess.Interface) {
   return (args: string[]) =>
-    execute(cwd, proc)(args).pipe(Effect.catch(() => Effect.succeed({ exitCode: 1, text: "", stderr: "" })))
+    executeGit(binary, cwd, proc)(args).pipe(Effect.catch(() => Effect.succeed({ exitCode: 1, text: "", stderr: "" })))
 }
 
-function execute(cwd: string, proc: AppProcess.Interface) {
+function executeGit(binary: string, cwd: string, proc: AppProcess.Interface) {
   return (args: string[]) =>
     proc
       .run(
-        ChildProcess.make("git", args, {
+        ChildProcess.make(binary, args, {
           cwd,
           extendEnv: true,
           stdin: "ignore",
@@ -976,6 +980,23 @@ function execute(cwd: string, proc: AppProcess.Interface) {
             }) satisfies Result,
         ),
       )
+}
+
+// macOS ships a `/usr/bin/git` shim that shells out to `xcode-select --find`.
+// When only the Command Line Tools are installed (no full Xcode), the shim
+// fails with `xcode-select: Failed to locate 'git'` unless `DEVELOPER_DIR` is
+// set. Probe known good binaries and use the first that answers `--version`.
+export function resolveBinary(proc: AppProcess.Interface): Effect.Effect<string> {
+  const candidates = ["git", "/Library/Developer/CommandLineTools/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]
+  const env = process.platform === "darwin" ? { DEVELOPER_DIR: "/Library/Developer/CommandLineTools" } : undefined
+  return Effect.findFirst(candidates, (candidate) =>
+    proc
+      .run(ChildProcess.make(candidate, ["--version"], { env, extendEnv: true, stdin: "ignore" }))
+      .pipe(
+        Effect.map((result) => result.exitCode === 0),
+        Effect.catch(() => Effect.succeed(false)),
+      ),
+  ).pipe(Effect.map((found) => (found._tag === "Some" ? found.value : "git")))
 }
 
 function resolvePath(cwd: string, value: string) {

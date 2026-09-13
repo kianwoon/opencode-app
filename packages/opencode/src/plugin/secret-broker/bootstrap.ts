@@ -5,7 +5,7 @@
 // SMTP_URL, …) is therefore blanked by default. Atomic create via the `wx` flag
 // so a concurrent run cannot clobber an existing example. Logs counts only.
 
-import { existsSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { parse } from "./env-loader"
 
 // Keys safe to document with their real value in .env.example. An EXACT literal
@@ -69,11 +69,12 @@ function render(values: ReadonlyMap<string, string>): { text: string; redacted: 
  *  never secret values. */
 export async function bootstrap(envFile: string, exampleFile: string): Promise<BootstrapResult> {
   const none: BootstrapResult = { created: false, total: 0, redacted: 0 }
-  const env = Bun.file(envFile)
-  if (!(await env.exists())) return none
+  // node:fs (not Bun's file API) so this works in the desktop app's Node
+  // sidecar, where the global `Bun` is undefined. Sync to match writeFileSync.
+  if (!existsSync(envFile)) return none
   if (existsSync(exampleFile)) return none
 
-  const values = parse(await env.text()).values
+  const values = parse(readFileSync(envFile, "utf8")).values
   if (values.size === 0) return none
 
   const { text, redacted } = render(values)

@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppProcess } from "@opencode-ai/core/process"
+import { resolveBinary } from "@opencode-ai/core/git"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 
@@ -104,13 +105,14 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const appProcess = yield* AppProcess.Service
+    const gitBinary = yield* resolveBinary(appProcess)
     const encoder = new TextEncoder()
     const stdin = (text: string) => Stream.make(encoder.encode(text))
 
     const run = Effect.fn("Git.run")(
       function* (args: string[], opts: Options) {
         const result = yield* appProcess.run(
-          ChildProcess.make("git", [...cfg, ...args], {
+          ChildProcess.make(gitBinary, [...cfg, ...args], {
             cwd: opts.cwd,
             env: opts.env,
             extendEnv: true,

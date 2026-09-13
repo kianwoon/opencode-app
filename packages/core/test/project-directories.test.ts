@@ -58,4 +58,21 @@ describe("ProjectDirectories", () => {
       expect(yield* service.list(projectID)).toEqual([{ directory, strategy: "new/strategy" }])
     }),
   )
+
+  it.effect("reverse lookup finds the owning project by directory or ancestor", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const service = yield* ProjectDirectories.Service
+      yield* service.create({ projectID, directory })
+
+      // Exact directory and nested ancestors both resolve to the owning project.
+      expect(yield* service.findDirectory(directory)).toEqual({ projectID, worktree: directory })
+      expect(yield* service.findDirectory(AbsolutePath.make("/tmp/project-directories/a/b"))).toEqual({
+        projectID,
+        worktree: directory,
+      })
+      // Unmapped directory falls through.
+      expect(yield* service.findDirectory(AbsolutePath.make("/tmp/elsewhere"))).toBeUndefined()
+    }),
+  )
 })

@@ -4,6 +4,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import { AppProcess } from "@opencode-ai/core/process"
+import { resolveBinary } from "@opencode-ai/core/git"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { EventV2 } from "@opencode-ai/core/event"
 import { InstanceState } from "@/effect/instance-state"
@@ -67,6 +68,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const appProcess = yield* AppProcess.Service
+    const gitBinary = yield* resolveBinary(appProcess)
     const config = yield* Config.Service
     const locks = new Map<string, Semaphore.Semaphore>()
 
@@ -126,7 +128,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         const git = Effect.fnUntraced(
           function* (cmd: string[], opts?: { cwd?: string; env?: Record<string, string>; stdin?: string }) {
             const result = yield* appProcess.run(
-              ChildProcess.make("git", cmd, { cwd: opts?.cwd, env: opts?.env, extendEnv: true }),
+              ChildProcess.make(gitBinary, cmd, { cwd: opts?.cwd, env: opts?.env, extendEnv: true }),
               { stdin: opts?.stdin },
             )
             return {
@@ -715,7 +717,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                   if (!refs.length) return new Map<string, { before: string; after: string }>()
 
                   const batch = yield* appProcess.run(
-                    ChildProcess.make("git", [...cfg, ...args(["cat-file", "--batch"])], {
+                    ChildProcess.make(gitBinary, [...cfg, ...args(["cat-file", "--batch"])], {
                       cwd: state.directory,
                       extendEnv: true,
                     }),

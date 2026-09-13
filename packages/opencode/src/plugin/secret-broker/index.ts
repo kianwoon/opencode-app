@@ -9,6 +9,7 @@
 // protection is enforced through tool.execute.before instead.
 
 import * as path from "node:path"
+import { readFile } from "node:fs/promises"
 import { Cause, Effect } from "effect"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Plugin } from "@/plugin"
@@ -101,9 +102,11 @@ export class SecretBroker {
 }
 
 async function readIfExists(file: string): Promise<ReadonlyMap<string, string> | undefined> {
-  const handle = Bun.file(file)
-  if (!(await handle.exists())) return undefined
-  return parse(await handle.text()).values
+  // node:fs/promises (not Bun's file API) so this works in the desktop app's
+  // Node sidecar, where the global `Bun` is undefined.
+  const text = await readFile(file, "utf8").catch(() => undefined)
+  if (text === undefined) return undefined
+  return parse(text).values
 }
 
 /** Placeholder used when redaction itself fails: withhold the text entirely. */

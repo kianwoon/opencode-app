@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { Allowlist } from "../../src/plugin/secret-broker/allowlist"
 import { bootstrap } from "../../src/plugin/secret-broker/bootstrap"
-import { parse } from "../../src/plugin/secret-broker/env-loader"
+import { load, parse } from "../../src/plugin/secret-broker/env-loader"
 import { check, denialMessage } from "../../src/plugin/secret-broker/protection"
 import { Redactor, StreamRedactor } from "../../src/plugin/secret-broker/redactor"
 import {
@@ -274,6 +274,36 @@ describe("bootstrap", () => {
     const empty = tmp()
     expect(existsSync(path.join(empty, ".env"))).toBe(false)
     expect((await bootstrap(path.join(empty, ".env"), path.join(empty, ".env.example"))).created).toBe(false)
+  })
+})
+
+describe("runtime-agnostic (desktop Node sidecar has no global Bun)", () => {
+  // The desktop app runs the server in an Electron/Node sidecar where the
+  // global `Bun` is undefined. A `Bun.` reference made the secretBroker plugin
+  // fail to load with "Bun is not defined" and blanked functionality. These
+  // sources must stay on node:fs / node:fs/promises.
+  test("plugin sources contain no Bun.* usage", () => {
+    const dir = path.join(import.meta.dir, "../../src/plugin/secret-broker")
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+      const text = readFileSync(path.join(dir, file), "utf8")
+      // Match `Bun.` as a member access, ignoring prose in comments is not
+      // needed: our comments use `Bun.file` too, so assert on real usage by
+      // rejecting any occurrence of the identifier followed by a dot.
+      expect(text, `${file} must not reference Bun.*`).not.toMatch(/\bBun\./)
+    }
+  })
+
+  test("env-loader.load survives a missing file and reads real files", async () => {
+    const dir = tmp()
+    expect(await load(path.join(dir, "nope.env"))).toBeUndefined()
+    writeFileSync(path.join(dir, "a.env"), "API_KEY=abc123\n")
+    expect((await load(path.join(dir, "a.env")))?.values.get("API_KEY")).toBe("abc123")
+  })
+
+  test("bootstrap is a no-op on absent .env", async () => {
+    const dir = tmp()
+    const result = await bootstrap(path.join(dir, ".env"), path.join(dir, ".env.example"))
+    expect(result.created).toBe(false)
   })
 })
 

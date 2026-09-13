@@ -4,13 +4,20 @@ import fs from "fs/promises"
 import path from "path"
 import { Effect, Schema } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Database } from "@opencode-ai/core/database/database"
 import { ProjectV2 } from "@opencode-ai/core/project"
+import { ProjectDirectories } from "@opencode-ai/core/project/directories"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(AppNodeBuilder.build(ProjectV2.node))
+const itWithDb = testEffect(
+  AppNodeBuilder.build(LayerNode.group([ProjectV2.node, ProjectDirectories.node, Database.node])),
+)
 
 function remoteID(remote: string) {
   return ProjectV2.ID.make(Hash.fast(`git-remote:${remote}`))
@@ -216,6 +223,52 @@ describe("ProjectV2.resolve", () => {
       expect(result.previous).toBe(ProjectV2.ID.make("old-id"))
       expect(result.id).toBe(remoteID("github.com/owner/repo"))
       expect(result.vcs?.type).toBe("git")
+    }),
+  )
+
+  itWithDb.live("falls back to persisted directory mapping when git discovery fails", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const nested = path.join(tmp.path, "a", "b")
+      yield* Effect.promise(() => fs.mkdir(nested, { recursive: true }))
+      // Seed a project_directory row for a non-git directory, mirroring the
+      // persisted mapping present when system git is broken.
+      const stored = AbsolutePath.make(tmp.path)
+      const seeded = ProjectV2.ID.make("db-fallback-project")
+      yield* Database.Service.use(({ db }) =>
+        db
+          .insert(ProjectTable)
+          .values({ id: seeded, worktree: stored, sandboxes: [] })
+          .onConflictDoNothing()
+          .run()
+          .pipe(Effect.orDie),
+      )
+      yield* ProjectDirectories.Service.use((dirs) => dirs.create({ projectID: seeded, directory: stored }))
+      const project = yield* ProjectV2.Service
+
+      const result = yield* project.resolve(AbsolutePath.make(nested))
+
+      expect(result.id).toBe(seeded)
+      expect(result.directory).toBe(stored)
+    }),
+  )
+
+  it.live("returns global when neither git nor a directory mapping resolves", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const project = yield* ProjectV2.Service
+
+      const result = yield* project.resolve(AbsolutePath.make(tmp.path))
+
+      expect(result.id).toBe(ProjectV2.ID.make("global"))
+      expect(path.resolve(result.directory)).toBe(path.parse(tmp.path).root)
+      expect(result.vcs).toBeUndefined()
     }),
   )
 })

@@ -3,6 +3,8 @@
 // single/double quoted values (with `\n`/`\t`/`\"`/`\\` escapes in double
 // quotes), and trailing ` # comment` on unquoted values.
 
+import { readFile } from "node:fs/promises"
+
 const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/
 
 export type Parsed = {
@@ -44,9 +46,11 @@ export function parse(source: string): Parsed {
 
 /** Returns `undefined` when the file does not exist (never throws on absence). */
 export async function load(file: string): Promise<Parsed | undefined> {
-  const handle = Bun.file(file)
-  if (!(await handle.exists())) return undefined
-  return parse(await handle.text())
+  // node:fs/promises (not Bun's file API) so this works in the desktop app's
+  // Node sidecar, where the global `Bun` is undefined.
+  const text = await readFile(file, "utf8").catch(() => undefined)
+  if (text === undefined) return undefined
+  return parse(text)
 }
 
 /** Keys only — used for allowlist snapshots where values must never escape. */
