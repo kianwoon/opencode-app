@@ -1,6 +1,11 @@
 // File-level protection enforced in `tool.execute.before` (throws to block).
 // `permission.ask` is declared in the plugin API but has zero trigger call
 // sites, so it cannot enforce anything — this path is the real gate.
+//
+// Residual risk (documented, spec §17): this denies plaintext reads of a
+// protected FILE. It cannot stop a program that already holds a secret from
+// encoding it as hex/base64 and writing it out, nor from sending it over the
+// network. Those are sandbox/egress concerns, out of scope for the broker.
 
 import * as path from "path"
 import { lstatSync, realpathSync } from "node:fs"
@@ -12,9 +17,12 @@ const FILE_TOOLS = new Set(["read", "edit", "write"])
 // must be inspected instead.
 const COMMAND_TOOLS = new Set(["bash"])
 
-// Verbs that can lift a file's bytes into stdout/argv. A command is denied only
-// when it names BOTH a protected file AND one of these (or redirects FROM a
-// file), so ordinary commands that merely mention `.env` in prose still pass.
+// Verbs/interpreters that can lift a file's bytes into stdout/argv. A command
+// is denied only when it names BOTH a protected file AND one of these (or
+// redirects FROM a file), so ordinary commands that merely mention `.env` in
+// prose still pass. Language interpreters are included because
+// `python -c 'print(open(".env").read())'` reads the file without any shell
+// verb; `tar`/`zip`/`unzip` repackage it.
 const EXFIL_VERBS = new Set([
   "cat",
   "tac",
@@ -47,6 +55,7 @@ const EXFIL_VERBS = new Set([
   "rsync",
   "tar",
   "zip",
+  "unzip",
   "dd",
   "install",
   "open",
@@ -63,21 +72,59 @@ const EXFIL_VERBS = new Set([
   "get-content",
   "read",
   "bat",
+  // Interpreters (spec §16): can read a protected file from inside the process.
+  "python",
+  "python3",
+  "node",
+  "nodejs",
+  "bun",
+  "ruby",
+  "perl",
+  "php",
 ])
 
-// Files the agent must never read or mutate. `.env.example`/`.env.sample` are
-// intentionally readable so the agent can discover required key names.
-const EXEMPT = new Set([".env.example", ".env.sample"])
+// Names that look like a declared contract, not a credential: `.env.example`,
+// `.env.sample`, and the broader template/sample families (`*.template`,
+// `*.example.*`, `*.sample.*`). These stay readable so the agent can discover
+// required key names (spec §8, §15).
+function isExemptName(name: string): boolean {
+  if (name === ".env.example" || name === ".env.sample") return true
+  if (name.endsWith(".template")) return true
+  if (name.includes(".example.") || name.includes(".sample.")) return true
+  return false
+}
 
 function isProtected(basename: string): boolean {
   // Case-fold so `.ENV` / `ID_RSA` cannot slip past on case-insensitive or
   // case-preserving filesystems.
   const name = basename.toLowerCase()
   if (name === ".env" || name === ".envrc") return true
-  if (name.startsWith(".env.")) return !EXEMPT.has(name)
+  if (name.startsWith(".env.")) return !isExemptName(name)
   if (name.endsWith(".pem") || name.endsWith(".key")) return true
   if (name.startsWith("id_rsa") || name.startsWith("id_ed25519")) return true
   return false
+}
+
+// Home/credential paths beyond the project .env (spec §15 optional set). Kept
+// CONSERVATIVE: any path segment ending in one of these is denied, even if it
+// is a project-relative directory with the same name. Segment matching (not a
+// bare basename) avoids denying every file called `config` or `credentials`.
+const HOME_SUFFIXES = [
+  ".aws/credentials",
+  ".npmrc",
+  ".pypirc",
+  ".kube/config",
+  ".docker/config.json",
+]
+
+function isProtectedPath(fullPath: string): boolean {
+  const normalized = fullPath.replace(/\\/g, "/").toLowerCase()
+  for (const suffix of HOME_SUFFIXES) {
+    if (normalized === suffix || normalized.endsWith(`/${suffix}`)) return true
+  }
+  // Any file inside an `.ssh` directory (id_rsa/id_ed25519 are also caught by
+  // isProtected; this covers the rest of ~/.ssh/*).
+  return normalized === ".ssh" || normalized.endsWith("/.ssh") || normalized.includes("/.ssh/")
 }
 
 /** Best-effort realpath so a symlink whose target basename differs from its
@@ -134,7 +181,7 @@ const WRAPPERS = new Set(["sudo", "doas", "env", "command", "exec", "nohup", "ti
 
 function segmentDenial(segment: string): Denial | undefined {
   const tokens = segment.split(/\s+/).filter((token) => token.length > 0)
-  const target = tokens.find((token) => isProtected(unquote(token)))
+  const target = tokens.find((token) => isProtected(unquote(token)) || isProtectedPath(token.replace(TOKEN_NOISE, "")))
   if (target === undefined) return undefined
   // The reading verb is in COMMAND position (first non-wrapper token); a word
   // like `read` passed as an echo argument must not disqualify the command.
@@ -165,28 +212,73 @@ function checkCommand(args: unknown): Denial | undefined {
 
 export type Denial = { tool: string; filePath: string }
 
+/** Recursively collects every string leaf from an arbitrary tool-arg structure
+ *  (objects, arrays, nested). Bounded depth so a cyclic/hostile object cannot
+ *  hang the gate. */
+function collectStrings(value: unknown, out: string[], depth = 0): void {
+  if (depth > 8) return
+  if (typeof value === "string") {
+    out.push(value)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStrings(item, out, depth + 1)
+    return
+  }
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) collectStrings(item, out, depth + 1)
+  }
+}
+
+/** P1-d: ANY tool (not just read/edit/write) whose string arg RESOLVES to a
+ *  protected basename is denied. Each string leaf is treated as a PATH (basename
+ *  after stripping quotes/flags), so a path-valued arg (`/repo/.env`,
+ *  `--file=.env`, `~/.aws/credentials`) is caught while a PROSE sentence that
+ *  merely contains the word `.env` (`"set API_KEY in .env"`) is not — its
+ *  basename is the whole string, not `.env`. This keeps agent work uninterrupted.
+ *  Command strings passed to a non-bash tool are out of scope here; the `bash`
+ *  path (checkCommand) inspects those. `.env.example` and its sample/template
+ *  siblings stay exempt (spec §15). */
+function sweepArgs(tool: string, args: unknown): Denial | undefined {
+  const strings: string[] = []
+  collectStrings(args, strings)
+  for (const string of strings) {
+    const trimmed = string.trim()
+    if (trimmed.length === 0) continue
+    if (isProtectedPath(trimmed)) return { tool, filePath: trimmed }
+    const cleaned = trimmed.replace(TOKEN_NOISE, "").replace(ASSIGN_PREFIX, "")
+    const basename = path.basename(cleaned)
+    if (isProtected(basename)) return { tool, filePath: trimmed }
+  }
+  return undefined
+}
+
 /** Returns a Denial when the tool call must be blocked, otherwise undefined. */
 export function check(tool: string, args: unknown): Denial | undefined {
   if (COMMAND_TOOLS.has(tool)) return checkCommand(args)
-  if (!FILE_TOOLS.has(tool)) return undefined
-  // Accept both `filePath` (current read/edit/write schemas) and `path` so a
-  // future schema rename cannot silently disable protection.
-  const record = args as { filePath?: unknown; path?: unknown } | undefined
-  const candidate = record?.filePath ?? record?.path
-  const filePath = typeof candidate === "string" ? candidate : undefined
-  if (filePath === undefined || filePath.length === 0) return undefined
-  const trimmed = filePath.trim()
-  const literal = path.basename(trimmed)
-  const literalProtected = isProtected(literal)
-  if (literalProtected) return { tool, filePath }
-  const resolved = resolvedBasename(trimmed)
-  // Fail CLOSED: realpath failed (ELOOP/ENOENT/…) on something that is itself a
-  // symlink — a broken/looping link named `readme.txt` pointing at the denied
-  // set must not slip through on its harmless link name.
-  if (resolved === undefined) return isUnresolvedSymlink(trimmed) ? { tool, filePath } : undefined
-  // The link resolves to a different real file: if EITHER name is protected, deny.
-  if (resolved !== literal && (isProtected(resolved) || literalProtected)) return { tool, filePath }
-  return undefined
+  if (FILE_TOOLS.has(tool)) {
+    // Accept both `filePath` (current read/edit/write schemas) and `path` so a
+    // future schema rename cannot silently disable protection.
+    const record = args as { filePath?: unknown; path?: unknown } | undefined
+    const candidate = record?.filePath ?? record?.path
+    const filePath = typeof candidate === "string" ? candidate : undefined
+    if (filePath === undefined || filePath.length === 0) return undefined
+    const trimmed = filePath.trim()
+    if (isProtectedPath(trimmed)) return { tool, filePath }
+    const literal = path.basename(trimmed)
+    const literalProtected = isProtected(literal)
+    if (literalProtected) return { tool, filePath }
+    const resolved = resolvedBasename(trimmed)
+    // Fail CLOSED: realpath failed (ELOOP/ENOENT/…) on something that is itself a
+    // symlink — a broken/looping link named `readme.txt` pointing at the denied
+    // set must not slip through on its harmless link name.
+    if (resolved === undefined) return isUnresolvedSymlink(trimmed) ? { tool, filePath } : undefined
+    // The link resolves to a different real file: if EITHER name is protected, deny.
+    if (resolved !== literal && (isProtected(resolved) || literalProtected)) return { tool, filePath }
+    return undefined
+  }
+  // Every other tool: sweep string args for a protected basename.
+  return sweepArgs(tool, args)
 }
 
 /** Message intentionally omits any file contents. */

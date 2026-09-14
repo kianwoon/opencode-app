@@ -7,14 +7,25 @@
 //
 // `permission.ask` is DECLARED but DEAD (no trigger call sites) — file
 // protection is enforced through tool.execute.before instead.
+//
+// Streaming sink (P2-j): the plugin API exposes no per-chunk stream hook, so the
+// model-visible channel is covered at the FINAL-RESULT boundaries that DO exist —
+// `tool.execute.after` (success), `redactOnFailure` (thrown tools), and
+// `experimental.chat.messages.transform` (before every step + compaction). A
+// chunk-boundary-safe `StreamRedactor` already exists (redactor.ts, retain =
+// longest-1) and is proven by the "split secret across two chunks" /
+// "byte-by-byte" cases in secret-broker.test.ts; if OpenCode later adds a stream
+// hook, wrap its sink with `new StreamRedactor(broker.redactor)` with no other
+// change. Network exfiltration is explicitly out of scope (design §17).
 
 import * as path from "node:path"
-import { readFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { Cause, Effect } from "effect"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Plugin } from "@/plugin"
 import { errorMessage } from "@/util/error"
 import { Allowlist } from "./allowlist"
+import { audit } from "./audit"
 import { bootstrap } from "./bootstrap"
 import { parse } from "./env-loader"
 import { check, denialMessage } from "./protection"
@@ -29,23 +40,48 @@ const ENV_FILE = ".env"
 const EXAMPLE_FILE = ".env.example"
 
 /**
- * Holds the per-directory broker state. The allowlist and redactor are frozen
- * from the startup snapshot so mid-session edits to .env(.example) never widen
- * what gets injected (Threat F).
+ * Holds the per-directory broker state. The allowlist is frozen from the startup
+ * snapshot so mid-session edits to `.env.example` never WIDEN what gets injected
+ * (Threat F) — `reload` can only shrink/refresh, never add keys. Values are
+ * re-read when `.env`'s mtime changes (design §25 option 2, P1-b).
  */
 export class SecretBroker {
+  private allowlist: Allowlist
+  private redactor: Redactor
+  private injected: ReadonlyMap<string, string>
+  private missing: readonly string[]
+  private malformed: readonly string[]
+  /** Session-frozen key set: reload may never expand injection beyond this. */
+  private readonly baseline: ReadonlySet<string>
+  private readonly envPath: string
+  private readonly examplePath: string
+  private readonly minLength: number
+  private envMtime: number | undefined
+  private exampleMtime: number | undefined
+
   private constructor(
-    private readonly allowlist: Allowlist,
-    private readonly redactor: Redactor,
-    /** Allowlist-filtered values captured at startup; the ONLY source injected
-     *  into shell.env, so an undeclared key can never leak into the child
-     *  environment even if filter logic drifts. Missing allowlisted keys are
-     *  simply absent. Note the REDACTOR is built from a wider set (every parsed
-     *  .env value), so a non-allowlisted value is never injected yet still
-     *  cannot surface through tool output. */
-    private readonly injected: ReadonlyMap<string, string>,
-    private readonly missing: readonly string[],
-  ) {}
+    state: {
+      allowlist: Allowlist
+      redactor: Redactor
+      injected: ReadonlyMap<string, string>
+      missing: readonly string[]
+      malformed: readonly string[]
+      baseline: ReadonlySet<string>
+    },
+    paths: { envPath: string; examplePath: string; minLength: number; envMtime?: number; exampleMtime?: number },
+  ) {
+    this.allowlist = state.allowlist
+    this.redactor = state.redactor
+    this.injected = state.injected
+    this.missing = state.missing
+    this.malformed = state.malformed
+    this.baseline = state.baseline
+    this.envPath = paths.envPath
+    this.examplePath = paths.examplePath
+    this.minLength = paths.minLength
+    this.envMtime = paths.envMtime
+    this.exampleMtime = paths.exampleMtime
+  }
 
   static async create(
     directory: string,
@@ -58,39 +94,90 @@ export class SecretBroker {
     await bootstrap(envPath, examplePath)
 
     const allowlist = await Allowlist.snapshot(examplePath)
-    const parsed = await readIfExists(envPath)
-    const declared = parsed ?? new Map<string, string>()
-    // Every non-empty value is injected regardless of length: a short secret is
-    // still a credential, and the redactor now covers short values with
-    // key-anchored + word-boundary matching, so it is never unredactable. Only
-    // length-0 (unset) values are withheld.
-    const { env, missing } = allowlist.select(declared, 1)
-
-    // INJECTION is allowlisted-only (threat F): only `env` reaches shell.env.
-    // REDACTION covers EVERY parsed .env value, so an undeclared secret (e.g.
-    // `cat .env` echoed through a tool result) is rewritten to its
-    // `secret://project/KEY` handle even though it is never injected. Values
-    // >= `minLength` get exact + encoded matching; shorter values get
-    // key-anchored + word-boundary matching to avoid false positives.
-    const redactable = [...declared.entries()]
-      .filter(([, value]) => value.length > 0)
-      .map(([key, value]) => ({ key, value }))
-    const injected = new Map(Object.entries(env))
-    return new SecretBroker(allowlist, new Redactor(redactable, minLength), injected, missing)
+    // Baseline frozen at startup (Threat F / design §29).
+    const baseline = new Set(allowlist.names())
+    const parsed = await parseFile(envPath)
+    const derived = derive(allowlist, parsed.values, minLength)
+    const broker = new SecretBroker(
+      { allowlist, ...derived, malformed: parsed.malformed, baseline },
+      {
+        envPath,
+        examplePath,
+        minLength,
+        envMtime: await mtime(envPath),
+        exampleMtime: await mtime(examplePath),
+      },
+    )
+    broker.reportStartup()
+    return broker
   }
 
-  /** Allowlisted values present at startup, injected verbatim. */
+  /** §25 reload: stat `.env`/`.env.example`; if either mtime changed, re-parse
+   *  and REBUILD the redactor + allowlist + injected map. Called immediately
+   *  before every shell spawn, so a value edited in `.env` refreshes and a newly
+   *  added value becomes redactable on the next process launch. The allowlist is
+   *  re-derived against the session baseline, so an edit can never expand it. */
+  async reload(): Promise<void> {
+    const envMtime = await mtime(this.envPath)
+    const exampleMtime = await mtime(this.examplePath)
+    if (envMtime === this.envMtime && exampleMtime === this.exampleMtime) return
+
+    const parsed = await parseFile(this.envPath)
+    await this.allowlist.refresh(this.examplePath, this.baseline)
+    const derived = derive(this.allowlist, parsed.values, this.minLength)
+    this.redactor = derived.redactor
+    this.injected = derived.injected
+    this.missing = derived.missing
+    this.malformed = parsed.malformed
+    this.envMtime = envMtime
+    this.exampleMtime = exampleMtime
+    this.reportStartup()
+  }
+
+  private reportStartup(): void {
+    audit({
+      action: "startup",
+      allowlisted: this.allowlist.size,
+      injected: this.injected.size,
+      missing: this.missing,
+      malformed: this.malformed,
+    })
+  }
+
+  /** Allowlisted values present, injected verbatim. */
   shellEnv(): Record<string, string> {
     return Object.fromEntries(this.injected)
   }
 
-  /** Non-secret diagnostic: names of allowlisted keys that were unset. */
-  diagnostics(): { allowlisted: number; missing: readonly string[] } {
-    return { allowlisted: this.allowlist.size, missing: this.missing }
+  /** Applies broker values onto a child env object (P1-c precedence, design §22:
+   *  protected allowlisted keys are OVERWRITTEN by the broker; every other
+   *  pre-existing key in `target` is left untouched, so a user's non-secret
+   *  environment wins for anything the broker does not manage). Values are
+   *  allowlisted-only, so this can never inject an undeclared key. */
+  applyTo(target: Record<string, string>): void {
+    for (const [key, value] of this.injected) target[key] = value
   }
 
-  redact(input: string): string {
-    return this.redactor.redact(input)
+  /** Non-secret diagnostic: counts + key NAMES only. */
+  diagnostics(): {
+    allowlisted: number
+    injected: number
+    missing: readonly string[]
+    malformed: readonly string[]
+    names: readonly string[]
+  } {
+    return {
+      allowlisted: this.allowlist.size,
+      injected: this.injected.size,
+      missing: this.missing,
+      malformed: this.malformed,
+      names: this.allowlist.names(),
+    }
+  }
+
+  /** Redacts and reports each redacted key NAME (metadata-only audit). */
+  redact(input: string, report?: (key: string) => void): string {
+    return this.redactor.redact(input, report)
   }
 
   redactDeep<T>(value: T): T {
@@ -104,12 +191,34 @@ export class SecretBroker {
   }
 }
 
-async function readIfExists(file: string): Promise<ReadonlyMap<string, string> | undefined> {
+type Derived = {
+  redactor: Redactor
+  injected: ReadonlyMap<string, string>
+  missing: readonly string[]
+}
+
+/** Builds the redactor (EVERY parsed value) and the injected map (allowlisted
+ *  values only) from a raw `KEY -> value` map. Values are never logged. */
+function derive(allowlist: Allowlist, declared: ReadonlyMap<string, string>, minLength: number): Derived {
+  const { env, missing } = allowlist.select(declared, 1)
+  const redactable = [...declared.entries()]
+    .filter(([, value]) => value.length > 0)
+    .map(([key, value]) => ({ key, value }))
+  return { redactor: new Redactor(redactable, minLength), injected: new Map(Object.entries(env)), missing }
+}
+
+async function parseFile(file: string): Promise<{ values: ReadonlyMap<string, string>; malformed: readonly string[] }> {
   // node:fs/promises (not Bun's file API) so this works in the desktop app's
   // Node sidecar, where the global `Bun` is undefined.
   const text = await readFile(file, "utf8").catch(() => undefined)
-  if (text === undefined) return undefined
-  return parse(text).values
+  if (text === undefined) return { values: new Map<string, string>(), malformed: [] }
+  const parsed = parse(text)
+  return { values: parsed.values, malformed: parsed.malformed }
+}
+
+async function mtime(file: string): Promise<number | undefined> {
+  const info = await stat(file).catch(() => undefined)
+  return info?.mtimeMs
 }
 
 /** Placeholder used when redaction itself fails: withhold the text entirely. */
@@ -210,21 +319,37 @@ export async function secretBrokerPlugin(
   const broker = await SecretBroker.create(input.directory, options)
 
   return {
-    "shell.env": async (_input, output) => {
-      Object.assign(output.env, broker.shellEnv())
+    "shell.env": async (hookInput, output) => {
+      // §25: refresh from disk immediately before the process launches.
+      await broker.reload()
+      broker.applyTo(output.env)
+      // Metadata-only audit: names + ids, never values.
+      for (const key of Object.keys(broker.shellEnv())) {
+        audit({ action: "inject", key, pid: process.pid, sessionID: hookInput.sessionID, callID: hookInput.callID })
+      }
     },
 
     "tool.execute.before": async (hookInput, output) => {
       const denial = check(hookInput.tool, output.args)
-      if (denial) throw new Error(denialMessage(denial))
+      if (!denial) return
+      audit({
+        action: "block",
+        tool: denial.tool,
+        filePath: denial.filePath,
+        sessionID: hookInput.sessionID,
+        callID: hookInput.callID,
+      })
+      throw new Error(denialMessage(denial))
     },
 
-    "tool.execute.after": async (_hookInput, output) => {
+    "tool.execute.after": async (hookInput, output) => {
       // Fail-closed (spec §31): if redaction throws we must never forward the
       // raw output. Replace with a safe placeholder instead.
+      const report = (key: string) =>
+        audit({ action: "redact", key, tool: hookInput.tool, sessionID: hookInput.sessionID, callID: hookInput.callID })
       try {
-        if (typeof output.output === "string") output.output = broker.redact(output.output)
-        if (typeof output.title === "string") output.title = broker.redact(output.title)
+        if (typeof output.output === "string") output.output = broker.redact(output.output, report)
+        if (typeof output.title === "string") output.title = broker.redact(output.title, report)
         if (output.metadata !== undefined) output.metadata = broker.redactDeep(output.metadata)
       } catch {
         output.output = "[secret-broker] redaction failed; output withheld to avoid leaking secrets."
@@ -265,7 +390,8 @@ export default secretBrokerPlugin
 
 // Also expose the internals for focused tests / advanced wiring.
 export { Allowlist } from "./allowlist"
+export { audit } from "./audit"
 export { bootstrap } from "./bootstrap"
 export { parse, load, loadKeys } from "./env-loader"
 export { check, denialMessage } from "./protection"
-export { Redactor } from "./redactor"
+export { Redactor, StreamRedactor } from "./redactor"

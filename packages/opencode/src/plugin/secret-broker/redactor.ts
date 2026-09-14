@@ -121,7 +121,15 @@ function shortPattern(entries: readonly Entry[]): { pattern: RegExp; entries: re
   return { pattern: new RegExp(alternatives.join("|"), "g"), entries }
 }
 
-function redactShort(input: string, matcher: { pattern: RegExp; entries: readonly Entry[] }): string {
+/** Callback invoked with a key NAME whenever that key was redacted. Used for
+ *  metadata-only audit (spec §23) — never receives a value. */
+export type RedactReport = (key: string) => void
+
+function redactShort(
+  input: string,
+  matcher: { pattern: RegExp; entries: readonly Entry[] },
+  report?: RedactReport,
+): string {
   return input.replace(matcher.pattern, (...args: unknown[]) => {
     const groups = args[args.length - 1] as Record<string, string | undefined>
     const index = matcher.entries.findIndex(
@@ -130,6 +138,7 @@ function redactShort(input: string, matcher: { pattern: RegExp; entries: readonl
     const entry = matcher.entries[index]
     if (entry === undefined) return String(args[0])
     const replacement = `${SCHEME}/${entry.key}`
+    report?.(entry.key)
     return groups[`val${index}`] === undefined
       ? replacement
       : `${groups[`pre${index}`] ?? ""}${replacement}${groups[`post${index}`] ?? ""}`
@@ -189,12 +198,14 @@ export class Redactor {
     return `${SCHEME}/${key}`
   }
 
-  redact(input: string): string {
+  redact(input: string, report?: RedactReport): string {
     let out = input
     for (const entry of this.entries) {
-      if (out.includes(entry.value)) out = out.split(entry.value).join(this.replacement(entry.key))
+      if (!out.includes(entry.value)) continue
+      out = out.split(entry.value).join(this.replacement(entry.key))
+      report?.(entry.key)
     }
-    return this.short === undefined ? out : redactShort(out, this.short)
+    return this.short === undefined ? out : redactShort(out, this.short, report)
   }
 
   /** Recursively redacts strings anywhere in the structure; leaves other

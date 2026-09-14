@@ -725,3 +725,122 @@ describe("redaction helpers (fail-closed)", () => {
     expect(called).toBe(false)
   })
 })
+
+describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
+  test("(a) reload refreshes a mid-session .env edit: new value injected + redacted", async () => {
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), "API_KEY=firstvalue\n")
+    const broker = await SecretBroker.create(dir)
+    expect(broker.shellEnv()).toEqual({ API_KEY: "firstvalue" })
+    await Bun.sleep(25)
+    writeFileSync(path.join(dir, ".env"), "API_KEY=secondvalue\n")
+    await broker.reload()
+    expect(broker.shellEnv()).toEqual({ API_KEY: "secondvalue" })
+    expect(broker.redact("leak secondvalue")).toBe("leak secret://project/API_KEY")
+    // The stale value is no longer a secret; only the live one is redacted.
+    expect(broker.redact("leak firstvalue")).toBe("leak firstvalue")
+  })
+
+  test("(b) precedence: allowlisted overwritten, non-allowlisted preserved", async () => {
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), "API_KEY=brokervalue\n")
+    const broker = await SecretBroker.create(dir)
+    const target: Record<string, string> = { PATH: "/usr/bin", API_KEY: "user-value", USER: "me" }
+    broker.applyTo(target)
+    expect(target.API_KEY).toBe("brokervalue")
+    expect(target.PATH).toBe("/usr/bin")
+    expect(target.USER).toBe("me")
+    expect(target.UNDECLARED).toBeUndefined()
+  })
+
+  test("(c) interpreter/tar referencing .env denied via the real before-hook", async () => {
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+    const hooks = await secretBrokerPlugin({ directory: dir } as never)
+    const before = hooks["tool.execute.before"]!
+    for (const command of ["python3 .env", "python .env", "node .env", "tar cf out.tar .env"]) {
+      await expect(before({ tool: "bash", sessionID: "s", callID: "c" }, { args: { command } }), command).rejects.toThrow(
+        /Secret Broker blocked bash/,
+      )
+    }
+    await expect(
+      before({ tool: "bash", sessionID: "s", callID: "c" }, { args: { command: "cat .env.example" } }),
+    ).resolves.toBeUndefined()
+  })
+
+  test("(d) home credential paths denied; ordinary project files allowed", () => {
+    for (const filePath of [
+      "/home/u/.aws/credentials",
+      "/home/u/.npmrc",
+      "/home/u/.ssh/known_hosts",
+      "/home/u/.kube/config",
+      "/home/u/.docker/config.json",
+    ]) {
+      expect(check("read", { filePath }), filePath).toBeDefined()
+    }
+    expect(check("read", { filePath: "/repo/src/config.ts" })).toBeUndefined()
+  })
+
+  test("(e) any-tool sweep denies a protected path arg on a non-file tool", () => {
+    expect(check("webfetch", { url: "/repo/.env" })).toBeDefined()
+    expect(check("grep", { pattern: "API", path: "/repo/.env" })).toBeDefined()
+    expect(check("custom", { a: ["ok", "/repo/.aws/credentials"] })).toBeDefined()
+    expect(check("webfetch", { url: "https://example.com/set-API_KEY-in-.env" })).toBeUndefined()
+  })
+
+  test("(f) template/sample siblings exempt while real secret files stay denied", () => {
+    expect(check("read", { filePath: "/p/.env.example" })).toBeUndefined()
+    expect(check("read", { filePath: "/p/config.template" })).toBeUndefined()
+    expect(check("bash", { command: "cat .env.template" })).toBeUndefined()
+    expect(check("read", { filePath: "/p/.env" })).toBeDefined()
+    expect(check("read", { filePath: "/p/.env.production" })).toBeDefined()
+  })
+
+  test("(g) multiline double-quoted value parses with escapes", () => {
+    const escaped = parse('PRIVATE_KEY="-----BEGIN\\nline2\\nline3-----"\nAFTER=ok\n')
+    expect(escaped.values.get("PRIVATE_KEY")).toBe("-----BEGIN\nline2\nline3-----")
+    expect(escaped.values.get("AFTER")).toBe("ok")
+    const physical = parse('CERT="a\nb"\nD=1\n')
+    expect(physical.values.get("CERT")).toBe("a\nb")
+    expect(physical.values.get("D")).toBe("1")
+  })
+
+  test("(h) malformed lines report key NAMES only, never values", () => {
+    const parsed = parse("GOOD=1\nNO_EQUALS should_not_appear\n=broken\nBROKEN KEY=supersecretvalue\n")
+    expect(parsed.keys.has("GOOD")).toBe(true)
+    expect(parsed.malformed).toContain("NO_EQUALS")
+    const reported = parsed.malformed.join(" ")
+    expect(reported).not.toContain("should_not_appear")
+    expect(reported).not.toContain("supersecretvalue")
+    expect(reported).not.toContain("BROKEN KEY")
+  })
+
+  test("(i) audit lines carry key names but never secret values", async () => {
+    const dir = tmp()
+    const secret = "sk-auditcanary0123456789"
+    writeFileSync(path.join(dir, ".env.example"), "AUDIT_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), `AUDIT_KEY=${secret}\n`)
+    const lines: string[] = []
+    const original = console.error
+    const capture = (...args: unknown[]) => {
+      lines.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "))
+    }
+    console.error = capture as unknown as typeof console.error
+    const hooks = await secretBrokerPlugin({ directory: dir } as never)
+    const env = { env: {} as Record<string, string> }
+    await hooks["shell.env"]!({ cwd: dir }, env as never)
+    const output = { title: "bash", output: `leaked ${secret}`, metadata: {} }
+    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
+    console.error = original
+    const joined = lines.join("\n")
+    expect(joined).toContain("startup")
+    expect(joined).toContain("inject")
+    expect(joined).toContain("AUDIT_KEY")
+    expect(env.env.AUDIT_KEY).toBe(secret)
+    expect(joined).not.toContain(secret)
+    expect(joined).not.toContain(Buffer.from(secret, "utf8").toString("base64"))
+  })
+})

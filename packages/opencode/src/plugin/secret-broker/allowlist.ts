@@ -2,6 +2,11 @@
 // mid-session MUST NOT expand what shell.env injects. The snapshot is frozen at
 // plugin init (or explicitly via `refresh`) and never re-read. Keys absent at
 // snapshot time are never injected even if later declared.
+//
+// `refresh` is used by the broker's §25 reload path. To keep Threat F intact it
+// accepts an optional `baseline`: the reload may SHRINK or update the key set
+// (a key removed from .env.example stops being injected) but can never ADD a key
+// that was not present at session start.
 
 import { loadKeys } from "./env-loader"
 
@@ -12,9 +17,9 @@ export class Allowlist {
     this.keys = keys
   }
 
-  static async snapshot(exampleFile: string): Promise<Allowlist> {
+  static async snapshot(exampleFile: string, baseline?: ReadonlySet<string>): Promise<Allowlist> {
     const keys = (await loadKeys(exampleFile)) ?? new Set<string>()
-    return new Allowlist(keys)
+    return new Allowlist(baseline === undefined ? keys : intersect(keys, baseline))
   }
 
   static empty(): Allowlist {
@@ -29,9 +34,16 @@ export class Allowlist {
     return this.keys.size
   }
 
-  /** Only used at explicit re-init boundaries, never from hook handlers. */
-  async refresh(exampleFile: string): Promise<void> {
-    this.keys = (await loadKeys(exampleFile)) ?? new Set<string>()
+  /** Frozen key names, sorted. Names only — never values (spec §23). */
+  names(): string[] {
+    return [...this.keys].sort()
+  }
+
+  /** Only used at explicit re-init boundaries, never from hook handlers. When
+   *  `baseline` is provided the result can never expand the session key set. */
+  async refresh(exampleFile: string, baseline?: ReadonlySet<string>): Promise<void> {
+    const keys = (await loadKeys(exampleFile)) ?? new Set<string>()
+    this.keys = baseline === undefined ? keys : intersect(keys, baseline)
   }
 
   /** Filters declared values down to the frozen allowlist. Only length-0 (unset)
@@ -48,4 +60,10 @@ export class Allowlist {
     }
     return { env, missing }
   }
+}
+
+function intersect(keys: ReadonlySet<string>, baseline: ReadonlySet<string>): ReadonlySet<string> {
+  const out = new Set<string>()
+  for (const key of keys) if (baseline.has(key)) out.add(key)
+  return out
 }
