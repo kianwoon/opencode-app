@@ -17,6 +17,14 @@ const FILE_TOOLS = new Set(["read", "edit", "write"])
 // must be inspected instead.
 const COMMAND_TOOLS = new Set(["bash"])
 
+// Code/script execution tools whose payload does NOT live under `command`, so
+// the bash scanner above never saw it (spec §11.2, §16). MCP tools are keyed
+// `<server>_<tool>` with the server name sanitized but `-` preserved
+// (mcp/catalog.ts), and the built-in code-mode tool id is `execute`. This is
+// the live shell-exec bypass: `context-mode_execute` ran arbitrary code that
+// read `.env` while `check` returned undefined.
+const CODE_EXEC_TOOLS = new Set(["execute", "context-mode_execute", "context-mode_batch_execute"])
+
 // Verbs/interpreters that can lift a file's bytes into stdout/argv. A command
 // is denied only when it names BOTH a protected file AND one of these (or
 // redirects FROM a file), so ordinary commands that merely mention `.env` in
@@ -81,6 +89,42 @@ const EXFIL_VERBS = new Set([
   "ruby",
   "perl",
   "php",
+])
+
+// Code-API identifiers that, together with a protected-file reference inside a
+// CODE_EXEC_TOOLS payload, mark an exfiltration attempt: file-read helpers and
+// network/spawn sinks (the incident: read `.env`, loop its keys, `curl` them to
+// an external host). Matched as whole case-folded identifier tokens so prose
+// like `"set API_KEY in .env"` is not disqualified. `EXFIL_VERBS` already covers
+// the shell verbs (`cat`, `open`, `curl`, …) for these same payloads.
+const CODE_SINKS = new Set([
+  "readfile",
+  "readfilesync",
+  "readtext",
+  "readtextsync",
+  "readlines",
+  "opensync",
+  "load",
+  "getenv",
+  "environ",
+  "fetch",
+  "axios",
+  "request",
+  "requests",
+  "urlopen",
+  "urllib",
+  "http",
+  "https",
+  "socket",
+  "exec",
+  "execsync",
+  "execcommand",
+  "spawn",
+  "spawnsync",
+  "popen",
+  "child_process",
+  "subprocess",
+  "system",
 ])
 
 // Names that look like a declared contract, not a credential: `.env.example`,
@@ -253,9 +297,53 @@ function sweepArgs(tool: string, args: unknown): Denial | undefined {
   return undefined
 }
 
+/** Finds the first protected file reference inside a code/script payload.
+ *  Tokens keep `.` and `/` (so `.env`, `/p/.env`, `~/.aws/credentials` survive)
+ *  and drop quotes/operators, so a string literal `".env"` is seen as `.env`
+ *  while prose whose whole basename is not protected is not. */
+function codeFileTarget(source: string): string | undefined {
+  return source
+    .split(/[\s"`'()\[\]{},;:=!+*&|<>@#]+/)
+    .map((token) => token.replace(TOKEN_NOISE, "").replace(ASSIGN_PREFIX, ""))
+    .find((token) => token.length > 0 && (isProtected(path.basename(token)) || isProtectedPath(token)))
+}
+
+/** Denies a code payload that both references a protected file AND calls a
+ *  read/network/exec sink (`readFileSync`, `fetch`, `curl`, `subprocess`, …).
+ *  Both must appear in the SAME string leaf, so a benign call is not caught by
+ *  a protected name mentioned in a different argument. Sinks are matched as
+ *  whole case-folded identifiers (split on every non-word char, so
+ *  `fs.readFileSync` yields `readfilesync`). */
+function codeDenial(tool: string, source: string): Denial | undefined {
+  const target = codeFileTarget(source)
+  if (target === undefined) return undefined
+  const hit = source
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/)
+    .some((token) => CODE_SINKS.has(token) || EXFIL_VERBS.has(token))
+  return hit ? { tool, filePath: target } : undefined
+}
+
+/** Scans every string leaf of a code-exec tool's args. Shell-shaped leaves
+ *  (`context-mode_batch_execute` commands) go through the command scanner;
+ *  code leaves (`context-mode_execute` / `execute`) through the source scanner.
+ *  Fail-closed on a match, allow otherwise. */
+function checkExecArgs(tool: string, args: unknown): Denial | undefined {
+  const strings: string[] = []
+  collectStrings(args, strings)
+  for (const source of strings) {
+    const viaCommand = checkCommand({ command: source })
+    if (viaCommand) return { tool, filePath: viaCommand.filePath }
+    const viaCode = codeDenial(tool, source)
+    if (viaCode) return viaCode
+  }
+  return undefined
+}
+
 /** Returns a Denial when the tool call must be blocked, otherwise undefined. */
 export function check(tool: string, args: unknown): Denial | undefined {
   if (COMMAND_TOOLS.has(tool)) return checkCommand(args)
+  if (CODE_EXEC_TOOLS.has(tool)) return checkExecArgs(tool, args)
   if (FILE_TOOLS.has(tool)) {
     // Accept both `filePath` (current read/edit/write schemas) and `path` so a
     // future schema rename cannot silently disable protection.
