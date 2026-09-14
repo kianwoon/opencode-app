@@ -7,10 +7,10 @@ import { McpCatalog } from "@/mcp/catalog"
  * Client-side MCP tool-search deferral (Claude Code "tool search" parity):
  * when MCP tool definitions would flood the context window, keep only a compact
  * catalog (names + truncated descriptions + server instructions) in context and
- * promote full definitions on demand through the `tool_search` tool.
+ * promote full definitions on demand through the `find_tools` tool.
  *
  * Promotion state is per session: once the model surfaces a tool via
- * `tool_search`, it stays in the tools array while context allows. When
+ * `find_tools`, it stays in the tools array while context allows. When
  * accumulated promotions would re-exceed the deferral threshold, the
  * least-recently promoted tools are demoted back into the catalog and can be
  * re-found with another search. `alwaysLoad` servers bypass deferral entirely.
@@ -70,7 +70,7 @@ export interface Deferral {
   inline: Record<string, MCP.McpTool>
   /** Deferred tools, keyed as they appear in the catalog. */
   deferred: Record<string, MCP.McpTool>
-  /** Rendered compact catalog for the tool_search description (empty when nothing is deferred). */
+  /** Rendered compact catalog for the find_tools description (empty when nothing is deferred). */
   catalog: string
 }
 
@@ -109,7 +109,7 @@ export function plan(input: {
   // Promotion is sticky but not unbounded: when accumulated promotions would
   // push inline bytes back over the threshold, demote the least-recently
   // promoted tools (they return to the deferred catalog and can be re-found
-  // with another tool_search). alwaysLoad tools are never demoted.
+  // with another find_tools). alwaysLoad tools are never demoted.
   const alwaysLoadBytes = Object.entries(input.tools)
     .filter(([key]) => alwaysLoad.has(serverOf(key)))
     .reduce((sum, [, entry]) => sum + McpCatalog.definitionBytes(entry.def), 0)
@@ -142,7 +142,7 @@ export function plan(input: {
 }
 
 /**
- * Match a tool_search query against the deferred catalog and promote hits.
+ * Match a find_tools query against the deferred catalog and promote hits.
  * Exact key match wins; otherwise case-insensitive substring match over
  * key, native tool name, and description. Already-inline tools are skipped.
  */
@@ -170,7 +170,7 @@ export function search(input: {
   return { keys }
 }
 
-/** Result body for a tool_search call: promoted tools' full definitions as JSON. */
+/** Result body for a find_tools call: promoted tools' full definitions as JSON. */
 export function formatResults(input: { tools: Record<string, MCP.McpTool>; keys: string[] }) {
   if (input.keys.length === 0)
     return "No matching MCP tools found. Try a shorter query or a server/tool name from the catalog."

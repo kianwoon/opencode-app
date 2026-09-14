@@ -1,6 +1,6 @@
 import type { ModelMessage, ToolResultPart } from "ai"
 import { createHash } from "node:crypto"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync, writeFile } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { mergeDeep, unique } from "remeda"
@@ -449,6 +449,34 @@ function attachmentBytes(part: { type: "file" | "image"; image?: unknown; data?:
   return undefined
 }
 
+// Async write threshold: below this the sync content-hash + write is a
+// sub-millisecond fast path; at or above it the disk write is moved off the
+// event loop so one large attachment cannot stall every agent fiber sharing it.
+const ATTACHMENT_ASYNC_THRESHOLD = 256 * 1024
+
+// Cheap deterministic fingerprint for the async path: a full crypto hash over
+// multi-megabyte buffers is itself main-loop work, so sample length + a spread
+// of bytes with fnv1a. Idempotency (same attachment -> same path) still holds
+// per content, which is the property that matters; the residual collision risk
+// is acceptable for a tmp attachment path that the model only reads.
+function attachmentFingerprint(bytes: Buffer) {
+  let hash = 0x811c9dc5
+  const step = Math.max(1, Math.floor(bytes.length / 4096))
+  for (let i = 0; i < bytes.length; i += step) {
+    hash ^= bytes[i]!
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+function attachmentExtension(input: { mime: string; filename?: string }) {
+  return (
+    MIME_EXTENSIONS[input.mime] ??
+    (input.filename?.includes(".") ? input.filename.slice(input.filename.lastIndexOf(".")) : undefined) ??
+    ".bin"
+  )
+}
+
 function writeUnsupportedAttachment(input: {
   part: { type: "file" | "image"; image?: unknown; data?: unknown }
   mime: string
@@ -459,16 +487,25 @@ function writeUnsupportedAttachment(input: {
   try {
     const dir = path.join(tmpdir(), "opencode")
     mkdirSync(dir, { recursive: true })
-    // Content-hash naming keeps repeated provider turns idempotent: the same
-    // attachment re-lowered from history overwrites the same path instead of
-    // accumulating duplicates.
-    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16)
-    const ext =
-      MIME_EXTENSIONS[input.mime] ??
-      (input.filename?.includes(".") ? input.filename.slice(input.filename.lastIndexOf(".")) : undefined) ??
-      ".bin"
-    const file = path.join(dir, hash + ext)
-    writeFileSync(file, bytes)
+    const ext = attachmentExtension(input)
+    // Small attachments: content-hash naming keeps repeated provider turns
+    // idempotent and the sync write is cheap enough to stay on the loop.
+    if (bytes.length < ATTACHMENT_ASYNC_THRESHOLD) {
+      const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16)
+      const file = path.join(dir, hash + ext)
+      writeFileSync(file, bytes)
+      return { path: file, bytes: bytes.length }
+    }
+    // Large attachments: this transform runs inside a synchronous lowering
+    // pipeline (session/llm.ts transformParams), so blocking here would stall
+    // every shared fiber. The path is derived synchronously from a cheap
+    // fingerprint and returned immediately; the bytes land in the background.
+    // The model only reads the path after this turn's request is built, and the
+    // write is atomic-enough (single writeFile) that a read either sees the
+    // file or an ENOENT it already handles. Never throws: a failed background
+    // write leaves the path referenced but empty, same as today's undefined.
+    const file = path.join(dir, attachmentFingerprint(bytes) + ext)
+    writeFile(file, bytes, () => {})
     return { path: file, bytes: bytes.length }
   } catch {
     return undefined

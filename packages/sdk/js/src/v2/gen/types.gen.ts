@@ -2032,6 +2032,7 @@ export type Config = {
     hands_model?: string
     reviewer_model?: string
     guru_model?: string
+    computer_aid_model?: string
     enforcement?: "strict" | "advisory"
   }
   default_agent?: string

@@ -226,3 +226,9 @@ yield * prompt.cancel(chat.id)
 - Testing debounce or throttle behavior, where the sleep **is** the test.
 - Letting real wall-clock advance past a genuine timestamp resolution boundary (e.g. mtime granularity).
 - Simulating network latency in race-regression tests that intentionally exercise ordering.
+
+### Reminders
+
+- Run tests from this package dir (`packages/opencode`), never from the repo root.
+- Selector quick rules: `it.effect` for pure/test-clock Effect, `it.live` when real time/FS/processes are involved, `it.instance` for live tests needing a scoped temp instance (see sections above).
+- Tests touching global config must run under `OPENCODE_CONFIG_DIR="$TMP_GLOBAL"` isolation (see top of this file).

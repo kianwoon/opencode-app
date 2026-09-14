@@ -43,6 +43,12 @@
 - Delivery: `steer` (default, promote at next safe boundary) vs `queue` (pending until idle, promote one at a time); any promotion resets agent turn allowance (batch steers = once).
 - EventV2 replay owner ≠ execution owner; System Context algebra/registry in `packages/core/src/system-context`; History selection + Epoch persistence Session-owned.
 
+## Prod build target (CLI vs Desktop App)
+- Run `ps aux | grep -i opencode` FIRST to see what the user actually runs; never assume.
+- CLI binary: `packages/opencode/script/build.ts` → `~/.opencode/bin/opencode`.
+- Desktop app: read `packages/desktop/AGENTS.md` before any desktop build — `OPENCODE_CHANNEL=prod bun run build`, then `package:mac`, then `verify-prod.ts`; the app runs `Resources/app.asar` and never loads `~/.opencode/bin`.
+- A CLI rebuild does NOT update the desktop app (2026-08-31: hours lost).
+
 ## Learnings (MANDATORY)
 - After non-obvious rework-causing issues, immediately write concise gotcha + correct command + acceptance gate into relevant package `AGENTS.md` (or root if cross-cutting); repeat mistake = must document.
 - Future sessions load `AGENTS.md` automatically; do not rely on memory.

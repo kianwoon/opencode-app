@@ -10,10 +10,12 @@ import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Schema, Scope } from "effect"
+import { Effect, Exit, Option, Schema, Scope, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { InstanceState } from "@/effect/instance-state"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -21,7 +23,8 @@ export interface TaskPromptOps {
   prompt(input: SessionPrompt.PromptInput): Effect.Effect<SessionV1.WithParts>
 }
 
-const id = "task"
+export const id = "task"
+export const TASK_TOOL_ID = id
 const BACKGROUND_DESCRIPTION = [
   "Background mode: background=true launches the subagent asynchronously and returns immediately.",
   "Foreground is the default; use it when you need the result before continuing.",
@@ -44,6 +47,51 @@ const BACKGROUND_UPDATED = [
 // fiber, silent provider, stuck tool dispatch) can't park the session forever.
 // Background tasks stay unbounded; the user polls those intentionally.
 export const FOREGROUND_SUBAGENT_TIMEOUT_MS = 30 * 60_000
+
+// Child-process isolation for foreground subagents (default ON), but only when
+// a SAFE child binary is resolvable. Read synchronously at call time (not module
+// load) so tests and the CLI can toggle it per process. Enabled unless opted out
+// via `OPENCODE_SUBAGENT_ISOLATE=0` (also "false"/"off", case-insensitive).
+// A missing binary disables isolation rather than spawning a wrong one: the
+// desktop app runs its own server baked into app.asar and never loads the
+// PATH/`~/.opencode/bin` CLI, which may be stale AND points at a different
+// channel DB (`opencode-main.db`) than the app (`opencode.db`) — so a PATH
+// child cannot see the parent's session and silently produces no output.
+export function isolatedEnabled() {
+  const value = process.env["OPENCODE_SUBAGENT_ISOLATE"]?.trim().toLowerCase()
+  if (value === "0" || value === "false" || value === "off") return false
+  return isolationBinary() !== undefined
+}
+
+// Resolves the child binary to the SAME build as the running process, or
+// undefined when no trustworthy binary exists. The compiled launcher sets
+// OPENCODE_BIN_PATH; a running compiled binary is its own execPath. A dev/`bun`
+// runtime (execPath is `bun`) has no safe child, and we deliberately do NOT fall
+// back to the PATH-installed CLI: that CLI can be a different version/channel and
+// would run against a different database, so the resumed session would not exist.
+function isolationBinary() {
+  const configured = process.env["OPENCODE_BIN_PATH"]?.trim()
+  if (configured) return configured
+  return process.execPath.includes("opencode") ? process.execPath : undefined
+}
+
+// `opencode run --format json` emits one JSON object per line; assistant text
+// parts carry the model's user-visible output. This mirrors runTask's contract:
+// the LAST text part's text is the result. Non-JSON lines (banners, warnings)
+// and non-text events are ignored. Schema.UnknownFromJsonString keeps the parse
+// total — a malformed line decodes to None rather than throwing.
+function isolatedText(stdout: string) {
+  let last = ""
+  for (const line of stdout.split("\n")) {
+    const event = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(line))
+    if (!event || typeof event !== "object") continue
+    const record = event as Record<string, unknown>
+    if (record.type !== "text") continue
+    const part = record.part as Record<string, unknown> | undefined
+    if (typeof part?.text === "string") last = part.text
+  }
+  return last
+}
 
 const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
@@ -93,6 +141,9 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    // Bound here so `execute` stays requirement-free; only used by the
+    // OPENCODE_SUBAGENT_ISOLATE child-process path.
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -280,6 +331,101 @@ export const TaskTool = Tool.define(
           Effect.forkIn(scope, { startImmediately: true }),
         )
       })
+
+      // Isolated transport (OPENCODE_SUBAGENT_ISOLATE=1, foreground only): the
+      // subagent runs in a fresh child process instead of a fiber sharing this
+      // event loop. IPC/secret boundary: only the child session id, the prompt
+      // text, the model id and the persisted permission ruleset (already written
+      // onto nextSession via deriveSubagentSessionPermission) cross. The child is
+      // spawned with extendEnv:true, so it inherits the parent process env and
+      // reads its own credentials from the same store — no API keys or secrets
+      // are passed as arguments, on stdin, or in any payload. Background subagents
+      // stay in-fiber: their lifecycle is already managed by BackgroundJob.
+      // Returns None on any spawn/IO failure so the caller falls back to runTask.
+      const runIsolated = Effect.gen(function* () {
+        const binary = isolationBinary()
+        if (!binary) return Option.none<string>()
+        const directory = (yield* InstanceState.context).directory
+        const cmd = ChildProcess.make(
+          binary,
+          [
+            "run",
+            "--session",
+            nextSession.id,
+            "--format",
+            "json",
+            // --model matches runTask's explicit model; --agent is intentionally
+            // omitted because `opencode run` rejects subagent names and would
+            // fall back to a primary agent. Resuming the session reuses its
+            // persisted agent (the subagent) and permission ruleset instead.
+            "--model",
+            `${model.providerID}/${model.modelID}`,
+            ...(variant ? ["--variant", variant] : []),
+            params.prompt,
+          ],
+          {
+            cwd: directory,
+            extendEnv: true,
+            // Pin the child to the parent's database. A same-build CLI compiled
+            // for another channel opens `opencode-<channel>.db` by default, so
+            // without this the resumed session would not exist in the child.
+            env: { OPENCODE_DB: Database.path() },
+            stdin: "ignore",
+            forceKillAfter: "3 seconds",
+          },
+        )
+        const handle = yield* spawner.spawn(cmd)
+        // Child stdout is the JSON event stream we parse; stderr is forwarded to
+        // the parent log so child failures stay diagnosable without leaking back
+        // into the tool result.
+        yield* Effect.forkScoped(
+          Stream.runForEach(Stream.decodeText(handle.stderr), (chunk) => Effect.sync(() => process.stderr.write(chunk))),
+        )
+        const chunks: string[] = []
+        yield* Stream.runForEach(Stream.decodeText(handle.stdout), (chunk) =>
+          Effect.sync(() => {
+            chunks.push(chunk)
+          }),
+        )
+        // A non-zero child exit (or a signal death) means the child never
+        // produced a usable result: treat it as isolation unavailable and let
+        // the caller fall back in-fiber, instead of parsing partial output.
+        const exited = yield* Effect.exit(handle.exitCode)
+        if (Exit.isFailure(exited)) return Option.none<string>()
+        if (exited.value !== 0) return Option.none<string>()
+        // Empty text is never a valid subagent result. Without this guard a
+        // failed child (e.g. session not found in a different channel DB) yields
+        // an empty string that the caller reports as a successful completion.
+        const text = isolatedText(chunks.join(""))
+        return text.trim().length === 0 ? Option.none<string>() : Option.some(text)
+      }).pipe(
+        Effect.scoped,
+        // Only spawn/stream failures fall back to the in-fiber path; the caller
+        // treats None as "isolation unavailable". A timeout is a real failure and
+        // is raised below, not converted to a fallback (which would silently run
+        // another 30 minutes in-process).
+        Effect.catch(() => Effect.succeed(Option.none<string>())),
+        Effect.timeoutOrElse({
+          duration: FOREGROUND_SUBAGENT_TIMEOUT_MS,
+          orElse: () =>
+            Effect.fail(
+              new Error(
+                `Isolated subagent timed out after 30 minutes (task_id: ${nextSession.id}). The child process was killed; retry the task.`,
+              ),
+            ),
+        }),
+      )
+
+      if (!runInBackground && isolatedEnabled()) {
+        const attempt = yield* runIsolated
+        if (Option.isSome(attempt)) {
+          return {
+            title: params.description,
+            metadata,
+            output: renderOutput({ sessionID: nextSession.id, state: "completed", text: attempt.value }),
+          }
+        }
+      }
 
       if (yield* background.extend({ id: nextSession.id, run: runTask() })) {
         return {

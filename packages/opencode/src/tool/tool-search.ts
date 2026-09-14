@@ -4,7 +4,7 @@ import { MCP } from "@/mcp"
 import { ToolSearch as SessionToolSearch } from "@/session/tool-search"
 import * as Tool from "./tool"
 
-export const TOOL_SEARCH_TOOL = "tool_search"
+export const TOOL_SEARCH_TOOL = "find_tools"
 
 export const Parameters = Schema.Struct({
   query: Schema.String.annotate({
@@ -40,7 +40,7 @@ export const ToolSearchTool = Tool.define(
           mcpConfig: (cfg.mcp ?? {}) as Record<string, unknown>,
         })
         return {
-          title: `tool_search(${params.query})`,
+          title: `find_tools(${params.query})`,
           metadata: { promoted: result.keys },
           output:
             SessionToolSearch.formatResults({ tools: all, keys: result.keys }) +

@@ -13,3 +13,6 @@ Use these patterns for server and HttpApi middleware tests in this directory.
 - Use `tmpdirScoped({ git: true })` plus `Project.use.fromDirectory(dir)` for project-backed requests.
 - If a test needs persisted state without matching runtime state, keep direct database setup inside a narrowly named helper that explains that state.
 - Add comments for non-obvious test topology, especially tests involving both the local test server and a fake upstream server.
+
+- Always run tests from the package dir (`packages/opencode`), never the repo root — see parent `../AGENTS.md` isolation gate (per-run `OPENCODE_CONFIG_DIR` isolation) for why.
+- Server tests need live sockets: run them with the `.live` suffix by default (e.g. `bun test *.live`), not the mocked runner.

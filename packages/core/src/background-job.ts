@@ -1,6 +1,6 @@
 export * as BackgroundJob from "./background-job"
 
-import { Cause, Clock, Context, Deferred, Effect, Exit, Layer, Scope, SynchronizedRef } from "effect"
+import { Cause, Clock, Context, Deferred, Effect, Exit, Layer, Scope, Semaphore, SynchronizedRef } from "effect"
 import { Identifier } from "./id/id"
 import { makeGlobalNode } from "./effect/app-node"
 
@@ -117,11 +117,21 @@ function errorText(error: unknown) {
  * separate durable ownership slice rather than pretending this registry has
  * those semantics.
  */
+// Bounds concurrent background drains so N background subagents can't saturate
+// the single Bun event loop. Default 4; override with OPENCODE_BG_CONCURRENCY
+// (positive integer). Queued jobs wait for a permit — never dropped.
+const DEFAULT_BG_CONCURRENCY = 4
+const resolveBgConcurrency = () => {
+  const raw = Number(process.env["OPENCODE_BG_CONCURRENCY"])
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_BG_CONCURRENCY
+}
+
 export const make = Effect.gen(function* () {
   const state: State = {
     jobs: yield* SynchronizedRef.make(new Map()),
     scope: yield* Scope.Scope,
   }
+  const bgPermit = Semaphore.makeUnsafe(resolveBgConcurrency()).withPermit
 
   const settle = Effect.fn("BackgroundJob.settle")(function* (
     id: string,
@@ -178,6 +188,7 @@ export const make = Effect.gen(function* () {
     run: Effect.Effect<string, unknown>,
   ) {
     return yield* run.pipe(
+      bgPermit,
       Effect.matchCauseEffect({
         onSuccess: (output) => settle(id, token, sequence, Exit.succeed(output)),
         onFailure: (cause) => settle(id, token, sequence, Exit.failCause(cause)),

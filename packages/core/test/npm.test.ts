@@ -47,7 +47,7 @@ describe("Npm.resolveEntryPoint", () => {
     await writePackage(path.join(tmp.path, "acme"), { name: "acme", main: "dist/index.js" })
     await Bun.write(path.join(tmp.path, "acme", "dist", "index.js"), "export const acme = true\n")
 
-    const entry = Npm.resolveEntryPoint("acme", path.join(tmp.path, "acme"))
+    const entry = await Npm.resolveEntryPoint("acme", path.join(tmp.path, "acme"))
     expect(entry.entrypoint).toBeDefined()
     expect(entry.entrypoint!.endsWith("dist/index.js")).toBe(true)
   })
@@ -63,7 +63,7 @@ describe("Npm.resolveEntryPoint", () => {
     })
     await Bun.write(path.join(tmp.path, "esm-only", "dist", "index.js"), "export const esm = true\n")
 
-    const entry = Npm.resolveEntryPoint("esm-only", path.join(tmp.path, "esm-only"))
+    const entry = await Npm.resolveEntryPoint("esm-only", path.join(tmp.path, "esm-only"))
     expect(entry.entrypoint).toBeDefined()
     expect(entry.entrypoint!.endsWith("dist/index.js")).toBe(true)
   })

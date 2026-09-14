@@ -25,6 +25,11 @@ import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 
+// These tests exercise in-fiber task lifecycle (stub prompt ops), not the
+// child-process isolation path, which is default-ON. Opt out so foreground
+// tasks stay in-fiber; isolation itself is covered by task-isolate.test.ts.
+process.env.OPENCODE_SUBAGENT_ISOLATE = "0"
+
 afterEach(async () => {
   await disposeAllInstances()
 })

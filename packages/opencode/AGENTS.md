@@ -362,3 +362,27 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
   strict event.location filter (packages/opencode/src/snapshot/index.ts);
   acceptance: test/snapshot/index.test.ts. Inspect a live hang via
   `kill -USR1 <utility-pid>` then CDP Debugger.pause for the JS stack.
+
+## Subagent isolation: `isolationBinary()` must match the running build + DB
+
+- **Symptom (2026-09-14):** with `OPENCODE_SUBAGENT_ISOLATE` default ON, EVERY subagent
+  returned instantly with empty output and was reported as `state="completed"`. The
+  desktop app's brain never got a real subagent result.
+- **Root cause (two compounding):** `isolationBinary()` fell back to the PATH-installed
+  `~/.opencode/bin/opencode` — a *different* build (stale, `0.0.0-main-*`) that opens
+  `opencode-main.db`, while the desktop app uses `opencode.db` (prod channel). The child
+  ran `opencode run --session <id>` against a DB where the session did not exist, exited
+  non-zero with empty stdout, and `isolatedText("")` returned `""` which the caller
+  rendered as a successful completion. `handle.exitCode` was awaited but its value ignored.
+- **Fix:** (1) `isolationBinary()` returns `undefined` unless `OPENCODE_BIN_PATH` is set or
+  `process.execPath` is an opencode binary — no PATH fallback; (2) `isolatedEnabled()` is
+  false when no safe binary resolves, so the in-fiber path runs instead; (3) `runIsolated`
+  treats non-zero exit / empty text as isolation-unavailable (`Option.none`) and falls
+  back in-fiber; (4) child env pins `OPENCODE_DB: Database.path()` so a same-build CLI for
+  another channel still hits the parent's DB.
+- **Desktop caveat:** the .app runs its own server from `app.asar` and does NOT set
+  `OPENCODE_BIN_PATH`, so isolation stays OFF in the desktop app (correct — no same-build
+  CLI exists to spawn). Do not "fix" that by pointing at the PATH binary.
+- **Acceptance gate:** `test/tool/task-isolate.test.ts` — flag defaults ON with a present
+  binary; isolation disables with no binary; non-zero/empty child output falls back in-fiber
+  (`bun test` from `packages/opencode`, `OPENCODE_CONFIG_DIR=""`).

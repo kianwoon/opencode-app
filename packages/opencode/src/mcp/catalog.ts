@@ -161,7 +161,7 @@ export interface ServerIndex {
 /**
  * Build a compact catalog index: names + truncated descriptions per server,
  * plus server instructions. Never includes input schemas — that is the whole
- * point; full definitions stay deferred until tool_search promotes them.
+ * point; full definitions stay deferred until find_tools promotes them.
  */
 export function index(
   defs: Record<string, { name: string; description?: string }>,
@@ -187,7 +187,7 @@ export function index(
     }))
 }
 
-/** Render the index as the tool_search tool description: compact, scannable, schema-free. */
+/** Render the index as the find_tools tool description: compact, scannable, schema-free. */
 export function describeIndex(index: ServerIndex[]): string {
   return index
     .map((server) => {

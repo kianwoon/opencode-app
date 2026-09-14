@@ -30,6 +30,14 @@ const media = (file: FileAttachment): ContentPart => ({
   metadata: file.description === undefined ? undefined : { description: file.description },
 })
 
+// The deferred-MCP tool was renamed `tool_search` -> `find_tools`. Old sessions
+// persist the former name; @ai-sdk/openai misclassifies any unknown `tool-*` part
+// as a native provider tool and emits a `tool_search_call` with undefined
+// arguments. Remap only local (non-providerExecuted) parts at projection time;
+// native provider parts keep their original names. Old DB rows are left untouched.
+const toolName = (tool: SessionMessage.AssistantTool) =>
+  tool.name === "tool_search" && tool.provider?.executed !== true ? "find_tools" : tool.name
+
 const toolInput = (tool: SessionMessage.AssistantTool) => {
   if (tool.state.status !== "pending") return tool.state.input
   try {
@@ -42,7 +50,7 @@ const toolInput = (tool: SessionMessage.AssistantTool) => {
 const toolCall = (tool: SessionMessage.AssistantTool, providerMetadata: ProviderMetadata | undefined): ContentPart =>
   ToolCallPart.make({
     id: tool.id,
-    name: tool.name,
+    name: toolName(tool),
     input: toolInput(tool),
     providerExecuted: tool.provider?.executed,
     providerMetadata,
@@ -59,7 +67,7 @@ const toolResult = (
     if (evicted && tool.provider?.executed !== true)
       return ToolResultPart.make({
         id: tool.id,
-        name: tool.name,
+        name: toolName(tool),
         result: TOOL_RESULT_EVICTED_TEXT,
       })
     const result =
@@ -68,7 +76,7 @@ const toolResult = (
         : ToolOutput.toResultValue({ structured: tool.state.structured, content: tool.state.content })
     return ToolResultPart.make({
       id: tool.id,
-      name: tool.name,
+      name: toolName(tool),
       result,
       providerExecuted: tool.provider?.executed,
       providerMetadata,
@@ -77,7 +85,7 @@ const toolResult = (
   if (tool.state.status === "error") {
     return ToolResultPart.make({
       id: tool.id,
-      name: tool.name,
+      name: toolName(tool),
       result:
         tool.provider?.executed === true && tool.state.result !== undefined
           ? tool.state.result

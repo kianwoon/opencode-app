@@ -253,6 +253,7 @@ describe("brain config expansion", () => {
               implementer: "allow",
               reviewer: "allow",
               guru: "allow",
+              "computer-aid": "allow",
             },
           })
         }),
@@ -261,7 +262,40 @@ describe("brain config expansion", () => {
     ),
   )
 
-  it.instance("user-defined agent entries win over generated ones", () =>
+  it.instance("explicit computer_aid_model maps onto the computer-aid agent", () =>
+    load({
+      brain: {
+        model: "anthropic/brain",
+        computer_aid_model: "anthropic/computer-aid",
+        enforcement: "strict",
+      },
+    }).pipe(
+      Effect.tap((config) =>
+        Effect.sync(() => {
+          expect(config.agent?.["computer-aid"]).toMatchObject({
+            mode: "subagent",
+            model: "anthropic/computer-aid",
+            permission: { task: "deny" },
+          })
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  )
+
+  it.instance("absent computer_aid_model leaves agent['computer-aid'] unset", () =>
+    load({ brain: { model: "anthropic/brain", enforcement: "advisory" } }).pipe(
+      Effect.tap((config) =>
+        Effect.sync(() => {
+          expect(config.agent?.["computer-aid"]).toMatchObject({ mode: "subagent", permission: {} })
+          expect(config.agent?.["computer-aid"]?.model).toBeUndefined()
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  )
+
+  it.instance("explicit brain models overwrite user-defined agent entries", () =>
     load({
       brain: {
         model: "anthropic/brain",
@@ -276,9 +310,9 @@ describe("brain config expansion", () => {
     }).pipe(
       Effect.tap((config) =>
         Effect.sync(() => {
-          expect(config.agent?.brain).toMatchObject({ model: "user/brain", permission: { edit: "allow" } })
+          expect(config.agent?.brain).toMatchObject({ model: "anthropic/brain", permission: { edit: "allow" } })
           expect(config.agent?.brain?.permission).not.toHaveProperty("task")
-          expect(config.agent?.explorer).toMatchObject({ model: "user/explorer" })
+          expect(config.agent?.explorer).toMatchObject({ model: "anthropic/hands" })
           expect(config.agent?.explorer?.mode).toBeUndefined()
           // strict fills the absent task permission even on user-defined entries
           expect(config.agent?.explorer?.permission).toEqual({ task: "deny" })
@@ -290,7 +324,7 @@ describe("brain config expansion", () => {
     ),
   )
 
-  test("md-defined agent without model gets hands_model filled", () => {
+  test("explicit brain models overwrite agent entry models", () => {
     const config = ConfigParse.schema(
       ConfigV1.Info,
       {
@@ -311,6 +345,6 @@ describe("brain config expansion", () => {
       "test",
     )
     ConfigBrain.expand(userSet)
-    expect(userSet.agent?.implementer?.model).toBe("user/hands")
+    expect(userSet.agent?.implementer?.model).toBe("anthropic/hands")
   })
 })

@@ -1439,7 +1439,7 @@ const layer = Layer.effect(
         return [{ ...part, messageID: info.id, sessionID: input.sessionID }]
       })
 
-      const resolvedParts = yield* Effect.forEach(input.parts, resolvePart, { concurrency: "unbounded" }).pipe(
+      const resolvedParts = yield* Effect.forEach(input.parts, resolvePart, { concurrency: 8 }).pipe(
         Effect.map((x) => x.flat().map(assign)),
       )
 

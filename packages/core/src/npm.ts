@@ -1,7 +1,6 @@
 export * as Npm from "./npm"
 
 import path from "path"
-import fs from "fs"
 import { pathToFileURL } from "url"
 import npa from "npm-package-arg"
 import { Effect, Schema, Context, Layer, Option, FileSystem } from "effect"
@@ -49,7 +48,7 @@ export function sanitize(pkg: string) {
   return Array.from(pkg, (char) => (illegal.has(char) || char.charCodeAt(0) < 32 ? "_" : char)).join("")
 }
 
-export function resolveEntryPoint(name: string, dir: string): EntryPoint {
+export async function resolveEntryPoint(name: string, dir: string): Promise<EntryPoint> {
   let entrypoint: string | undefined
   try {
     // Resolve the installed package's own main entry relative to its
@@ -60,7 +59,9 @@ export function resolveEntryPoint(name: string, dir: string): EntryPoint {
     // not supported" — observed with @zenobius/opencode-skillful in the
     // desktop Node sidecar).
     type PackageJson = { main?: unknown; exports?: unknown }
-    const pkgJson = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as PackageJson
+    // Async read: this runs on the shared event loop, and a cold disk read of
+    // package.json must not block every other agent fiber.
+    const pkgJson = JSON.parse(await Bun.file(path.join(dir, "package.json")).text()) as PackageJson
     // Entry target: exports["."] (string or import/default condition) wins,
     // then "main", then the index.js fallback.
     const exportsDot =
@@ -164,17 +165,17 @@ const layer = Layer.effect(
       })()
 
       if (yield* afs.existsSafe(path.join(dir, "node_modules", name))) {
-        return resolveEntryPoint(name, path.join(dir, "node_modules", name))
+        return yield* Effect.promise(() => resolveEntryPoint(name, path.join(dir, "node_modules", name)))
       }
 
       const tree = yield* reify({ dir, add: [pkg] })
       const first = tree.edgesOut.values().next().value?.to
       if (!first) {
-        const result = resolveEntryPoint(name, path.join(dir, "node_modules", name))
+        const result = yield* Effect.promise(() => resolveEntryPoint(name, path.join(dir, "node_modules", name)))
         if (result.entrypoint) return result
         return yield* new InstallFailedError({ add: [pkg], dir })
       }
-      return resolveEntryPoint(first.name, first.path)
+      return yield* Effect.promise(() => resolveEntryPoint(first.name, first.path))
     }, Effect.scoped)
 
     const install: Interface["install"] = Effect.fn("Npm.install")(function* (dir, input) {

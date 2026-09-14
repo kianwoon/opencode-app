@@ -8,9 +8,49 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { evaluate } from "@/permission/evaluate"
 import { Config } from "@/config/config"
 import { ToolID } from "./schema"
+import { CpuPool } from "./cpu-pool"
+import { truncateInline } from "./truncate-inline"
 import { TRUNCATION_DIR } from "./truncation-dir"
 
 const RETENTION = Duration.days(7)
+
+// Hashing and reduction of a very large dump are CPU-bound. Route them through
+// the worker pool so the main loop (shared by every agent fiber) stays free;
+// small inputs and a missing/unsupported pool stay on an inline chunked path
+// that yields between 64KB chunks.
+const OFFLOAD_MIN_BYTES = 256 * 1024
+const HASH_CHUNK_BYTES = 64 * 1024
+
+const sha256Chunked = Effect.fnUntraced(function* (text: string) {
+  const hash = createHash("sha256")
+  const buffer = Buffer.from(text, "utf-8")
+  if (buffer.length <= HASH_CHUNK_BYTES) return hash.update(buffer).digest("hex")
+  for (let offset = 0; offset < buffer.length; offset += HASH_CHUNK_BYTES) {
+    hash.update(buffer.subarray(offset, offset + HASH_CHUNK_BYTES))
+    yield* Effect.yieldNow
+  }
+  return hash.digest("hex")
+})
+
+const sha256Async = Effect.fnUntraced(function* (text: string) {
+  if (Buffer.byteLength(text, "utf-8") < OFFLOAD_MIN_BYTES) return yield* sha256Chunked(text)
+  const pooled = yield* CpuPool.sha256(text).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  if (typeof pooled === "string") return pooled
+  return yield* sha256Chunked(text)
+})
+
+const reduce = Effect.fnUntraced(function* (
+  text: string,
+  maxLines: number,
+  maxBytes: number,
+  direction: "head" | "tail",
+) {
+  if (Buffer.byteLength(text, "utf-8") < OFFLOAD_MIN_BYTES) return truncateInline(text, maxLines, maxBytes, direction)
+  const pooled = yield* CpuPool.truncate(text, maxLines, maxBytes, direction).pipe(
+    Effect.catch(() => Effect.succeed(undefined)),
+  )
+  return CpuPool.isReduction(pooled) ? pooled : truncateInline(text, maxLines, maxBytes, direction)
+})
 
 // Process-wide hash-dedup state: (sessionID, toolName) -> hash of the last full
 // output written for that key, plus hash -> file path so identical outputs reuse
@@ -108,42 +148,13 @@ const layer = Layer.effect(
         return { content: text, truncated: false } as const
       }
 
-      const out: string[] = []
-      let i = 0
-      let bytes = 0
-      let hitBytes = false
-
-      if (direction === "head") {
-        for (i = 0; i < lines.length && i < maxLines; i++) {
-          const size = Buffer.byteLength(lines[i], "utf-8") + (i > 0 ? 1 : 0)
-          if (bytes + size > maxBytes) {
-            hitBytes = true
-            break
-          }
-          out.push(lines[i])
-          bytes += size
-        }
-      } else {
-        for (i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
-          const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
-          if (bytes + size > maxBytes) {
-            hitBytes = true
-            break
-          }
-          out.unshift(lines[i])
-          bytes += size
-        }
-      }
-
-      const removedLines = lines.length - out.length
-      const removedBytes = totalBytes - bytes
-      const unit = hitBytes ? "bytes" : "lines"
-      const removed = hitBytes ? removedBytes : removedLines
-      const preview = out.join("\n")
+      const reduction = yield* reduce(text, maxLines, maxBytes, direction)
+      const preview = reduction.content
+      const { removedBytes, removedLines } = reduction
 
       // Hash-dedup: when this exact output was already written for this key, reuse
       // that file instead of duplicating another 60KB+ dump on disk.
-      const hash = createHash("sha256").update(text).digest("hex")
+      const hash = yield* sha256Async(text)
       if (options.dedupKey) {
         const previous = lastOutputHash.get(options.dedupKey)
         lastOutputHash.set(options.dedupKey, hash)
@@ -182,7 +193,7 @@ const layer = Layer.effect(
     })
 
     const dedup = Effect.fn("Truncate.dedup")(function* (key: string, text: string) {
-      lastOutputHash.set(key, createHash("sha256").update(text).digest("hex"))
+      lastOutputHash.set(key, yield* sha256Async(text))
     })
 
     yield* cleanup().pipe(

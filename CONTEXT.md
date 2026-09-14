@@ -26,6 +26,8 @@ _Avoid_: System update, system notification, raw text diff
 **Context Epoch**:
 The span during which one initially rendered **System Context** remains the immutable provider-cache baseline, ending at completed compaction, Session movement, or an incompatible context transition that requires a fresh baseline.
 
+An **explicit task switch** (task governor Tier 1: `/task-new`, `/task-done`, or an explicit branch/worktree change) is one such incompatible context transition: it ends the current **Context Epoch** by triggering compaction with task preserve-facts, and the next provider turn opens a fresh epoch. Mid-history messages are never rewritten in place to reflect the switch — the old task's content simply becomes prune-eligible (a tail-boundary anchor) while the cached prefix stays byte-stable until the epoch ends. Suggestive cues (Tier 2) never end an epoch; they only surface a one-shot stale-context nudge.
+
 **Baseline System Context**:
 The full **System Context** rendered at the start of a **Context Epoch**.
 _Avoid_: Live system prompt

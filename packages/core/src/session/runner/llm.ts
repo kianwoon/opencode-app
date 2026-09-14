@@ -110,6 +110,16 @@ const openrouterRoutingKeys = [
 const isRecordValue = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
+// Bounds concurrent tool settlements per provider turn. A single model turn can
+// emit an unbounded burst of tool-calls; each settlement may run CPU/IO-heavy
+// work, so fan-out is capped rather than left to FiberSet's unbounded default.
+// Default 8; override with OPENCODE_TOOL_CONCURRENCY (positive integer).
+const DEFAULT_TOOL_CONCURRENCY = 8
+const resolveToolConcurrency = () => {
+  const raw = Number(process.env["OPENCODE_TOOL_CONCURRENCY"])
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_TOOL_CONCURRENCY
+}
+
 const openrouterRouting = (options: unknown): Record<string, unknown> => {
   if (!isRecordValue(options)) return {}
   const routing = options.routing
@@ -228,7 +238,7 @@ const layer = Layer.effect(
       if (cached) return cached
       const loaded = Effect.cached(
         Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
-          concurrency: "unbounded",
+          concurrency: 3,
         }).pipe(Effect.map(SystemContext.combine)),
       ).pipe(Effect.flatten)
       contextCache.set(agent.id, loaded)
@@ -331,6 +341,10 @@ const layer = Layer.effect(
       )
         return yield* Effect.die(continueAfterCompaction(currentStep))
       const startSnapshot = yield* snapshots.capture()
+      // Admission gate for tool settlement fan-out. Held only around the
+      // settlement + publication of one call, so stream consumption stays
+      // responsive while at most `resolveToolConcurrency()` settlements run.
+      const toolPermit = Semaphore.makeUnsafe(resolveToolConcurrency()).withPermit
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
         agent: agent.id,
@@ -365,12 +379,14 @@ const layer = Layer.effect(
             const assistantMessageID = yield* publisher.assistantMessageID(event.id)
             yield* Effect.uninterruptibleMask((restore) =>
               restore(
-                toolMaterialization.settle({
-                  sessionID: session.id,
-                  agent: agent.id,
-                  assistantMessageID,
-                  call: event,
-                }),
+                toolPermit(
+                  toolMaterialization.settle({
+                    sessionID: session.id,
+                    agent: agent.id,
+                    assistantMessageID,
+                    call: event,
+                  }),
+                ),
               ).pipe(
                 Effect.flatMap((settlement) =>
                   publish(

@@ -718,6 +718,33 @@ describe("code mode permission visibility", () => {
     expect(asked).toEqual(["github_list_issues"])
   })
 
+  test("child MCP tool error text is redacted through tool.execute.after before the program sees it", async () => {
+    const trigger = ((name: unknown, _input: unknown, output: any) => {
+      if (name === "tool.execute.after" && typeof output?.output === "string")
+        return Effect.sync(() => {
+          output.output = output.output.replaceAll("sk-abcdefgh", "secret://project/API_KEY")
+          return output
+        })
+      return Effect.succeed(output)
+    }) as Plugin.Interface["trigger"]
+    const tool = await build(
+      {
+        bad_tool: mcpTool("tool", () => ({
+          isError: true,
+          content: [{ type: "text", text: "server exploded sk-abcdefgh" }],
+        })),
+      },
+      undefined,
+      undefined,
+      trigger,
+    )
+    const output = await Effect.runPromise(
+      tool.execute({ code: "try { await tools.bad.tool({}) } catch (e) { return 'caught: ' + e.message }" }, ctx),
+    )
+    expect(output.output).not.toContain("sk-abcdefgh")
+    expect(output.output).toContain("secret://project/API_KEY")
+  })
+
   test("Permission.visibleTools hides only hard denies, matching Permission.disabled", () => {
     const tools = { a_tool: 1, b_tool: 2, c_tool: 3 }
     const visible = Permission.visibleTools(tools, [

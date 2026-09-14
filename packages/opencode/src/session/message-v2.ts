@@ -301,7 +301,14 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             type: "step-start",
           })
         if (part.type === "tool") {
-          toolNames.add(part.tool)
+          // The deferred-MCP tool was renamed `tool_search` -> `find_tools`. Old
+          // sessions persist the former name; @ai-sdk/openai misclassifies any
+          // unknown `tool-*` part as a native provider tool and emits a
+          // `tool_search_call` with undefined arguments. Remap only local
+          // (non-providerExecuted) parts at projection time; native provider
+          // parts keep their original ids. Old DB rows are left untouched.
+          const toolName = part.tool === "tool_search" && !part.metadata?.providerExecuted ? "find_tools" : part.tool
+          toolNames.add(toolName)
           if (part.state.status === "completed") {
             const outputText = part.state.time.compacted
               ? "[Old tool result content cleared]"
@@ -326,7 +333,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 : outputText
 
             assistantMessage.parts.push({
-              type: ("tool-" + part.tool) as `tool-${string}`,
+              type: ("tool-" + toolName) as `tool-${string}`,
               state: "output-available",
               toolCallId: part.callID,
               input: part.state.input,
@@ -339,7 +346,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             const output = part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined
             if (typeof output === "string") {
               assistantMessage.parts.push({
-                type: ("tool-" + part.tool) as `tool-${string}`,
+                type: ("tool-" + toolName) as `tool-${string}`,
                 state: "output-available",
                 toolCallId: part.callID,
                 input: part.state.input,
@@ -349,7 +356,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               })
             } else {
               assistantMessage.parts.push({
-                type: ("tool-" + part.tool) as `tool-${string}`,
+                type: ("tool-" + toolName) as `tool-${string}`,
                 state: "output-error",
                 toolCallId: part.callID,
                 input: part.state.input,
@@ -363,7 +370,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           // Anthropic/Claude APIs require every tool_use to have a corresponding tool_result
           if (part.state.status === "pending" || part.state.status === "running")
             assistantMessage.parts.push({
-              type: ("tool-" + part.tool) as `tool-${string}`,
+              type: ("tool-" + toolName) as `tool-${string}`,
               state: "output-error",
               toolCallId: part.callID,
               input: part.state.input,

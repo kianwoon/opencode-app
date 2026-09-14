@@ -161,7 +161,7 @@ Context- and IO-efficiency work that keeps turns fast as sessions grow:
   instead of full rescans.
 - **Post-compaction hydration boundary** — only retained messages hydrate
   after compaction, not the whole history.
-- **tool_search demotion** — promoted tool definitions demote again under
+- **find_tools demotion** — promoted tool definitions demote again under
   context pressure, keeping the catalog lean.
 
 ---

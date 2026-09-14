@@ -2,8 +2,9 @@ export * as ConfigBrain from "./brain"
 
 import type { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 
-// Fill-absent-only synthesis of the brain agent hierarchy from the `brain` config
-// block: user-defined agent entries always win, generated entries only fill gaps.
+// Explicit brain models take precedence over agent entry models: a non-empty
+// brain model string overwrites `agent.<name>.model`; empty/absent leaves the
+// agent entry as-is (cleared = no opinion). Permission fill stays fill-absent-only.
 export function expand(config: ConfigV1.Info) {
   const brain = config.brain
   if (!brain) return
@@ -19,19 +20,32 @@ export function expand(config: ConfigV1.Info) {
         ? {
             edit: "deny",
             bash: "deny",
-            task: { "*": "deny", explorer: "allow", implementer: "allow", reviewer: "allow", guru: "allow" },
+            task: {
+              "*": "deny",
+              explorer: "allow",
+              implementer: "allow",
+              reviewer: "allow",
+              guru: "allow",
+              "computer-aid": "allow",
+            },
           }
         : {},
     }
   } else {
-    // agent/*.md entries exist without a model (single-source-truth change):
-    // fill absent fields only, never overwrite user-set values.
-    if (!agent.brain.model && brain.model) agent.brain.model = brain.model
+    // brain.model overrides agent/*.md entry models when set.
+    if (brain.model) agent.brain.model = brain.model
     if (strict && (!agent.brain.permission || Object.keys(agent.brain.permission).length === 0)) {
       agent.brain.permission = {
         edit: "deny",
         bash: "deny",
-        task: { "*": "deny", explorer: "allow", implementer: "allow", reviewer: "allow", guru: "allow" },
+        task: {
+          "*": "deny",
+          explorer: "allow",
+          implementer: "allow",
+          reviewer: "allow",
+          guru: "allow",
+          "computer-aid": "allow",
+        },
       }
     }
   }
@@ -41,6 +55,7 @@ export function expand(config: ConfigV1.Info) {
     ["implementer", brain.hands_model],
     ["reviewer", brain.reviewer_model],
     ["guru", brain.guru_model],
+    ["computer-aid", brain.computer_aid_model],
   ] as const) {
     const entry = agent[name]
     if (!entry) {
@@ -51,7 +66,8 @@ export function expand(config: ConfigV1.Info) {
       }
       continue
     }
-    if (!entry.model && model) entry.model = model
+    // Non-empty brain model wins; empty/absent leaves the entry untouched.
+    if (model) entry.model = model
     if (!strict) continue
     entry.permission ??= {}
     if (entry.permission.task === undefined) entry.permission.task = "deny"
