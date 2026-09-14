@@ -31,6 +31,8 @@ import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import { pluginSpecifier } from "@/config/plugin"
+import type { Origin as ConfigPluginOrigin } from "@/config/plugin"
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -66,8 +68,39 @@ export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel
   return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel)
 }
 
+// A user may wire the standalone `opencode-secret-broker` package (npm name or
+// file:// path) into `plugin[]` in addition to the built-in. Both expose the same
+// hooks (shell.env injection, tool.execute redaction, messages.transform), so
+// running both double-injects and double-redacts. Match either the published
+// package name or any path segment containing `secret-broker`.
+export function isStandaloneSecretBrokerSpec(spec: string): boolean {
+  return /secret-broker/i.test(spec)
+}
+
+function hasStandaloneSecretBroker(origins: readonly ConfigPluginOrigin[]): boolean {
+  return origins.some((origin) => isStandaloneSecretBrokerSpec(pluginSpecifier(origin.spec)))
+}
+
+// The single-broker decision: the built-in loads only when neither the opt-out
+// flag nor a standalone plugin[] entry is present.
+export function shouldLoadBuiltinSecretBroker(input: {
+  disableSecretBroker: boolean
+  pluginOrigins: readonly ConfigPluginOrigin[]
+}): boolean {
+  if (input.disableSecretBroker) return false
+  return !hasStandaloneSecretBroker(input.pluginOrigins)
+}
+
+let warnedStandaloneSecretBroker = false
+function warnStandaloneSecretBrokerOnce() {
+  if (warnedStandaloneSecretBroker) return
+  warnedStandaloneSecretBroker = true
+  console.warn("[secret-broker] standalone secret-broker detected in plugin[]; built-in yielding to avoid double-load")
+}
+
 // Built-in plugins that are directly imported (not installed from npm)
-function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
+function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker: boolean): PluginInstance[] {
+  if (standaloneSecretBroker) warnStandaloneSecretBrokerOnce()
   return [
     // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
     (input) =>
@@ -86,8 +119,10 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     XaiAuthPlugin,
     CerebrasPlugin,
     // Secret Broker: enabled by default (protects .env files and redacts secrets
-    // from tool I/O). Opt out with OPENCODE_DISABLE_SECRET_BROKER.
-    ...(flags.disableSecretBroker ? [] : [SecretBrokerPlugin]),
+    // from tool I/O). Opt out with OPENCODE_DISABLE_SECRET_BROKER. When the user
+    // also wires the standalone broker into plugin[], the built-in yields so only
+    // one broker is ever active.
+    ...(flags.disableSecretBroker || standaloneSecretBroker ? [] : [SecretBrokerPlugin]),
     // Execution Guard: runs AFTER the Secret Broker so its `shell.env` deletes the
     // broker's injected keys for zero-secret command classes (install/build/test).
     // Co-gated with the broker (without it there are no broker keys to strip) and
@@ -185,7 +220,8 @@ const layer = Layer.effect(
           $: typeof Bun === "undefined" ? undefined : Bun.$,
         }
 
-        for (const plugin of flags.disableDefaultPlugins ? [] : internalPlugins(flags)) {
+        const standaloneSecretBroker = hasStandaloneSecretBroker(cfg.plugin_origins ?? [])
+        for (const plugin of flags.disableDefaultPlugins ? [] : internalPlugins(flags, standaloneSecretBroker)) {
           const init = yield* Effect.tryPromise({
             try: () => plugin(input),
             catch: errorMessage,

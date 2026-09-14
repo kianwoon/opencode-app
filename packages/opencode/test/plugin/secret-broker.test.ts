@@ -15,6 +15,7 @@ import {
   secretBrokerPlugin,
 } from "../../src/plugin/secret-broker/index"
 import { Plugin } from "../../src/plugin"
+import { isStandaloneSecretBrokerSpec, shouldLoadBuiltinSecretBroker } from "../../src/plugin/index"
 import { Cause, Effect, Exit } from "effect"
 
 const dirs: string[] = []
@@ -886,5 +887,43 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
     expect(env.env.AUDIT_KEY).toBe(secret)
     expect(joined).not.toContain(secret)
     expect(joined).not.toContain(Buffer.from(secret, "utf8").toString("base64"))
+  })
+})
+
+describe("single-broker guarantee (built-in vs standalone)", () => {
+  test("matches the published npm name", () => {
+    expect(isStandaloneSecretBrokerSpec("opencode-secret-broker")).toBe(true)
+  })
+
+  test("matches a file:// path containing secret-broker", () => {
+    expect(isStandaloneSecretBrokerSpec("file:///home/user/packages/secret-broker/src/secret-broker.ts")).toBe(true)
+  })
+
+  test("ignores unrelated plugins", () => {
+    expect(isStandaloneSecretBrokerSpec("opencode-gitlab-auth")).toBe(false)
+    expect(isStandaloneSecretBrokerSpec("./plugins/redact.ts")).toBe(false)
+  })
+
+  test("built-in yields when config wires the standalone broker", () => {
+    expect(
+      shouldLoadBuiltinSecretBroker({
+        disableSecretBroker: false,
+        pluginOrigins: [
+          {
+            spec: "file:///repo/packages/secret-broker/src/secret-broker.ts",
+            source: "/cfg/opencode.json",
+            scope: "global",
+          },
+        ],
+      }),
+    ).toBe(false)
+  })
+
+  test("built-in stays active with no standalone entry", () => {
+    expect(shouldLoadBuiltinSecretBroker({ disableSecretBroker: false, pluginOrigins: [] })).toBe(true)
+  })
+
+  test("flag opt-out wins even without a standalone entry", () => {
+    expect(shouldLoadBuiltinSecretBroker({ disableSecretBroker: true, pluginOrigins: [] })).toBe(false)
   })
 })

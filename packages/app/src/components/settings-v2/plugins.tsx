@@ -37,7 +37,18 @@ const pluginFilePath = (spec: PluginSpec) => {
 }
 
 // File plugins show their file name as the title; the full path sits right below it.
-const pluginTitle = (spec: PluginSpec) => pluginFilePath(spec)?.split("/").pop() ?? pluginName(spec)
+// A resolved entry file (e.g. `dist/server.js`) is not meaningful to a user, so
+// generic entry basenames fall back to the owning package/folder name.
+const ENTRY_BASENAMES = new Set(["server.ts", "server.js", "server.mjs", "index.ts", "index.js", "index.mjs"])
+
+const pluginTitle = (spec: PluginSpec) => {
+  const path = pluginFilePath(spec)
+  if (!path) return pluginName(spec)
+  const parts = path.split("/").filter(Boolean)
+  const base = parts.pop() ?? pluginName(spec)
+  if (!ENTRY_BASENAMES.has(base)) return base
+  return parts.pop() ?? base
+}
 
 export const SettingsPluginsV2: Component = () => {
   const language = useLanguage()
@@ -166,13 +177,31 @@ const PluginAdd: Component<{ onAdd: (spec: string) => Promise<void> }> = (props)
   }
 
   const browse = async () => {
+    const defaultPath = await defaultPluginDir()
+    const directory = platform.platform === "desktop" ? platform.openDirectoryPickerDialog : undefined
+    if (directory) {
+      const picked = await directory({
+        title: language.t("settings.plugins.plugins.add.title"),
+        defaultPath,
+      })
+      const dir = Array.isArray(picked) ? picked[0] : picked
+      if (!dir) return
+      await addPath(dir)
+      return
+    }
     if (!platform.openFilePickerDialog) return
     const picked = await platform.openFilePickerDialog({
       title: language.t("settings.plugins.plugins.add.title"),
-      defaultPath: await defaultPluginDir(),
+      defaultPath,
       extensions: ["js", "ts", "mjs", "cjs"],
     })
     if (!picked) return
+    await addPath(picked)
+  }
+
+  // A folder is stored as a file:// spec; the server resolves it to the
+  // plugin's real entry file at config load, so users never pick the file.
+  const addPath = async (picked: string) => {
     const spec = picked.startsWith("file://") ? picked : `file://${picked}`
     await props.onAdd(spec)
     setValue("")

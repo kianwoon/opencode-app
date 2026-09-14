@@ -177,6 +177,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       return window.api.openDirectoryPicker({
         multiple: opts?.multiple ?? false,
         title: opts?.title,
+        defaultPath: opts?.defaultPath,
       })
     },
 

@@ -38,11 +38,6 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-/** Env booleans the host treats as ON unless explicitly disabled. */
-function isTruthyEnv(value: string | undefined): boolean {
-  return value !== undefined && value !== "" && value !== "0" && value !== "false"
-}
-
 export type SecretBrokerOptions = {
   /** Minimum value length eligible for redaction/injection. Default 8. */
   minLength?: number
@@ -330,17 +325,10 @@ export async function secretBrokerPlugin(
 ): Promise<Hooks> {
   const broker = await SecretBroker.create(input.directory, options)
 
-  // Double-run guard: the host's built-in broker is registered unless
-  // OPENCODE_DISABLE_SECRET_BROKER is set (see `internalPlugins`). If this
-  // standalone package is loaded while that flag is unset, both brokers would
-  // run — duplicate injection/redaction work, not a leak, but wasteful and
-  // confusing. Warn once so the user can disable the built-in.
-  if (!isTruthyEnv(process.env.OPENCODE_DISABLE_SECRET_BROKER)) {
-    console.warn(
-      "[secret-broker] standalone plugin loaded while the built-in broker is still enabled; " +
-        "set OPENCODE_DISABLE_SECRET_BROKER=1 to avoid running both.",
-    )
-  }
+  // The host's built-in broker yields automatically when this package is wired
+  // into plugin[] (see `internalPlugins`), so only this instance runs. The env
+  // flag still forces the built-in off without a standalone entry. No warning is
+  // needed here; loading this plugin IS the user's opt-in.
 
   return {
     "shell.env": async (hookInput, output) => {

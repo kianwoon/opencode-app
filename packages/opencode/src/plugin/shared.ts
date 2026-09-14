@@ -53,6 +53,11 @@ export type PluginEntry = {
 
 const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.mjs", "index.cjs"]
 
+// Last-resort entrypoints for a folder plugin that declares no usable
+// package.json entry. Ordered most-specific first so a project that ships both
+// `src/secret-broker.ts` and `dist/server.js` loads the source during dev.
+const SERVER_ENTRY_FALLBACKS = ["src/secret-broker.ts", "src/server.ts", "src/index.ts", "dist/server.js"]
+
 export function pluginSource(spec: string): PluginSource {
   if (isPathPluginSpec(spec)) return "file"
   return "npm"
@@ -118,11 +123,23 @@ function targetPath(target: string) {
   if (path.isAbsolute(target)) return target
 }
 
-async function resolveDirectoryIndex(dir: string) {
-  for (const name of INDEX_FILES) {
+async function firstExisting(dir: string, names: readonly string[]) {
+  for (const name of names) {
     const file = path.join(dir, name)
     if (await Filesystem.exists(file)) return file
   }
+}
+
+async function resolveDirectoryIndex(dir: string) {
+  return firstExisting(dir, INDEX_FILES)
+}
+
+// A folder plugin with no package.json entry still needs a loadable file. The
+// named fallbacks win over the generic index so a folder that ships both a
+// purpose-built entry (`src/server.ts`) and a barrel `index.ts` resolves to the
+// one the plugin author intended as the server entrypoint.
+async function resolveServerDirectoryEntry(dir: string) {
+  return firstExisting(dir, [...SERVER_ENTRY_FALLBACKS, ...INDEX_FILES])
 }
 
 async function resolveTargetDirectory(target: string) {
@@ -137,12 +154,21 @@ async function resolvePluginEntrypoint(spec: string, target: string, kind: Plugi
   const source = pluginSource(spec)
   const hit =
     pkg ?? (source === "npm" ? await readPluginPackage(target) : await readPluginPackage(target).catch(() => undefined))
-  if (!hit) return target
+  const dir = await resolveTargetDirectory(target)
+
+  // A plugin folder without a package.json still needs an entrypoint: fall back
+  // to the conventional server entry files so a user can pick a plugin
+  // DIRECTORY and never has to know which file implements the plugin.
+  if (!hit) {
+    if (kind === "server" && source === "file" && dir) {
+      const fallback = await resolveServerDirectoryEntry(dir)
+      if (fallback) return pathToFileURL(fallback).href
+    }
+    return target
+  }
 
   const entry = resolvePackageEntrypoint(spec, kind, hit)
   if (entry) return entry
-
-  const dir = await resolveTargetDirectory(target)
 
   if (kind === "tui") {
     if (source === "file" && dir) {
@@ -156,12 +182,13 @@ async function resolvePluginEntrypoint(spec: string, target: string, kind: Plugi
     return target
   }
 
-  if (dir && isRecord(hit.json.exports)) {
-    if (source === "file") {
-      const index = await resolveDirectoryIndex(dir)
-      if (index) return pathToFileURL(index).href
-    }
-
+  // Directories are not importable on their own. File plugins resolve through
+  // the conventional entry files; npm targets keep their existing
+  // package-resolution behavior (the target directory).
+  if (dir) {
+    if (source !== "file") return isRecord(hit.json.exports) ? undefined : target
+    const fallback = await resolveServerDirectoryEntry(dir)
+    if (fallback) return pathToFileURL(fallback).href
     return
   }
 
@@ -185,8 +212,8 @@ export async function resolvePathPluginTarget(spec: string) {
     return pathToFileURL(file).href
   }
 
-  const index = await resolveDirectoryIndex(file)
-  if (index) return pathToFileURL(index).href
+  const entry = await resolveServerDirectoryEntry(file)
+  if (entry) return pathToFileURL(entry).href
 
   throw new Error(`Plugin directory ${file} is missing package.json or index file`)
 }
