@@ -7,6 +7,64 @@ import { lstatSync, realpathSync } from "node:fs"
 
 const FILE_TOOLS = new Set(["read", "edit", "write"])
 
+// Shell tools whose args carry a raw command string. `cat .env` never touches a
+// file-tool schema, so the file check below cannot see it — the command string
+// must be inspected instead.
+const COMMAND_TOOLS = new Set(["bash"])
+
+// Verbs that can lift a file's bytes into stdout/argv. A command is denied only
+// when it names BOTH a protected file AND one of these (or redirects FROM a
+// file), so ordinary commands that merely mention `.env` in prose still pass.
+const EXFIL_VERBS = new Set([
+  "cat",
+  "tac",
+  "less",
+  "more",
+  "most",
+  "head",
+  "tail",
+  "grep",
+  "egrep",
+  "fgrep",
+  "rg",
+  "ripgrep",
+  "sed",
+  "awk",
+  "gawk",
+  "cut",
+  "sort",
+  "uniq",
+  "tr",
+  "strings",
+  "xxd",
+  "od",
+  "hexdump",
+  "base64",
+  "base32",
+  "cp",
+  "mv",
+  "scp",
+  "rsync",
+  "tar",
+  "zip",
+  "dd",
+  "install",
+  "open",
+  "source",
+  ".",
+  "type",
+  "tee",
+  "pbcopy",
+  "curl",
+  "wget",
+  "nc",
+  "ncat",
+  "netcat",
+  "get-content",
+  "read",
+  "bat",
+])
+
 // Files the agent must never read or mutate. `.env.example`/`.env.sample` are
 // intentionally readable so the agent can discover required key names.
 const EXEMPT = new Set([".env.example", ".env.sample"])
@@ -46,10 +104,70 @@ function isUnresolvedSymlink(filePath: string): boolean {
   }
 }
 
+// Shell operators that start a new command in a pipeline/list. Splitting on
+// them keeps a harmless `cat notes.md` from being disqualified by a protected
+// path named in a DIFFERENT segment.
+const SEGMENT_SPLIT = /\|\||&&|\||;|&|\n|`|\(|\)|\$\(/
+
+// Redirection markers: `> .env` mutates a protected file even without an exfil
+// verb, and `< .env` lifts its bytes into a program's stdin.
+const REDIRECT = /^[0-9]*(>>|>|<)$/
+
+// An inline env assignment (`KEY=.env`) hides the path behind `KEY=`, and a
+// long option (`--file=.env`) hides it behind the flag.
+const ASSIGN_PREFIX = /^-{0,2}[A-Za-z_][A-Za-z0-9_-]*=/
+
+// Quotes/brackets a token can carry from command substitution, grouping or a
+// quoted string, plus the `@`-file form (`curl --data @.env`). Stripped before a
+// basename check so `.env)`, `".env"` and `@.env` are recognized as `.env`.
+const TOKEN_NOISE = /^[`"'(@]+|[`"');,]+$/g
+
+function unquote(token: string): string {
+  const trimmed = token.replace(TOKEN_NOISE, "")
+  const assigned = trimmed.replace(ASSIGN_PREFIX, "")
+  return path.basename(assigned)
+}
+
+// Wrappers that sit BEFORE the real command in a segment (`sudo cat .env`).
+// Skipped when locating the command token so the verb check still fires.
+const WRAPPERS = new Set(["sudo", "doas", "env", "command", "exec", "nohup", "time", "nice", "xargs"])
+
+function segmentDenial(segment: string): Denial | undefined {
+  const tokens = segment.split(/\s+/).filter((token) => token.length > 0)
+  const target = tokens.find((token) => isProtected(unquote(token)))
+  if (target === undefined) return undefined
+  // The reading verb is in COMMAND position (first non-wrapper token); a word
+  // like `read` passed as an echo argument must not disqualify the command.
+  // Redirects (`< .env`, `> .env`) are denied on their own.
+  const command = tokens
+    .map((token) => token.replace(TOKEN_NOISE, "").toLowerCase())
+    .find((token) => !WRAPPERS.has(token))
+  return (command !== undefined && EXFIL_VERBS.has(command)) || tokens.some((token) => REDIRECT.test(token))
+    ? { tool: "bash", filePath: target }
+    : undefined
+}
+
+/** Inspects a shell command string for obvious secret-file exfiltration. Denies
+ *  only when a segment names BOTH a protected file and an exfil verb (or
+ *  redirects to/from it), so ordinary commands pass untouched. Fail-closed on
+ *  match; `.env.example` stays readable. */
+function checkCommand(args: unknown): Denial | undefined {
+  const record = args as { command?: unknown } | undefined
+  const command = typeof record?.command === "string" ? record.command : undefined
+  if (command === undefined || command.length === 0) return undefined
+  // `#` comments cannot execute, and a protected name in prose is not a read.
+  const stripped = command.replace(/(^|\s)#[^\n]*/g, "$1")
+  return stripped
+    .split(SEGMENT_SPLIT)
+    .map(segmentDenial)
+    .find((denial) => denial !== undefined)
+}
+
 export type Denial = { tool: string; filePath: string }
 
 /** Returns a Denial when the tool call must be blocked, otherwise undefined. */
 export function check(tool: string, args: unknown): Denial | undefined {
+  if (COMMAND_TOOLS.has(tool)) return checkCommand(args)
   if (!FILE_TOOLS.has(tool)) return undefined
   // Accept both `filePath` (current read/edit/write schemas) and `path` so a
   // future schema rename cannot silently disable protection.

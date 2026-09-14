@@ -34,12 +34,11 @@ export class Allowlist {
     this.keys = (await loadKeys(exampleFile)) ?? new Set<string>()
   }
 
-  /** Filters declared values down to the frozen allowlist. Values shorter than
-   *  `minLength` are NOT injected — they are too short to redact safely, so
-   *  injecting them would create an unredactable leak. Short and absent values
-   *  are reported as `missing` (never their contents). `minLength` must match
-   *  the Redactor's so injection and redaction stay consistent. */
-  select(declared: ReadonlyMap<string, string>, minLength = 0): { env: Record<string, string>; missing: string[] } {
+  /** Filters declared values down to the frozen allowlist. Only length-0 (unset)
+   *  values are withheld — a SHORT value is a credential too and is injected, as
+   *  the redactor covers it with key-anchored + word-boundary matching. Absent
+   *  and empty values are reported as `missing` (never their contents). */
+  select(declared: ReadonlyMap<string, string>, minLength = 1): { env: Record<string, string>; missing: string[] } {
     const env: Record<string, string> = {}
     const missing: string[] = []
     for (const key of this.keys) {

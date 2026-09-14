@@ -288,4 +288,59 @@ describe("secret-broker e2e — model-visible channel never carries the canary",
     // The model-visible redaction path never reproduces it.
     assertSanitized(broker.redact(`leak ${CANARY}`), "broker.redact")
   })
+
+  test("11. `cat .env` through the bash tool is denied; `.env.example` is allowed", async () => {
+    const dir = seed()
+    const hooks = await hooksFor(dir)
+    for (const command of ["cat .env", "head -n 3 .env", "base64 .env", "cat .env | base64"]) {
+      await expect(
+        hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s", callID: "c" }, { args: { command } } as never),
+        command,
+      ).rejects.toThrow(/Secret Broker blocked bash/)
+    }
+    await expect(
+      hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s", callID: "c" }, {
+        args: { command: "cat .env.example" },
+      } as never),
+    ).resolves.toBeUndefined()
+    await expect(
+      hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s", callID: "c" }, {
+        args: { command: "npm test" },
+      } as never),
+    ).resolves.toBeUndefined()
+  })
+
+  test("12. short (<minLength) secret is injected AND redacted across every sink", async () => {
+    const SHORT = "sh0rt7"
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "SHORT_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), `SHORT_KEY=${SHORT}\n`)
+    const hooks = await hooksFor(dir)
+    const HANDLE = "secret://project/SHORT_KEY"
+
+    // Injected into the child environment.
+    const env = { env: {} as Record<string, string> }
+    await hooks["shell.env"]!({ cwd: dir }, env as never)
+    expect(env.env.SHORT_KEY).toBe(SHORT)
+
+    // Redacted in tool output (`printenv` / `cat .env` echo).
+    const output = { title: "bash", output: `SHORT_KEY=${SHORT}`, metadata: {} }
+    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
+    expect(output.output).not.toContain(SHORT)
+    expect(output.output).toContain(HANDLE)
+
+    // Redacted in model messages.
+    const messages = [{ info: { id: "m1", role: "assistant" }, parts: [{ type: "text", text: `key ${SHORT}` }] }]
+    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as never })
+    expect(JSON.stringify(messages)).not.toContain(SHORT)
+    expect(JSON.stringify(messages)).toContain(HANDLE)
+
+    // Redacted across stream chunk boundaries. (The handle may itself be split
+    // by the retain buffer, so only absence of the secret is asserted.)
+    const stream = new StreamRedactor(new Redactor([{ key: "SHORT_KEY", value: SHORT }], 8))
+    let released = ""
+    for (const char of `key=${SHORT}`) released += stream.push(char)
+    released += stream.flush()
+    expect(released).not.toContain(SHORT)
+  })
 })

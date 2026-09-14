@@ -87,8 +87,58 @@ function variantsFor(value: string, minLength: number): string[] {
   return out
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/**
+ * One combined matcher for every sub-`minLength` value. A bare substring scan is
+ * unsafe at that length (`sh0rt7` would rewrite ordinary prose), so a short
+ * value is matched ONLY when its context proves it IS that secret:
+ *
+ *   - an assignment — `KEY=value`, `KEY: value`, `"KEY": "value"`, optionally
+ *     `export`ed — where the name is the secret's own key; the assignment keeps
+ *     its prefix/quotes and only the value is replaced; or
+ *   - a whole word-boundary token (`(?<![\w-])value(?![\w-])`), so a longer word
+ *     that merely contains the value is left intact.
+ *
+ * All entries share ONE regex and one `String.replace` pass, so a handle
+ * inserted for one entry is never rescanned and rewritten by another.
+ * Encoded variants are intentionally NOT generated for short values: a short
+ * base64/hex blob collides with ordinary text far too often to be worth it.
+ */
+function shortPattern(entries: readonly Entry[]): { pattern: RegExp; entries: readonly Entry[] } | undefined {
+  if (entries.length === 0) return undefined
+  const alternatives = entries.map((entry, index) => {
+    const name = escapeRegExp(entry.key)
+    const value = escapeRegExp(entry.value)
+    const assignment =
+      `(?<pre${index}>(?:export\\s+)?["']?${name}["']?\\s*[=:]\\s*["']?)` +
+      `(?<val${index}>${value})` +
+      `(?<post${index}>["']?)`
+    return `(?:${assignment}|(?<tok${index}>(?<![\\w-])${value}(?![\\w-])))`
+  })
+  return { pattern: new RegExp(alternatives.join("|"), "g"), entries }
+}
+
+function redactShort(input: string, matcher: { pattern: RegExp; entries: readonly Entry[] }): string {
+  return input.replace(matcher.pattern, (...args: unknown[]) => {
+    const groups = args[args.length - 1] as Record<string, string | undefined>
+    const index = matcher.entries.findIndex(
+      (_, i) => groups[`val${i}`] !== undefined || groups[`tok${i}`] !== undefined,
+    )
+    const entry = matcher.entries[index]
+    if (entry === undefined) return String(args[0])
+    const replacement = `${SCHEME}/${entry.key}`
+    return groups[`val${index}`] === undefined
+      ? replacement
+      : `${groups[`pre${index}`] ?? ""}${replacement}${groups[`post${index}`] ?? ""}`
+  })
+}
+
 export class Redactor {
   private entries: Variant[]
+  private short?: { pattern: RegExp; entries: readonly Entry[] }
   private keys: number
   private readonly retain: number
 
@@ -98,10 +148,18 @@ export class Redactor {
   ) {
     const byValue = new Map<string, string>()
     const keys = new Set<string>()
+    const shorts: Entry[] = []
     let longest = 0
     for (const entry of entries) {
-      if (entry.value.length < minLength) continue
+      if (entry.value.length === 0) continue
       keys.add(entry.key)
+      // Track the raw length even for short values: a `StreamRedactor` must hold
+      // back an incomplete short value so a split `key=sh0rt7` cannot leak.
+      if (entry.value.length > longest) longest = entry.value.length
+      if (entry.value.length < minLength) {
+        shorts.push(entry)
+        continue
+      }
       for (const value of variantsFor(entry.value, minLength)) {
         if (!byValue.has(value)) byValue.set(value, entry.key)
         if (value.length > longest) longest = value.length
@@ -111,6 +169,7 @@ export class Redactor {
     this.entries = [...byValue.entries()]
       .map(([value, key]) => ({ value, key }))
       .sort((a, b) => b.value.length - a.value.length)
+    this.short = shortPattern(shorts)
     // Retain one fewer char than the longest variant so a secret straddling a
     // chunk boundary is still whole when its final char arrives.
     this.retain = Math.max(0, longest - 1)
@@ -135,7 +194,7 @@ export class Redactor {
     for (const entry of this.entries) {
       if (out.includes(entry.value)) out = out.split(entry.value).join(this.replacement(entry.key))
     }
-    return out
+    return this.short === undefined ? out : redactShort(out, this.short)
   }
 
   /** Recursively redacts strings anywhere in the structure; leaves other

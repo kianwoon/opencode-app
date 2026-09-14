@@ -60,17 +60,20 @@ export class SecretBroker {
     const allowlist = await Allowlist.snapshot(examplePath)
     const parsed = await readIfExists(envPath)
     const declared = parsed ?? new Map<string, string>()
-    const { env, missing } = allowlist.select(declared, minLength)
+    // Every non-empty value is injected regardless of length: a short secret is
+    // still a credential, and the redactor now covers short values with
+    // key-anchored + word-boundary matching, so it is never unredactable. Only
+    // length-0 (unset) values are withheld.
+    const { env, missing } = allowlist.select(declared, 1)
 
     // INJECTION is allowlisted-only (threat F): only `env` reaches shell.env.
-    // REDACTION covers EVERY parsed .env value that meets `minLength`, so an
-    // undeclared secret (e.g. `cat .env` echoed through a tool result) is
-    // rewritten to its `secret://project/KEY` handle even though it is never
-    // injected. Values shorter than `minLength` are not redacted — too short to
-    // match safely — but direct `.env` reads are already blocked by
-    // `tool.execute.before`, so they cannot be dumped verbatim either.
+    // REDACTION covers EVERY parsed .env value, so an undeclared secret (e.g.
+    // `cat .env` echoed through a tool result) is rewritten to its
+    // `secret://project/KEY` handle even though it is never injected. Values
+    // >= `minLength` get exact + encoded matching; shorter values get
+    // key-anchored + word-boundary matching to avoid false positives.
     const redactable = [...declared.entries()]
-      .filter(([, value]) => value.length >= minLength)
+      .filter(([, value]) => value.length > 0)
       .map(([key, value]) => ({ key, value }))
     const injected = new Map(Object.entries(env))
     return new SecretBroker(allowlist, new Redactor(redactable, minLength), injected, missing)
