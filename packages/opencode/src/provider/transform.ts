@@ -2084,11 +2084,14 @@ function reasoningEffort(model: Provider.Model, effort: string) {
       return { reasoningEffort: effort }
     case "@ai-sdk/deepseek":
       return { thinking: { type: "enabled" }, reasoningEffort: effort }
+    case "gitlab-ai-provider":
+      if (model.family?.startsWith("gpt")) return { reasoningEffort: effort }
+      if (model.family?.startsWith("claude")) return { thinking: { type: "adaptive", effort } }
+      return
     case "@ai-sdk/cohere":
     case "@ai-sdk/perplexity":
     case "@ai-sdk/vercel":
     case "@ai-sdk/alibaba":
-    case "gitlab-ai-provider":
       return
   }
 }
