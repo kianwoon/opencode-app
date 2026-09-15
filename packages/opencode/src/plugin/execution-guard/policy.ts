@@ -7,13 +7,10 @@
 //     - `bash <(curl …)` / `sh -c "$(curl …)"` / `eval $(curl …)` (fetcher inside
 //       a process/command substitution feeding a shell)
 //     - a dependency resolved from a URL or git remote (`npm i github:…`,
-//       `pip install git+https://…`, `pip install https://…whl`). The plan's
-//       approval workflow needs the `permission.ask` trigger, which is DEAD
-//       (zero call sites), so the plugin cannot PROMPT. It therefore HARD-DENIES
-//       with a message directing the user to run/approve the install manually.
-//       (Documented limitation: replace with an allow-once approval path when
-//       `permission.ask` gains a trigger, or when ctx.ask wiring is added in
-//       tool/shell.ts:264-292.)
+//       `pip install git+https://…`, `pip install https://…whl`). These stay
+//       HARD-DENIED: no plugin-side prompt path exists. Plain registry installs
+//       ARE prompted — tool/shell.ts issues `ctx.ask({permission:
+//       "package_install"})` before exec, default rule `ask`.
 //
 //   ALLOW (zero / allowlisted secrets decided by subsets.ts):
 //     - plain registry installs, builds, tests, etc.

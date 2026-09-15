@@ -118,6 +118,9 @@ const layer = Layer.effect(
 
         const defaults = Permission.fromConfig({
           "*": "allow",
+          // Dependency Guard: package installs run third-party install scripts,
+          // so they are gated behind an explicit ask rather than the "*" allow.
+          package_install: "ask",
           doom_loop: "ask",
           external_directory: {
             "*": "ask",

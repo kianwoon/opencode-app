@@ -7,9 +7,11 @@
 //   tool.execute.before   (input {tool,sessionID,callID}, output {args}) -> throw to block
 //   shell.env             (input {cwd,sessionID,callID}, output {env})    -> mutate output.env
 //
-// `permission.ask` is DECLARED but DEAD (no trigger call sites), so git/URL
-// dependency installs are HARD-DENIED here rather than prompted; the denial
-// message directs the user to approve manually. See policy.ts for the rationale.
+// `permission.ask` has no plugin trigger call sites, so git/URL dependency
+// installs are HARD-DENIED here. Plain registry installs are instead gated by
+// the live tool-side permission system: tool/shell.ts calls ctx.ask with
+// `permission: "package_install"` (default rule `ask`) before exec. See
+// policy.ts for the deny-tier rationale.
 //
 // ORDERING REQUIREMENT: this plugin must be registered AFTER the Secret Broker
 // so its `shell.env` runs after the broker has assigned the allowlisted subset

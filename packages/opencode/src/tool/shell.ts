@@ -22,6 +22,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { Classify } from "@/plugin/execution-guard/classify"
 
 export { Parameters } from "./shell/prompt"
 
@@ -262,6 +263,20 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
 })
 
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
+  // Dependency Guard: a package install runs third-party install scripts with
+  // the child-process environment, so gate it behind an explicit ask. Default
+  // rule (agent defaults) is `package_install: "ask"`; the user may allow-once
+  // or allow-always. The stricter deny tiers (curl|sh, remote deps) are still
+  // enforced by the Execution Guard before-hook.
+  if (Classify.classify(input.command) === "package_install") {
+    yield* ctx.ask({
+      permission: "package_install",
+      patterns: [input.command],
+      always: [input.command],
+      metadata: { command: input.command },
+    })
+  }
+
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {

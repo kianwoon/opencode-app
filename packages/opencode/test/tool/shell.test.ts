@@ -989,6 +989,53 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  each("asks for package_install permission for a registry install", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          expect(
+            yield* fail(
+              {
+                command: "npm install left-pad",
+              },
+              capture(requests, err),
+            ),
+          ).toMatchObject({ message: err.message })
+          const installReq = requests.find((r) => r.permission === "package_install")
+          expect(installReq).toBeDefined()
+          expect(installReq!.patterns).toContain("npm install left-pad")
+        }),
+      )
+    }),
+  )
+
+  each("does not ask for package_install permission for a non-install command", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          expect(
+            yield* fail(
+              {
+                command: "npm run build",
+              },
+              capture(requests, err),
+            ),
+          ).toMatchObject({ message: err.message })
+          const installReq = requests.find((r) => r.permission === "package_install")
+          expect(installReq).toBeUndefined()
+        }),
+      )
+    }),
+  )
+
   each("matches redirects in permission pattern", () =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped()

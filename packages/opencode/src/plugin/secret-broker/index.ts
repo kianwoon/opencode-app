@@ -5,8 +5,9 @@
 //   tool.execute.before  (input, output {args}) -> throw to block
 //   tool.execute.after   (input, output {title,output,metadata}) -> mutate to redact
 //
-// `permission.ask` is DECLARED but DEAD (no trigger call sites) — file
-// protection is enforced through tool.execute.before instead.
+// `permission.ask` has no plugin trigger call sites — file and install
+// protection is enforced through tool.execute.before plus the live tool-side
+// ctx.ask in tool/shell.ts, not through this hook.
 //
 // Streaming sink (P2-j): the plugin API exposes no per-chunk stream hook, so the
 // model-visible channel is covered at the FINAL-RESULT boundaries that DO exist —
