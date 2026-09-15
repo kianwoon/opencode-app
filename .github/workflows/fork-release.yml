@@ -28,11 +28,11 @@ jobs:
           set -euo pipefail
           if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Creating release for $TAG_NAME"
-            gh release create "$TAG_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "$TAG_NAME" \
-              --generate-notes
+            if ! gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG_NAME" --generate-notes; then
+              echo "Create failed (likely 422: already exists), re-checking..."
+              gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null
+              echo "Release for $TAG_NAME exists, treating as success"
+            fi
           else
             echo "Release for $TAG_NAME already exists, skipping"
           fi
