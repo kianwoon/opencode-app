@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process"
+import { existsSync, renameSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 
-import type { Configuration } from "electron-builder"
+import type { AfterPackContext, Configuration } from "electron-builder"
 
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
@@ -17,6 +18,33 @@ const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/ope
 
 const metainfoFpm = (appId: string) =>
   `${path.join(packageDir, "resources", `${appId}.metainfo.xml`)}=/usr/share/metainfo/${appId}.metainfo.xml`
+
+// Electron resolves child processes from GetHelperAppPath, which probes
+// "Electron Helper*.app/Contents/MacOS/Electron Helper*" (built from
+// ELECTRON_PRODUCT_NAME) before falling back to "<main CFBundleName> Helper*".
+// electron-builder renames the helper bundles/dirs/executables to
+// "<productName> Helper*" while leaving the inner CFBundleName as
+// "Electron Helper*", so the package is internally inconsistent and child
+// spawns abort with LOG(FATAL) "Unable to find helper app"
+// (electron_main_delegate_mac.mm:66). Rename bundle, executable and
+// CFBundleExecutable back to Electron's canonical names. Runs before signing,
+// so the repackaged helpers are signed consistently.
+// https://github.com/electron-userland/electron-builder/issues/6962
+async function renameMacHelpers(context: AfterPackContext) {
+  if (context.electronPlatformName !== "darwin") return
+  const appName = context.packager.appInfo.productFilename
+  const frameworks = path.join(context.appOutDir, `${appName}.app`, "Contents", "Frameworks")
+  for (const suffix of ["", " (GPU)", " (Renderer)", " (Plugin)"]) {
+    const bundle = path.join(frameworks, `${appName} Helper${suffix}.app`)
+    if (!existsSync(bundle)) continue
+    const helper = `Electron Helper${suffix}`
+    const executable = path.join(bundle, "Contents", "MacOS", `${appName} Helper${suffix}`)
+    if (existsSync(executable)) renameSync(executable, path.join(bundle, "Contents", "MacOS", helper))
+    const plist = path.join(bundle, "Contents", "Info.plist")
+    if (existsSync(plist)) await execFileAsync("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleExecutable ${helper}`, plist])
+    renameSync(bundle, path.join(frameworks, `${helper}.app`))
+  }
+}
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -43,6 +71,7 @@ const APP_IDS = {
 
 const getBase = (appId: string): Configuration => ({
   artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  afterPack: renameMacHelpers,
   directories: {
     output: "dist",
     buildResources: "resources",

@@ -22,6 +22,7 @@ async function setup() {
     subagent: session("subagent", "Subagent session", "session"),
     abort: session("abort", "Abort session"),
     timeout: session("timeout", "Timeout session"),
+    stall: session("stall", "Stall session"),
   }
 
   await Notifications.tui(
@@ -246,7 +247,20 @@ describe("internal notifications TUI plugin", () => {
     harness.emit({
       id: "event-4",
       type: "session.error",
-      properties: { sessionID: "timeout", error: { name: "UnknownError", data: { message: "SSE read timed out" } } },
+      properties: { sessionID: "timeout", error: { name: "UnknownError", data: { message: "No SSE chunk received for 5000ms; the stream stalled and was aborted" } } },
+    })
+    harness.emit({
+      id: "event-5",
+      type: "session.status",
+      properties: { sessionID: "stall", status: { type: "busy" } },
+    })
+    harness.emit({
+      id: "event-6",
+      type: "session.error",
+      properties: {
+        sessionID: "stall",
+        error: { name: "UnknownError", data: { message: "No SSE chunk received for 180000ms; the stream stalled and was aborted" } },
+      },
     })
 
     expect(harness.notifications).toEqual([
@@ -258,6 +272,12 @@ describe("internal notifications TUI plugin", () => {
       },
       {
         title: "Timeout session",
+        message: "Model stopped responding",
+        notification: { when: "blurred" },
+        sound: { name: "error", when: "always" },
+      },
+      {
+        title: "Stall session",
         message: "Model stopped responding",
         notification: { when: "blurred" },
         sound: { name: "error", when: "always" },

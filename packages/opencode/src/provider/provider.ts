@@ -59,50 +59,82 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController, maxBytes = 0) 
   if ((typeof ms !== "number" || ms <= 0) && maxBytes <= 0) return res
   if (!res.body) return res
 
+  const guarded = typeof ms === "number" && ms > 0
   const reader = res.body.getReader()
+  const decoder = new TextDecoder()
   let received = 0
+  // Deadline for the next payload-bearing chunk. Heartbeat-only reads (SSE
+  // comments, whitespace keep-alives) must NOT push this forward — otherwise
+  // a gateway pinging `: ping` defeats the stall guard while no real content
+  // arrives. Only chunks carrying payload re-arm it.
+  let deadline = 0
+  let stalled: ProviderError.ChunkStallError | undefined
+  // Trailing partial line held across reads so a heartbeat split over two
+  // TCP segments (`: pi` + `ng\n\n`) is not mistaken for payload.
+  let tail = ""
+
+  const failStalled = () => {
+    if (stalled) return stalled
+    stalled = new ProviderError.ChunkStallError(ms)
+    ctl.abort(stalled)
+    reader.cancel(stalled).catch(() => {})
+    return stalled
+  }
+
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
-      const read =
-        typeof ms === "number" && ms > 0
-          ? new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
-              const id = setTimeout(() => {
-                const err = new ProviderError.ChunkStallError(ms)
-                ctl.abort(err)
-                reader.cancel(err).catch(() => {})
-                reject(err)
-              }, ms)
+      if (stalled) throw stalled
+      if (guarded && deadline === 0) deadline = Date.now() + ms
+      const part = !guarded
+        ? await reader.read()
+        : await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
+            const id = setTimeout(() => reject(failStalled()), Math.max(deadline - Date.now(), 0))
 
-              reader.read().then(
-                (part) => {
-                  clearTimeout(id)
-                  resolve(part)
-                },
-                (err) => {
-                  clearTimeout(id)
-                  reject(err)
-                },
-              )
-            })
-          : reader.read()
-      const part = await read
+            reader.read().then(
+              (p) => {
+                clearTimeout(id)
+                resolve(p)
+              },
+              (err) => {
+                clearTimeout(id)
+                reject(err)
+              },
+            )
+          })
+      if (stalled) throw stalled
 
       if (part.done) {
+        deadline = 0
+        tail = ""
         ctrl.close()
         return
       }
 
       received += part.value.byteLength
       if (maxBytes > 0 && received > maxBytes) {
+        deadline = 0
         const err = new ProviderError.StreamVolumeError(maxBytes)
         ctl.abort(err)
         void reader.cancel(err).catch(() => {})
         ctrl.error(err)
         return
       }
+      if (guarded) {
+        const text = tail + decoder.decode(part.value, { stream: true })
+        const lines = text.split("\n")
+        // Keep the trailing partial line in the check: a `data:` line split
+        // across two TCP segments must still count as payload on arrival.
+        tail = lines.pop() ?? ""
+        const payload = [...lines, tail].some((line) => {
+          const trimmed = line.trim()
+          return trimmed !== "" && !trimmed.startsWith(":")
+        })
+        if (payload) deadline = Date.now() + ms
+      }
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
+      deadline = 0
       ctl.abort(reason)
       await reader.cancel(reason)
     },

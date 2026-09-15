@@ -226,11 +226,17 @@ export function TitlebarTabStrip(props: {
   let listRef!: HTMLDivElement
   let resizeFrame: number | undefined
   const [visibility, setVisibility] = createStore<Record<string, boolean>>({})
-  // Display order only: sessions with an unsent composed message sit between
-  // the idle tabs and the running (busy) sessions, which pin to the right end
-  // of the strip; everything else keeps the open/drag order. The persisted tab
-  // store order is untouched, so manual drag-reorder still works among idle
-  // tabs.
+  // Display order only: a session that becomes running (busy) or drafted (an
+  // unsent composed message) moves to the right end of the strip — drafted
+  // before running — and stays where it finished when it goes idle again
+  // instead of snapping back. Brand-new tabs append in open order, closed tabs
+  // drop out, and a manual drag reorder becomes the new sticky baseline. The
+  // persisted tab store order is untouched.
+  let order: string[] = []
+  let prevPropsKeys: string[] = []
+  let prevRunning = new Set<string>()
+  let prevDrafted = new Set<string>()
+
   const displayTabs = createMemo(() => {
     const running = new Set<string>()
     const drafted = new Set<string>()
@@ -246,12 +252,34 @@ export function TitlebarTabStrip(props: {
       const prompt = tabs.stateValue<PromptSession>(tab, "prompt")
       if (prompt?.dirty()) drafted.add(tabKey(tab))
     }
-    const rest = props.tabs.filter((tab) => !running.has(tabKey(tab)) && !drafted.has(tabKey(tab)))
-    return [
-      ...rest,
-      ...props.tabs.filter((tab) => drafted.has(tabKey(tab))),
-      ...props.tabs.filter((tab) => running.has(tabKey(tab))),
+
+    const propsKeys = props.tabs.map(tabKey)
+    // A manual drag reorder arrives as a changed order among already-open tabs;
+    // adopt it as the new sticky baseline. Adds/removes leave the shared order
+    // intact and need no reseed.
+    const prevShared = prevPropsKeys.filter((key) => propsKeys.includes(key))
+    const nextShared = propsKeys.filter((key) => prevPropsKeys.includes(key))
+    const rebased = prevShared.some((key, index) => key !== nextShared[index])
+
+    const byKey = new Map(props.tabs.map((tab) => [tabKey(tab), tab]))
+    const sticky = rebased ? propsKeys.slice() : order.filter((key) => byKey.has(key))
+    for (const key of propsKeys) {
+      if (!sticky.includes(key)) sticky.push(key)
+    }
+
+    const entered = sticky.filter((key) =>
+      running.has(key) ? !prevRunning.has(key) : drafted.has(key) && !prevDrafted.has(key),
+    )
+    const enteredSet = new Set(entered)
+    order = [
+      ...sticky.filter((key) => !enteredSet.has(key)),
+      ...entered.filter((key) => drafted.has(key)),
+      ...entered.filter((key) => running.has(key)),
     ]
+    prevPropsKeys = propsKeys
+    prevRunning = running
+    prevDrafted = drafted
+    return order.flatMap((key) => byKey.get(key) ?? [])
   })
   const visibleTabs = createMemo(() => displayTabs().filter((tab) => tab.type === "draft" || visibility[tabKey(tab)]))
   const visibleTabIds = () => visibleTabs().map(tabKey)

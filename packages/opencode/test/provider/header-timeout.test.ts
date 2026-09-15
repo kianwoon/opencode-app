@@ -280,18 +280,22 @@ it.live("OpenAI API auth gets default headerTimeout", () =>
 
 it.live("timeout does not abort a healthy SSE stream mid-body (regression: 300s kill)", () =>
   Effect.gen(function* () {
-    // Gaps of 30ms between chunks, 50ms idle limit: every idle gap passes,
-    // while total body duration (150ms) exceeds the limit. The old hard
-    // whole-request AbortSignal.timeout would have killed this stream.
+    // Gaps of 200ms between chunks, 1000ms idle limit: every idle gap passes
+    // with a wide margin, while total body duration (1200ms) still exceeds the
+    // limit. The margin matters: the Effect test runtime batches socket writes,
+    // so a nominal 30ms gap can surface as ~90ms of event-loop silence. A tight
+    // limit (e.g. 50ms) therefore fires on a "healthy" stream and parks
+    // `result.text` until the test times out. The old hard whole-request
+    // AbortSignal.timeout would still have killed this stream.
     const server = yield* Effect.acquireRelease(
       Effect.promise(() =>
         spacedChunksServer([
           { delay: 0, chunk: "a" },
-          { delay: 30, chunk: "b" },
-          { delay: 30, chunk: "c" },
-          { delay: 30, chunk: "d" },
-          { delay: 30, chunk: "e" },
-          { delay: 30, chunk: "f" },
+          { delay: 200, chunk: "b" },
+          { delay: 200, chunk: "c" },
+          { delay: 200, chunk: "d" },
+          { delay: 200, chunk: "e" },
+          { delay: 200, chunk: "f" },
         ]),
       ),
       (server) => Effect.sync(() => server.server.close()),
@@ -309,7 +313,7 @@ it.live("timeout does not abort a healthy SSE stream mid-body (regression: 300s 
 
           expect(yield* Effect.promise(() => result.text)).toBe("abcdef")
         }),
-      { config: providerConfig(server.url, { timeout: 50 }) },
+      { config: providerConfig(server.url, { timeout: 1_000 }) },
     )
   }),
 )

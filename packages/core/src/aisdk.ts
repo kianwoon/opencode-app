@@ -9,6 +9,17 @@ import { State } from "./state"
 
 type SDK = any
 
+// Sibling of ProviderError.ChunkStallError in packages/opencode (core cannot
+// import the opencode package). message-v2 matches stalls by the shared
+// `ProviderChunkStallError` name + `ms` field, so this must keep both.
+export class ChunkStallError extends Error {
+  public override readonly name = "ProviderChunkStallError"
+
+  constructor(public readonly ms: number) {
+    super(`No SSE chunk received for ${ms}ms; the stream stalled and was aborted`)
+  }
+}
+
 export interface SDKEvent {
   readonly model: ModelV2.Info
   readonly package: string
@@ -23,42 +34,80 @@ export interface LanguageEvent {
   language?: LanguageModelV3
 }
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
+export function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
-  if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
-
+  // No content-type gate: gateways (and the fetchFreshConnection node-stream
+  // bridge, which builds a Response with no content-type at all) can omit
+  // `text/event-stream` on streaming responses. Applies to ANY streamed body.
   const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  // Deadline for the next payload-bearing chunk. Heartbeat-only reads (SSE
+  // comments, whitespace keep-alives) must NOT push this forward — otherwise
+  // a gateway pinging `: ping` defeats the stall guard while no real content
+  // arrives. Only chunks carrying payload re-arm it.
+  let deadline = 0
+  let stalled: ChunkStallError | undefined
+  // Trailing partial line held across reads so a heartbeat split over two
+  // TCP segments (`: pi` + `ng\n\n`) is not mistaken for payload.
+  let tail = ""
+
+  const failStalled = () => {
+    if (stalled) return stalled
+    stalled = new ChunkStallError(ms)
+    ctl.abort(stalled)
+    reader.cancel(stalled).catch(() => {})
+    return stalled
+  }
+
+  const read = async () => {
+    const part = await reader.read()
+    if (!part.done || !stalled) return part
+    throw stalled
+  }
+
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
+      if (stalled) throw stalled
+      if (deadline === 0) deadline = Date.now() + ms
       const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
-        const id = setTimeout(() => {
-          const err = new Error("SSE read timed out")
-          ctl.abort(err)
-          reader.cancel(err).catch(() => {})
-          reject(err)
-        }, ms)
+        const id = setTimeout(() => reject(failStalled()), Math.max(deadline - Date.now(), 0))
 
-        reader.read().then(
-          (part) => {
-            clearTimeout(id)
-            resolve(part)
-          },
-          (err) => {
-            clearTimeout(id)
+        const onRead = async () => {
+          try {
+            resolve(await read())
+          } catch (err) {
             reject(err)
-          },
-        )
+          } finally {
+            clearTimeout(id)
+          }
+        }
+        void onRead()
       })
 
+      if (stalled) throw stalled
+
       if (part.done) {
+        deadline = 0
+        tail = ""
         ctrl.close()
         return
       }
 
+      const text = tail + decoder.decode(part.value, { stream: true })
+      const lines = text.split("\n")
+      // Keep the trailing partial line in the check: a `data:` line split
+      // across two TCP segments must still count as payload on arrival.
+      tail = lines.pop() ?? ""
+      const payload = [...lines, tail].some((line) => {
+        const trimmed = line.trim()
+        return trimmed !== "" && !trimmed.startsWith(":")
+      })
+      if (payload) deadline = Date.now() + ms
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
+      deadline = 0
       ctl.abort(reason)
       await reader.cancel(reason)
     },

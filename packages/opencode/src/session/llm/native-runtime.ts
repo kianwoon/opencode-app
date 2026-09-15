@@ -1,5 +1,6 @@
 import type { Auth } from "@/auth"
 import type { Provider } from "@/provider/provider"
+import { ProviderError } from "@/provider/error"
 import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
@@ -41,6 +42,54 @@ type StreamInput = {
   readonly providerOptions?: Record<string, any>
   readonly headers: Record<string, string>
   readonly abort: AbortSignal
+}
+
+// Default idle guard for the native runtime: same 180s payload-only deadline
+// as the AI SDK wrapSSE idle guard (DEFAULT_IDLE_TIMEOUT). Only fires on a
+// gap between payload-bearing LLMEvents — heartbeats/keep-alives that emit
+// no event must NOT re-arm it, or a pinging gateway defeats the guard while
+// no real content arrives. Raises ProviderError.ChunkStallError identity so
+// message-v2 retry mapping still matches. Respects the same escape hatches:
+// timeout:false disables entirely, chunkTimeout:false disables the gap guard.
+const DEFAULT_NATIVE_IDLE_MS = 180_000
+
+const resolveNativeIdleMs = (model: Provider.Model, provider: Provider.Info) => {
+  // Timeout knobs live in provider options, model options, or both:
+  // resolveSDK merges {...provider.options, ...model.options} (model wins),
+  // and the e2e test config sets them at provider level. Read the same
+  // merged surface here or provider-level chunkTimeout is silently ignored.
+  const merged = { ...provider.options, ...model.options } as Record<string, unknown>
+  const timeout = merged["timeout"]
+  const chunkTimeout = merged["chunkTimeout"]
+  if (timeout === false || chunkTimeout === false) return undefined
+  if (typeof chunkTimeout === "number" && chunkTimeout > 0) return chunkTimeout
+  if (typeof timeout === "number" && timeout > 0) return timeout
+  if (typeof timeout === "string" && timeout !== "" && Number(timeout) > 0) return Number(timeout)
+  return DEFAULT_NATIVE_IDLE_MS
+}
+
+const withPayloadIdleGuard = (
+  stream: Stream.Stream<LLMEvent, unknown>,
+  ms: number | undefined,
+): Stream.Stream<LLMEvent, unknown> => {
+  if (ms === undefined || ms <= 0) return stream
+  // Every pull is one payload-bearing LLMEvent (heartbeats emit no event, so
+  // they never re-arm the deadline). A pull that takes longer than `ms` means
+  // the upstream produced nothing payload-bearing in the window: fail the
+  // stream with ChunkStallError so message-v2 retries the turn.
+  return Stream.unwrap(
+    Effect.gen(function* () {
+      const pull = yield* Stream.toPull(stream)
+      const guarded = Effect.timeoutOption(pull, ms).pipe(
+        Effect.flatMap((option) =>
+          option._tag === "Some"
+            ? Effect.succeed(option.value)
+            : Effect.fail(new ProviderError.ChunkStallError(ms)),
+        ),
+      )
+      return Stream.fromPull(Effect.succeed(guarded))
+    }),
+  )
 }
 
 export function status(input: Pick<StreamInput, "model" | "provider" | "auth">): RuntimeStatus {
@@ -100,6 +149,7 @@ export function stream(input: StreamInput): StreamResult {
     providerOptions: ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
     headers: { ...providerHeaders(input.provider.options.headers), ...input.headers },
   })
+  const idleMs = resolveNativeIdleMs(input.model, input.provider)
   const stream = Stream.scoped(
     Stream.unwrap(
       Effect.gen(function* () {
@@ -141,7 +191,10 @@ export function stream(input: StreamInput): StreamResult {
 
   return {
     ...current,
-    stream: fetch ? stream.pipe(Stream.provideService(FetchHttpClient.Fetch, fetch)) : stream,
+    stream: withPayloadIdleGuard(
+      fetch ? stream.pipe(Stream.provideService(FetchHttpClient.Fetch, fetch)) : stream,
+      idleMs,
+    ),
   }
 }
 

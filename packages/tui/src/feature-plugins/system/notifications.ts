@@ -20,8 +20,8 @@ function notify(api: TuiPluginApi, sessionID: string | undefined, message: strin
 function sessionErrorMessage(error: SessionError) {
   if (error?.name === "MessageAbortedError") return "Session aborted"
   const data = error?.data
-  if (data && typeof data === "object" && "message" in data && data.message === "SSE read timed out") {
-    return "Model stopped responding"
+  if (data && typeof data === "object" && "message" in data && typeof data.message === "string") {
+    if (data.message.startsWith("No SSE chunk received for")) return "Model stopped responding"
   }
   return "Session error"
 }

@@ -1,5 +1,6 @@
-import { afterEach, expect, test } from "bun:test"
-import { mkdir, unlink } from "fs/promises"
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, unlink } from "fs/promises"
+import os from "os"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -57,6 +58,27 @@ afterEach(async () => {
   }
   originalEnv.clear()
   await disposeAllInstances()
+})
+
+// Bootstrap installs @opencode-ai/plugin into every directory in
+// ConfigPaths.directories, and Config.waitForDependencies joins those installs.
+// A global OPENCODE_CONFIG_DIR whose dir has no node_modules triggers a real
+// (network) npm reify; concurrent bootstraps queue behind its flock and park
+// plugin-touching tests past their deadline. Redirect the override at a
+// file-local dir marked ready up front, so no unrelated install is enqueued.
+const configDirOverride = process.env.OPENCODE_CONFIG_DIR
+let isolatedConfigDir: string | undefined
+
+beforeAll(async () => {
+  isolatedConfigDir = await mkdtemp(path.join(os.tmpdir(), "opencode-provider-config-"))
+  await markPluginDependenciesReady(isolatedConfigDir)
+  process.env.OPENCODE_CONFIG_DIR = isolatedConfigDir
+})
+
+afterAll(async () => {
+  if (configDirOverride === undefined) delete process.env.OPENCODE_CONFIG_DIR
+  else process.env.OPENCODE_CONFIG_DIR = configDirOverride
+  if (isolatedConfigDir) await rm(isolatedConfigDir, { recursive: true, force: true }).catch(() => undefined)
 })
 
 const providerLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>

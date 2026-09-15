@@ -3009,7 +3009,10 @@ describe("ProviderTransform.message - anthropic empty content filtering", () => 
           {},
         )
         expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"])
-        expect(messages[1].providerOptions?.bedrock?.cachePoint).toEqual(cached ? { type: "default" } : undefined)
+        // Cache breakpoints pin the latest user message (stable prefix), not a sliding last-two
+        // window, so the assistant replay keeps no cachePoint of its own.
+        expect(messages[1].providerOptions?.bedrock?.cachePoint).toEqual(undefined)
+        expect(messages[2].providerOptions?.bedrock?.cachePoint).toEqual(cached ? { type: "default" } : undefined)
         const provider = createAmazonBedrock({
           apiKey: "test-key",
           region: "us-east-1",
@@ -3018,10 +3021,7 @@ describe("ProviderTransform.message - anthropic empty content filtering", () => 
               const body = JSON.parse(String(args[1]?.body))
               expect(body.messages).toEqual([
                 { role: "user", content: [{ text: "Think" }] },
-                {
-                  role: "assistant",
-                  content: [{ text: "Earlier answer" }, ...(cached ? [{ cachePoint: { type: "default" } }] : [])],
-                },
+                { role: "assistant", content: [{ text: "Earlier answer" }] },
                 {
                   role: "user",
                   content: [{ text: "Continue" }, ...(cached ? [{ cachePoint: { type: "default" } }] : [])],

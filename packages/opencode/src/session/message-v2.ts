@@ -810,6 +810,9 @@ export function fromError(
       // ChunkStallError (idle-guard abort) must be retried: a silent stall is
       // a transient provider-side condition. Bounded by RETRY_MAX_RETRIES in
       // the retry schedule, so a persistently-stalled provider still gives up.
+      // Also matches the core AISDK ChunkStallError sibling by name: core
+      // cannot import the opencode provider error, but both share the
+      // `ProviderChunkStallError` name + `ms` field.
       return new APIError(
         {
           message: e.message,
@@ -817,6 +820,24 @@ export function fromError(
           metadata: {
             code: e.name,
             ...(e instanceof ProviderError.ChunkStallError ? { stallIdleMs: String(e.ms) } : {}),
+          },
+        },
+        { cause: e },
+      ).toObject()
+    case e instanceof Error && e.name === "ProviderChunkStallError":
+      // Name-based match for the core AISDK sibling (core cannot import the
+      // opencode ProviderError, so instanceof cannot see it). The AI SDK may
+      // also surface the abort as a wrapped APICallError; unreachable here
+      // because APICallError.isInstance is matched after, but the plain-error
+      // shape is what wrapSSE rejects with. Same identity as ChunkStallError:
+      // retryable, bounded by the retry schedule.
+      return new APIError(
+        {
+          message: e.message,
+          isRetryable: true,
+          metadata: {
+            code: e.name,
+            ...("ms" in e && typeof e.ms === "number" ? { stallIdleMs: String(e.ms) } : {}),
           },
         },
         { cause: e },
