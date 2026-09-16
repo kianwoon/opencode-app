@@ -13,6 +13,12 @@ const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/
 // diagnostic. `=broken` yields none; `KEY without equals` yields KEY.
 const LEADING_NAME = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)/
 
+// `secret://…` values are unresolved handles: no resolver exists yet, so the
+// literal URI is NOT a usable secret. It must never be injected (useless
+// string) nor redacted (a URI is not secret material, so naming it leaks
+// nothing). A one-line warning makes the dangling scheme visible.
+const SECRET_URI = /^secret:\/\//
+
 export type Parsed = {
   readonly values: ReadonlyMap<string, string>
   readonly keys: ReadonlySet<string>
@@ -70,6 +76,14 @@ export function parse(source: string): Parsed {
     }
     const [, key, raw] = match
     if (key === undefined || raw === undefined) continue
+    // `secret://` scheme is unimplemented (no resolver), so the URI is neither
+    // injected nor redacted — it is simply not a secret. Warn once, key name and
+    // URI only (a URI is not secret material), then omit the key entirely.
+    const value = isOpenDoubleQuote(raw) ? undefined : unquote(raw)
+    if (value !== undefined && SECRET_URI.test(value)) {
+      console.warn(`[secret-broker] ${key} uses unresolved secret:// URI "${value}"; skipped (no resolver implemented)`)
+      continue
+    }
     if (isOpenDoubleQuote(raw)) {
       // Multi-line double-quoted value: consume physical lines until the
       // closing quote. The final line may carry trailing content, which is

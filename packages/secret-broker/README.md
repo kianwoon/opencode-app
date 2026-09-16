@@ -33,6 +33,15 @@ built-in flag is unset.
 - Set `minLength` via plugin options; default 8. Values shorter than the floor
   are matched by word boundary only.
 
+## Agent usage contract
+
+- Secrets are injected into shell **child-process** environments; reference them
+  as `$KEY_NAME` in shell commands. Values are never visible to the model by design.
+- Never read `.env`; it is denied to tools. Key NAMES are listed in every denial message.
+- MCP tools do NOT receive injection — use the native shell tool for secret access.
+- `secret://` URIs in `.env` are not yet resolved: the key is skipped with a warning.
+- Only keys declared in `.env.example` are injected.
+
 ## Scope limit (design §17)
 
 Output redaction protects the **model-visible channel** only. It does **not**

@@ -156,6 +156,12 @@ export class SecretBroker {
     return Object.fromEntries(this.injected)
   }
 
+  /** Injected secret KEY NAMES only (never values), sorted. Used to tell a
+   *  blocked agent which `$NAME`s it can reference in shell commands. */
+  injectedNames(): string[] {
+    return [...this.injected.keys()].sort()
+  }
+
   /** Applies broker values onto a child env object (P1-c precedence, design §22:
    *  protected allowlisted keys are OVERWRITTEN by the broker; every other
    *  pre-existing key in `target` is left untouched, so a user's non-secret
@@ -351,7 +357,7 @@ export async function secretBrokerPlugin(
         sessionID: hookInput.sessionID,
         callID: hookInput.callID,
       })
-      throw new Error(denialMessage(denial))
+      throw new Error(denialMessage(denial, broker.injectedNames()))
     },
 
     "tool.execute.after": async (hookInput, output) => {

@@ -377,7 +377,14 @@ export function check(tool: string, args: unknown): Denial | undefined {
   return sweepArgs(tool, args)
 }
 
-/** Message intentionally omits any file contents. */
-export function denialMessage(denial: Denial): string {
-  return `Secret Broker blocked ${denial.tool} of protected file "${denial.filePath}". Read .env.example for the required key names instead.`
+/** Message intentionally omits any file contents. `keyNames` are the secret
+ *  KEY NAMES currently injected for the session (names only, never values) —
+ *  they let the agent switch to `$NAME` indirection instead of dead-ending. */
+export function denialMessage(denial: Denial, keyNames: readonly string[] = []): string {
+  const base = `Secret Broker blocked ${denial.tool} of protected file "${denial.filePath}". Read .env.example for the required key names instead.`
+  const contract =
+    keyNames.length === 0
+      ? ` Its real values are NOT readable, and no allowlisted secrets are injected for this session.`
+      : ` Its real values are never visible to the model, but the allowlisted secrets ARE injected into shell child-process environments — reference them as $KEY_NAME in shell commands (e.g. $${keyNames[0]}). Injected key names: ${keyNames.join(", ")}.`
+  return base + contract
 }

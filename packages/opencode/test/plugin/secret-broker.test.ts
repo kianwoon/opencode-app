@@ -941,3 +941,69 @@ describe("single-broker guarantee (built-in vs standalone)", () => {
     expect(shouldLoadBuiltinSecretBroker({ disableSecretBroker: true, pluginOrigins: [] })).toBe(false)
   })
 })
+
+
+describe("agent usability contract (denial guidance + secret:// URIs)", () => {
+  test("denial message lists injected key NAMES and the $VAR usage pattern", () => {
+    const msg = denialMessage({ tool: "read", filePath: ".env" }, ["API_KEY", "STRIPE_KEY"])
+    expect(msg).toContain("Secret Broker blocked read")
+    expect(msg).toContain(".env.example")
+    // Names only — never values — plus the indirection hint.
+    expect(msg).toContain("API_KEY")
+    expect(msg).toContain("STRIPE_KEY")
+    expect(msg).toContain("$KEY_NAME")
+    expect(msg).toContain("child-process")
+    expect(msg).toContain("$API_KEY")
+  })
+
+  test("denial message with no injected names does not invent any", () => {
+    const msg = denialMessage({ tool: "bash", filePath: "server.pem" }, [])
+    expect(msg).toContain("no allowlisted secrets are injected")
+    expect(msg).not.toContain("$KEY_NAME")
+  })
+
+  test("real before-hook denial carries the session's injected key names", async () => {
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+    const hooks = await secretBrokerPlugin({ directory: dir } as never)
+    await expect(
+      hooks["tool.execute.before"]!({ tool: "read", sessionID: "s", callID: "c" }, { args: { filePath: ".env" } }),
+    ).rejects.toThrow(/\$KEY_NAME[\s\S]*Injected key names: API_KEY/)
+  })
+
+  test("secret:// URI value is not parsed as a secret and warns by key name", () => {
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = ((...args: unknown[]) => {
+      warnings.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "))
+    }) as typeof console.warn
+    const parsed = parse("FOO=secret://whatever\nGOOD=plain\n")
+    console.warn = original
+    // The dangling URI is dropped entirely; the ordinary value survives.
+    expect(parsed.values.has("FOO")).toBe(false)
+    expect(parsed.values.get("GOOD")).toBe("plain")
+    expect(parsed.keys.has("FOO")).toBe(false)
+    expect(warnings.join("\n")).toContain("FOO")
+  })
+
+  test("secret:// URI is neither injected nor redacted by the broker", async () => {
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "FOO=\nGOOD=\n")
+    writeFileSync(path.join(dir, ".env"), "FOO=secret://whatever\nGOOD=longenoughvalue\n")
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = ((...args: unknown[]) => {
+      warnings.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "))
+    }) as typeof console.warn
+    const broker = await SecretBroker.create(dir)
+    console.warn = original
+    // Not injected; reported as missing instead.
+    expect(broker.shellEnv()).toEqual({ GOOD: "longenoughvalue" })
+    expect(broker.diagnostics().missing).toEqual(["FOO"])
+    // The literal URI is not secret material, so it is not redacted.
+    expect(broker.redact("uses secret://whatever here")).toBe("uses secret://whatever here")
+    expect(warnings.join("\n")).toContain("FOO")
+    expect(warnings.join("\n")).not.toContain("longenoughvalue")
+  })
+})
