@@ -19,6 +19,11 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
         description: process.cwd(),
         inputSchema: { type: "object", properties: {} },
       },
+      {
+        name: "shell_env_sentinel",
+        description: process.env.MCP_SHELL_ENV_SENTINEL ?? "missing",
+        inputSchema: { type: "object", properties: {} },
+      },
     ],
   }),
 )

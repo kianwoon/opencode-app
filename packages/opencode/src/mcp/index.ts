@@ -34,6 +34,7 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
+import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
 
 const DEFAULT_TIMEOUT = 30_000
 const CLIENT_OPTIONS = {
@@ -208,6 +209,7 @@ const layer = Layer.effect(
     const auth = yield* McpAuth.Service
     const events = yield* EventV2Bridge.Service
     const browser = yield* McpBrowser.Service
+    const ptyEnv = yield* PtyEnvironment.Service
 
     type Transport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport
 
@@ -350,6 +352,10 @@ const layer = Layer.effect(
       const baseDir = yield* InstanceState.directory
       const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
+      // Local MCP server processes (and the tool children they spawn, e.g.
+      // context-mode_execute) must receive the same broker-injected shell.env
+      // the PTY path injects, rather than only the parent process env.
+      const shellEnv = yield* ptyEnv.get({ directory: baseDir, cwd })
 
       const attempt = Effect.fn("MCP.connectLocal.attempt")(function* () {
         const transport = new StdioClientTransport({
@@ -359,6 +365,7 @@ const layer = Layer.effect(
           cwd,
           env: {
             ...process.env,
+            ...shellEnv,
             ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
             ...mcp.environment,
           },
@@ -1015,7 +1022,14 @@ export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [CrossSpawnSpawner.node, McpAuth.node, EventV2Bridge.node, Config.node, McpBrowser.node],
+  deps: [
+    CrossSpawnSpawner.node,
+    McpAuth.node,
+    EventV2Bridge.node,
+    Config.node,
+    McpBrowser.node,
+    PtyEnvironment.node,
+  ],
 })
 
 export * as MCP from "."

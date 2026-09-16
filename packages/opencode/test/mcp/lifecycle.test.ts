@@ -14,7 +14,8 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Effect, Exit } from "effect"
+import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
+import { Cause, Effect, Exit, Layer } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { MCP } from "../../src/mcp/index"
 import { McpOAuthCallback } from "../../src/mcp/oauth-callback"
@@ -22,6 +23,19 @@ import { TestInstance } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(MCP.node))
+// Stub the plugin-backed provider with a sentinel so the assertion is about
+// MCP wiring, not about a particular broker plugin being loaded.
+const itWithShellEnv = testEffect(
+  LayerNode.compile(MCP.node, [
+    [
+      PtyEnvironment.node,
+      Layer.succeed(
+        PtyEnvironment.Service,
+        PtyEnvironment.Service.of({ get: () => Effect.succeed({ MCP_SHELL_ENV_SENTINEL: "broker-sentinel" }) }),
+      ),
+    ],
+  ]),
+)
 const stdioFixture = path.join(import.meta.dir, "../fixture/mcp-lifecycle-stdio.ts")
 
 type Page<T> = { items: T[]; nextCursor?: string }
@@ -216,8 +230,16 @@ it.instance(
   { init: (directory) => Effect.promise(() => Bun.$`mkdir -p ${path.join(directory, "plugins/sub")}`.quiet()) },
 )
 
-it.instance("tools() reuses cached definitions until a protocol notification", () =>
+itWithShellEnv.instance("local stdio server receives shell.env broker env", () =>
   Effect.gen(function* () {
+    const mcp = yield* MCP.Service
+    yield* mcp.add("shell-env", { type: "local", command: [process.execPath, stdioFixture] })
+
+    expect((yield* mcp.tools())["shell-env_shell_env_sentinel"]?.def.description).toBe("broker-sentinel")
+  }),
+)
+
+it.instance("tools() reuses cached definitions until a protocol notification", () =>  Effect.gen(function* () {
     const server = yield* lifecycleServer({ capabilities: { tools: { listChanged: true } } })
     const mcp = yield* MCP.Service
     yield* mcp.add("cache-server", remote(server.url))

@@ -1,6 +1,7 @@
 export * as PluginPtyEnvironment from "./pty-environment"
 
 import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
+import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { Effect, Layer } from "effect"
 import { InstanceStore } from "@/project/instance-store"
 import { Plugin } from "."
@@ -22,3 +23,9 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export const node = makeGlobalNode({
+  service: PtyEnvironment.Service,
+  layer,
+  deps: [Plugin.node, InstanceStore.node],
+})
