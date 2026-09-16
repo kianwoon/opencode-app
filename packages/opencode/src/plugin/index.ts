@@ -98,8 +98,9 @@ function warnStandaloneSecretBrokerOnce() {
   console.warn("[secret-broker] standalone secret-broker detected in plugin[]; built-in yielding to avoid double-load")
 }
 
-// Built-in plugins that are directly imported (not installed from npm)
-function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker: boolean): PluginInstance[] {
+// Built-in plugins that are directly imported (not installed from npm). These
+// register BEFORE external plugin[] entries.
+export function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker: boolean): PluginInstance[] {
   if (standaloneSecretBroker) warnStandaloneSecretBrokerOnce()
   return [
     // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
@@ -123,15 +124,21 @@ function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker: boole
     // also wires the standalone broker into plugin[], the built-in yields so only
     // one broker is ever active.
     ...(flags.disableSecretBroker || standaloneSecretBroker ? [] : [SecretBrokerPlugin]),
-    // Execution Guard: runs AFTER the Secret Broker so its `shell.env` deletes the
-    // broker's injected keys for zero-secret command classes (install/build/test).
-    // Co-gated with the broker (without it there are no broker keys to strip) and
-    // independently opt-out via OPENCODE_DISABLE_EXECUTION_GUARD.
-    ...(flags.disableSecretBroker || flags.disableExecutionGuard ? [] : [ExecutionGuardPlugin]),
     // Context Firewall (plan §4): tagging + neutralizing untrusted content so it
     // can never grant authority at the model sink. Independent of the broker.
     ...(flags.disableContextFirewall ? [] : [ContextFirewallPlugin]),
   ]
+}
+
+// Execution Guard MUST register after every secret broker, including a standalone
+// broker wired via plugin[] (loaded after built-ins). Its `shell.env` deletes the
+// broker's injected keys for zero-secret command classes (install/build/test), so
+// registering it earlier would see an empty output.env and strip nothing. Ordering
+// between its before-hook and the broker's before-hook is irrelevant: both deny
+// independently and a throw still aborts execution. Co-gated with the broker (no
+// broker keys to strip without it) and opt-out via OPENCODE_DISABLE_EXECUTION_GUARD.
+export function tailInternalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
+  return flags.disableSecretBroker || flags.disableExecutionGuard ? [] : [ExecutionGuardPlugin]
 }
 
 function isServerPlugin(value: unknown): value is PluginInstance {
@@ -289,6 +296,19 @@ const layer = Layer.effect(
               }),
             ),
           )
+        }
+
+        // Execution Guard registers after external plugins (standalone broker) so its
+        // shell.env sees broker-injected env; see tailInternalPlugins.
+        for (const plugin of flags.disableDefaultPlugins ? [] : tailInternalPlugins(flags)) {
+          const init = yield* Effect.tryPromise({
+            try: () => plugin(input),
+            catch: errorMessage,
+          }).pipe(
+            Effect.tapError((error) => Effect.logError("failed to load internal plugin", { name: plugin.name, error })),
+            Effect.option,
+          )
+          if (init._tag === "Some") hooks.push(init.value)
         }
 
         // Notify plugins of current config

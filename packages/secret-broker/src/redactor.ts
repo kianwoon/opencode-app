@@ -251,15 +251,29 @@ export class Redactor {
   /** Like {@link redactDeep} but MUTATES strings in place and preserves object
    *  identity/prototypes — used on model messages, whose parts may be class
    *  instances or error objects that must not be re-hydrated as plain objects. */
-  redactInPlace<T>(value: T): T {
+  redactInPlace<T>(value: T, preserveToolCallArgs = false): T {
     if (typeof value === "string") return this.redact(value) as unknown as T
     if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) value[i] = this.redactInPlace(value[i])
+      for (let i = 0; i < value.length; i++) value[i] = this.redactInPlace(value[i], preserveToolCallArgs)
       return value
     }
     if (value !== null && typeof value === "object") {
       const record = value as Record<string, unknown>
-      for (const key of Object.keys(record)) record[key] = this.redactInPlace(record[key])
+      // Tool-call ARGUMENTS are agent-authored and already carry resolved
+      // `secret://…` handles; re-redacting them rewrites the handle text and
+      // poisons later bash commands (a handle fails command classification and
+      // forces a permission ask). Preserve `input` ONLY on the message-transform
+      // path, which is the only caller that sets this flag — output redaction
+      // (`redactDeep`/`tool.execute.after`) keeps redacting everything.
+      const argsHolder =
+        preserveToolCallArgs &&
+        (record.type === "tool" ||
+          (record.input !== undefined &&
+            (record.status === "pending" || record.status === "running" || record.status === "completed" || record.status === "error")))
+      for (const key of Object.keys(record)) {
+        if (argsHolder && key === "input") continue
+        record[key] = this.redactInPlace(record[key], preserveToolCallArgs)
+      }
       return value
     }
     return value

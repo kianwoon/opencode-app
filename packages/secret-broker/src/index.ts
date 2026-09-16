@@ -199,8 +199,8 @@ export class SecretBroker {
 
   /** Redacts strings in place, preserving object identity/prototypes. Used on
    *  model messages, whose parts/errors must not be re-hydrated as plain objects. */
-  redactInPlace<T>(value: T): T {
-    return this.redactor.redactInPlace(value)
+  redactInPlace<T>(value: T, preserveToolCallArgs = false): T {
+    return this.redactor.redactInPlace(value, preserveToolCallArgs)
   }
 }
 
@@ -391,7 +391,7 @@ export async function secretBrokerPlugin(
       for (let index = 0; index < output.messages.length; index++) {
         const message = output.messages[index]
         try {
-          broker.redactInPlace(message)
+          broker.redactInPlace(message, true)
         } catch {
           // The in-place pass may have redacted some fields before a throwing
           // accessor aborted it, leaving a PARTIAL result. Discard the whole
