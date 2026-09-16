@@ -97,12 +97,16 @@ describe("redactor", () => {
     expect(out).toBe("x secret://project/LONG y secret://project/SHORT z")
   })
 
-  test("short values are matched by word boundary, never as substrings", () => {
+  test("short values are redacted ONLY in assignment form, never as bare words", () => {
     const redactor = new Redactor([{ key: "TINY", value: "abc" }], 8)
     expect(redactor.size).toBe(1)
-    // Whole tokens are redacted; a longer word that merely contains the value is not.
-    expect(redactor.redact("abc stays abc")).toBe("secret://project/TINY stays secret://project/TINY")
+    // A short value as a bare word is left INTACT: matching it everywhere would
+    // corrupt ordinary identifiers, filenames and prose (GAP-1 regression).
+    expect(redactor.redact("abc stays abc")).toBe("abc stays abc")
     expect(redactor.redact("abcdef stays")).toBe("abcdef stays")
+    // The assignment form still redacts the leak that matters.
+    expect(redactor.redact("TINY=abc")).toBe("TINY=secret://project/TINY")
+    expect(redactor.redact("export TINY=abc")).toBe("export TINY=secret://project/TINY")
   })
 
   test("redactDeep walks nested output metadata", () => {
@@ -706,8 +710,9 @@ describe("minLength consistency (Critical: short values injected AND redacted)",
     writeFileSync(path.join(dir, ".env"), "SHORT=abc\nLONG=longenoughvalue\n")
     const broker = await SecretBroker.create(dir)
     expect(broker.shellEnv()).toEqual({ SHORT: "abc", LONG: "longenoughvalue" })
-    // Short value redacted as a whole token / assignment; long value exact.
-    expect(broker.redact("has abc and longenoughvalue")).toBe("has secret://project/SHORT and secret://project/LONG")
+    // Short value redacted ONLY as an assignment; a bare word stays intact so the
+    // broker never corrupts identifiers/filenames. Long value matches exactly.
+    expect(broker.redact("has abc and longenoughvalue")).toBe("has abc and secret://project/LONG")
     expect(broker.redact("SHORT='abc'")).toBe("SHORT='secret://project/SHORT'")
     expect(broker.diagnostics().missing).toEqual([])
   })
@@ -901,6 +906,30 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
     expect(env.env.AUDIT_KEY).toBe(secret)
     expect(joined).not.toContain(secret)
     expect(joined).not.toContain(Buffer.from(secret, "utf8").toString("base64"))
+  })
+
+  test("GAP-3 regression: a denial writes a durable, value-free audit line", async () => {
+    const dir = tmp()
+    const auditPath = path.join(dir, "audit.log")
+    process.env.OPENCODE_SECRET_BROKER_AUDIT_FILE = auditPath
+    try {
+      writeFileSync(path.join(dir, ".env.example"), "AUDIT_KEY=\n")
+      writeFileSync(path.join(dir, ".env"), "AUDIT_KEY=sk-auditcanary0123456789\n")
+      const hooks = await secretBrokerPlugin({ directory: dir } as never)
+      await expect(
+        hooks["tool.execute.before"]!({ tool: "read", sessionID: "s", callID: "c" }, { args: { filePath: ".env" } }),
+      ).rejects.toThrow()
+      // The denial is durably recorded (stderr alone is not captured by default).
+      const lines = readFileSync(auditPath, "utf8").trim().split("\n")
+      const block = lines.map((line) => JSON.parse(line)).find((event) => event.action === "block")
+      expect(block).toBeDefined()
+      expect(block.tool).toBe("read")
+      expect(block.filePath).toBe(".env")
+      // Value-free: the audit file never carries the secret bytes.
+      expect(readFileSync(auditPath, "utf8")).not.toContain("sk-auditcanary0123456789")
+    } finally {
+      delete process.env.OPENCODE_SECRET_BROKER_AUDIT_FILE
+    }
   })
 })
 

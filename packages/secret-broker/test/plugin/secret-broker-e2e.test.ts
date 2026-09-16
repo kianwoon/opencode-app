@@ -329,8 +329,10 @@ describe("secret-broker e2e — model-visible channel never carries the canary",
     expect(output.output).not.toContain(SHORT)
     expect(output.output).toContain(HANDLE)
 
-    // Redacted in model messages.
-    const messages = [{ info: { id: "m1", role: "assistant" }, parts: [{ type: "text", text: `key ${SHORT}` }] }]
+    // Redacted in model messages. A short value is redacted ONLY in its
+    // assignment form (`KEY=value`); it is never matched as a bare word, so the
+    // broker cannot corrupt ordinary identifiers/filenames (GAP-1).
+    const messages = [{ info: { id: "m1", role: "assistant" }, parts: [{ type: "text", text: `SHORT_KEY=${SHORT}` }] }]
     await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as never })
     expect(JSON.stringify(messages)).not.toContain(SHORT)
     expect(JSON.stringify(messages)).toContain(HANDLE)
@@ -339,7 +341,7 @@ describe("secret-broker e2e — model-visible channel never carries the canary",
     // by the retain buffer, so only absence of the secret is asserted.)
     const stream = new StreamRedactor(new Redactor([{ key: "SHORT_KEY", value: SHORT }], 8))
     let released = ""
-    for (const char of `key=${SHORT}`) released += stream.push(char)
+    for (const char of `SHORT_KEY=${SHORT}`) released += stream.push(char)
     released += stream.flush()
     expect(released).not.toContain(SHORT)
   })

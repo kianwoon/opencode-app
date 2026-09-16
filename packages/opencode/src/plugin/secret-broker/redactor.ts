@@ -42,6 +42,11 @@ type Variant = {
  *  with ordinary text, so we skip it (documented precision tradeoff above). */
 const MIN_BASE64_LENGTH = 12
 
+/** Extra chars a short value's stream-retain window adds beyond `KEY=value` to
+ *  cover `export `, surrounding quotes and separator whitespace (e.g.
+ *  `export "KEY" = "value"`). Conservative: over-retaining only delays release. */
+const ASSIGN_PREFIX_MARGIN = 16
+
 function jsonEscape(value: string): string {
   return JSON.stringify(value).slice(1, -1)
 }
@@ -93,14 +98,19 @@ function escapeRegExp(text: string): string {
 
 /**
  * One combined matcher for every sub-`minLength` value. A bare substring scan is
- * unsafe at that length (`sh0rt7` would rewrite ordinary prose), so a short
- * value is matched ONLY when its context proves it IS that secret:
+ * unsafe at that length (`sh0rt7`, `dev`, `APP_ENV=test` would rewrite ordinary
+ * prose and filenames), so a short value is matched ONLY in its assignment form —
+ * `KEY=value`, `KEY: value`, `"KEY": "value"`, optionally `export`ed — where the
+ * name is the secret's own key; the assignment keeps its prefix/quotes and only
+ * the value is replaced.
  *
- *   - an assignment — `KEY=value`, `KEY: value`, `"KEY": "value"`, optionally
- *     `export`ed — where the name is the secret's own key; the assignment keeps
- *     its prefix/quotes and only the value is replaced; or
- *   - a whole word-boundary token (`(?<![\w-])value(?![\w-])`), so a longer word
- *     that merely contains the value is left intact.
+ * The bare word-boundary form (`(?<![\w-])value(?![\w-])`) is deliberately NOT
+ * emitted for short values: a sub-`minLength` value is by definition short enough
+ * to collide with common identifiers and filename fragments, and rewriting every
+ * standalone occurrence corrupts the agent's own tool payloads and outputs (e.g.
+ * a config value `test` mangling `*.test.ts` paths and `test(...)` calls). The
+ * assignment form still catches the leak that matters. `minLength` already marks
+ * short values as too noisy to match exactly; this keeps that contract.
  *
  * All entries share ONE regex and one `String.replace` pass, so a handle
  * inserted for one entry is never rescanned and rewritten by another.
@@ -112,11 +122,11 @@ function shortPattern(entries: readonly Entry[]): { pattern: RegExp; entries: re
   const alternatives = entries.map((entry, index) => {
     const name = escapeRegExp(entry.key)
     const value = escapeRegExp(entry.value)
-    const assignment =
+    return (
       `(?<pre${index}>(?:export\\s+)?["']?${name}["']?\\s*[=:]\\s*["']?)` +
       `(?<val${index}>${value})` +
       `(?<post${index}>["']?)`
-    return `(?:${assignment}|(?<tok${index}>(?<![\\w-])${value}(?![\\w-])))`
+    )
   })
   return { pattern: new RegExp(alternatives.join("|"), "g"), entries }
 }
@@ -132,16 +142,12 @@ function redactShort(
 ): string {
   return input.replace(matcher.pattern, (...args: unknown[]) => {
     const groups = args[args.length - 1] as Record<string, string | undefined>
-    const index = matcher.entries.findIndex(
-      (_, i) => groups[`val${i}`] !== undefined || groups[`tok${i}`] !== undefined,
-    )
+    const index = matcher.entries.findIndex((_, i) => groups[`val${i}`] !== undefined)
     const entry = matcher.entries[index]
     if (entry === undefined) return String(args[0])
     const replacement = `${SCHEME}/${entry.key}`
     report?.(entry.key)
-    return groups[`val${index}`] === undefined
-      ? replacement
-      : `${groups[`pre${index}`] ?? ""}${replacement}${groups[`post${index}`] ?? ""}`
+    return `${groups[`pre${index}`] ?? ""}${replacement}${groups[`post${index}`] ?? ""}`
   })
 }
 
@@ -159,6 +165,7 @@ export class Redactor {
     const keys = new Set<string>()
     const shorts: Entry[] = []
     let longest = 0
+    let shortRetain = 0
     for (const entry of entries) {
       if (entry.value.length === 0) continue
       keys.add(entry.key)
@@ -167,6 +174,13 @@ export class Redactor {
       if (entry.value.length > longest) longest = entry.value.length
       if (entry.value.length < minLength) {
         shorts.push(entry)
+        // A short value is matched ONLY as part of its `KEY=value` assignment
+        // (see shortPattern), so the stream must retain from the START of that
+        // assignment — otherwise the `KEY=` prefix is released before the value
+        // completes and a split assignment leaks. Cover the key name, the value,
+        // and a margin for quotes/`export`/separator whitespace around them.
+        const span = entry.key.length + entry.value.length + ASSIGN_PREFIX_MARGIN
+        if (span > shortRetain) shortRetain = span
         continue
       }
       for (const value of variantsFor(entry.value, minLength)) {
@@ -180,8 +194,10 @@ export class Redactor {
       .sort((a, b) => b.value.length - a.value.length)
     this.short = shortPattern(shorts)
     // Retain one fewer char than the longest variant so a secret straddling a
-    // chunk boundary is still whole when its final char arrives.
-    this.retain = Math.max(0, longest - 1)
+    // chunk boundary is still whole when its final char arrives. Short values
+    // add their full assignment span (see `shortRetain`) so a split `KEY=value`
+    // is redacted as a whole rather than leaked across the boundary.
+    this.retain = Math.max(0, longest - 1, shortRetain - 1)
   }
 
   /** Number of distinct secret values eligible for redaction. */
