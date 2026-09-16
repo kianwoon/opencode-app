@@ -279,7 +279,9 @@ function collectStrings(value: unknown, out: string[], depth = 0): void {
  *  after stripping quotes/flags), so a path-valued arg (`/repo/.env`,
  *  `--file=.env`, `~/.aws/credentials`) is caught while a PROSE sentence that
  *  merely contains the word `.env` (`"set API_KEY in .env"`) is not — its
- *  basename is the whole string, not `.env`. This keeps agent work uninterrupted.
+ *  basename is the whole string, not `.env`, and a leaf carrying whitespace is
+ *  skipped outright so a prose `task` prompt that names a dotenv path passes.
+ *  This keeps agent work uninterrupted.
  *  Command strings passed to a non-bash tool are out of scope here; the `bash`
  *  path (checkCommand) inspects those. `.env.example` and its sample/template
  *  siblings stay exempt (spec §15). */
@@ -289,6 +291,12 @@ function sweepArgs(tool: string, args: unknown): Denial | undefined {
   for (const string of strings) {
     const trimmed = string.trim()
     if (trimmed.length === 0) continue
+    // A leaf with internal whitespace is prose (a task brief / description), not
+    // a file argument: `path.basename` of a sentence ending in `.../ .env` would
+    // otherwise read as a path. Only whitespace-free leaves are swept as paths,
+    // so `{ filePath: ".env" }` and `--file=.env` stay blocked while prose that
+    // merely names a dotenv path passes untouched.
+    if (/\s/.test(trimmed)) continue
     if (isProtectedPath(trimmed)) return { tool, filePath: trimmed }
     const cleaned = trimmed.replace(TOKEN_NOISE, "").replace(ASSIGN_PREFIX, "")
     const basename = path.basename(cleaned)
@@ -369,7 +377,14 @@ export function check(tool: string, args: unknown): Denial | undefined {
   return sweepArgs(tool, args)
 }
 
-/** Message intentionally omits any file contents. */
-export function denialMessage(denial: Denial): string {
-  return `Secret Broker blocked ${denial.tool} of protected file "${denial.filePath}". Read .env.example for the required key names instead.`
+/** Message intentionally omits any file contents. `keyNames` are the secret
+ *  KEY NAMES currently injected for the session (names only, never values) —
+ *  they let the agent switch to `$NAME` indirection instead of dead-ending. */
+export function denialMessage(denial: Denial, keyNames: readonly string[] = []): string {
+  const base = `Secret Broker blocked ${denial.tool} of protected file "${denial.filePath}". Read .env.example for the required key names instead.`
+  const contract =
+    keyNames.length === 0
+      ? ` Its real values are NOT readable, and no allowlisted secrets are injected for this session.`
+      : ` Its real values are never visible to the model, but the allowlisted secrets ARE injected into shell child-process environments — reference them as $KEY_NAME in shell commands (e.g. $${keyNames[0]}). Injected key names: ${keyNames.join(", ")}.`
+  return base + contract
 }

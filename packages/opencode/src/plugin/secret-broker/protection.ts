@@ -279,7 +279,9 @@ function collectStrings(value: unknown, out: string[], depth = 0): void {
  *  after stripping quotes/flags), so a path-valued arg (`/repo/.env`,
  *  `--file=.env`, `~/.aws/credentials`) is caught while a PROSE sentence that
  *  merely contains the word `.env` (`"set API_KEY in .env"`) is not — its
- *  basename is the whole string, not `.env`. This keeps agent work uninterrupted.
+ *  basename is the whole string, not `.env`, and a leaf carrying whitespace is
+ *  skipped outright so a prose `task` prompt that names a dotenv path passes.
+ *  This keeps agent work uninterrupted.
  *  Command strings passed to a non-bash tool are out of scope here; the `bash`
  *  path (checkCommand) inspects those. `.env.example` and its sample/template
  *  siblings stay exempt (spec §15). */
@@ -289,6 +291,12 @@ function sweepArgs(tool: string, args: unknown): Denial | undefined {
   for (const string of strings) {
     const trimmed = string.trim()
     if (trimmed.length === 0) continue
+    // A leaf with internal whitespace is prose (a task brief / description), not
+    // a file argument: `path.basename` of a sentence ending in `.../ .env` would
+    // otherwise read as a path. Only whitespace-free leaves are swept as paths,
+    // so `{ filePath: ".env" }` and `--file=.env` stay blocked while prose that
+    // merely names a dotenv path passes untouched.
+    if (/\s/.test(trimmed)) continue
     if (isProtectedPath(trimmed)) return { tool, filePath: trimmed }
     const cleaned = trimmed.replace(TOKEN_NOISE, "").replace(ASSIGN_PREFIX, "")
     const basename = path.basename(cleaned)

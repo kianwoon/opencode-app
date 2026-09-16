@@ -836,6 +836,20 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
     expect(check("webfetch", { url: "https://example.com/set-API_KEY-in-.env" })).toBeUndefined()
   })
 
+  test("(e2) task prompt prose naming a dotenv path passes; path args still denied", () => {
+    // The task tool never reads files: a brief that merely names a dotenv path
+    // must not be swept as a path argument (false positive blocking every task).
+    expect(check("task", { prompt: "add NEW_KEY to .env.example" })).toBeUndefined()
+    expect(check("task", { prompt: "add NEW_KEY to .env" })).toBeUndefined()
+    expect(check("task", { prompt: "update packages/app/.env to add the key" })).toBeUndefined()
+    expect(check("task", { prompt: "read config from packages/web/.env" })).toBeUndefined()
+    expect(check("task", { description: "edit .env and docs", prompt: "x" })).toBeUndefined()
+    // A genuine path-valued arg leaves no whitespace and stays blocked.
+    expect(check("task", { filePath: ".env" })).toBeDefined()
+    expect(check("task", { args: { path: "/repo/.env" } })).toBeDefined()
+    expect(check("task", { flags: ["--file=.env"] })).toBeDefined()
+  })
+
   test("(f) template/sample siblings exempt while real secret files stay denied", () => {
     expect(check("read", { filePath: "/p/.env.example" })).toBeUndefined()
     expect(check("read", { filePath: "/p/config.template" })).toBeUndefined()
