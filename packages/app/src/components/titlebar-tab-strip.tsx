@@ -18,7 +18,7 @@ import { createTabPromptState, type PromptSession } from "@/context/prompt"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { showToast } from "@/utils/toast"
 import { canStartTabDrag, isTabCloseTarget } from "./titlebar-tab-gesture"
-import { adjacentTabKey, mergeVisibleTabOrder } from "./titlebar-tab-order"
+import { adjacentTabKey, mergeVisibleTabOrder, tabOrderRebased } from "./titlebar-tab-order"
 import type { Session } from "@opencode-ai/sdk/v2"
 
 function SessionTabSlot(props: {
@@ -254,12 +254,11 @@ export function TitlebarTabStrip(props: {
     }
 
     const propsKeys = props.tabs.map(tabKey)
-    // A manual drag reorder arrives as a changed order among already-open tabs;
-    // adopt it as the new sticky baseline. Adds/removes leave the shared order
-    // intact and need no reseed.
-    const prevShared = prevPropsKeys.filter((key) => propsKeys.includes(key))
-    const nextShared = propsKeys.filter((key) => prevPropsKeys.includes(key))
-    const rebased = prevShared.some((key, index) => key !== nextShared[index])
+    // A manual drag reorder arrives as a changed relative order among
+    // already-open tabs; adopt it as the new sticky baseline. Adds/removes
+    // (including a session finishing and jumping position) preserve the
+    // relative order of shared keys and need no reseed.
+    const rebased = tabOrderRebased(prevPropsKeys, propsKeys)
 
     const byKey = new Map(props.tabs.map((tab) => [tabKey(tab), tab]))
     const sticky = rebased ? propsKeys.slice() : order.filter((key) => byKey.has(key))

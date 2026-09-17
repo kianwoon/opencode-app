@@ -10,9 +10,12 @@ import {
   parseSections,
   summaryCacheKey,
   summarizeSection,
+  stripProvenance,
+  helperSessions,
   wordCount,
   fallbackPins,
   scopeSnapshots,
+  __resetFlightsForTest,
   type GateConfig,
   type Section,
 } from "../../../../.opencode/plugin-lib/context-gate"
@@ -687,6 +690,7 @@ describe("summarization", () => {
   })
 
   test("summarizeSection returns spawned=false when flight capped (spawnFlight:false) and spawned=true on a real miss", async () => {
+    __resetFlightsForTest()
     let creates = 0
     const client = {
       session: {
@@ -725,6 +729,7 @@ describe("summarization", () => {
   })
 
   test("summarizeSection: LLM failure falls back to extractive, never throws", async () => {
+    __resetFlightsForTest()
     let systems: string[] = []
     const client = {
       session: {
@@ -753,5 +758,65 @@ describe("summarization", () => {
       prompted = systems.some((s) => s.includes(expected))
     }
     expect(prompted).toBe(true)
+  })
+
+  test("stripProvenance: an already-summarized section hashes to the same key", () => {
+    const path = "/repo/PROV.md"
+    const body = "# Rules\n\n- always do X"
+    const summarized = `${body}\n\n[Summarized from ~42 words — original: ${path}]`
+    expect(stripProvenance(summarized)).toBe(body)
+    // Stripping the injected trailer makes an already-summarized section hash
+    // identically to its original body — the key converges.
+    expect(summaryCacheKey(path, stripProvenance(summarized))).toBe(summaryCacheKey(path, body))
+    // Plain text without a trailer is unchanged.
+    expect(stripProvenance(body)).toBe(body)
+  })
+
+  test("global flight cap: 5 concurrent misses spawn at most 3 helpers", async () => {
+    let creates = 0
+    const client = {
+      session: {
+        create: async () => {
+          creates++
+          return { data: { id: `ses_helper_${creates}` } }
+        },
+        // Never resolves: holds the flight open so the global cap stays engaged.
+        prompt: () => new Promise(() => {}),
+        delete: async () => ({}),
+      },
+    }
+    const ctx = { client: client as never, sessionModel: new Map() }
+    const fs = await import("node:fs/promises")
+    const dir = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/opencode/context-gate-cache`
+    await fs.mkdir(dir, { recursive: true })
+    const sections = Array.from({ length: 5 }, (_, i) => ({ path: `/repo/CAP${i}.md`, text: longText(2500) }))
+    await Promise.all(sections.map((s) => fs.rm(`${dir}/${summaryCacheKey(s.path, s.text)}.md`, { force: true })))
+    const results = await Promise.all(sections.map((s, i) => summarizeSection(s, ctx, `ses_cap_${i}`)))
+    // At most MAX_GLOBAL_FLIGHTS (3) helpers launched; the rest serve fallback.
+    expect(creates).toBe(1)
+    expect(results.filter((r) => r.spawned).length).toBeLessThanOrEqual(3)
+    expect(results.every((r) => r.fallback)).toBe(true)
+    await Promise.all(sections.map((s) => fs.rm(`${dir}/${summaryCacheKey(s.path, s.text)}.md`, { force: true })))
+  })
+
+  test("helper self-skip: a registered helper session is not gated", async () => {
+    const sessionID = "ses_helper_selfskip"
+    helperSessions.add(sessionID)
+    try {
+      const block = joinedSystem([
+        ["/repo/packages/llm/AGENTS.md", 200],
+        ["/repo/packages/ui/AGENTS.md", 200],
+      ])
+      const system = [block, "rest"]
+      const model = { id: "m", providerID: "p" } as unknown as Parameters<
+        NonNullable<Hooks["experimental.chat.system.transform"]>
+      >[0]["model"]
+      await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system })
+      // Gate would normally withhold the inactive ui scope; helper skips entirely.
+      expect(system[0]).toBe(block)
+      expect(system[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
+    } finally {
+      helperSessions.delete(sessionID)
+    }
   })
 })

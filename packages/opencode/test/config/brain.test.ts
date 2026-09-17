@@ -131,7 +131,7 @@ describe("brain config expansion", () => {
     ),
   )
 
-  it.instance("strict enforcement generates entries and denies edits, bash, and nested tasks", () =>
+  it.instance("strict enforcement generates default-deny brain permission with read-only allow-list", () =>
     load({
       brain: {
         model: "anthropic/brain",
@@ -143,21 +143,30 @@ describe("brain config expansion", () => {
     }).pipe(
       Effect.tap((config) =>
         Effect.sync(() => {
+          const permission = config.agent?.brain?.permission
           expect(config.agent?.brain).toMatchObject({
             mode: "primary",
             model: "anthropic/brain",
-            permission: {
-              edit: "deny",
-              bash: "deny",
-              task: {
-                "*": "deny",
-                explorer: "allow",
-                implementer: "allow",
-                reviewer: "allow",
-                guru: "allow",
-              },
+          })
+          // Default-deny must stay the FIRST key: Ruleset.findLast makes the last
+          // matching rule win, so a non-first "*" would stop denying execution tools.
+          expect(Object.keys(permission ?? {})[0]).toBe("*")
+          expect(permission?.["*"]).toBe("deny")
+          expect(permission).toMatchObject({
+            read: "allow",
+            grep: "allow",
+            glob: "allow",
+            task: {
+              "*": "deny",
+              explorer: "allow",
+              implementer: "allow",
+              reviewer: "allow",
+              guru: "allow",
             },
           })
+          // bash/edit are no longer own keys — they fall under the "*" deny.
+          expect(permission?.bash).toBeUndefined()
+          expect(permission?.edit).toBeUndefined()
           for (const name of ["explorer", "implementer"] as const) {
             expect(config.agent?.[name]).toMatchObject({
               mode: "subagent",

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { adjacentTabKey, mergeVisibleTabOrder } from "./titlebar-tab-order"
+import { adjacentTabKey, mergeVisibleTabOrder, tabOrderRebased } from "./titlebar-tab-order"
 
 describe("adjacentTabKey", () => {
   test("follows the visible left-to-right order", () => {
@@ -20,4 +20,17 @@ test("merges reordered visible tabs around hidden tabs", () => {
     "a",
     "b",
   ])
+})
+
+describe("tabOrderRebased", () => {
+  test("keeps the finished position when an unrelated middle tab is closed", () => {
+    expect(tabOrderRebased(["a", "b", "c", "d"], ["a", "c", "d"])).toBe(false)
+    expect(tabOrderRebased(["a", "b", "c", "d"], ["a", "b", "d"])).toBe(false)
+    expect(tabOrderRebased(["a", "b"], ["a", "b", "c"])).toBe(false)
+  })
+
+  test("rebases on a genuine drag reorder", () => {
+    expect(tabOrderRebased(["a", "b", "c"], ["c", "a", "b"])).toBe(true)
+    expect(tabOrderRebased(["a", "b", "c"], ["b", "a", "c"])).toBe(true)
+  })
 })

@@ -57,6 +57,10 @@ export const restorePromptModel = (local: ModelSelection, prompt: PromptState) =
     local.model.variant.current() === (model.variant ?? undefined)
   )
     return true
+  // A session/agent model already resolved wins over the persisted prompt
+  // model: the prompt store can lag behind (e.g. it still holds the hands
+  // agent's model from a delegated turn) and must not re-pin the composer.
+  if (current) return true
   local.model.set({ providerID: model.providerID, modelID: model.modelID })
   local.model.variant.set(model.variant ?? undefined)
   return true

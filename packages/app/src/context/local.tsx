@@ -21,6 +21,7 @@ type State = {
   agent?: string
   model?: ModelKey
   variant?: string | null
+  explicit?: boolean
 }
 
 type Saved = {
@@ -203,8 +204,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const prev = scope()
           const next = {
             agent: item.name,
-            model: item.model ?? prev?.model,
-            variant: item.variant ?? prev?.variant,
+            model: item.model,
+            variant: item.model ? item.variant : item.variant ?? prev?.variant,
+            explicit: false,
           } satisfies State
           const session = id()
           if (session) {
@@ -231,11 +233,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const current = () => {
-      const item = firstModel(
-        () => scope()?.model,
-        () => agent.current()?.model,
-        fallback,
-      )
+      const s = scope()
+      const item = s?.explicit
+        ? firstModel(() => s.model, () => agent.current()?.model, fallback)
+        : firstModel(() => agent.current()?.model, () => s?.model, fallback)
       if (!item) return
       return models.find(item)
     }
@@ -265,6 +266,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const state = {
         ...(scope() ?? { agent: agent.current()?.name }),
         ...next,
+        ...("model" in next ? { explicit: next.model !== undefined } : {}),
       } satisfies State
 
       const session = id()

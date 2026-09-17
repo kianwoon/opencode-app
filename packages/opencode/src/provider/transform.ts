@@ -1476,7 +1476,13 @@ export function options(input: {
   }
 
   if (input.providerOptions?.setCacheKey !== false) {
-    if (input.model.api.npm === "@ai-sdk/deepinfra" || input.model.api.npm === "@ai-sdk/cerebras") {
+    if (
+      input.model.api.npm === "@ai-sdk/deepinfra" ||
+      input.model.api.npm === "@ai-sdk/cerebras" ||
+      input.model.api.npm === "@ai-sdk/openai-compatible"
+    ) {
+      // @ai-sdk/openai-compatible spreads providerOptions verbatim into the wire body, so a
+      // camelCase `promptCacheKey` reaches strict decoders (e.g. Console Go) and is rejected.
       result["prompt_cache_key"] = input.sessionID
     } else if (
       input.model.api.npm === "@ai-sdk/openai" ||
@@ -1485,7 +1491,6 @@ export function options(input: {
       input.model.api.npm === "@ai-sdk/mistral" ||
       input.model.api.npm === "venice-ai-sdk-provider" ||
       input.model.api.npm === "@openrouter/ai-sdk-provider" ||
-      input.model.api.npm === "@ai-sdk/openai-compatible" ||
       input.providerOptions?.setCacheKey === true
     ) {
       result["promptCacheKey"] = input.sessionID
@@ -1540,7 +1545,11 @@ export function options(input: {
       result["textVerbosity"] = "low"
     }
 
-    if (input.model.providerID.startsWith("opencode") && input.providerOptions?.setCacheKey !== false) {
+    if (
+      input.model.providerID.startsWith("opencode") &&
+      input.model.api.npm !== "@ai-sdk/openai-compatible" &&
+      input.providerOptions?.setCacheKey !== false
+    ) {
       result["promptCacheKey"] = input.sessionID
       result["include"] = INCLUDE_ENCRYPTED_REASONING
       result["reasoningSummary"] = "auto"

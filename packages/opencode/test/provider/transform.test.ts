@@ -108,7 +108,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
-  test("should set promptCacheKey for the OpenAI-compatible SDK by default", () => {
+  test("should set snake_case prompt_cache_key for the OpenAI-compatible SDK by default", () => {
     const result = ProviderTransform.options({
       model: {
         ...mockModel,
@@ -118,7 +118,8 @@ describe("ProviderTransform.options - setCacheKey", () => {
       sessionID,
       providerOptions: {},
     })
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.prompt_cache_key).toBe(sessionID)
+    expect(result.promptCacheKey).toBeUndefined()
   })
 
   test("should set promptCacheKey for the OpenRouter SDK by default", () => {

@@ -424,6 +424,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             agent: currentAgent.name,
             model: { providerID: currentModel.provider.id, modelID: currentModel.id },
             variant: variant ?? null,
+            explicit: true,
           })
           layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
           const draftID = search.draftId

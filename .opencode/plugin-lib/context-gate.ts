@@ -215,7 +215,7 @@ export function parseSections(systemBlock: string): { prologue: string; sections
   const prologue = systemBlock.slice(0, headers[0]!.start)
   const sections = headers.map((h) => ({
     path: h.path,
-    text: systemBlock.slice(h.textStart, h.end),
+    text: stripProvenance(systemBlock.slice(h.textStart, h.end)),
   }))
   return { prologue, sections }
 }
@@ -541,6 +541,18 @@ function recordRetrieval(sessionID: string, path: string) {
 // ---------------------------------------------------------------------------
 
 const memo = new Map<string, string>()
+/** Helper session IDs the gate creates for summarization — never gated. */
+export const helperSessions = new Set<string>()
+const MAX_HELPER_SESSIONS = 200
+
+function trackHelper(id: string) {
+  if (helperSessions.size >= MAX_HELPER_SESSIONS) {
+    const oldest = helperSessions.values().next().value
+    if (oldest !== undefined) helperSessions.delete(oldest)
+  }
+  helperSessions.add(id)
+}
+
 const MAX_MEMO = 200
 
 function hashOf(text: string): string {
@@ -573,6 +585,18 @@ function memoKey(sessionID: string, decision: Omit<GateDecision, "output">, sect
 // ---------------------------------------------------------------------------
 
 const SUMMARIZE_TIMEOUT_MS = 30_000
+const MAX_GLOBAL_FLIGHTS = 1
+let activeFlights = 0
+
+export function __resetFlightsForTest(): void {
+  activeFlights = 0
+  inflight.clear()
+}
+
+/** Drop the injected provenance trailer so an already-summarized section hashes stably. */
+export function stripProvenance(text: string): string {
+  return text.replace(/\n*\[Summarized from ~\d+ words — original: .*\]\s*$/, "")
+}
 
 export function wordCount(text: string): number {
   const trimmed = text.trim()
@@ -658,12 +682,24 @@ async function llmSummarize(
   model: { providerID: string; modelID: string } | undefined,
   path: string,
   text: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   const created = await client.session.create({ body: { title: `context-gate summary: ${path}` } })
   const session = created.data
   if (!session) return undefined
+  trackHelper(session.id)
+  if (signal?.aborted) {
+    await client.session.delete({ path: { id: session.id } }).catch(() => {})
+    helperSessions.delete(session.id)
+    return undefined
+  }
   const words = wordCount(text)
   const target = Math.max(1, Math.floor(words * 0.5))
+  const onAbort = () => {
+    helperSessions.delete(session.id)
+    void client.session.delete({ path: { id: session.id } }).catch(() => {})
+  }
+  signal?.addEventListener("abort", onAbort, { once: true })
   try {
     const response = await client.session.prompt({
       path: { id: session.id },
@@ -677,8 +713,10 @@ async function llmSummarize(
   } catch {
     return undefined
   } finally {
+    signal?.removeEventListener("abort", onAbort)
     // The helper session must never outlive its use — delete it on every path.
     await client.session.delete({ path: { id: session.id } }).catch(() => {})
+    helperSessions.delete(session.id)
   }
 }
 
@@ -690,6 +728,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined>
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer)
   })
+}
+
+/**
+ * Run one LLM summary bounded by SUMMARIZE_TIMEOUT_MS. On timeout the helper
+ * request is aborted (not merely orphaned) so its session is torn down rather
+ * than left inflight — an orphaned helper was a storm source.
+ */
+async function runLlmFlight(
+  client: PluginInput["client"],
+  model: { providerID: string; modelID: string } | undefined,
+  path: string,
+  text: string,
+): Promise<string | undefined> {
+  const controller = new AbortController()
+  const llm = llmSummarize(client, model, path, text, controller.signal)
+  const result = await withTimeout(llm, SUMMARIZE_TIMEOUT_MS)
+  if (result === undefined) controller.abort()
+  return result
 }
 
 interface SummarizeContext {
@@ -715,8 +771,9 @@ export async function summarizeSection(
 ): Promise<Section & { cached: boolean; fallback: boolean; spawned: boolean }> {
   const config = loadConfig()
   const path = section.path!
-  const key = summaryCacheKey(path, section.text)
-  const words = wordCount(section.text)
+  const stripped = stripProvenance(section.text)
+  const key = summaryCacheKey(path, stripped)
+  const words = wordCount(stripped)
 
   const cached = await withTimeout(
     (async () => {
@@ -741,13 +798,16 @@ export async function summarizeSection(
   }
 
   // True disk miss: only spawn a new flight when the caller allows it
-  // (gateSystem caps this at one per transform) and none is already running.
+  // (gateSystem caps this at one per transform), none is already running, and
+  // the process-global flight budget has room (a fleet of sessions must not
+  // each fan out a helper).
   let spawned = false
-  if (!inflight.has(key) && options?.spawnFlight !== false) {
+  if (!inflight.has(key) && options?.spawnFlight !== false && activeFlights < MAX_GLOBAL_FLIGHTS) {
     spawned = true
+    activeFlights++
     const flight = (async () => {
       const model = resolveSummarizerModel(ctx, sessionID)
-      const llm = await withTimeout(llmSummarize(ctx.client, model, path, section.text), SUMMARIZE_TIMEOUT_MS)
+      const llm = await runLlmFlight(ctx.client, model, path, section.text)
       if (!llm) return undefined
       try {
         await storeSummary(fs, key, llm)
@@ -759,7 +819,10 @@ export async function summarizeSection(
     inflight.set(key, flight)
     // Intentionally not awaited: the miss path returns the extractive
     // fallback right away; the flight only warms the disk cache.
-    void flight.finally(() => inflight.delete(key))
+    void flight.finally(() => {
+      inflight.delete(key)
+      if (activeFlights > 0) activeFlights--
+    })
   }
 
   log("summarize", { path, words, cached: false, fallback: true, model: resolveSummarizerModel(ctx, sessionID) })
@@ -861,6 +924,9 @@ async function gateSystem(
 ) {
   const sessionID = hookInput.sessionID
   if (!sessionID || output.system.length === 0) return
+  // Helper sessions spawned by this gate must never be gated themselves —
+  // recursive gating of the summarizer was a storm source.
+  if (helperSessions.has(sessionID)) return
 
   // Gate only the header block (system[0]); later entries are plugin
   // appends and the rule anchor — small, deliberate, and order-sensitive.
@@ -885,6 +951,10 @@ async function gateSystem(
   // storm of helper sessions.
   let flightSpawned = false
   for (const section of sections) {
+    if (section.path?.startsWith("context-gate summary:")) {
+      expanded.push(section)
+      continue
+    }
     if (!isSummarizable(section, config)) {
       expanded.push(section)
       continue
