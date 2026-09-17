@@ -220,6 +220,33 @@ export function toOaCompatibleRequest(body: CommonRequest) {
   }
 }
 
+// Maps an upstream finish reason onto the OpenAI-compatible vocabulary the
+// proxy exposes. Non-standard values (anthropic's end_turn/tool_use/max_tokens,
+// gateway dialects, "unknown") are normalized; anything unrecognized returns
+// null so the caller can apply its own fallback.
+function mapOaFinishReason(reason: unknown): "stop" | "tool_calls" | "length" | "content_filter" | null {
+  if (reason === "stop" || reason === "end_turn") return "stop"
+  if (reason === "tool_calls" || reason === "function_call" || reason === "tool_use") return "tool_calls"
+  if (reason === "length" || reason === "max_tokens") return "length"
+  if (reason === "content_filter") return "content_filter"
+  return null
+}
+
+// A terminal marker chunk carries an empty delta; content-bearing chunks never
+// do. Used to detect an upstream that ended the stream with a null/absent
+// finish reason so we can synthesize "stop" instead of emitting nothing.
+function isEmptyDelta(delta: unknown): boolean {
+  if (!delta || typeof delta !== "object") return !delta
+  return Object.keys(delta as Record<string, unknown>).length === 0
+}
+
+// Explicit failure signals must pass through untouched: the client maps
+// network_error to a retryable stream failure, and masking it as "stop" would
+// silently turn an aborted upstream turn into a successful one.
+function isErrorReason(reason: unknown): boolean {
+  return reason === "network_error" || reason === "error"
+}
+
 export function fromOaCompatibleResponse(resp: any): CommonResponse {
   if (!resp || typeof resp !== "object") return resp
 
@@ -257,12 +284,12 @@ export function fromOaCompatibleResponse(resp: any): CommonResponse {
   }
 
   const stopReason = (() => {
-    const reason = choice.finish_reason
-    if (reason === "stop") return "stop"
-    if (reason === "tool_calls") return "tool_calls"
-    if (reason === "length") return "length"
-    if (reason === "content_filter") return "content_filter"
-    return null
+    const mapped = mapOaFinishReason(choice.finish_reason)
+    if (mapped) return mapped
+    // Non-standard/missing upstream reason: if the message still carries text
+    // or tool calls, synthesize "stop" so downstream never sees a null finish
+    // reason alongside real content (mirrors the streaming fallback below).
+    return content.length > 0 ? "stop" : null
   })()
 
   const usage = (() => {
@@ -454,11 +481,31 @@ export function fromOaCompatibleChunk(chunk: string): CommonChunk | string {
     }
   }
 
-  if (choice.finish_reason) {
+  const mappedFinish = mapOaFinishReason(choice.finish_reason)
+  if (mappedFinish) {
+    result.choices.push({
+      index: choice.index ?? 0,
+      delta: {},
+      finish_reason: mappedFinish,
+    })
+  } else if (isErrorReason(choice.finish_reason)) {
+    // Explicit failure signal: pass the raw reason through so the client's
+    // network_error -> retryable mapping still fires.
     result.choices.push({
       index: choice.index ?? 0,
       delta: {},
       finish_reason: choice.finish_reason,
+    })
+  } else if (choice.finish_reason != null || (isEmptyDelta(delta) && result.choices.length === 0)) {
+    // Either the upstream sent a non-standard terminal reason, or it ended the
+    // stream with a bare empty-delta chunk carrying no recognized reason.
+    // Emit "stop" so the caller always sees a terminal finish_reason when the
+    // stream terminates, instead of a dangling null that downstream providers
+    // report as "stream ended without a finish reason".
+    result.choices.push({
+      index: choice.index ?? 0,
+      delta: {},
+      finish_reason: "stop",
     })
   }
 
@@ -528,11 +575,29 @@ export function toOaCompatibleChunk(chunk: CommonChunk): string {
     }
   }
 
-  if (choice.finish_reason) {
+  const mappedFinish = mapOaFinishReason(choice.finish_reason)
+  if (mappedFinish) {
+    result.choices.push({
+      index: choice.index,
+      delta: {},
+      finish_reason: mappedFinish,
+    })
+  } else if (isErrorReason(choice.finish_reason)) {
     result.choices.push({
       index: choice.index,
       delta: {},
       finish_reason: choice.finish_reason,
+    })
+  } else if (choice.finish_reason != null || (isEmptyDelta(delta) && result.choices.length === 0)) {
+    // Same terminal guarantee as fromOaCompatibleChunk: a non-standard reason
+    // or a bare empty-delta terminator still yields an explicit "stop" so the
+    // downstream consumer never observes a null finish_reason on a stream that
+    // actually produced (or cleanly ended) output. Explicit error reasons are
+    // passed through above for the client's retry mapping.
+    result.choices.push({
+      index: choice.index,
+      delta: {},
+      finish_reason: "stop",
     })
   }
 

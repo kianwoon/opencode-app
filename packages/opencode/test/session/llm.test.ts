@@ -413,6 +413,34 @@ describe("session.llm.ai-sdk adapter", () => {
     })
   })
 
+  test("coerces a synthesized finish with no provider reason to stop when the step produced output", async () => {
+    const state = LLMAISDK.adapterState()
+    const exit = await Effect.runPromise(
+      Effect.forEach(
+        [
+          uncheckedAdapterEvent({ type: "text-delta", id: "text-1", text: "hello" }),
+          uncheckedAdapterEvent({
+            type: "finish-step",
+            response: { id: "response-1", timestamp: new Date(0), modelId: "gpt-test" },
+            finishReason: "other",
+            rawFinishReason: undefined,
+            providerMetadata: undefined,
+            usage: {},
+          }),
+        ],
+        (event) => LLMAISDK.toLLMEvents(state, event),
+      ).pipe(
+        Effect.map((items) => items.flat()),
+        Effect.exit,
+      ),
+    )
+
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (Exit.isFailure(exit)) throw new Error("expected coerced step-finish")
+    const stepFinish = exit.value.find((event) => event.type === "step-finish")
+    expect(stepFinish).toMatchObject({ type: "step-finish", reason: "stop" })
+  })
+
   test("reuses adapter state cleanly across streams once finish has fired", async () => {
     // adapterState() is meant to be per-stream, but the only thing finish currently clears
     // is toolNames — step, text counters, and the current text/reasoning IDs all leak

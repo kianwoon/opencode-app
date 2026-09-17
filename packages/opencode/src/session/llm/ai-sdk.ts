@@ -16,6 +16,10 @@ export function adapterState() {
     currentReasoningID: undefined as string | undefined,
     toolNames: {} as Record<string, string>,
     copilotTotalNanoAiu: undefined as number | undefined,
+    // Tracks whether this stream emitted any model output. Used to distinguish
+    // a provider that closed cleanly without a finish_reason but did produce
+    // content (coerce to "stop") from a genuinely empty stream (fail loudly).
+    sawOutput: false,
   }
 }
 
@@ -89,7 +93,15 @@ export function toLLMEvents(
       if (event.rawFinishReason === "network_error")
         return Effect.fail(new ProviderError.ResponseStreamError("Provider finish_reason: network_error"))
       return Effect.sync(() => {
-        if (event.finishReason === "other" && event.rawFinishReason === undefined) {
+        const missingReason = event.finishReason === "other" && event.rawFinishReason === undefined
+        // A synthesized "other" with no raw reason means the provider closed the
+        // stream without a finish_reason. That is only fatal when the step
+        // genuinely produced nothing; if text/tool output or token usage
+        // arrived, coerce the reason to "stop" so a content-bearing stream is
+        // not surfaced as an error while an empty stream still fails loudly.
+        const producedOutput =
+          state.sawOutput || event.usage?.outputTokens != null || event.usage?.totalTokens != null
+        if (missingReason && !producedOutput) {
           throw new ProviderError.ResponseStreamError("Provider stream ended without a finish reason")
         }
         const original = providerMetadata(event.providerMetadata)
@@ -107,7 +119,7 @@ export function toLLMEvents(
         return [
           LLMEvent.stepFinish({
             index: state.step++,
-            reason: finishReason(event.finishReason),
+            reason: missingReason && producedOutput ? "stop" : finishReason(event.finishReason),
             usage: usage(event.usage),
             providerMetadata: metadata,
           }),
@@ -141,13 +153,16 @@ export function toLLMEvents(
       })
 
     case "text-delta":
-      return Effect.succeed([
-        LLMEvent.textDelta({
-          id: currentTextID(state, event.id),
-          text: event.text,
-          providerMetadata: providerMetadata(event.providerMetadata),
-        }),
-      ])
+      return Effect.sync(() => {
+        state.sawOutput = true
+        return [
+          LLMEvent.textDelta({
+            id: currentTextID(state, event.id),
+            text: event.text,
+            providerMetadata: providerMetadata(event.providerMetadata),
+          }),
+        ]
+      })
 
     case "text-end":
       return Effect.sync(() => {
@@ -173,13 +188,16 @@ export function toLLMEvents(
       })
 
     case "reasoning-delta":
-      return Effect.succeed([
-        LLMEvent.reasoningDelta({
-          id: currentReasoningID(state, event.id),
-          text: event.text,
-          providerMetadata: providerMetadata(event.providerMetadata),
-        }),
-      ])
+      return Effect.sync(() => {
+        state.sawOutput = true
+        return [
+          LLMEvent.reasoningDelta({
+            id: currentReasoningID(state, event.id),
+            text: event.text,
+            providerMetadata: providerMetadata(event.providerMetadata),
+          }),
+        ]
+      })
 
     case "reasoning-end":
       return Effect.sync(() => {
@@ -225,6 +243,7 @@ export function toLLMEvents(
 
     case "tool-call":
       return Effect.sync(() => {
+        state.sawOutput = true
         state.toolNames[event.toolCallId] = event.toolName
         return [
           LLMEvent.toolCall({

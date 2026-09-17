@@ -3,7 +3,11 @@ import type { ZenData } from "@opencode-ai/console-core/model.js"
 import type { ProviderHelper } from "../src/routes/zen/util/provider/provider"
 import { anthropicHelper } from "../src/routes/zen/util/provider/anthropic"
 import { googleHelper } from "../src/routes/zen/util/provider/google"
-import { oaCompatHelper } from "../src/routes/zen/util/provider/openai-compatible"
+import {
+  fromOaCompatibleChunk,
+  oaCompatHelper,
+  toOaCompatibleChunk,
+} from "../src/routes/zen/util/provider/openai-compatible"
 import { openaiHelper } from "../src/routes/zen/util/provider/openai"
 
 const providers = {
@@ -96,5 +100,56 @@ describe("provider usage extraction", () => {
       cacheWrite5mTokens: 3,
       cacheWrite1hTokens: undefined,
     })
+  })
+})
+
+describe("oa-compat finish reason normalization", () => {
+  const chunk = (choice: Record<string, unknown>) =>
+    `data: ${JSON.stringify({
+      id: "chatcmpl-1",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "m",
+      choices: [{ index: 0, ...choice }],
+    })}`
+
+  const finishOf = (raw: string): string | null | undefined => {
+    const parsed = fromOaCompatibleChunk(raw)
+    if (typeof parsed === "string") throw new Error("expected a parsed chunk")
+    return parsed.choices[0]?.finish_reason
+  }
+
+  test("synthesizes stop for a bare empty-delta terminator with no finish reason", () => {
+    expect(finishOf(chunk({ delta: {}, finish_reason: null }))).toBe("stop")
+  })
+
+  test("synthesizes stop for non-standard upstream reasons", () => {
+    expect(finishOf(chunk({ delta: {}, finish_reason: "end_turn" }))).toBe("stop")
+  })
+
+  test("passes standard reasons through unchanged", () => {
+    expect(finishOf(chunk({ delta: {}, finish_reason: "stop" }))).toBe("stop")
+    expect(finishOf(chunk({ delta: {}, finish_reason: "length" }))).toBe("length")
+    expect(finishOf(chunk({ delta: {}, finish_reason: "content_filter" }))).toBe("content_filter")
+    expect(finishOf(chunk({ delta: {}, finish_reason: "tool_calls" }))).toBe("tool_calls")
+  })
+
+  test("passes network_error through so retry mapping still fires", () => {
+    expect(finishOf(chunk({ delta: {}, finish_reason: "network_error" }))).toBe("network_error")
+  })
+
+  test("does not synthesize a terminal reason on content-bearing deltas", () => {
+    expect(finishOf(chunk({ delta: { content: "hello" }, finish_reason: null }))).toBe(null)
+  })
+
+  test("toOaCompatibleChunk emits stop for an empty terminal delta", () => {
+    const out = toOaCompatibleChunk({
+      id: "x",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "m",
+      choices: [{ index: 0, delta: {}, finish_reason: null }],
+    })
+    expect(JSON.parse(out.slice(6)).choices[0].finish_reason).toBe("stop")
   })
 })
