@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ZenData } from "@opencode-ai/console-core/model.js"
 import type { ProviderHelper } from "../src/routes/zen/util/provider/provider"
+import { buildFinishChunk, observeStreamFragment } from "../src/routes/zen/util/provider/provider"
 import { anthropicHelper } from "../src/routes/zen/util/provider/anthropic"
 import { googleHelper } from "../src/routes/zen/util/provider/google"
 import {
@@ -151,5 +152,42 @@ describe("oa-compat finish reason normalization", () => {
       choices: [{ index: 0, delta: {}, finish_reason: null }],
     })
     expect(JSON.parse(out.slice(6)).choices[0].finish_reason).toBe("stop")
+  })
+})
+
+describe("zen stream-close finish synthesis", () => {
+  test("buildFinishChunk emits an oa-compat terminal stop chunk", () => {
+    const out = buildFinishChunk("oa-compat")
+    const payload = JSON.parse(out.slice(6))
+    expect(payload.choices[0].finish_reason).toBe("stop")
+  })
+
+  test("buildFinishChunk emits an anthropic message_delta end_turn", () => {
+    const out = buildFinishChunk("anthropic")
+    expect(out).toContain("message_delta")
+    expect(out).toContain('"stop_reason":"end_turn"')
+  })
+
+  test("observeStreamFragment tracks oa-compat output and terminal reasons", () => {
+    const state = { sawOutput: false, sawTerminal: false }
+    observeStreamFragment("oa-compat", 'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}', state)
+    expect(state.sawOutput).toBe(true)
+    expect(state.sawTerminal).toBe(false)
+    observeStreamFragment("oa-compat", 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}', state)
+    expect(state.sawTerminal).toBe(true)
+  })
+
+  test("observeStreamFragment flags tool_call deltas as output", () => {
+    const state = { sawOutput: false, sawTerminal: false }
+    observeStreamFragment("oa-compat", 'data: {"choices":[{"delta":{"tool_calls":[{"index":0}]},"finish_reason":null}]}', state)
+    expect(state.sawOutput).toBe(true)
+    expect(state.sawTerminal).toBe(false)
+  })
+
+  test("observeStreamFragment leaves a genuinely empty stream untouched", () => {
+    const state = { sawOutput: false, sawTerminal: false }
+    observeStreamFragment("oa-compat", 'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}', state)
+    expect(state.sawOutput).toBe(false)
+    expect(state.sawTerminal).toBe(false)
   })
 })

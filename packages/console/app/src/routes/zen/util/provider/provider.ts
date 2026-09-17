@@ -179,6 +179,75 @@ export function buildCostChunk(format: ZenData.Format, cost: string): string {
   }
 }
 
+// Emits a terminal finish_reason chunk in the downstream (client-facing)
+// format. Used by the zen handler when an upstream stream produced output but
+// closed without ever sending a terminal reason, so downstream consumers never
+// observe a dangling null finish_reason on a content-bearing stream.
+export function buildFinishChunk(format: ZenData.Format): string {
+  switch (format) {
+    case "anthropic":
+      return `event: message_delta\ndata: ${JSON.stringify({
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+      })}\n\n`
+    case "openai":
+      return `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`
+    case "oa-compat":
+      return `data: ${JSON.stringify({
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      })}\n\n`
+    default:
+      return `data: ${JSON.stringify({
+        candidates: [{ index: 0, finishReason: "STOP" }],
+      })}\n\n`
+  }
+}
+
+// Detects, in a client-facing stream fragment, whether it carries output
+// content and/or a terminal finish_reason, so the handler can synthesize a
+// terminal chunk on EOF when none arrived. Returns the observed flags.
+export function observeStreamFragment(
+  format: ZenData.Format,
+  fragment: string,
+  state: { sawOutput: boolean; sawTerminal: boolean },
+): void {
+  if (!fragment) return
+  if (format === "anthropic") {
+    if (fragment.includes("message_delta")) {
+      state.sawTerminal = true
+      return
+    }
+    // text/input_json deltas carry real content; a tool_use content_block_start
+    // also counts (the tool call is output) but a bare text block start does not.
+    if (fragment.includes("content_block_delta") || fragment.includes('"type":"tool_use"')) state.sawOutput = true
+    return
+  }
+  if (format === "openai") {
+    if (fragment.includes("response.completed")) {
+      state.sawTerminal = true
+      return
+    }
+    if (/"type"\s*:\s*"response\./.test(fragment)) state.sawOutput = true
+    return
+  }
+  if (format === "google") {
+    if (/"finishReason"\s*:\s*"/.test(fragment)) {
+      state.sawTerminal = true
+      return
+    }
+    if (/"parts"\s*:/.test(fragment) || /"text"\s*:/.test(fragment)) state.sawOutput = true
+    return
+  }
+  // oa-compat: every chunk carries a finish_reason key (usually null); only a
+  // non-null reason terminates, and only a real delta counts as output.
+  if (/"finish_reason"\s*:\s*(?!null)/.test(fragment)) {
+    state.sawTerminal = true
+    return
+  }
+  if (/"content"\s*:\s*"|"tool_calls"\s*:/.test(fragment)) state.sawOutput = true
+}
+
+
 export function createBodyConverter(from: ZenData.Format, to: ZenData.Format) {
   return (body: any): any => {
     if (from === to) return body

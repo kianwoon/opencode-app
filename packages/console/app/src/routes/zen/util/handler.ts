@@ -28,7 +28,14 @@ import {
   GoUsageLimitError,
   BlackUsageLimitError,
 } from "./error"
-import { buildCostChunk, createStreamPartConverter, createResponseConverter, UsageInfo } from "./provider/provider"
+import {
+  buildCostChunk,
+  buildFinishChunk,
+  observeStreamFragment,
+  createStreamPartConverter,
+  createResponseConverter,
+  UsageInfo,
+} from "./provider/provider"
 import { anthropicHelper } from "./provider/anthropic"
 import { googleHelper } from "./provider/google"
 import { openaiHelper } from "./provider/openai"
@@ -361,6 +368,10 @@ export async function handler(
         let buffer = ""
         let responseLength = 0
         let timestampFirstByte = 0
+        // Tracks the client-facing stream so EOF can synthesize a terminal
+        // finish_reason when the upstream produced output but closed without
+        // one (see buildFinishChunk).
+        const termState = { sawOutput: false, sawTerminal: false }
 
         function pump(): Promise<void> {
           return (
@@ -371,6 +382,9 @@ export async function handler(
                   response_length: responseLength,
                   "timestamp.last_byte": timestampLastByte,
                 })
+                if (termState.sawOutput && !termState.sawTerminal) {
+                  c.enqueue(encoder.encode(buildFinishChunk(opts.format)))
+                }
                 await rateLimiter?.track()
                 const usage = usageParser.retrieve()
                 if (usage) {
@@ -425,7 +439,10 @@ export async function handler(
 
                 if (providerInfo.format !== opts.format) {
                   part = streamConverter(part)
+                  observeStreamFragment(opts.format, part, termState)
                   c.enqueue(encoder.encode(part + "\n\n"))
+                } else {
+                  observeStreamFragment(opts.format, part, termState)
                 }
               }
 

@@ -413,12 +413,41 @@ describe("session.llm.ai-sdk adapter", () => {
     })
   })
 
-  test("coerces a synthesized finish with no provider reason to stop when the step produced output", async () => {
-    const state = LLMAISDK.adapterState()
+  test("coerces a synthesized finish with no provider reason to stop when the step produced output", async () => {    const state = LLMAISDK.adapterState()
     const exit = await Effect.runPromise(
       Effect.forEach(
         [
           uncheckedAdapterEvent({ type: "text-delta", id: "text-1", text: "hello" }),
+          uncheckedAdapterEvent({
+            type: "finish-step",
+            response: { id: "response-1", timestamp: new Date(0), modelId: "gpt-test" },
+            finishReason: "other",
+            rawFinishReason: undefined,
+            providerMetadata: undefined,
+            usage: {},
+          }),
+        ],
+        (event) => LLMAISDK.toLLMEvents(state, event),
+      ).pipe(
+        Effect.map((items) => items.flat()),
+        Effect.exit,
+      ),
+    )
+
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (Exit.isFailure(exit)) throw new Error("expected coerced step-finish")
+    const stepFinish = exit.value.find((event) => event.type === "step-finish")
+    expect(stepFinish).toMatchObject({ type: "step-finish", reason: "stop" })
+  })
+
+  test("coerces a finish to stop when only tool-input-delta output arrived before EOF", async () => {
+    const state = LLMAISDK.adapterState()
+    const exit = await Effect.runPromise(
+      Effect.forEach(
+        [
+          uncheckedAdapterEvent({ type: "tool-input-start", id: "call-1", toolName: "lookup" }),
+          uncheckedAdapterEvent({ type: "tool-input-delta", id: "call-1", delta: '{"query":' }),
+          uncheckedAdapterEvent({ type: "tool-input-delta", id: "call-1", delta: '"weather"}' }),
           uncheckedAdapterEvent({
             type: "finish-step",
             response: { id: "response-1", timestamp: new Date(0), modelId: "gpt-test" },

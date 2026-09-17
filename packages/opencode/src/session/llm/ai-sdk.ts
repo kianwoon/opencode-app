@@ -224,13 +224,20 @@ export function toLLMEvents(
       })
 
     case "tool-input-delta":
-      return Effect.succeed([
-        LLMEvent.toolInputDelta({
-          id: event.id,
-          name: state.toolNames[event.id] ?? "unknown",
-          text: event.delta ?? "",
-        }),
-      ])
+      return Effect.sync(() => {
+        // Streaming tool-call arguments are real output: mark the step as
+        // having produced content so a stream that closes right after a
+        // tool-input-delta (before a finish_reason) coerces to "stop"
+        // instead of failing as an empty stream.
+        state.sawOutput = true
+        return [
+          LLMEvent.toolInputDelta({
+            id: event.id,
+            name: state.toolNames[event.id] ?? "unknown",
+            text: event.delta ?? "",
+          }),
+        ]
+      })
 
     case "tool-input-end":
       return Effect.succeed([
@@ -290,11 +297,19 @@ export function toLLMEvents(
       return Effect.fail(event.error)
 
     case "abort":
-    case "source":
-    case "file":
     case "tool-output-denied":
     case "tool-approval-request":
       return Effect.succeed([])
+
+    case "source":
+    case "file":
+      // Both carry model-authored content (source citations / file parts),
+      // so treat them as output for the finish-reason coercion above even
+      // though the adapter forwards no session-visible event for them.
+      return Effect.sync(() => {
+        state.sawOutput = true
+        return []
+      })
 
     case "raw":
       return Effect.sync(() => {
