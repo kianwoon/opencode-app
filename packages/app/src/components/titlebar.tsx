@@ -35,7 +35,7 @@ import { createMediaQuery } from "@solid-primitives/media"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/components/titlebar-session-events"
 import { useGlobal } from "@/context/global"
 import { ServerConnection, useServer } from "@/context/server"
-import { tabKey, useTabs } from "@/context/tabs"
+import { recentTab, tabKey, useTabs } from "@/context/tabs"
 import type { PromptSession } from "@/context/prompt"
 import "./titlebar.css"
 import { newTabTooltipKeybind } from "./command-tooltip-keybind"
@@ -257,25 +257,57 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
               if (platform.platform === "desktop") document.title = formatWindowTitle()
             })
 
+            // Boot restore: the persisted last-active URL may not resolve to an
+            // open tab (stale window id, pruned session, …). When that happens no
+            // tab is selected and the strip renders its first entry — the oldest
+            // (leftmost) tab — as if active. Restore the last-active tab recorded
+            // in `tabs.recent` instead. This is a one-shot boot decision so it
+            // never fights later home/navigation toggles.
+            let bootRestored = false
+            const restoreRecent = () => {
+              if (bootRestored) return false
+              if (!tabs.ready() || !tabs.recentReady()) return false
+              const recent = recentTab(tabsStore, tabs.recentKey())
+              if (!recent) return false
+              bootRestored = true
+              tabs.select(recent)
+              return true
+            }
+
             createEffect(() => {
               const route = layout.route()
               if (!tabs.ready()) return
               const tab = currentTab()
               if (tab) {
+                bootRestored = true
                 tabs.remember(tab)
+                return
+              }
+
+              if (route.type === "home") {
+                restoreRecent()
                 return
               }
 
               if (route.type === "session") {
                 const s = session()
-                if (!s) return
+                if (!s) {
+                  // Wait for the session lookup to settle before treating the
+                  // URL as dead: a still-loading deep link must not be
+                  // overridden by the recent tab.
+                  if (!session.loading) restoreRecent()
+                  return
+                }
                 const sessionId = s.parentID ?? s.id
                 const next = { server: route.server ?? server.key, sessionId }
                 const tab = tabsStoreActions.addSessionTab(next)
                 // Warm the tab info cache so later project closes can
                 // attribute this tab even if the sync cache evicts the session.
                 if (tab.type === "session") tabs.rememberSessionInfo(tab, s)
+                return
               }
+
+              if (route.type === "draft" || route.type === "dir-new-sesssion") restoreRecent()
             })
 
             makeEventListener(window, SESSION_TABS_REMOVED_EVENT, (event) => {

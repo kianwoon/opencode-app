@@ -23,6 +23,7 @@ import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidj
 import { createEffect, createMemo, createResource, createSignal, onCleanup, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
+import { isKnownRoute } from "./last-active-url"
 import { t } from "./i18n"
 import { initializationData } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
@@ -88,11 +89,16 @@ function windowLastActiveUrlKey(windowID: string) {
   return `opencode.desktop.window.${windowID}.last-active-url`
 }
 
+// A stale or malformed persisted URL must never be seeded into the router: a
+// malformed `/server/<segment>/...` value makes `currentRoute` throw inside
+// `requireServerKey`, and a URL that no longer resolves to an open tab leaves
+// no tab selected (the strip then renders its first entry, the leftmost tab).
+// Rejected URLs fall back to "/", where the tab store restores `tabs.recent`.
 function getLastActiveUrl(windowID: string) {
   if (typeof localStorage !== "object") return "/"
   try {
     const value = localStorage.getItem(windowLastActiveUrlKey(windowID))
-    if (value?.startsWith("/") && !value.startsWith("//")) return value
+    if (value?.startsWith("/") && !value.startsWith("//") && isKnownRoute(value)) return value
   } catch {}
   return "/"
 }

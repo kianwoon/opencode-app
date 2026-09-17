@@ -15,22 +15,18 @@ import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type
 import { createDraftPromptSession, type PromptModel } from "./prompt-state"
 import { migrateTabs } from "./tab-migration"
 import { projectSessionIDs } from "./project-tabs"
+import {
+  draftHref,
+  recentTab,
+  tabHref,
+  tabKey,
+  type DraftTab,
+  type SessionTab,
+  type Tab,
+} from "./tab-key"
 
-export type SessionTab = {
-  type: "session"
-  server: ServerConnection.Key
-  sessionId: string
-}
-
-export type DraftTab = {
-  type: "draft"
-  draftID: string
-  server: ServerConnection.Key
-  directory: string
-  worktree?: string
-}
-
-export type Tab = SessionTab | DraftTab
+export { draftHref, recentTab, tabHref, tabKey }
+export type { DraftTab, SessionTab, Tab }
 
 export type TabInfo = {
   title?: string
@@ -41,13 +37,6 @@ export type TabInfo = {
 type RecentTab = {
   key?: string
 }
-
-export const draftHref = (draftID: string) => `/new-session?draftId=${encodeURIComponent(draftID)}`
-
-export const tabHref = (tab: Tab) =>
-  tab.type === "draft" ? draftHref(tab.draftID) : sessionHref(tab.server, tab.sessionId)
-
-export const tabKey = (tab: Tab) => (tab.type === "draft" ? `draft:${tab.draftID}` : `${tab.server}\n${tabHref(tab)}`)
 
 export function sessionHasOpenTab(tabs: Tab[], server: ServerConnection.Key, session: Session) {
   return tabs.some((tab) => tab.type === "session" && tab.server === server && tab.sessionId === session.id)
@@ -124,6 +113,11 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
     createEffect(() => {
       if (!ready() || !recentReady()) return
       const servers = new Set(server.list.map(ServerConnection.key))
+      // A transiently empty server list (e.g. still booting, or a reconnect)
+      // must not wipe every persisted tab. Skip pruning until at least one
+      // server is known; otherwise the tab store is emptied and the strip
+      // falls back to "no active tab" until the servers reappear.
+      if (servers.size === 0) return
       const next = store.filter((tab) => servers.has(tab.server))
       if (next.length !== store.length) {
         for (const tab of store) {
@@ -445,6 +439,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         }
         navigate("/")
       },
+      recentKey,
       state<T>(tab: Tab, name: string, init: () => T) {
         return memory.ensure(tabKey(tab), name, init)
       },

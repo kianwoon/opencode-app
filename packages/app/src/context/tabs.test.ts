@@ -3,7 +3,8 @@ import { createRoot, getOwner, onCleanup } from "solid-js"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
 import { projectSessionIDs } from "./project-tabs"
-import type { SessionTab, Tab } from "./tabs"
+import type { SessionTab, Tab } from "./tab-key"
+import { recentTab, tabKey } from "./tab-key"
 import { migrateTabs } from "./tab-migration"
 import type { ServerConnection } from "./server"
 
@@ -255,5 +256,39 @@ describe("project session tab matching", () => {
     })
 
     expect(ids).toEqual([])
+  })
+})
+
+describe("recent tab restore", () => {
+  test("resolves the persisted recent key against the open store", () => {
+    const tabs: Tab[] = [sessionTab("oldest"), sessionTab("middle"), sessionTab("last-active")]
+
+    expect(recentTab(tabs, tabKey(sessionTab("last-active")))).toEqual(sessionTab("last-active"))
+  })
+
+  test("returns undefined when the recent key is missing or stale", () => {
+    const tabs: Tab[] = [sessionTab("a"), sessionTab("b")]
+
+    expect(recentTab(tabs, undefined)).toBeUndefined()
+    expect(recentTab(tabs, tabKey(sessionTab("closed")))).toBeUndefined()
+    expect(recentTab([], tabKey(sessionTab("a")))).toBeUndefined()
+  })
+
+  test("restores a non-leftmost tab when the persisted URL no longer matches", () => {
+    // Boot state: URL did not resolve to any tab, so nothing is active. The
+    // strip would fall back to index 0 ("oldest"). Restoring `tabs.recent`
+    // must yield the last-active tab instead.
+    const tabs: Tab[] = [sessionTab("oldest"), sessionTab("middle"), sessionTab("last-active")]
+    const storedRecent = tabKey(sessionTab("last-active"))
+
+    expect(recentTab(tabs, storedRecent)).not.toEqual(tabs[0])
+    expect(recentTab(tabs, storedRecent)).toEqual(tabs[2])
+  })
+
+  test("distinguishes tabs across servers with the same session id", () => {
+    const otherServer = "local\nhttp://localhost:9999" as ServerConnection.Key
+    const tabs: Tab[] = [sessionTab("shared"), { type: "session", server: otherServer, sessionId: "shared" }]
+
+    expect(recentTab(tabs, tabKey(tabs[1]!))).toEqual(tabs[1])
   })
 })
