@@ -130,6 +130,54 @@ export const RetryDecision = Schema.Literals([
 ])
 export type RetryDecision = Schema.Schema.Type<typeof RetryDecision>
 
+/**
+ * Names of the decision seams the service can dispatch. `ClassifierService`
+ * re-exports this as `ClassifierName`; the union is declared here so the schema
+ * module stays the single vocabulary owner.
+ */
+export type ClassifierName =
+  | "retry"
+  | "relevance"
+  | "scoring"
+  | "state-extraction"
+  | "batch"
+  | "verification"
+  | "guardrails"
+  | "matching"
+  | "screening"
+  | "memory"
+  | "anomaly"
+
+/**
+ * Context-relevance seam verdict, one per batch of context sections. `UNSURE`
+ * is the fail-open answer (nothing prunable was decided) and is what an empty or
+ * entirely unanswered batch folds to.
+ */
+export const RelevanceDecision = Schema.Literals(["KEEP", "PRUNE", "UNSURE"])
+export type RelevanceDecision = Schema.Schema.Type<typeof RelevanceDecision>
+
+/**
+ * Scoring seam verdict, one per subject/dimension batch. `RATED` means at least
+ * one dimension produced a real score; `UNSURE` is the fail-open answer (nothing
+ * scored) and is what an empty or entirely unanswered batch folds to.
+ */
+export const ScoreDecision = Schema.Literals(["RATED", "UNSURE"])
+export type ScoreDecision = Schema.Schema.Type<typeof ScoreDecision>
+
+/**
+ * State-extraction seam verdict. `EXTRACTED` means at least one field/flag came
+ * back as a real fact; `UNSURE` is the fail-open answer for an empty batch.
+ */
+export const ExtractionDecision = Schema.Literals(["EXTRACTED", "UNSURE"])
+export type ExtractionDecision = Schema.Schema.Type<typeof ExtractionDecision>
+
+/**
+ * Batch/map-reduce seam verdict. `AGGREGATED` means at least one item resolved;
+ * `UNSURE` is the fail-open answer when every chunk failed.
+ */
+export const BatchDecision = Schema.Literals(["AGGREGATED", "UNSURE"])
+export type BatchDecision = Schema.Schema.Type<typeof BatchDecision>
+
 export const ReasonCode = Schema.Literals([
   "NO_PROGRESS_REPEATED_FAILURE",
   "NEW_INFORMATION",
@@ -140,6 +188,15 @@ export const ReasonCode = Schema.Literals([
   "REPEATED_EXACT_FAILURE",
   "CLASSIFIER_UNAVAILABLE",
   "ACTION_OVERRIDDEN",
+  "CONTEXT_RELEVANT",
+  "CONTEXT_IRRELEVANT",
+  "CONTEXT_UNKNOWN",
+  "SCORES_RATED",
+  "SCORES_UNKNOWN",
+  "FACTS_EXTRACTED",
+  "FACTS_UNKNOWN",
+  "BATCH_AGGREGATED",
+  "BATCH_UNKNOWN",
 ])
 export type ReasonCode = Schema.Schema.Type<typeof ReasonCode>
 

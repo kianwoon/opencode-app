@@ -48,7 +48,7 @@ const evaluate = (input: {
     signals: signals(input.signals),
     attempt: input.attempt ?? 2,
     maxAttempts: input.maxAttempts ?? 5,
-    thresholds: { retry_switch: { accept: input.accept ?? 0.8 }, retry_act: { accept: 0.8 } },
+    thresholds: { retry_switch: { accept: input.accept ?? 0.8 }, retry_act: { accept: 0.8 }, relevance: { accept: 0.5 } },
   })
 }
 

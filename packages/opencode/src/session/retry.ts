@@ -2,6 +2,7 @@ import type { NamedError } from "@opencode-ai/core/util/error"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cause, Clock, Duration, Effect, Schedule } from "effect"
 import { MessageV2 } from "./message-v2"
+import { fingerprint } from "@/classifier/retry"
 import { iife } from "@/util/iife"
 import { isRecord } from "@/util/record"
 
@@ -191,6 +192,13 @@ export function policy(opts: {
   provider: string
   parse: (error: unknown) => Err
   set: (input: { attempt: number; message: string; action?: Retryable["action"]; next: number }) => Effect.Effect<void>
+  /**
+   * Synchronous classifier-verdict gate. Called on every schedule step with the
+   * current failure's fingerprint; returning true terminates the schedule exactly
+   * like the attempt cap. MUST be total and synchronous — it runs on the retry
+   * path. A throw is caught and treated as "do not stop" (fail-open).
+   */
+  shouldStop?: (input: { attempt: number; fingerprint: string }) => boolean
 }) {
   return Schedule.fromStepWithMetadata(
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
@@ -198,6 +206,21 @@ export function policy(opts: {
       const retry = retryable(error, opts.provider)
       if (!retry) return Cause.done(meta.attempt)
       if (meta.attempt > RETRY_MAX_RETRIES) return Cause.done(meta.attempt)
+      // Fail-open: only an explicit true may halt; absent hook is a no-op with
+      // zero added work. The fingerprint input mirrors the observer's exactly
+      // (`error: message`) so the two sides always agree on what "the same
+      // failure" means. The hook is caller-supplied, so a throw degrades to
+      // "do not stop" rather than escaping Effect.retry.
+      const stop = (() => {
+        if (!opts.shouldStop) return false
+        try {
+          // scoped to the foreign callback only: the retry path must survive a hook that throws
+          return opts.shouldStop({ attempt: meta.attempt, fingerprint: fingerprint({ error: retry.message }) }) === true
+        } catch {
+          return false
+        }
+      })()
+      if (stop) return Cause.done(meta.attempt)
       return Effect.gen(function* () {
         const wait = delay(meta.attempt, SessionV1.APIError.isInstance(error) ? error : undefined)
         const now = yield* Clock.currentTimeMillis

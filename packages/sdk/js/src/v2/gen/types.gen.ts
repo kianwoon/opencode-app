@@ -2039,6 +2039,16 @@ export type Config = {
   classifier?: {
     enabled?: boolean
     retry?: boolean
+    relevance?: boolean
+    scoring?: boolean
+    state_extraction?: boolean
+    batch?: boolean
+    verification?: boolean
+    guardrails?: boolean
+    matching?: boolean
+    screening?: boolean
+    memory?: boolean
+    anomaly?: boolean
     model?: string
     /**
      * Attempts before the retry classifier is allowed to STOP or ESCALATE.
@@ -2048,7 +2058,16 @@ export type Config = {
       retry_switch?: {
         accept?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       }
+      retry_act?: {
+        accept?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+      relevance?: {
+        accept?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
     }
+    act?: boolean
+    act_relevance?: boolean
+    act_retry?: boolean
   }
   default_agent?: string
   subagent_depth?: number

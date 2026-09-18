@@ -27,6 +27,13 @@ export const SYSTEMONE_URL = "https://api.typesafe.ai/v1/systemone"
 /** Explicit timeout so a hung upstream becomes a fallback, not a stall. */
 export const SYSTEMONE_TIMEOUT = Duration.seconds(20)
 
+/**
+ * Tighter bound for the AWAITED turn-path relevance call: pruning requires the
+ * verdict before the messages go on the wire, so this stall is user-visible
+ * (~10x Jev's ~300ms answer) unlike the detached shadow path above.
+ */
+export const RELEVANCE_TURN_TIMEOUT = Duration.seconds(3)
+
 export class SystemOneError extends Schema.TaggedErrorClass<SystemOneError>()("Classifier.SystemOneError", {
   /** Coarse failure kind so callers can branch without parsing messages. */
   kind: Schema.Literals(["missing_api_key", "http", "decode", "timeout"]),

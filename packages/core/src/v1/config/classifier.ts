@@ -19,6 +19,12 @@ const Thresholds = Schema.Struct({
       accept: Schema.optional(Schema.Number),
     }),
   ),
+  relevance: Schema.optional(
+    Schema.Struct({
+      /** Accepting irrelevance probability for a context section to be prunable (e.g. 0.5). */
+      accept: Schema.optional(Schema.Number),
+    }),
+  ),
 })
 
 /**
@@ -32,6 +38,36 @@ export const Info = Schema.Struct({
   retry: Schema.optional(Schema.Boolean).annotate({
     description: "Enable the retry/death-spiral classifier specifically.",
   }),
+  relevance: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the context-relevance classifier specifically.",
+  }),
+  scoring: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the ordered-scoring classifier specifically.",
+  }),
+  state_extraction: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the state-extraction classifier specifically.",
+  }),
+  batch: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the batch/map-reduce classifier specifically.",
+  }),
+  verification: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the verification classifier specifically.",
+  }),
+  guardrails: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the guardrails classifier specifically.",
+  }),
+  matching: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the matching classifier specifically.",
+  }),
+  screening: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the screening classifier specifically.",
+  }),
+  memory: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the memory classifier specifically.",
+  }),
+  anomaly: Schema.optional(Schema.Boolean).annotate({
+    description: "Enable the anomaly classifier specifically.",
+  }),
   model: Schema.optional(Schema.String).annotate({
     description: 'System One model id, e.g. "jev-latest".',
   }),
@@ -42,7 +78,14 @@ export const Info = Schema.Struct({
     description: "Decision thresholds keyed by decision seam.",
   }),
   act: Schema.optional(Schema.Boolean).annotate({
-    description: "Allow the classifier to ACT on STOP/ESCALATE verdicts, not just observe. Defaults to false.",
+    description:
+      "Allow the classifier to ACT on STOP/ESCALATE verdicts, not just observe. Defaults to false. MASTER switch: when a per-seam `act_*` field is absent it supplies that seam's default.",
+  }),
+  act_relevance: Schema.optional(Schema.Boolean).annotate({
+    description: "Allow the classifier to ACT on relevance decisions (prune context). Falls back to `act`.",
+  }),
+  act_retry: Schema.optional(Schema.Boolean).annotate({
+    description: "Allow the classifier to ACT on retry decisions (halt retries). Falls back to `act`.",
   }),
 })
 export type Info = Schema.Schema.Type<typeof Info>

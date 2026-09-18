@@ -47,6 +47,21 @@ export const resolveClassifierModel = (input: {
 }): string | undefined =>
   [input.override, input.brainModel, input.classifierModel].find((model) => model != null && model !== "")
 
+/**
+ * Split the legacy `act` master switch into per-seam actuation flags. A seam's
+ * explicit `act_*` wins; otherwise it inherits the master `act`; absent ⇒ false
+ * (fail-off). Pure so both read sites share one precedence implementation and
+ * `{ act: true }` alone reproduces the pre-split "both on" behavior exactly.
+ */
+export const resolveAct = (input: {
+  act?: boolean | undefined
+  actRetry?: boolean | undefined
+  actRelevance?: boolean | undefined
+}): { retry: boolean; relevance: boolean } => ({
+  retry: input.actRetry ?? input.act ?? false,
+  relevance: input.actRelevance ?? input.act ?? false,
+})
+
 export interface FailureRecord {
   /** Stable fingerprint of error+action,+result — the repeat detector. */
   signature: string
@@ -123,12 +138,36 @@ export interface Thresholds {
   retry_act: {
     accept: number
   }
+  /**
+   * Minimum irrelevance probability ("noul") for a context section to be
+   * prunable. 0.5 is the calibrated midpoint of the 0..1 scale, so a section is
+   * dropped only on a literal "more likely irrelevant than not" reading.
+   */
+  relevance: {
+    accept: number
+  }
 }
 
 export const DEFAULT_THRESHOLDS: Thresholds = {
   retry_switch: { accept: 0.8 },
   retry_act: { accept: 0.8 },
+  relevance: { accept: 0.5 },
 }
+
+/** Merge config-derived overrides over the defaults; absent fields keep the default. */
+export const thresholdsFromConfig = (
+  input:
+    | {
+        retry_switch?: { accept?: number } | undefined
+        retry_act?: { accept?: number } | undefined
+        relevance?: { accept?: number } | undefined
+      }
+    | undefined,
+): Thresholds => ({
+  retry_switch: { accept: input?.retry_switch?.accept ?? DEFAULT_THRESHOLDS.retry_switch.accept },
+  retry_act: { accept: input?.retry_act?.accept ?? DEFAULT_THRESHOLDS.retry_act.accept },
+  relevance: { accept: input?.relevance?.accept ?? DEFAULT_THRESHOLDS.relevance.accept },
+})
 
 /** Per-question answer signals the effectful half reads off the Jev response. */
 export interface RetrySignals {
@@ -205,6 +244,57 @@ export const shouldActOnRetry = (input: {
   if (input.fallbackUsed === true) return false
   if (!Number.isFinite(input.confidence)) return false
   return input.confidence >= input.threshold
+}
+
+/** Outcome of consulting the cached verdict on the retry path. */
+export type StopDecision =
+  | { stop: true; verdict: CachedVerdict; threshold: number }
+  | { stop: false; overrideReason?: ReasonCode; verdict?: CachedVerdict }
+
+/** Minimal shape of the session-keyed store entry; kept structural to avoid a cycle. */
+export interface CachedVerdict {
+  decision: RetryDecision
+  confidence: number
+  reasonCode: ReasonCode
+  fingerprint: string
+  attempt: number
+}
+
+/**
+ * Pure gate for Phase 2 actuation. Fails open on every unexpected input: it only
+ * ever returns `stop: true` for a real, matching, above-threshold STOP/ESCALATE
+ * verdict. `overrideReason` is reported ONLY when a real verdict was seen but the
+ * gate deliberately refused to act (currently: a stale/fingerprint-mismatched
+ * verdict); it is never set merely because the gate itself is disabled.
+ */
+export const shouldStopRetries = (input: {
+  enabled: boolean | undefined
+  act: boolean | undefined
+  verdict: CachedVerdict | undefined
+  fingerprint: string
+  attempt: number
+  threshold: number
+}): StopDecision => {
+  const eligible = (verdict: CachedVerdict): boolean =>
+    shouldActOnRetry({ decision: verdict.decision, confidence: verdict.confidence, threshold: input.threshold })
+  const verdict = input.verdict
+  // Safety invariant (defense-in-depth): the pure gate must refuse to halt unless
+  // actuation is explicitly enabled. It is true here even though the processor
+  // caller pre-filters on the same condition; do NOT remove it just because the
+  // current caller makes it unreachable. No verdict may exist at this point, so
+  // this is NOT an "override" — it stays reason-free rather than misreporting
+  // `ACTION_OVERRIDDEN`.
+  if (input.enabled !== true || input.act !== true) return { stop: false }
+  if (!verdict) return { stop: false }
+  // A verdict only describes the exact failure it was computed from, and only a
+  // verdict from an EARLIER attempt may halt the current one (no self-halt). This
+  // IS a genuine override: a real verdict existed but was deliberately not acted
+  // upon, which is exactly what `ACTION_OVERRIDDEN` means.
+  if (verdict.fingerprint !== input.fingerprint)
+    return { stop: false, overrideReason: "ACTION_OVERRIDDEN", verdict }
+  if (verdict.attempt >= input.attempt) return { stop: false }
+  if (!eligible(verdict)) return { stop: false, verdict }
+  return { stop: true, verdict, threshold: input.threshold }
 }
 
 // --- Deterministic fallback classifier ---------------------------------------

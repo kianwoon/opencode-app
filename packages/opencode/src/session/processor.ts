@@ -9,6 +9,7 @@ import { ClassifierOpenRouter } from "@/classifier/openrouter"
 import { ClassifierRetry } from "@/classifier/retry"
 import { ClassifierService } from "@/classifier/service"
 import { ClassifierTelemetry } from "@/classifier/telemetry"
+import { ClassifierVerdict } from "@/classifier/verdict"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
@@ -132,6 +133,8 @@ function observeShadowRetryClassifier(input: {
   maxAttempts: number
   /** Bare System One model id from `classifier.model`; no model configured means no shadow run. */
   model: string | undefined
+  /** Config-derived thresholds merged over the defaults; the classifier's own decision reads these. */
+  thresholds: ClassifierRetry.Thresholds
   enabled: boolean
   classifier: ClassifierService.Interface
 }) {
@@ -154,23 +157,33 @@ function observeShadowRetryClassifier(input: {
       attempt: input.attempt,
     })
     const started = yield* Clock.currentTimeMillis
+    const failureSignature = ClassifierRetry.fingerprint({ error: input.message })
     const state = ClassifierRetry.buildDecisionState({
       goal: `complete the assistant turn on ${input.providerID}/${input.modelID}`,
       step: input.attempt,
       latestAction: `retry attempt ${input.attempt}`,
       latestResult: input.message,
       previousFailures:
-        input.attempt > 1
-          ? [{ signature: ClassifierRetry.fingerprint({ error: input.message }), count: input.attempt - 1 }]
-          : [],
+        input.attempt > 1 ? [{ signature: failureSignature, count: input.attempt - 1 }] : [],
     })
     const result = yield* classifier.classify(
       "retry",
-      { state, attempt: input.attempt, maxAttempts: input.maxAttempts, thresholds: ClassifierRetry.DEFAULT_THRESHOLDS },
+      { state, attempt: input.attempt, maxAttempts: input.maxAttempts, thresholds: input.thresholds },
       // `model` is the classifier's own bare model id — never the session model.
       { sessionID: input.sessionID, model: input.model },
     ).pipe(Effect.orDie) // an unexpected defect must not turn into a misleading decision log
     const ended = yield* Clock.currentTimeMillis
+    // Publish for the retry schedule to READ SYNCHRONOUSLY. Only a real classifier
+    // result is published: a fallback verdict must never actuate (fail-open).
+    if (!result.fallbackUsed) {
+      ClassifierVerdict.put(input.sessionID, {
+        decision: result.decision,
+        confidence: result.confidence,
+        reasonCode: result.reasonCode,
+        fingerprint: failureSignature,
+        attempt: input.attempt,
+      })
+    }
     yield* ClassifierTelemetry.decision({
       decision: { ...result, classifier: `${result.classifier}:shadow`, latencyMs: ended - started },
       sessionID: input.sessionID,
@@ -805,6 +818,7 @@ const layer = Layer.effect(
                         message: info.message,
                         policyAction: info.action,
                         maxAttempts: classifierConfig?.max_attempts ?? SessionRetry.RETRY_MAX_RETRIES,
+                        thresholds: ClassifierRetry.thresholdsFromConfig(classifierConfig?.thresholds),
                         // The classifier model is the configured bare id (never the session model);
                         // absent config skips the shadow run, as the request body requires a bare id.
                         model: ClassifierRetry.resolveClassifierModel({
@@ -827,6 +841,76 @@ const layer = Layer.effect(
                     action: info.action,
                     next: info.next,
                   })
+                },
+                /**
+                 * Synchronous + fail-open verdict gate (Piece 2). Reads the store
+                 * directly: no Effect, no await, no classifier call, so it adds no
+                 * latency. Returns true only for a real, matching, above-threshold
+                 * STOP/ESCALATE verdict, which terminates the schedule exactly like
+                 * the attempt cap so the existing `halt` handler surfaces it.
+                 */
+                shouldStop: ({ attempt, fingerprint: current }) => {
+                  // Gated BEFORE any read: when the feature is off this is a
+                  // constant-time `false` with zero added work on the retry path.
+                  if (
+                    classifierConfig?.enabled !== true ||
+                    !(classifierConfig?.act === true)
+                  )
+                    return false
+                  const verdict = ClassifierVerdict.get(ctx.sessionID)
+                  const outcome = ClassifierRetry.shouldStopRetries({
+                    enabled: true,
+                    act: true,
+                    verdict,
+                    fingerprint: current,
+                    attempt,
+                    threshold:
+                      classifierConfig?.thresholds?.retry_act?.accept ??
+                      ClassifierRetry.DEFAULT_THRESHOLDS.retry_act.accept,
+                  })
+                  if (outcome.stop) {
+                    const acted = outcome.verdict
+                    // Consumed: a stale verdict must never halt a later failure.
+                    ClassifierVerdict.clear(ctx.sessionID)
+                    Effect.runFork(
+                      ClassifierTelemetry.decision({
+                        decision: {
+                          decision: acted.decision,
+                          confidence: acted.confidence,
+                          reasonCode: acted.reasonCode,
+                          classifier: "verdict-store",
+                          latencyMs: 0,
+                          fallbackUsed: false,
+                        },
+                        sessionID: ctx.sessionID,
+                        attempt,
+                        cached: true,
+                        actedOn: true,
+                      }),
+                    )
+                    return true
+                  }
+                  if (outcome.overrideReason && outcome.verdict) {
+                    const overridden = outcome.verdict
+                    Effect.runFork(
+                      ClassifierTelemetry.decision({
+                        decision: {
+                          decision: overridden.decision,
+                          confidence: overridden.confidence,
+                          reasonCode: overridden.reasonCode,
+                          classifier: "verdict-store",
+                          latencyMs: 0,
+                          fallbackUsed: false,
+                        },
+                        sessionID: ctx.sessionID,
+                        attempt,
+                        cached: true,
+                        actedOn: false,
+                        overrideReason: outcome.overrideReason,
+                      }),
+                    )
+                  }
+                  return false
                 },
               }),
             ),

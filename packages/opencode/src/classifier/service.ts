@@ -15,9 +15,13 @@ export * as ClassifierService from "./service"
 
 import { Clock, Effect, Layer, Context } from "effect"
 
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { ClassifierClient } from "./client"
-import { type ClassifierDecision, type RetryDecision } from "./schema"
+import { ClassifierOpenRouter } from "./openrouter"
+import { type ClassifierDecision, type ClassifierName, type RelevanceDecision, type RetryDecision } from "./schema"
 import {
   DEFAULT_THRESHOLDS,
   type RetryInput,
@@ -25,11 +29,18 @@ import {
   classifyRetry,
   resolveClassifierModel,
   ruleBasedDecision,
+  thresholdsFromConfig,
   toDecision,
 } from "./retry"
+import {
+  type RelevanceInput,
+  classifyRelevance,
+  keepAllVerdicts,
+  ruleBasedRelevance,
+  toDecision as toRelevanceDecision,
+} from "./relevance"
 
-/** Only `retry` is a live seam in Phase 1. */
-export type ClassifierName = "retry"
+export type { ClassifierName }
 
 export interface ClassifyOptions {
   /** Overrides the configured thresholds (e.g. tests). */
@@ -51,6 +62,11 @@ export interface Interface {
     input: RetryInput,
     options?: ClassifyOptions,
   ) => Effect.Effect<ClassifierDecision<RetryDecision>>
+  /** Context-relevance seam, same fail-open contract; one batched Jev call. */
+  readonly classifyRelevance: (
+    input: RelevanceInput,
+    options?: ClassifyOptions,
+  ) => Effect.Effect<ClassifierDecision<RelevanceDecision>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ClassifierDecision") {}
@@ -68,6 +84,14 @@ export const ruleBasedLayer: Layer.Layer<Service> = Layer.succeed(
         thresholds: options?.thresholds ?? input.thresholds ?? DEFAULT_THRESHOLDS,
       })
       return toDecision("rule-based", result, {
+        latencyMs: (yield* Clock.currentTimeMillis) - started,
+        fallbackUsed: false,
+      })
+    }),
+    classifyRelevance: Effect.fn("DecisionClassifier.ruleBasedRelevance")(function* (input, options) {
+      const started = yield* Clock.currentTimeMillis
+      const verdicts = keepAllVerdicts(input.sections)
+      return toRelevanceDecision("rule-based", ruleBasedRelevance(verdicts), {
         latencyMs: (yield* Clock.currentTimeMillis) - started,
         fallbackUsed: false,
       })
@@ -107,7 +131,10 @@ export const systemOneLayer: Layer.Layer<Service, never, ClassifierClient.Servic
     ) {
       const started = yield* Clock.currentTimeMillis
       const cfg = yield* config.get()
-      const thresholds = options?.thresholds ?? input.thresholds ?? DEFAULT_THRESHOLDS
+      // Config-derived thresholds are merged over the defaults so a user-set
+      // `thresholds.retry_act.accept` is honoured alongside `retry_switch`.
+      const thresholds =
+        options?.thresholds ?? input.thresholds ?? thresholdsFromConfig(cfg.classifier?.thresholds)
       const maxAttempts = options?.maxAttempts ?? input.maxAttempts
       const model = resolveClassifierModel({
         override: options?.model,
@@ -134,6 +161,66 @@ export const systemOneLayer: Layer.Layer<Service, never, ClassifierClient.Servic
       )
     })
 
-    return Service.of({ classify })
+    // Deterministic relevance outcome: keep every section, flagged as a fallback
+    // so nothing downstream may prune on it, with CLASSIFIER_UNAVAILABLE as the
+    // reason so outage telemetry sees the degraded path from the decision alone.
+    const relevanceFallback = (input: RelevanceInput, started: number) =>
+      Effect.map(Clock.currentTimeMillis, (end) => ({
+        ...toRelevanceDecision("rule-based", ruleBasedRelevance(keepAllVerdicts(input.sections)), {
+          latencyMs: end - started,
+          fallbackUsed: true,
+        }),
+        reasonCode: "CLASSIFIER_UNAVAILABLE" as const,
+      }))
+
+    const classifyRelevanceFn = Effect.fn("DecisionClassifier.systemOneRelevance")(function* (
+      input: RelevanceInput,
+      options?: ClassifyOptions,
+    ) {
+      const started = yield* Clock.currentTimeMillis
+      const cfg = yield* config.get()
+      const threshold = input.threshold ?? thresholdsFromConfig(cfg.classifier?.thresholds).relevance.accept
+      const model = resolveClassifierModel({
+        override: options?.model,
+        brainModel: cfg.brain?.classifier_model,
+        classifierModel: cfg.classifier?.model,
+      })
+
+      if (!model || input.sections.length === 0) return yield* relevanceFallback(input, started)
+
+      return yield* classifyRelevance({
+        client,
+        model,
+        task: input.task,
+        sections: input.sections,
+        threshold,
+      }).pipe(
+        Effect.flatMap((result) =>
+          Effect.map(Clock.currentTimeMillis, (end) =>
+            toRelevanceDecision("jev", result, { latencyMs: end - started, fallbackUsed: false }),
+          ),
+        ),
+        Effect.catch(() => relevanceFallback(input, started)),
+      )
+    })
+
+    return Service.of({ classify, classifyRelevance: classifyRelevanceFn })
   }),
 )
+
+/**
+ * App-runtime registration for the decision seam. The transport is composed
+ * HERE (no other container knows about the classifier) so both services are
+ * REACHABLE from the session loop, which resolves them optionally via
+ * `Effect.serviceOption`. `provideMerge` (not `provide`) is deliberate: the
+ * loop also looks up the CLIENT, so the transport must stay in the exported
+ * context. Binding is lazy — `systemOneLayer` defers all I/O to a call and the
+ * app's `classifier` gates are off by default, so nothing runs at startup.
+ * `systemOneLayer` keeps its deterministic fallback, so a missing credential
+ * degrades rather than fails.
+ */
+export const node = LayerNode.make({
+  service: Service,
+  layer: Layer.provideMerge(systemOneLayer, ClassifierOpenRouter.layer),
+  deps: [ClassifierOpenRouter.node, Config.node, Auth.node, httpClient],
+})

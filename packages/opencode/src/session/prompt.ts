@@ -46,7 +46,16 @@ import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { Auth } from "@/auth"
+import { ClassifierClient } from "@/classifier/client"
+import { ClassifierOpenRouter } from "@/classifier/openrouter"
+import { ClassifierRelevance } from "@/classifier/relevance"
+import { ClassifierRetry } from "@/classifier/retry"
+import { ClassifierService } from "@/classifier/service"
+import { ClassifierTelemetry } from "@/classifier/telemetry"
+import { ClassifierTrigger } from "@/classifier/trigger"
+import { Cause, Clock, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
@@ -1867,6 +1876,116 @@ const layer = Layer.effect(
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
+            if (ClassifierTrigger.isEnabled("relevance", cfg.classifier)) {
+              const classifierConfig = cfg.classifier
+              const threshold = ClassifierRetry.thresholdsFromConfig(classifierConfig?.thresholds).relevance.accept
+              // `act` is the master switch; the relevance seam resolves through
+              // `resolveAct` so pruning can be enabled independently of retry-halting.
+              const act = ClassifierRetry.resolveAct({
+                act: classifierConfig?.act,
+                actRetry: classifierConfig?.act_retry,
+                actRelevance: classifierConfig?.act_relevance,
+              }).relevance
+              const task = msgs
+                .filter((msg) => msg.info.id === lastUser.id)
+                .flatMap((msg) => msg.parts.filter((part): part is SessionV1.TextPart => part.type === "text"))
+                .map((part) => part.text)
+                .join(" ")
+              // One candidate per MESSAGE (coarse + cheap). The most recent turn
+              // is excluded here, so it is never even offered to the classifier;
+              // the invariants below only have to defend the middle of the
+              // conversation.
+              const recent = new Set([lastUser.id, ...(lastAssistant ? [lastAssistant.id] : [])])
+              const sections = msgs
+                .filter((msg) => !recent.has(msg.info.id))
+                .map((msg) => ({
+                  id: msg.info.id,
+                  text: msg.parts
+                    .filter((part): part is SessionV1.TextPart => part.type === "text")
+                    .map((part) => part.text)
+                    .join("\n"),
+                }))
+                .filter((section) => section.text.length > 0)
+              if (sections.length > 0) {
+                yield* Effect.gen(function* () {
+                  const client = yield* Effect.serviceOption(ClassifierClient.Service)
+                  const model = ClassifierRetry.resolveClassifierModel({
+                    brainModel: cfg.brain?.classifier_model,
+                    classifierModel: classifierConfig?.model,
+                  })
+                  // Without a bound transport only the envelope is reachable (the
+                  // service deliberately does not expose per-section verdicts), so
+                  // observe + log, but never prune.
+                  if (!Option.isSome(client) || !model) {
+                    const observed = yield* Effect.serviceOption(ClassifierService.Service)
+                    if (!Option.isSome(observed)) return
+                    const decided = yield* observed.value.classifyRelevance({ task, sections })
+                    yield* ClassifierTelemetry.decision({ decision: decided, sessionID, actedOn: false })
+                    return
+                  }
+                  const started = yield* Clock.currentTimeMillis
+                  const result = yield* ClassifierRelevance.classifyRelevance({ client: client.value, model, task, sections, threshold })
+                  const decision = ClassifierRelevance.toDecision("jev", result, {
+                    latencyMs: (yield* Clock.currentTimeMillis) - started,
+                    fallbackUsed: false,
+                  })
+                  // Pruning invariants (only when acting): NEVER prune a system
+                  // message, never the most recent turn (already excluded above),
+                  // never leave the conversation empty or without a user turn,
+                  // and never introduce an adjacent same-role pair. System
+                  // messages carry the agent's standing instructions, so their
+                  // role is checked explicitly below rather than inferred from
+                  // the alternation test. If any check fails the prune is
+                  // abandoned wholesale — keep, never guess.
+                  const doomed = new Set(
+                    act && ClassifierRelevance.shouldActOnRelevance({ decision: result.decision, confidence: result.confidence, threshold })
+                      ? ClassifierRelevance.prunableSections(result.verdicts).map((verdict) => verdict.id)
+                      : [],
+                  )
+                  // The alternation check below is role-symmetric and would happily
+                  // accept dropping a system message, so exclude those roles here.
+                  const prunableRole = (role: string) => role === "user" || role === "assistant"
+                  for (const msg of msgs) if (!prunableRole(msg.info.role)) doomed.delete(msg.info.id)
+                  // The most recent turn is excluded from the candidate set above,
+                  // so it can never be in `doomed`; delete again defensively so a
+                  // future widening of the candidate set cannot prune it.
+                  doomed.delete(lastUser.id)
+                  if (lastAssistant) doomed.delete(lastAssistant.id)
+                  const kept = msgs.filter((msg) => !doomed.has(msg.info.id))
+                  const alternates = kept.every((msg, index) => index === 0 || msg.info.role !== kept[index - 1]?.info.role)
+                  const pruned =
+                    doomed.size > 0 &&
+                    kept.length > 0 &&
+                    kept.some((msg) => msg.info.role === "user") &&
+                    alternates
+                  if (pruned) msgs = kept
+                  const keptCount = result.verdicts.filter((verdict) => verdict.keep).length
+                  yield* ClassifierTelemetry.decision({
+                    decision,
+                    sessionID,
+                    actedOn: pruned,
+                    threshold,
+                    // True totals keep a capped `evidence` array visibly truncated.
+                    sections: {
+                      total: result.verdicts.length,
+                      kept: keptCount,
+                      pruned: result.verdicts.length - keptCount,
+                    },
+                    evidence: result.verdicts.map((verdict) => ({
+                      id: verdict.id,
+                      noul: verdict.noul,
+                      keep: verdict.keep,
+                    })),
+                  })
+                }).pipe(
+                  // Turn-critical AWAITED call: the tighter bound caps user-visible
+                  // stall at 3s instead of the client's 20s (detached shadow path).
+                  Effect.timeout(ClassifierClient.RELEVANCE_TURN_TIMEOUT),
+                  Effect.catchCause(() => Effect.void),
+                )
+              }
+            }
+
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const [skills, env, instructions, mcpInstructions, workflowGuidance, rulePaths, modelMsgs] =
@@ -2332,7 +2451,26 @@ const quoteTrimRegex = /^["']|["']$/g
 
 export const node = LayerNode.make({
   service: Service,
-  layer: layer,
+  // The classifier CLIENT is bound here so the relevance seam can resolve it —
+  // `SessionProcessor.node` (a dependency) already contributes ClassifierService,
+  // but its composition `provide`s the transport away, so ClassifierClient is
+  // None at this construction point. Guarding on the client (the missing one)
+  // rather than the service is therefore deliberate. `provideMerge` (not
+  // `provide`) keeps the transport's export in context so BOTH services resolve.
+  // `systemOneLayer` keeps its deterministic fallback, so a missing credential
+  // degrades rather than fails.
+  layer: Layer.provideMerge(
+    layer,
+    Layer.unwrap(
+      Effect.serviceOption(ClassifierClient.Service).pipe(
+        Effect.map((found) =>
+          Option.isSome(found)
+            ? Layer.empty
+            : Layer.provideMerge(ClassifierService.systemOneLayer, ClassifierOpenRouter.layer),
+        ),
+      ),
+    ),
+  ),
   deps: [
     SessionStatus.node,
     Session.node,
@@ -2361,6 +2499,8 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     Database.node,
     SessionTodoNode,
+    Auth.node,
+    httpClient,
   ],
 })
 
