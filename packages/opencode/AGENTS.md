@@ -386,3 +386,48 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
 - **Acceptance gate:** `test/tool/task-isolate.test.ts` — flag defaults ON with a present
   binary; isolation disables with no binary; non-zero/empty child output falls back in-fiber
   (`bun test` from `packages/opencode`, `OPENCODE_CONFIG_DIR=""`).
+
+## MCP structuredContent is dropped from model-visible output
+
+- **Symptom:** MCP tools whose addressing data lives only in `structuredContent`
+  (CUA driver: `snapshot_id` + `element_token`) become unusable — the model sees only
+  `content[].text`, so token-based clicks fail with "bare element_index is not accepted"
+  / "element_token is stale" even though the tool returned valid addressing data.
+- **Root cause:** `src/session/tools.ts` built model output from the result's `content`
+  text parts only. `catalog.ts:75` falls back to `structuredContent` **only when `content`
+  is EMPTY** — CUA returns BOTH, so the structured half was silently dropped.
+- **Fix (shipped):** `structuredTokenBlock()` in `src/session/tools.ts` appends an
+  `[mcp-structured snapshot_id=...]` line plus per-element `token=` lines to `textParts`
+  before `truncate.output`; caps at 300 elements / 80-char labels.
+- **Acceptance guard:** `test/session/tools.test.ts` "surfaces snapshot_id and element
+  tokens from structuredContent"; typecheck via `bun typecheck` from `packages/opencode`.
+  Desktop shipping needs `OPENCODE_CHANNEL=prod bun run build` then `package:mac` then
+  `verify-prod.ts` (CLI rebuild does NOT update the app).
+
+## Classifier shadow seam + Effect fork/layer gotchas (2026-09-10)
+- `test/session/` has a large PRE-EXISTING failure baseline (~39-48 fail / 11 errors,
+  553 tests, ~256s) and is flaky (timeout-based tests vary run to run). Never claim
+  "all green" from it; A/B against a baseline before attributing failures to your
+  change. Never run it in full while iterating, and NEVER pipe a long run through
+  `| tail`/`| head` — buffered silence is indistinguishable from a hang. Run only the
+  affected file(s), e.g. `bun test test/session/processor-effect.test.ts`. Effect
+  layer-provisioning regressions surface as "Service not found" + the missing service
+  name; assertion mismatches and timeouts are usually pre-existing. Acceptance gate:
+  an A/B (stash only the touched paths, rerun a targeted subset, restore) shows
+  identical failure sets.
+- `Effect.runFork` produces a detached, unsupervised fiber that is NOT interrupted when
+  the parent completes. Any `runFork` on a request/HTTP path MUST carry an explicit
+  timeout or it leaks a fiber per invocation. Pattern used: pipe the forked effect
+  through `Effect.timeout(<existing constant>)` and `Effect.catchCause(() => Effect.void)`
+  so neither error nor defect nor hang escapes. Corollary for tests: a fiber forked with
+  the test layer's `TestClock` never advances its `Effect.timeout` — fork it with the
+  LIVE layer. Acceptance gate: the forked effect has a bounded lifetime and nothing can
+  escape into the parent.
+- Binding a service via `Layer.provideMerge` in a node's `layer` is NOT the same as
+  adding it to `deps`. The classifier fallback is bound as
+  `Layer.provideMerge(layer, Layer.unwrap(Effect.serviceOption(Service).pipe(Effect.map(found => Option.isSome(found) ? Layer.empty : FallbackLayer))))`
+  so it self-skips when an outer layer already provides the service, avoiding `deps[]`
+  changes that would break direct-construction test fixtures. Separately: adding a NEW
+  dep (e.g. `RuntimeFlags.node`) to a widely-used node makes that node a hard dependency
+  for every fixture that constructs it — check fixtures before adding. Acceptance gate:
+  `bun typecheck` clean AND affected targeted tests show no NEW failures vs baseline.

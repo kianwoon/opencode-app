@@ -1,10 +1,18 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
+import { Cause, Clock, Deferred, Effect, Exit, Layer, Context, Option, Scope, Schema } from "effect"
+import { ClassifierClient } from "@/classifier/client"
+import { ClassifierOpenRouter } from "@/classifier/openrouter"
+import { ClassifierRetry } from "@/classifier/retry"
+import { ClassifierService } from "@/classifier/service"
+import { ClassifierTelemetry } from "@/classifier/telemetry"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
+import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
@@ -105,6 +113,77 @@ type StreamEvent = LLMEvent
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionProcessor") {}
 
+/**
+ * Shadow decision seam. Runs the classifier alongside `SessionRetry.policy` and
+ * reports what it *would* have decided; it can never return a value the retry
+ * machinery reads, and it is forked so it cannot delay the retry path. Not a
+ * named `Effect.fn` on purpose: it must stay uncallable from an effectful
+ * context so it can never be `yield*`ed into the retry path.
+ * The failure history is built from the in-scope provider error only — message
+ * history and parts are deliberately NOT loaded (latency).
+ */
+function observeShadowRetryClassifier(input: {
+  providerID: string
+  modelID: string
+  sessionID: SessionID
+  attempt: number
+  message: string
+  policyAction: SessionRetry.Retryable["action"] | undefined
+  maxAttempts: number
+  /** Bare System One model id from `classifier.model`; no model configured means no shadow run. */
+  model: string | undefined
+  enabled: boolean
+  classifier: ClassifierService.Interface
+}) {
+  if (!input.enabled) return
+  if (!input.model) return
+  const classifier = input.classifier
+  return Effect.gen(function* () {
+    // policy decision first: it is always available regardless of the shadow outcome
+    yield* ClassifierTelemetry.decision({
+      decision: ClassifierRetry.toDecision(
+        "policy",
+        {
+          decision: input.policyAction ? "RETRY" : "STOP",
+          reasonCode: input.policyAction ? "NEW_INFORMATION" : "MAX_ATTEMPTS",
+          confidence: 1,
+        },
+        { latencyMs: 0, fallbackUsed: false },
+      ),
+      sessionID: input.sessionID,
+      attempt: input.attempt,
+    })
+    const started = yield* Clock.currentTimeMillis
+    const state = ClassifierRetry.buildDecisionState({
+      goal: `complete the assistant turn on ${input.providerID}/${input.modelID}`,
+      step: input.attempt,
+      latestAction: `retry attempt ${input.attempt}`,
+      latestResult: input.message,
+      previousFailures:
+        input.attempt > 1
+          ? [{ signature: ClassifierRetry.fingerprint({ error: input.message }), count: input.attempt - 1 }]
+          : [],
+    })
+    const result = yield* classifier.classify(
+      "retry",
+      { state, attempt: input.attempt, maxAttempts: input.maxAttempts, thresholds: ClassifierRetry.DEFAULT_THRESHOLDS },
+      // `model` is the classifier's own bare model id — never the session model.
+      { sessionID: input.sessionID, model: input.model },
+    ).pipe(Effect.orDie) // an unexpected defect must not turn into a misleading decision log
+    const ended = yield* Clock.currentTimeMillis
+    yield* ClassifierTelemetry.decision({
+      decision: { ...result, classifier: `${result.classifier}:shadow`, latencyMs: ended - started },
+      sessionID: input.sessionID,
+      attempt: input.attempt,
+    })
+  }).pipe(
+    // Bounded: the fiber is detached, so a hung classifier must not leak forever.
+    Effect.timeout(ClassifierClient.SYSTEMONE_TIMEOUT),
+    Effect.asVoid,
+    Effect.catchCause(() => Effect.void),
+  ) // shadow failure is silently skipped, never logged as Jev's
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -121,6 +200,9 @@ const layer = Layer.effect(
     const image = yield* Image.Service
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
+    const flags = yield* RuntimeFlags.Service
+    // Optional: the shadow classifier must not force a classifier layer into every build.
+    const classifier = yield* Effect.serviceOption(ClassifierService.Service)
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
@@ -680,7 +762,9 @@ const layer = Layer.effect(
           messageID: input.assistantMessage.id,
         })
         ctx.needsCompaction = false
-        ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        const turnConfig = yield* config.get()
+        ctx.shouldBreak = turnConfig.experimental?.continue_loop_on_deny !== true
+        const classifierConfig = turnConfig.classifier
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
@@ -712,6 +796,30 @@ const layer = Layer.effect(
                 provider: input.model.providerID,
                 parse,
                 set: (info) => {
+                  const shadow = Option.isSome(classifier)
+                    ? observeShadowRetryClassifier({
+                        providerID: input.model.providerID,
+                        modelID: input.model.id,
+                        sessionID: ctx.sessionID,
+                        attempt: info.attempt,
+                        message: info.message,
+                        policyAction: info.action,
+                        maxAttempts: classifierConfig?.max_attempts ?? SessionRetry.RETRY_MAX_RETRIES,
+                        // The classifier model is the configured bare id (never the session model);
+                        // absent config skips the shadow run, as the request body requires a bare id.
+                        model: ClassifierRetry.resolveClassifierModel({
+                          brainModel: turnConfig.brain?.classifier_model,
+                          classifierModel: classifierConfig?.model,
+                        }),
+                        enabled: ClassifierRetry.shadowEnabled({
+                          enabled: classifierConfig?.enabled,
+                          flag: flags.experimentalClassifierShadow,
+                        }),
+                        classifier: classifier.value,
+                      })
+                    : undefined
+                  // Forked, detached: the shadow run cannot delay or affect this retry path.
+                  if (shadow) Effect.runFork(Effect.provideService(shadow, RuntimeFlags.Service, flags))
                   return status.set(ctx.sessionID, {
                     type: "retry",
                     attempt: info.attempt,
@@ -748,10 +856,28 @@ const layer = Layer.effect(
 
 export const node = LayerNode.make({
   service: Service,
-  layer: layer,
+  // The classifier is bound here so the shadow hook can resolve it; it stays
+  // inert while the shadow flag/config gates are off. When no classifier layer
+  // is supplied from outside, the real OpenRouter transport is composed
+  // explicitly — `systemOneLayer` keeps its own deterministic fallback for
+  // every client error, so a missing credential degrades rather than fails.
+  layer: Layer.provideMerge(
+    layer,
+    Layer.unwrap(
+      Effect.serviceOption(ClassifierService.Service).pipe(
+        Effect.map((found) =>
+          Option.isSome(found)
+            ? Layer.empty
+            : Layer.provide(ClassifierService.systemOneLayer, ClassifierOpenRouter.layer),
+        ),
+      ),
+    ),
+  ),
   deps: [
     Session.node,
     Config.node,
+    Auth.node,
+    httpClient,
     Snapshot.node,
     Agent.node,
     LLM.node,
@@ -762,6 +888,7 @@ export const node = LayerNode.make({
     Image.node,
     EventV2Bridge.node,
     Database.node,
+    RuntimeFlags.node,
   ],
 })
 

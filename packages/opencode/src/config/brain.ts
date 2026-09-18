@@ -47,6 +47,7 @@ const BRAIN_PERMISSION_STRICT = () => ({
     reviewer: "allow",
     guru: "allow",
     "computer-aid": "allow",
+    classifier: "allow",
   },
 }) as const
 
@@ -80,6 +81,7 @@ export function expand(config: ConfigV1.Info) {
     ["reviewer", brain.reviewer_model],
     ["guru", brain.guru_model],
     ["computer-aid", brain.computer_aid_model],
+    ["classifier", brain.classifier_model],
   ] as const) {
     const entry = agent[name]
     if (!entry) {

@@ -473,6 +473,57 @@ it.effect("redacts a thrown read_mcp_resource error", () =>
   }),
 )
 
+it.effect("surfaces snapshot_id and element tokens from structuredContent", () => {
+  const mcpTool: MCP.McpTool = {
+    def: { name: "snapshot", description: "cua", inputSchema: { type: "object", properties: {} } } as never,
+    client: {
+      callTool: async () => ({
+        content: [{ type: "text", text: "62KB of accessibility text".repeat(50) }],
+        structuredContent: {
+          snapshot_id: "snap-123",
+          elements: [
+            { element_index: 7, element_token: "tok-abc", role: "button", label: "Submit" },
+            { element_index: 8, element_token: "tok-def", role: "textfield", label: "Query" },
+          ],
+        },
+      }),
+    } as never,
+  }
+  return Effect.gen(function* () {
+    const tools = yield* SessionTools.resolve({
+      agent,
+      model,
+      session: { id: sessionID, permission: [] } as unknown as Session.Info,
+      processor: mcpProcessor(),
+      bypassAgentCheck: false,
+      messages: [],
+      promptOps: {} as never,
+      mcpConfig: {},
+    })
+    const execute = tools.mcp_srv_snapshot?.execute
+    if (!execute) throw new Error("mcp_srv_snapshot tool is missing execute")
+    const output = (yield* Effect.promise(() =>
+      execute({}, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }),
+    )) as { output: string }
+    expect(output.output).toContain("[mcp-structured snapshot_id=snap-123]")
+    expect(output.output).toContain("[7] token=tok-abc button Submit")
+    expect(output.output).toContain("[8] token=tok-def textfield Query")
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.succeed(Plugin.Service, fakePlugin),
+        Layer.mock(Agent.Service, { get: () => Effect.succeed(agent) }),
+        Layer.succeed(Config.Service, TestConfig.make()),
+        Layer.succeed(Permission.Service, fakePermission),
+        mcpLayer({ tools: () => Effect.succeed({ mcp_srv_snapshot: mcpTool }) }),
+        Layer.succeed(Truncate.Service, fakeTruncate),
+        RuntimeFlags.layer(),
+        Layer.succeed(ToolRegistry.Service, throwingRegistry),
+      ),
+    ),
+  )
+})
+
 it.effect("redacts a thrown MCP tool error (inline deferral branch)", () =>
   Effect.gen(function* () {
     const mcpTool: MCP.McpTool = {

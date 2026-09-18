@@ -2033,7 +2033,22 @@ export type Config = {
     reviewer_model?: string
     guru_model?: string
     computer_aid_model?: string
+    classifier_model?: string
     enforcement?: "strict" | "advisory"
+  }
+  classifier?: {
+    enabled?: boolean
+    retry?: boolean
+    model?: string
+    /**
+     * Attempts before the retry classifier is allowed to STOP or ESCALATE.
+     */
+    max_attempts?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    thresholds?: {
+      retry_switch?: {
+        accept?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+    }
   }
   default_agent?: string
   subagent_depth?: number

@@ -544,6 +544,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
           }
 
+          const structured = structuredTokenBlock(result.structuredContent)
+          if (structured) textParts.push(structured)
+
           const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
           const metadata = {
             ...result.metadata,
@@ -705,6 +708,31 @@ function formatMcpResourceContent(server: string, uri: string, content: { conten
     attachments,
     text: text.join("\n\n") || `MCP resource ${uri} from ${server} returned no contents.`,
   }
+}
+
+const MAX_STRUCTURED_ELEMENTS = 300
+const MAX_STRUCTURED_LABEL = 80
+
+/** Surface CUA `snapshot_id`/`element_token` that live only in MCP `structuredContent`. */
+function structuredTokenBlock(value: unknown) {
+  if (!isRecord(value)) return undefined
+  const lines: string[] = []
+  if (typeof value.snapshot_id === "string") lines.push(`[mcp-structured snapshot_id=${value.snapshot_id}]`)
+  const elements = value.elements
+  if (Array.isArray(elements)) {
+    for (const element of elements.slice(0, MAX_STRUCTURED_ELEMENTS)) {
+      if (!isRecord(element)) continue
+      const token = typeof element.element_token === "string" ? element.element_token : undefined
+      if (!token) continue
+      const index = element.element_index === undefined ? "?" : String(element.element_index)
+      const role = typeof element.role === "string" ? element.role : ""
+      const label = typeof element.label === "string" ? element.label.slice(0, MAX_STRUCTURED_LABEL) : ""
+      lines.push(`  [${index}] token=${token} ${role} ${label}`.trimEnd())
+    }
+    const remaining = elements.length - MAX_STRUCTURED_ELEMENTS
+    if (remaining > 0) lines.push(`  [+${remaining} more]`)
+  }
+  return lines.length > 0 ? lines.join("\n") : undefined
 }
 
 function base64Size(value: string) {

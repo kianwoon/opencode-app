@@ -18,6 +18,9 @@ export const Info = Schema.Struct({
   computer_aid_model: Schema.optional(Schema.String).annotate({
     description: "Model to use for the computer-aid agent in provider/model format",
   }),
+  classifier_model: Schema.optional(Schema.String).annotate({
+    description: "Model for the classifier agent in the format provider/model",
+  }),
   enforcement: Schema.optional(Schema.Literals(["strict", "advisory"])).annotate({
     description:
       "Control brain enforcement behavior: 'strict' blocks on failed checks, 'advisory' only warns without blocking. Strict enforcement permissions take precedence over global `permission` for the generated agents.",
