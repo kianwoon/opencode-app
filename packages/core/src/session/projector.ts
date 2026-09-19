@@ -207,7 +207,7 @@ function insertMessage(db: DatabaseService, event: SessionEvent.Event, message: 
     .pipe(Effect.orDie)
 }
 
-const ORPHAN_ERROR =
+export const ORPHAN_ERROR =
   "Orphaned by restart: owning execution fiber did not survive process restart; marked failed at boot. Re-send your prompt to retry."
 
 export function sweepOrphanedParts(db: DatabaseService) {

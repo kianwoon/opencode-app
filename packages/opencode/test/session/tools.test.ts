@@ -158,6 +158,7 @@ it.effect("preserves running tool start time across metadata updates", () =>
       messages: [],
       promptOps: {} as never,
       mcpConfig: {},
+      jevEnabled: false,
     })
     const execute = tools.timing.execute
     if (!execute) throw new Error("timing tool is missing execute")
@@ -224,6 +225,7 @@ it.effect("a tool whose execute never settles fails with the timeout error", () 
       messages: [],
       promptOps: {} as never,
       mcpConfig: {},
+      jevEnabled: false,
     })
     const execute = tools.hang.execute
     if (!execute) throw new Error("hang tool is missing execute")
@@ -340,6 +342,7 @@ itErrorPath.effect("redacts a thrown tool error and preserves the original error
       messages: [],
       promptOps: {} as never,
       mcpConfig: {},
+      jevEnabled: false,
     })
     const execute = tools.boom.execute
     if (!execute) throw new Error("boom tool is missing execute")
@@ -423,6 +426,7 @@ function mcpToolInput(name: string, overrides: Partial<MCP.Interface>) {
       messages: [],
       promptOps: {} as never,
       mcpConfig: {},
+      jevEnabled: false,
     })
     const execute = tools[name]?.execute
     if (!execute) throw new Error(`${name} tool is missing execute`)
@@ -499,6 +503,7 @@ it.effect("surfaces snapshot_id and element tokens from structuredContent", () =
       messages: [],
       promptOps: {} as never,
       mcpConfig: {},
+      jevEnabled: false,
     })
     const execute = tools.mcp_srv_snapshot?.execute
     if (!execute) throw new Error("mcp_srv_snapshot tool is missing execute")

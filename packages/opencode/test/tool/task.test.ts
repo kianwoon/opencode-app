@@ -289,6 +289,130 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("execute refuses to re-dispatch an identical task orphaned by restart", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const args = {
+        description: "inspect bug",
+        prompt: "look into the cache key path",
+        subagent_type: "general",
+      }
+      // Pre-seed the parent history with the boot-swept orphaned part, as the
+      // projector would have left it after a crash restart.
+      const orphaned: SessionV1.ToolPart = {
+        id: PartID.ascending(),
+        messageID: assistant.id,
+        sessionID: chat.id,
+        type: "tool",
+        callID: "call-orphaned",
+        tool: TaskTool.id,
+        state: {
+          status: "error",
+          error: "Orphaned by restart: owning execution fiber did not survive process restart; marked failed at boot. Re-send your prompt to retry.",
+          input: args,
+          time: { start: Date.now(), end: Date.now() },
+        },
+      }
+      const ctx = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        extra: { promptOps: stubOps() },
+        messages: [{ info: assistant, parts: [orphaned] }],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      const exit = yield* def.execute(args, ctx).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) throw new Error("expected terminal refusal")
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error("expected Error defect")
+      expect(failure.message).toContain("Terminal: child orphaned by restart")
+      // No new child session row — the storm's per-turn session mint is the
+      // thing being prevented.
+      expect(yield* sessions.children(chat.id)).toHaveLength(0)
+
+      // A different task (changed prompt) is NOT blocked.
+      const other = {
+        description: "inspect bug",
+        prompt: "a genuinely different prompt",
+        subagent_type: "general",
+      }
+      const ok = yield* def.execute(other, ctx)
+      expect(ok.output).toContain('state="completed"')
+      expect(yield* sessions.children(chat.id)).toHaveLength(1)
+    }),
+  )
+
+  it.instance("execute caps parallel task fan-out in a single turn", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const seedSibling = (callID: string) =>
+        sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: assistant.id,
+          sessionID: chat.id,
+          type: "tool",
+          callID,
+          tool: TaskTool.id,
+          state: { status: "running", input: {}, time: { start: Date.now() } },
+        } satisfies SessionV1.ToolPart)
+
+      const ctx = (callID: string) => ({
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        callID,
+        extra: { promptOps: stubOps() },
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      })
+
+      // Under the cap, with the caller's own part persisted (the processor
+      // mints it before dispatch) alongside 4 siblings — 5 total, not 6.
+      for (const n of [1, 2, 3, 4]) yield* seedSibling(`call-${n}`)
+      yield* seedSibling("call-self")
+      const ok = yield* def.execute(
+        { description: "one", prompt: "p1", subagent_type: "general" },
+        ctx("call-self"),
+      )
+      expect(ok.output).toContain('state="completed"')
+
+      // One more sibling tips the SAME turn over the cap — this is the shape
+      // the fan-out loop mints (N task parts, one turn, no child session yet).
+      yield* seedSibling("call-5")
+      const before = (yield* sessions.children(chat.id)).length
+
+      const exit = yield* def.execute(
+        { description: "six", prompt: "p6", subagent_type: "general" },
+        ctx("call-self"),
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) throw new Error("expected fan-out refusal")
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error("expected Error defect")
+      expect(failure.message).toContain("Terminal: too many parallel task calls")
+      expect(failure.message).toContain("split into sequential steps")
+      // Refused at the boundary — no child session row was minted.
+      expect((yield* sessions.children(chat.id)).length).toBe(before)
+    }),
+  )
+
   it.instance("execute surfaces child errors with a resumable task_id", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

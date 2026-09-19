@@ -132,6 +132,21 @@ export const Info = Schema.Struct({
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  jev: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable Jev tool-routing: narrows the tool list per turn via the Jev decision model. OFF = full tool list.",
+      }),
+      threshold: Schema.optional(Schema.Finite).annotate({
+        description: "Confidence threshold for Jev keep/drop decisions (default 0.7).",
+      }),
+      timeoutMs: Schema.optional(PositiveInt).annotate({
+        description: "Timeout in milliseconds for the Jev decision request (default 3000). Fail-open keeps the full tool list.",
+      }),
+    }),
+  ).annotate({
+    description: "Global Jev tool-routing switch (all agents/sessions). ON = Jev choice narrows tools per turn; OFF = current behavior.",
+  }),
   attachment: Schema.optional(ConfigAttachmentV1.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
   }),

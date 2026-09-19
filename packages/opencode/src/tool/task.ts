@@ -4,6 +4,7 @@ import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
+import { ORPHAN_ERROR } from "@opencode-ai/core/session/projector"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
@@ -47,6 +48,12 @@ const BACKGROUND_UPDATED = [
 // fiber, silent provider, stuck tool dispatch) can't park the session forever.
 // Background tasks stay unbounded; the user polls those intentionally.
 export const FOREGROUND_SUBAGENT_TIMEOUT_MS = 30 * 60_000
+
+// Breadth bound for a single assistant turn's task fan-out. `subagent_depth`
+// bounds nesting, not parallelism — a model looping on fan-out emitted 9161
+// identical task parts (one turn, ~4ms apart) and minted a child session per
+// call. Refused at the tool boundary so no rows are allocated.
+export const MAX_PARALLEL_TASKS_PER_TURN = 5
 
 // Child-process isolation for foreground subagents (default ON), but only when
 // a SAFE child binary is resolvable. Read synchronously at call time (not module
@@ -168,6 +175,63 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(
           new Error(
             `Subagent depth limit reached (${cfg.subagent_depth ?? 1}). Increase "subagent_depth" to allow nested subagents.`,
+          ),
+        )
+      }
+
+      // Crash-retry storm guard. After a process restart the boot sweep marks
+      // every in-flight part with ORPHAN_ERROR (see core SessionProjector).
+      // Re-issuing the identical task then mints a NEW child session on every
+      // turn while the orphaned part stays failed — ses_f45d6db2 accumulated
+      // 8189 identical explorer task parts this way. A prior orphaned attempt
+      // of the exact same (subagent_type, description, prompt) is terminal:
+      // refuse WITHOUT creating a child session or a new part, and say so, so
+      // the model stops re-delegating. Matched against the already-projected
+      // parent history (ctx.messages) — no extra query, no new dependency.
+      const duplicate = ctx.messages
+        .flatMap((message) => message.parts)
+        .find(
+          (part): part is SessionV1.ToolPart =>
+            part.type === "tool" &&
+            part.tool === id &&
+            part.state.status === "error" &&
+            part.state.error.includes(ORPHAN_ERROR) &&
+            part.state.input.subagent_type === params.subagent_type &&
+            part.state.input.description === params.description &&
+            part.state.input.prompt === params.prompt,
+        )
+      if (duplicate) {
+        return yield* Effect.fail(
+          new Error(
+            `Terminal: child orphaned by restart, do not retry automatically — ask user. ` +
+              `The identical ${params.subagent_type} task (callID: ${duplicate.callID}) already failed at boot and was not re-dispatched.`,
+          ),
+        )
+      }
+
+      // Per-turn parallel fan-out cap. The depth guard above bounds *nesting*,
+      // not breadth: a single assistant turn that emits N task calls runs them
+      // concurrently (AI SDK dispatch), and a model stuck in a fan-out loop
+      // emitted 9161 identical task parts. The already-projected parent history
+      // (ctx.messages) is snapshotted BEFORE this assistant message exists, so
+      // it can never see same-turn siblings — count the live projected parts of
+      // the current assistant message instead. Refuse WITHOUT minting a child
+      // session so the storm cannot allocate rows, and say so terminally.
+      const siblings = yield* MessageV2.parts(ctx.messageID).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.orDie,
+      )
+      // Exclude self by callID and re-add it (+1): the caller's own part is
+      // usually already persisted (processor `ensureToolCall` runs before
+      // dispatch), but may not be when tools are invoked directly, so keying on
+      // callID keeps the count exact instead of double-counting the caller.
+      const parallel =
+        siblings.filter((part) => part.type === "tool" && part.tool === id && part.callID !== ctx.callID)
+          .length + 1
+      if (parallel > MAX_PARALLEL_TASKS_PER_TURN) {
+        return yield* Effect.fail(
+          new Error(
+            `Terminal: too many parallel task calls (${parallel}>${MAX_PARALLEL_TASKS_PER_TURN}) in one turn — split into sequential steps, ask user.`,
           ),
         )
       }

@@ -172,6 +172,24 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
   return items.sort().join("\n")
 }
 
+// Global Jev tool-routing: narrows the turn tool list via the Jev decision
+// model. The transport + verdict algebra live in the shared, zero-dependency
+// `@/jev/client` module (copyable into plugins that cannot import the runtime);
+// this re-export keeps the historical import path used by tests stable.
+export { jevKeepTools, jevVerdict, jevDecide } from "@/jev/client"
+import { jevDecide } from "@/jev/client"
+
+function jevPromptText(parts: readonly unknown[]): string {
+  return parts
+    .filter((p): p is { type: "text"; text: string } => {
+      if (typeof p !== "object" || p === null) return false
+      const r = p as Record<string, unknown>
+      return r["type"] === "text" && typeof r["text"] === "string"
+    })
+    .map((p) => p.text)
+    .join("\n")
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -1535,6 +1553,20 @@ const layer = Layer.effect(
         let repeatKey: string | undefined
         let repeatCount = 0
         let forceWrapUp = false
+        // Jev routing decision cache: a single slot keyed by the current user
+        // message id (the turn boundary). A new user message changes the key,
+        // so the narrowed tool set is recomputed for a new turn and reused for
+        // every LLM step within one turn. `computed` memoizes a fail-open
+        // outcome (no key, no decision) so later steps skip the provider
+        // lookup/HTTP call too. `keep: null` = fail open (full list).
+        // Intentionally runLoop-scoped, not lifted to session scope: it is
+        // recomputed on wake, which is acceptable — a wake is a fresh decision.
+        const jevTurn: {
+          key: string
+          computed: boolean
+          keep: Set<string> | null
+          names: Set<string>
+        } = { key: "", computed: false, keep: null, names: new Set() }
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         // Re-entry cap (module-level state, survives within the process).
@@ -1821,6 +1853,7 @@ const layer = Layer.effect(
               messages: msgs,
               promptOps,
               mcpConfig: (cfg.mcp ?? {}) as Record<string, unknown>,
+              jevEnabled: cfg.jev?.enabled === true,
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),
@@ -1862,6 +1895,87 @@ const layer = Layer.effect(
               if (format.type === "json_schema" && !turnTools["StructuredOutput"]) {
                 turnTools["StructuredOutput"] = tools["StructuredOutput"]
               }
+            }
+
+            // Global Jev tool-routing (OFF = current behavior, full tool
+            // list). Fail-open: missing key, timeout, error, or parse miss
+            // keeps the full list. Never drops StructuredOutput on
+            // json_schema turns. The decision is computed ONCE per user turn
+            // (cached in jevTurn under the current user message id) and reused
+            // across every LLM step: a 20-step turn makes one HTTP call, not
+            // 20. Later steps intersect the cached set with the current
+            // turnTools, so wrapUp/json_schema masking is still respected;
+            // tools that surface after the decision (e.g. find_tools
+            // promotions) were never evaluated, so they fail open and stay.
+            const jevEnabled = cfg.jev?.enabled === true
+            if (jevEnabled && !wrapUp) {
+              const names = Object.keys(turnTools)
+              if (jevTurn.key !== lastUser.id) {
+                jevTurn.key = lastUser.id
+                jevTurn.computed = false
+                jevTurn.keep = null
+                jevTurn.names = new Set()
+              }
+              if (!jevTurn.computed && names.length > 0) {
+                jevTurn.computed = true
+                const openrouter = yield* provider.getProvider(ProviderV2.ID.openrouter).pipe(Effect.option)
+                const jevKey = Option.isSome(openrouter) ? openrouter.value.key : undefined
+                if (jevKey) {
+                  const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : 0.7
+                  const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : 3000
+                  const decided = yield* Effect.promise(() =>
+                    jevDecide({ key: jevKey, state: jevPromptText(lastUserMsg?.parts ?? []), names, threshold, timeoutMs }),
+                  )
+                  // undefined → null: fail open AND memoized, so later steps in
+                  // the same turn do not retry the HTTP call.
+                  jevTurn.keep = decided.keep ?? null
+                  jevTurn.names = new Set(names)
+                  if (!jevTurn.keep) {
+                    yield* Effect.logInfo("jev.tool-routing fallback", {
+                      "session.id": sessionID,
+                      reason: "no-decision",
+                      tools: names.length,
+                      status: decided.status,
+                    })
+                  }
+                } else if (step === 1) {
+                  yield* Effect.logInfo("jev.tool-routing skipped", {
+                    "session.id": sessionID,
+                    reason: "no-openrouter-key",
+                  })
+                }
+              } else if (step === 1 && names.length === 0) {
+                yield* Effect.logInfo("jev.tool-routing skipped", { "session.id": sessionID, reason: "no-tools" })
+              }
+              const keep = jevTurn.keep
+              if (keep) {
+                // Never-evaluated names (surfaced after the decision) stay in
+                // the list — masking only removes what Jev explicitly skipped.
+                const narrowed = Object.fromEntries(
+                  Object.entries(turnTools).filter(([name]) => !jevTurn.names.has(name) || keep.has(name)),
+                )
+                if (format.type === "json_schema" && tools["StructuredOutput"]) {
+                  narrowed["StructuredOutput"] = tools["StructuredOutput"]
+                }
+                if (Object.keys(narrowed).length > 0) {
+                  turnTools = narrowed
+                  yield* Effect.logInfo("jev.tool-routing applied", {
+                    "session.id": sessionID,
+                    step,
+                    tools_before: names.length,
+                    tools_after: Object.keys(narrowed).length,
+                  })
+                } else {
+                  yield* Effect.logInfo("jev.tool-routing fallback", {
+                    "session.id": sessionID,
+                    step,
+                    reason: "empty-narrowing",
+                    tools: names.length,
+                  })
+                }
+              }
+            } else if (!jevEnabled && step === 1) {
+              yield* Effect.logInfo("jev.tool-routing skipped", { "session.id": sessionID, reason: "disabled" })
             }
 
             if (step === 1)

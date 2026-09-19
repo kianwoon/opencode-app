@@ -2107,6 +2107,11 @@ export type Config = {
   tools?: {
     [key: string]: boolean
   }
+  jev?: {
+    enabled?: boolean
+    threshold?: number
+    timeoutMs?: number
+  }
   attachment?: AttachmentConfig
   enterprise?: {
     url?: string

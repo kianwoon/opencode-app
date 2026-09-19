@@ -1,4 +1,5 @@
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
+import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
@@ -88,6 +89,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const serverSync = useServerSync()
 
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
+  const jev = createMemo(() => serverSync().data.config.jev ?? {})
   const models = useModels()
 
   const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
@@ -160,6 +162,15 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
+  const commitJev = (patch: { enabled?: boolean }) => {
+    void serverSync()
+      .updateConfig({ jev: { ...jev(), ...patch } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
   return (
     <>
       <div class="settings-v2-tab-header">
@@ -197,6 +208,12 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
                   commit({ enforcement: option })
                 }}
               />
+            </SettingsRowV2>
+
+            <SettingsRowV2 title="Tool routing" description="Route tools via typesafe/jev-1.13. OFF keeps the full tool list.">
+              <Switch checked={jev().enabled ?? false} onChange={() => commitJev({ enabled: !(jev().enabled ?? false) })} hideLabel>
+                Toggle Jev tool routing
+              </Switch>
             </SettingsRowV2>
           </SettingsListV2>
         </div>
