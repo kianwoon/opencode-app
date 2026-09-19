@@ -33,4 +33,3 @@ logs/
 *.bun-build
 tsconfig.tsbuildinfo
 graphify-out/
-jev.md
