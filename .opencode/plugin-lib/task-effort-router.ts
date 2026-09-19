@@ -1,5 +1,13 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
+import {
+  classifyTier,
+  memoResult,
+  resolveJevEffortConfig,
+  type EffortTier,
+  type JevEffortConfig,
+  type TierResult,
+} from "../plugin-lib/jev-effort"
 
 /**
  * Task Effort Router — a self-adjusting reasoning-effort governor.
@@ -38,6 +46,7 @@ type RouterConfig = {
   riskyTools: string[]
   brainAgent: string
   budgetBands: { low: number; medium: number }
+  jev: JevEffortConfig
 }
 
 const DEFAULTS: RouterConfig = {
@@ -49,10 +58,11 @@ const DEFAULTS: RouterConfig = {
   riskyTools: ["edit", "write", "patch", "bash"],
   brainAgent: "brain",
   budgetBands: { low: 8000, medium: 20000 },
+  jev: { enabled: false, model: "typesafe/jev-1.13", threshold: 0.5 },
 }
 
 /** Shape-check a loaded value so malformed configs fail open, never throw. */
-function isConfig(value: unknown): value is RouterConfig {
+function isConfig(value: unknown): value is Omit<RouterConfig, "jev"> {
   if (!value || typeof value !== "object") return false
   const cfg = value as Record<string, unknown>
   const num = (v: unknown) => typeof v === "number" && Number.isFinite(v)
@@ -245,7 +255,8 @@ async function loadRouterConfig(): Promise<RouterConfig> {
     if (stat.mtimeMs !== configCache.mtimeMs) {
       const parsed: unknown = JSON.parse(await fs.readFile(file, "utf8"))
       if (isConfig(parsed)) {
-        configCache.config = parsed
+        // `jev` is optional and OFF by default; resolve it from the same file.
+        configCache.config = { ...parsed, jev: resolveJevEffortConfig((parsed as Record<string, unknown>).jev) }
         configCache.mtimeMs = stat.mtimeMs
       }
     }
@@ -459,6 +470,70 @@ function variantFor(model: unknown, tier: Effort, direction: "down" | "up") {
   return undefined
 }
 
+/**
+ * Apply a Jev tier verdict to a session's baseline. Only when the classifier
+ * is confident enough (>= cfg.threshold) AND the tier differs from the shape
+ * baseline. `wasDefinitive` records whether the shape already had an opinion,
+ * selecting the log event ("jev-override" vs "jev-baseline"). Never called on
+ * the request critical path unless the verdict was a synchronous memo hit.
+ */
+function adoptJevTier(
+  sessionID: string,
+  result: TierResult,
+  cfg: JevEffortConfig,
+  wasDefinitive: boolean,
+  expected?: State,
+): boolean {
+  if (result.confidence < cfg.threshold) {
+    log("jev-skip", { sessionID, tier: result.tier, confidence: result.confidence, reason: "below-threshold" })
+    return false
+  }
+  const entry = state.get(sessionID)
+  // Cross-task contamination guard: a detached verdict may land AFTER a new
+  // user message replaced this session's entry. `expected` is the exact entry
+  // object written by the firing that launched the call; identity mismatch
+  // means a fresh task owns the session, so this verdict is stale — drop it.
+  if (expected !== undefined && entry !== expected) {
+    log("jev-skip", { sessionID, tier: result.tier, confidence: result.confidence, reason: "stale-task" })
+    return false
+  }
+  if (!entry) return false
+  const tier = result.tier as Effort
+  if (tier === entry.baseline) return false
+  const previous = entry.baseline
+  entry.baseline = tier
+  log(wasDefinitive ? "jev-override" : "jev-baseline", {
+    sessionID,
+    tier,
+    previous,
+    confidence: result.confidence,
+  })
+  return true
+}
+
+/** Test-only access to the in-memory session map; never used by the runtime. */
+export const __testState = {
+  get: (sessionID: string) => state.get(sessionID),
+  set: (sessionID: string, entry: State) => state.set(sessionID, entry),
+  clear: () => state.clear(),
+}
+
+/**
+ * Route a (possibly absent) classifier verdict onto a session baseline. Null
+ * is a deliberate fail-open no-op — exported so the null path is unit-testable
+ * without touching the network.
+ */
+export function adoptDetachedVerdict(
+  sessionID: string,
+  result: TierResult | null,
+  cfg: JevEffortConfig,
+  wasDefinitive: boolean,
+  expected?: State,
+): boolean {
+  if (!result) return false
+  return adoptJevTier(sessionID, result, cfg, wasDefinitive, expected)
+}
+
 export const TaskEffortRouterPlugin: Plugin = async (_input) => {
   return {
     "chat.message": async (input, output) => {
@@ -480,7 +555,7 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
       const cfg = await loadRouterConfig()
       const profile = assess(text, cfg)
       trackSession(input.sessionID)
-      state.set(input.sessionID, {
+      const written: State = {
         escalated: undefined,
         baseline: profile.baseline,
         escalations: 0,
@@ -488,13 +563,36 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
         turns: 0,
         skipLogged: false,
         lastMessage: { text, ts: now },
-      })
+      }
+      state.set(input.sessionID, written)
       log("assess", {
         sessionID: input.sessionID,
         baseline: profile.baseline,
         risky: profile.risky,
         words: text ? countWords(text) : 0,
       })
+      // Jev tier-classification (opt-in, OFF by default). Two paths:
+      //  - memo hit → synchronous adoption, zero async gap before the write
+      //    above already happened; we re-apply now so the baseline is final.
+      //  - otherwise → detached call that updates the baseline when it lands.
+      // The shape result is definitive only when assess() returned a tier.
+      // Both paths pin to `written` by identity so a verdict landing after a
+      // new task replaced the entry is dropped instead of contaminating it.
+      if (cfg.jev.enabled && text.trim().length > 0) {
+        const wasDefinitive = profile.baseline !== undefined
+        const cached = memoResult(text)
+        if (cached) {
+          adoptJevTier(input.sessionID, cached, cfg.jev, wasDefinitive, written)
+        } else {
+          void classifyTier(text, cfg.jev)
+            .then((result) => {
+              if (result) adoptJevTier(input.sessionID, result, cfg.jev, wasDefinitive, written)
+            })
+            .catch(() => {
+              // detached: never surfaces
+            })
+        }
+      }
     },
 
     "chat.params": async (input, output) => {
