@@ -2112,6 +2112,11 @@ export type Config = {
     threshold?: number
     timeoutMs?: number
   }
+  governor?: {
+    enabled?: boolean
+    threshold?: number
+    timeoutMs?: number
+  }
   attachment?: AttachmentConfig
   enterprise?: {
     url?: string

@@ -147,6 +147,24 @@ export const Info = Schema.Struct({
   ).annotate({
     description: "Global Jev tool-routing switch (all agents/sessions). ON = Jev choice narrows tools per turn; OFF = current behavior.",
   }),
+  governor: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable the context governor: drop-only relevance gate over conversation context at the shared v1 choke-point (brain, hands, agents). OFF = current behavior.",
+      }),
+      threshold: Schema.optional(Schema.Finite).annotate({
+        description: "Choice-probability threshold for governor keep/drop decisions (default 0.7).",
+      }),
+      timeoutMs: Schema.optional(PositiveInt).annotate({
+        description:
+          "Timeout in milliseconds for the governor decision request (default 3000). Fail-open keeps all sections.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Global context governor switch (all agents/sessions). ON = drop-only relevance gating of conversation context; OFF = current behavior.",
+  }),
   attachment: Schema.optional(ConfigAttachmentV1.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
   }),

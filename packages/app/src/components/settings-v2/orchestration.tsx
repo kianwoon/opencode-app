@@ -90,6 +90,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
 
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
   const jev = createMemo(() => serverSync().data.config.jev ?? {})
+  const governor = createMemo(() => serverSync().data.config.governor ?? {})
   const models = useModels()
 
   const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
@@ -171,6 +172,15 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
+  const commitGovernor = (patch: { enabled?: boolean }) => {
+    void serverSync()
+      .updateConfig({ governor: { ...governor(), ...patch } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
   return (
     <>
       <div class="settings-v2-tab-header">
@@ -213,6 +223,19 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
             <SettingsRowV2 title="Tool routing" description="Route tools via typesafe/jev-1.13. OFF keeps the full tool list.">
               <Switch checked={jev().enabled ?? false} onChange={() => commitJev({ enabled: !(jev().enabled ?? false) })} hideLabel>
                 Toggle Jev tool routing
+              </Switch>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Context governor"
+              description="Drop-only relevance gating of conversation context via typesafe/jev-1.13. OFF keeps all context."
+            >
+              <Switch
+                checked={governor().enabled ?? false}
+                onChange={() => commitGovernor({ enabled: !(governor().enabled ?? false) })}
+                hideLabel
+              >
+                Toggle context governor
               </Switch>
             </SettingsRowV2>
           </SettingsListV2>
