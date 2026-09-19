@@ -36,7 +36,6 @@ import { Instruction } from "@/session/instruction"
 import { LLM } from "@/session/llm"
 import { SessionProcessor } from "@/session/processor"
 import { SessionPrompt } from "@/session/prompt"
-import { ClassifierService } from "@/classifier/service"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { Session } from "@/session/session"
@@ -253,7 +252,6 @@ const app = LayerNode.group([
   SessionPrompt.node,
   Instruction.node,
   LLM.node,
-  ClassifierService.node,
   LSP.node,
   MCP.node,
   McpAuth.node,

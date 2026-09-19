@@ -55,7 +55,6 @@ import { TaskScheduler } from "@/task/scheduler"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { ClassifierService } from "@/classifier/service"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -108,7 +107,6 @@ export const AppLayer = AppNodeBuilderV1.build(
     Installation.node,
     ShareNext.node,
     SessionShare.node,
-    ClassifierService.node,
   ]),
 ).pipe(Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)), Layer.provideMerge(Observability.layer))
 

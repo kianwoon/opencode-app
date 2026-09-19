@@ -2,7 +2,6 @@ import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
-import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { Show, type Component, createMemo, For } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
@@ -24,7 +23,6 @@ type BrainConfig = {
   reviewer_model?: string
   guru_model?: string
   computer_aid_model?: string
-  classifier_model?: string
   enforcement?: Enforcement
 }
 
@@ -90,10 +88,9 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const serverSync = useServerSync()
 
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
-  const classifier = createMemo(() => serverSync().data.config.classifier ?? {})
   const models = useModels()
 
-  const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model" | "classifier_model") => {
+  const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
     const value = brain()[field] ?? ""
     const [providerID, ...rest] = value.split("/")
     const modelID = rest.join("/")
@@ -101,7 +98,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     return models.find({ providerID, modelID })
   }
 
-  const commitField = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model" | "classifier_model", item: ModelKey | undefined) => {
+  const commitField = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model", item: ModelKey | undefined) => {
     commit({ [field]: item ? `${item.providerID}/${item.modelID}` : "" })
   }
 
@@ -109,7 +106,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   // picker expects. Selection reads from server config; commit writes back.
   // The picker also uses `recent.push` when selecting; that only affects the
   // composer's recent list, which is harmless here.
-  const stateFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model" | "classifier_model") => ({
+  const stateFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => ({
     ready: models.ready,
     list: models.list,
     current: () => currentFor(field),
@@ -147,11 +144,6 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       title: () => language.t("settings.orchestration.row.computerAidModel.title"),
       description: () => language.t("settings.orchestration.row.computerAidModel.description"),
     },
-    {
-      field: "classifier_model" as const,
-      title: () => language.t("settings.orchestration.row.classifierModel.title"),
-      description: () => language.t("settings.orchestration.row.classifierModel.description"),
-    },
   ]
 
   const enforcementLabels: Record<Enforcement, () => string> = {
@@ -162,15 +154,6 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const commit = (patch: Partial<BrainConfig>) => {
     void serverSync()
       .updateConfig({ brain: { ...brain(), ...patch } })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err)
-        showToast({ title: language.t("common.requestFailed"), description: message })
-      })
-  }
-
-  const commitClassifier = (patch: { enabled?: boolean; act?: boolean }) => {
-    void serverSync()
-      .updateConfig({ classifier: { ...classifier(), ...patch } })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })
@@ -188,43 +171,11 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
           <SettingsListV2>
             <For each={modelRows}>
               {(row) => (
-                <>
-                  <Show when={row.field === "classifier_model"}>
-                    <SettingsRowV2
-                      title={language.t("settings.orchestration.classifier.enabled.title")}
-                      description={language.t("settings.orchestration.classifier.enabled.description")}
-                    >
-                      <div data-action="settings-orchestration-classifier-enabled">
-                        <Switch
-                          checked={classifier().enabled === true}
-                          onChange={(enabled: boolean) => {
-                            if (enabled === (classifier().enabled === true)) return
-                            commitClassifier({ enabled })
-                          }}
-                        />
-                      </div>
-                    </SettingsRowV2>
-                    <SettingsRowV2
-                      title={language.t("settings.orchestration.classifier.act.title")}
-                      description={language.t("settings.orchestration.classifier.act.description")}
-                    >
-                      <div data-action="settings-orchestration-classifier-act">
-                        <Switch
-                          checked={classifier().act === true}
-                          onChange={(act: boolean) => {
-                            if (act === (classifier().act === true)) return
-                            commitClassifier({ act })
-                          }}
-                        />
-                      </div>
-                    </SettingsRowV2>
-                  </Show>
-                  <SettingsRowV2 title={row.title()} description={row.description()}>
-                    <div class="w-full sm:w-[220px]">
-                      <ModelFieldControl field={row.field} state={stateFor(row.field)} />
-                    </div>
-                  </SettingsRowV2>
-                </>
+                <SettingsRowV2 title={row.title()} description={row.description()}>
+                  <div class="w-full sm:w-[220px]">
+                    <ModelFieldControl field={row.field} state={stateFor(row.field)} />
+                  </div>
+                </SettingsRowV2>
               )}
             </For>
 

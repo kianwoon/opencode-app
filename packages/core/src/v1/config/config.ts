@@ -7,7 +7,6 @@ import { ConfigReference } from "../../config/reference"
 import { ConfigAgentV1 } from "./agent"
 import { ConfigAttachmentV1 } from "./attachment"
 import { ConfigBrainV1 } from "./brain"
-import { ConfigClassifierV1 } from "./classifier"
 import { ConfigCommandV1 } from "./command"
 import { ConfigFormatterV1 } from "./formatter"
 import { ConfigLayoutV1 } from "./layout"
@@ -82,10 +81,6 @@ export const Info = Schema.Struct({
   brain: Schema.optional(ConfigBrainV1.Info).annotate({
     description:
       "Brain configuration for hands and review agents. Strict enforcement permissions take precedence over global `permission` for the generated agents.",
-  }),
-  classifier: Schema.optional(ConfigClassifierV1.Info).annotate({
-    description:
-      "Decision-classifier (Jev/System One) seam configuration. Infrastructure only in Phase 1; defaults to disabled.",
   }),
   default_agent: Schema.optional(Schema.String).annotate({
     description:

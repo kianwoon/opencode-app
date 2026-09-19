@@ -46,18 +46,7 @@ import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Auth } from "@/auth"
-import { ClassifierClient } from "@/classifier/client"
-import { ClassifierOpenRouter } from "@/classifier/openrouter"
-import { ClassifierRelevance } from "@/classifier/relevance"
-import { ClassifierRetry } from "@/classifier/retry"
-import { ClassifierService } from "@/classifier/service"
-import { ClassifierStateExtraction } from "@/classifier/state-extraction"
-import { ClassifierTelemetry } from "@/classifier/telemetry"
-import { ClassifierTrigger } from "@/classifier/trigger"
-import { ClassifierVerification } from "@/classifier/verification"
-import { Cause, Clock, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
@@ -1546,12 +1535,6 @@ const layer = Layer.effect(
         let repeatKey: string | undefined
         let repeatCount = 0
         let forceWrapUp = false
-        // Seam #4 state-extraction producer: compact facts for this drain, fed to
-        // the verification seam. Reset per drain, never persisted.
-        let extractedFacts: string | undefined
-        // Seam #2 verification: the ONE corrective iteration is bounded by this
-        // flag — set the first (and only) time a FAIL verdict forces a re-run.
-        let verificationRetried = false
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         // Re-entry cap (module-level state, survives within the process).
@@ -1829,63 +1812,6 @@ const layer = Layer.effect(
             const promptOps = yield* ops()
             const cfg = yield* config.get()
 
-            // SEAM #4 state-extraction (turn START). Gated default-OFF; when off
-            // the body is never touched. Produces compact facts that feed the
-            // verification seam and the telemetry trail — an INPUT producer, not
-            // an actor. Fail-open: any error/timeout leaves `extractedFacts`
-            // undefined and the turn proceeds unchanged.
-            if (ClassifierTrigger.isEnabled("state-extraction", cfg.classifier)) {
-              const classifierConfig = cfg.classifier
-              const userState = msgs
-                .filter((m) => m.info.id === lastUser.id)
-                .flatMap((m) => m.parts.filter((part): part is SessionV1.TextPart => part.type === "text"))
-                .map((part) => part.text)
-                .join(" ")
-              yield* Effect.gen(function* () {
-                const client = yield* Effect.serviceOption(ClassifierClient.Service)
-                const model = ClassifierRetry.resolveClassifierModel({
-                  brainModel: cfg.brain?.classifier_model,
-                  classifierModel: classifierConfig?.model,
-                })
-                if (!Option.isSome(client) || !model) return
-                const started = yield* Clock.currentTimeMillis
-                const result = yield* ClassifierStateExtraction.classifyExtraction({
-                  client: client.value,
-                  model,
-                  state: userState,
-                  fields: Object.keys(ClassifierStateExtraction.KNOWN_FIELD_OPTIONS),
-                })
-                if (result.decision === "EXTRACTED") {
-                  extractedFacts = [
-                    ...Object.entries(result.extraction.fields).map(([key, value]) => `${key}=${value}`),
-                    ...Object.entries(result.extraction.flags).map(([key, value]) => `${key}=${value}`),
-                  ].join(", ")
-                  // `ClassifierTelemetry.decision`'s envelope is typed to the
-                  // retry|relevance union only, so the extraction verdict is
-                  // logged here in the same `classifier.decision` shape rather
-                  // than widening a sibling module's public type.
-                  yield* Effect.logInfo("classifier.decision", {
-                    classifier: "jev",
-                    decision: result.decision,
-                    confidence: result.confidence,
-                    reasonCode: result.reasonCode,
-                    latencyMs: (yield* Clock.currentTimeMillis) - started,
-                    cached: false,
-                    fallback: false,
-                    actedOn: false,
-                    "session.id": sessionID,
-                    facts: extractedFacts,
-                  })
-                }
-              }).pipe(
-                // Turn-critical AWAITED call bounded to 3s (not the 20s default).
-                Effect.timeout(ClassifierClient.RELEVANCE_TURN_TIMEOUT),
-                // Fail-open but LOUD: a swallowed timeout/HTTP error here once hid
-                // an entire session's classifier outage. The turn still proceeds.
-                Effect.catchCause(ClassifierClient.failOpen("state-extraction", sessionID)),
-              )
-            }
-
             const tools = yield* SessionTools.resolve({
               agent,
               session,
@@ -1940,141 +1866,6 @@ const layer = Layer.effect(
 
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
-
-            if (ClassifierTrigger.isEnabled("relevance", cfg.classifier)) {
-              const classifierConfig = cfg.classifier
-              const threshold = ClassifierRetry.thresholdsFromConfig(classifierConfig?.thresholds).relevance.accept
-              // `act` is the master switch; the relevance seam resolves through
-              // `resolveAct` so pruning can be enabled independently of retry-halting.
-              const act = ClassifierRetry.resolveAct({
-                act: classifierConfig?.act,
-                actRetry: classifierConfig?.act_retry,
-                actRelevance: classifierConfig?.act_relevance,
-              }).relevance
-              const task = msgs
-                .filter((msg) => msg.info.id === lastUser.id)
-                .flatMap((msg) => msg.parts.filter((part): part is SessionV1.TextPart => part.type === "text"))
-                .map((part) => part.text)
-                .join(" ")
-              // One candidate per MESSAGE (coarse + cheap). The most recent turn
-              // is excluded here, so it is never even offered to the classifier;
-              // the invariants below only have to defend the middle of the
-              // conversation.
-              const recent = new Set([lastUser.id, ...(lastAssistant ? [lastAssistant.id] : [])])
-              const sections = msgs
-                .filter((msg) => !recent.has(msg.info.id))
-                .map((msg) => ({
-                  id: msg.info.id,
-                  text: msg.parts
-                    .filter((part): part is SessionV1.TextPart => part.type === "text")
-                    .map((part) => part.text)
-                    .join("\n"),
-                }))
-                .filter((section) => section.text.length > 0)
-              if (sections.length > 0) {
-                yield* Effect.gen(function* () {
-                  const client = yield* Effect.serviceOption(ClassifierClient.Service)
-                  const model = ClassifierRetry.resolveClassifierModel({
-                    brainModel: cfg.brain?.classifier_model,
-                    classifierModel: classifierConfig?.model,
-                  })
-                  // Without a bound transport only the envelope is reachable (the
-                  // service deliberately does not expose per-section verdicts), so
-                  // observe + log, but never prune.
-                  if (!Option.isSome(client) || !model) {
-                    const observed = yield* Effect.serviceOption(ClassifierService.Service)
-                    if (!Option.isSome(observed)) return
-                    const decided = yield* observed.value.classifyRelevance({ task, sections })
-                    yield* ClassifierTelemetry.decision({ decision: decided, sessionID, actedOn: false })
-                    return
-                  }
-                  const started = yield* Clock.currentTimeMillis
-                  // SEAM #7 context-gating extras ride the SAME batch as the
-                  // relevance question, but ONLY when this seam may already act
-                  // (`act` true). With `act` false the extras are not requested,
-                  // so the question set and the verdicts stay byte-identical to
-                  // the legacy single-question batch.
-                  const gatingExtras: readonly ClassifierRelevance.GatingExtra[] | undefined = act
-                    ? (Object.keys(ClassifierRelevance.GATING_EXTRAS) as ClassifierRelevance.GatingExtra[])
-                    : undefined
-                  const result = yield* ClassifierRelevance.classifyRelevance({
-                    client: client.value,
-                    model,
-                    task,
-                    sections,
-                    threshold,
-                    extras: gatingExtras,
-                  })
-                  const decision = ClassifierRelevance.toDecision("jev", result, {
-                    latencyMs: (yield* Clock.currentTimeMillis) - started,
-                    fallbackUsed: false,
-                  })
-                  // Pruning invariants (only when acting): NEVER prune a system
-                  // message, never the most recent turn (already excluded above),
-                  // never leave the conversation empty or without a user turn,
-                  // and never introduce an adjacent same-role pair. System
-                  // messages carry the agent's standing instructions, so their
-                  // role is checked explicitly below rather than inferred from
-                  // the alternation test. If any check fails the prune is
-                  // abandoned wholesale — keep, never guess.
-                  const doomed = new Set(
-                    act && ClassifierRelevance.shouldActOnRelevance({ decision: result.decision, confidence: result.confidence, threshold })
-                      ? ClassifierRelevance.prunableSections(result.verdicts).map((verdict) => verdict.id)
-                      : [],
-                  )
-                  // Extra gating verdicts only exist when requested (never from
-                  // absent data — `evaluateGating` fails open). A section flagged
-                  // duplicate/superseded, excluded from context, or obsolete is
-                  // added to the prunable set; the invariants below still vet it.
-                  if (act && gatingExtras) {
-                    for (const gate of result.gating) {
-                      if (!gate.include || gate.duplicate || gate.superseded || !gate.stillRelevant) doomed.add(gate.id)
-                    }
-                  }
-                  // The alternation check below is role-symmetric and would happily
-                  // accept dropping a system message, so exclude those roles here.
-                  const prunableRole = (role: string) => role === "user" || role === "assistant"
-                  for (const msg of msgs) if (!prunableRole(msg.info.role)) doomed.delete(msg.info.id)
-                  // The most recent turn is excluded from the candidate set above,
-                  // so it can never be in `doomed`; delete again defensively so a
-                  // future widening of the candidate set cannot prune it.
-                  doomed.delete(lastUser.id)
-                  if (lastAssistant) doomed.delete(lastAssistant.id)
-                  const kept = msgs.filter((msg) => !doomed.has(msg.info.id))
-                  const alternates = kept.every((msg, index) => index === 0 || msg.info.role !== kept[index - 1]?.info.role)
-                  const pruned =
-                    doomed.size > 0 &&
-                    kept.length > 0 &&
-                    kept.some((msg) => msg.info.role === "user") &&
-                    alternates
-                  if (pruned) msgs = kept
-                  const keptCount = result.verdicts.filter((verdict) => verdict.keep).length
-                  yield* ClassifierTelemetry.decision({
-                    decision,
-                    sessionID,
-                    actedOn: pruned,
-                    threshold,
-                    // True totals keep a capped `evidence` array visibly truncated.
-                    sections: {
-                      total: result.verdicts.length,
-                      kept: keptCount,
-                      pruned: result.verdicts.length - keptCount,
-                    },
-                    evidence: result.verdicts.map((verdict) => ({
-                      id: verdict.id,
-                      noul: verdict.noul,
-                      keep: verdict.keep,
-                    })),
-                  })
-                }).pipe(
-                  // Turn-critical AWAITED call: the tighter bound caps user-visible
-                  // stall at 3s instead of the client's 20s (detached shadow path).
-                  Effect.timeout(ClassifierClient.RELEVANCE_TURN_TIMEOUT),
-                  // Fail-open but LOUD — a swallowed 400 here hid the whole outage.
-                  Effect.catchCause(ClassifierClient.failOpen("relevance", sessionID)),
-                )
-              }
-            }
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
@@ -2167,94 +1958,6 @@ const layer = Layer.effect(
                 }).toObject()
                 yield* sessions.updateMessage(handle.message)
                 return "break" as const
-              }
-            }
-
-            // SEAM #2 verification (turn END; REAL ACT). Gated default-OFF. On a
-            // FAIL verdict it forces exactly ONE corrective iteration by
-            // appending a synthetic correction turn and continuing the loop
-            // instead of breaking. HARD BOUND: `verificationRetried` guarantees
-            // at most one such iteration per drain; a second FAIL is accepted.
-            // The step budget is respected: never retry at/after the final step.
-            // Fail-open: any classifier error/timeout/UNCERTAIN finishes normally.
-            if (
-              result === "stop" &&
-              !verificationRetried &&
-              !isLastStep &&
-              ClassifierTrigger.isEnabled("verification", cfg.classifier)
-            ) {
-              const classifierConfig = cfg.classifier
-              const threshold = ClassifierRetry.thresholdsFromConfig(classifierConfig?.thresholds).retry_act.accept
-              const artifact = (yield* MessageV2.parts(handle.message.id).pipe(
-                Effect.provideService(Database.Service, database),
-              ))
-                .flatMap((part) => (part.type === "text" ? [part.text] : []))
-                .join("\n")
-              const requestState = msgs
-                .filter((m) => m.info.id === lastUser.id)
-                .flatMap((m) => m.parts.filter((part): part is SessionV1.TextPart => part.type === "text"))
-                .map((part) => part.text)
-                .join(" ")
-              const correction = yield* Effect.gen(function* () {
-                const client = yield* Effect.serviceOption(ClassifierClient.Service)
-                const model = ClassifierRetry.resolveClassifierModel({
-                  brainModel: cfg.brain?.classifier_model,
-                  classifierModel: classifierConfig?.model,
-                })
-                if (!Option.isSome(client) || !model) return undefined
-                const started = yield* Clock.currentTimeMillis
-                const state = extractedFacts ? `${requestState}\n\nExtracted facts: ${extractedFacts}` : requestState
-                const checked = yield* ClassifierVerification.classifyVerification({
-                  client: client.value,
-                  model,
-                  state,
-                  artifact,
-                  checks: ClassifierVerification.DEFAULT_CHECKS,
-                  threshold,
-                })
-                yield* ClassifierTelemetry.decision({
-                  decision: {
-                    decision: checked.decision === "FAIL" ? "STOP" : "CONTINUE",
-                    confidence: checked.checked.length === 0
-                      ? 0
-                      : checked.checked.reduce((sum, entry) => sum + entry.probability, 0) / checked.checked.length,
-                    reasonCode: checked.decision === "FAIL" ? "NO_PROGRESS_REPEATED_FAILURE" : "PROGRESS_MADE",
-                    classifier: "jev",
-                    latencyMs: (yield* Clock.currentTimeMillis) - started,
-                    fallbackUsed: false,
-                  },
-                  sessionID,
-                  actedOn: checked.decision === "FAIL",
-                })
-                if (checked.decision !== "FAIL") return undefined
-                return `Your last response may not satisfy: ${checked.failed.join(", ")}. Address it.`
-              }).pipe(
-                // Turn-critical AWAITED call bounded to 3s (not the 20s default).
-                Effect.timeout(ClassifierClient.RELEVANCE_TURN_TIMEOUT),
-                // Fail-open but LOUD — verification is on the same fail-open contract.
-                Effect.catchCause(ClassifierClient.failOpen("verification", sessionID)),
-              )
-              if (correction !== undefined) {
-                // Consume the ONE allowed retry before the next turn is driven.
-                verificationRetried = true
-                const correctionMsg: SessionV1.User = {
-                  id: MessageID.ascending(),
-                  sessionID,
-                  role: "user",
-                  time: { created: Date.now() },
-                  agent: lastUser.agent,
-                  model: lastUser.model,
-                }
-                yield* sessions.updateMessage(correctionMsg)
-                yield* sessions.updatePart({
-                  id: PartID.ascending(),
-                  messageID: correctionMsg.id,
-                  sessionID,
-                  type: "text",
-                  text: correction,
-                  synthetic: true,
-                } satisfies SessionV1.TextPart)
-                return "continue" as const
               }
             }
 
@@ -2629,26 +2332,7 @@ const quoteTrimRegex = /^["']|["']$/g
 
 export const node = LayerNode.make({
   service: Service,
-  // The classifier CLIENT is bound here so the relevance seam can resolve it —
-  // `SessionProcessor.node` (a dependency) already contributes ClassifierService,
-  // but its composition `provide`s the transport away, so ClassifierClient is
-  // None at this construction point. Guarding on the client (the missing one)
-  // rather than the service is therefore deliberate. `provideMerge` (not
-  // `provide`) keeps the transport's export in context so BOTH services resolve.
-  // `systemOneLayer` keeps its deterministic fallback, so a missing credential
-  // degrades rather than fails.
-  layer: Layer.provideMerge(
-    layer,
-    Layer.unwrap(
-      Effect.serviceOption(ClassifierClient.Service).pipe(
-        Effect.map((found) =>
-          Option.isSome(found)
-            ? Layer.empty
-            : Layer.provideMerge(ClassifierService.systemOneLayer, ClassifierOpenRouter.layer),
-        ),
-      ),
-    ),
-  ),
+  layer,
   deps: [
     SessionStatus.node,
     Session.node,
@@ -2677,8 +2361,6 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     Database.node,
     SessionTodoNode,
-    Auth.node,
-    httpClient,
   ],
 })
 

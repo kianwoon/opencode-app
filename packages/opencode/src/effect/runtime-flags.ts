@@ -59,7 +59,6 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
   experimentalWorkflows: boolDefaultOn("OPENCODE_EXPERIMENTAL_WORKFLOWS"),
   experimentalVerification: enabledByExperimental("OPENCODE_EXPERIMENTAL_VERIFICATION"),
   experimentalEffortLog: enabledByExperimental("OPENCODE_EXPERIMENTAL_EFFORT_LOG"),
-  experimentalClassifierShadow: enabledByExperimental("OPENCODE_EXPERIMENTAL_CLASSIFIER_SHADOW"),
   experimentalEventSystem: enabledByExperimental("OPENCODE_EXPERIMENTAL_EVENT_SYSTEM"),
   experimentalWorkspaces: enabledByExperimental("OPENCODE_EXPERIMENTAL_WORKSPACES"),
   experimentalIconDiscovery: enabledByExperimental("OPENCODE_EXPERIMENTAL_ICON_DISCOVERY"),
