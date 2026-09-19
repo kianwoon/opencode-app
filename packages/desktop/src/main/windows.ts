@@ -304,6 +304,7 @@ function loadWindow(win: BrowserWindow, html: string) {
 
 function wireWindowRecovery(win: BrowserWindow, name: string) {
   let showing = false
+  let deferred: { message: string; detail: string; wait: boolean } | undefined
   const sampler = createUnresponsiveSampler(win, name)
 
   type RecoveryAction = "relaunch" | "export-logs" | "keep-waiting" | "quit"
@@ -328,6 +329,18 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
 
   const show = async (message: string, detail: string, wait: boolean) => {
     if (showing || win.isDestroyed()) return
+    if (!win.isFocused() && !app.isActive()) {
+      writeLog("window", "deferring recovery dialog while backgrounded", { window: name }, "warn")
+      if (!deferred) {
+        deferred = { message, detail, wait }
+        win.once("focus", () => {
+          const next = deferred
+          deferred = undefined
+          if (next && !win.isDestroyed()) void show(next.message, next.detail, next.wait)
+        })
+      }
+      return
+    }
     showing = true
     try {
       while (!win.isDestroyed()) {

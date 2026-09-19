@@ -215,10 +215,10 @@ const main = Effect.gen(function* () {
       emitDeepLinks(urls)
     }
     const win = getLastFocusedWindow()
-    if (win) {
-      win.show()
-      win.focus()
-    }
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    else win.showInactive()
+    if (app.isActive() || win.isFocused()) win.focus()
   })
 
   app.on("open-url", (event: Event, url: string) => {
