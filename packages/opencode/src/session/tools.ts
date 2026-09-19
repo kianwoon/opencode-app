@@ -61,6 +61,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   promptOps: TaskPromptOps
   /** Raw `cfg.mcp` record, read by the caller for tool-search `alwaysLoad` lookups. */
   mcpConfig: Record<string, unknown>
+  /**
+   * True when global Jev tool-routing is enabled. Jev already narrows the tool
+   * set on the prompt side, so MCP tool-search deferral is skipped to avoid
+   * double-narrowing (two independent filters hiding tools from each other).
+   */
+  jevEnabled: boolean
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -462,13 +468,19 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     yield* mcp.tools(),
     Permission.merge(input.agent.permission, input.session.permission ?? []),
   )
-  const deferral = ToolSearch.plan({
-    sessionID: input.session.id,
-    tools: visible,
-    contextLimit: input.model.limit.context,
-    mcpConfig: input.mcpConfig,
-    threshold: input.mcpConfig.experimental ? readThreshold(input.mcpConfig.experimental) : undefined,
-  })
+  // When Jev routes tools on the prompt side, MCP deferral is skipped: all
+  // visible MCP tools load inline so Jev sees (and can keep/skip) them, and
+  // the two narrowers never fight each other. Deferral still runs when Jev is
+  // off, preserving today's behavior exactly.
+  const deferral: ToolSearch.Deferral = input.jevEnabled
+    ? { inline: visible, deferred: {}, catalog: "" }
+    : ToolSearch.plan({
+        sessionID: input.session.id,
+        tools: visible,
+        contextLimit: input.model.limit.context,
+        mcpConfig: input.mcpConfig,
+        threshold: input.mcpConfig.experimental ? readThreshold(input.mcpConfig.experimental) : undefined,
+      })
 
   for (const [key, entry] of Object.entries(deferral.inline)) {
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
@@ -500,12 +512,6 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               },
             }),
           )
-          yield* plugin.trigger(
-            "tool.execute.after",
-            { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
-            result,
-          )
-
           const textParts: string[] = []
           const attachments: Omit<SessionV1.FilePart, "id" | "sessionID" | "messageID">[] = []
           for (const contentItem of result.content) {
@@ -547,17 +553,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           const structured = structuredTokenBlock(result.structuredContent)
           if (structured) textParts.push(structured)
 
-          const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
-          const metadata = {
-            ...result.metadata,
-            truncated: truncated.truncated,
-            ...(truncated.truncated && { outputPath: truncated.outputPath }),
-          }
-
           const output = {
             title: "",
-            metadata,
-            output: truncated.content,
+            metadata: {},
+            output: textParts.join("\n\n"),
             attachments: attachments.map((attachment) => ({
               ...attachment,
               id: PartID.ascending(),
@@ -566,6 +565,19 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             })),
             content: result.content,
           }
+          yield* plugin.trigger(
+            "tool.execute.after",
+            { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
+            output,
+          )
+
+          const truncated = yield* truncate.output(output.output, {}, input.agent)
+          output.output = truncated.content
+          output.metadata = {
+            truncated: truncated.truncated,
+            ...(truncated.truncated && { outputPath: truncated.outputPath }),
+          }
+
           if (opts.abortSignal?.aborted) {
             yield* input.processor.completeToolCall(opts.toolCallId, output)
           }
