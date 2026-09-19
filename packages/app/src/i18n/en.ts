@@ -1158,6 +1158,8 @@ export const dict = {
   "settings.orchestration.enforcement.option.advisory": "Advisory",
   "settings.orchestration.classifier.enabled.title": "Classifier",
   "settings.orchestration.classifier.enabled.description": "Run a decision classifier during provider retries. Logs decisions only (shadow mode) — never changes agent behavior.",
+  "settings.orchestration.classifier.act.title": "Act on decisions",
+  "settings.orchestration.classifier.act.description": "Let the classifier stop retries when it confidently decides STOP or ESCALATE. Off by default; requires the classifier to be enabled.",
   "settings.providers.section.connected": "Connected providers",
   "settings.providers.connected.empty": "No connected providers",
   "settings.providers.connected.environmentDescription": "Connected from your environment variables",

@@ -168,7 +168,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
-  const commitClassifier = (patch: { enabled: boolean }) => {
+  const commitClassifier = (patch: { enabled?: boolean; act?: boolean }) => {
     void serverSync()
       .updateConfig({ classifier: { ...classifier(), ...patch } })
       .catch((err: unknown) => {
@@ -200,6 +200,20 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
                           onChange={(enabled: boolean) => {
                             if (enabled === (classifier().enabled === true)) return
                             commitClassifier({ enabled })
+                          }}
+                        />
+                      </div>
+                    </SettingsRowV2>
+                    <SettingsRowV2
+                      title={language.t("settings.orchestration.classifier.act.title")}
+                      description={language.t("settings.orchestration.classifier.act.description")}
+                    >
+                      <div data-action="settings-orchestration-classifier-act">
+                        <Switch
+                          checked={classifier().act === true}
+                          onChange={(act: boolean) => {
+                            if (act === (classifier().act === true)) return
+                            commitClassifier({ act })
                           }}
                         />
                       </div>

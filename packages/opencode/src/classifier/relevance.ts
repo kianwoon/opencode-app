@@ -52,13 +52,17 @@ export function buildSectionQuestions(
   sections: readonly ContextSection[],
   extras?: readonly GatingExtra[],
 ): Record<string, { type: "noul"; instructions: string; criteria: { true: string; false: string } }> {
+  // The task travels ONCE, out of band in `state` (see `classifyRelevance`);
+  // Jev ingests `state`, so re-interpolating it into every instruction would
+  // transmit it 1 + N times and blow the 64k per-request budget on big sessions.
+  void task
   return Object.fromEntries(
     sections.flatMap((section) => {
       const base = [
         section.id,
         {
           type: "noul" as const,
-          instructions: `Is section "${section.label ?? section.id}" relevant to the current task: ${task}? Section excerpt: ${sectionExcerpt(section.text)}`,
+          instructions: `Is section "${section.label ?? section.id}" relevant to the current task? Section excerpt: ${sectionExcerpt(section.text)}`,
           criteria: { true: "relevant", false: "irrelevant" },
         },
       ] as const
@@ -70,7 +74,7 @@ export function buildSectionQuestions(
             extraQuestionKey(section.id, extra),
             {
               type: "noul" as const,
-              instructions: `${GATING_EXTRAS[extra].question} Section "${section.label ?? section.id}" (task: ${task}). Section excerpt: ${sectionExcerpt(section.text)}`,
+              instructions: `${GATING_EXTRAS[extra].question} Section "${section.label ?? section.id}". Section excerpt: ${sectionExcerpt(section.text)}`,
               criteria: GATING_EXTRAS[extra].criteria,
             },
           ] as const,
@@ -78,6 +82,36 @@ export function buildSectionQuestions(
       return [base, ...extraEntries]
     }),
   )
+}
+
+/**
+ * Cap on sections classified in ONE request. The vendor budget is 64k tokens
+ * for `state` + ALL questions combined; `state` is the task (unbounded, but in
+ * practice a few hundred tokens) and each question is a short instruction plus
+ * a ≤200-char excerpt (~60–80 tokens worst case). 64k / ~100 ≈ 640, so 400
+ * leaves a large margin for a long task and generous tokenizer variance.
+ *
+ * Honesty: when there are more sections than this, the OLDEST are skipped and
+ * are NEVER classified — so they can never be pruned. That is a real coverage
+ * limitation, not a free win. We take the tail because the most recent sections
+ * are the ones most likely to be relevant to the current task.
+ */
+export const MAX_SECTIONS_PER_REQUEST = 400
+
+/** The tail (most recent) `MAX_SECTIONS_PER_REQUEST` sections, plus skip stats. */
+export function capSections(sections: readonly ContextSection[]): {
+  considered: number
+  requested: number
+  skipped: number
+  sections: readonly ContextSection[]
+} {
+  const requested = Math.min(sections.length, MAX_SECTIONS_PER_REQUEST)
+  return {
+    considered: sections.length,
+    requested,
+    skipped: sections.length - requested,
+    sections: requested === sections.length ? sections : sections.slice(sections.length - requested),
+  }
 }
 
 // --- Extra context-gating questions (Task #7) --------------------------------
@@ -290,7 +324,8 @@ export const classifyRelevance = (input: {
   ClassifierClient.SystemOneError
 > =>
   Effect.gen(function* () {
-    const questions = buildSectionQuestions(input.task, input.sections, input.extras)
+    const capped = capSections(input.sections)
+    const questions = buildSectionQuestions(input.task, capped.sections, input.extras)
     const response = yield* input.client.ask({
       model: input.model,
       state: input.task,
@@ -298,12 +333,12 @@ export const classifyRelevance = (input: {
     })
     const verdicts = evaluateRelevance({
       answers: response.answers,
-      sections: input.sections,
+      sections: capped.sections,
       threshold: input.threshold,
     })
     const gating = evaluateGating({
       answers: response.answers,
-      sections: input.sections,
+      sections: capped.sections,
       extras: input.extras,
     })
     return { ...toRelevanceResult(verdicts), verdicts, gating }

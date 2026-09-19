@@ -16,7 +16,7 @@ export * as ClassifierClient from "./client"
 
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Duration, Effect, Layer, Schema, Context } from "effect"
+import { Cause, Duration, Effect, Layer, Schema, Context } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
 import { withTransientReadRetry } from "@/util/effect-http-client"
@@ -33,6 +33,21 @@ export const SYSTEMONE_TIMEOUT = Duration.seconds(20)
  * (~10x Jev's ~300ms answer) unlike the detached shadow path above.
  */
 export const RELEVANCE_TURN_TIMEOUT = Duration.seconds(3)
+
+/**
+ * Fail-open classifier seam handler: log a WARNING with the seam name and
+ * session id, then swallow so the turn still proceeds. The swallowed cause (a
+ * timeout or an HTTP 400 over budget) is otherwise invisible — a silent
+ * `() => Effect.void` once hid an entire session's classifier outage.
+ */
+export const failOpen =
+  (seam: string, sessionID: string) =>
+  (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
+    Effect.logWarning("classifier seam failed (fail-open)", {
+      seam,
+      "session.id": sessionID,
+      cause: Cause.pretty(cause),
+    })
 
 export class SystemOneError extends Schema.TaggedErrorClass<SystemOneError>()("Classifier.SystemOneError", {
   /** Coarse failure kind so callers can branch without parsing messages. */

@@ -11,7 +11,10 @@ import { Token } from "../util/token"
 
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
-const DEFAULT_TRIGGER = 1
+// Compaction fires proactively at this fraction of the effective window.
+// Must stay within the config schema range (0.05-0.95); 0.95 is the closest
+// reachable value to "only at the hard limit" while still firing proactively.
+const DEFAULT_TRIGGER = 0.95
 /** Smallest usable compaction window; budgets below this are raised to it. */
 const MIN_WINDOW_TOKENS = 2_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000

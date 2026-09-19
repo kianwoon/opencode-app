@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Logger, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
 import { ClassifierClient } from "@/classifier/client"
@@ -58,17 +58,94 @@ describe("buildSectionQuestions", () => {
     expect(Object.values(questions).every((question) => question.type === "noul")).toBe(true)
   })
 
-  test("carries the task and a bounded excerpt, never the whole section", () => {
+  test("does NOT interpolate the full task; carries a bounded excerpt", () => {
     const huge = "x".repeat(5000)
     const questions = ClassifierRelevance.buildSectionQuestions("fix the test", [{ id: "big", text: huge }])
-    expect(questions.big.instructions).toContain("fix the test")
+    // De-dup: the task rides in `state` once, not in every instruction.
+    expect(questions.big.instructions).not.toContain("fix the test")
     expect(questions.big.instructions).toContain("…")
     expect(questions.big.instructions.length).toBeLessThan(500)
+  })
+
+  test("de-dup keeps count, keying, type and criteria unchanged", () => {
+    const questions = ClassifierRelevance.buildSectionQuestions("task", sections)
+    expect(Object.keys(questions)).toEqual(["system", "history", "docs"])
+    expect(Object.values(questions).every((q) => q.type === "noul")).toBe(true)
+    expect(questions.system.criteria).toEqual({ true: "relevant", false: "irrelevant" })
   })
 
   test("an empty section list yields no questions and never throws", () => {
     expect(ClassifierRelevance.buildSectionQuestions("t", [])).toEqual({})
   })
+})
+
+describe("capSections", () => {
+  test("under the cap: everything is requested, nothing skipped", () => {
+    const capped = ClassifierRelevance.capSections(sections)
+    expect(capped).toMatchObject({ considered: 3, requested: 3, skipped: 0 })
+    expect(capped.sections).toEqual(sections)
+  })
+
+  test("over the cap: only the tail is requested and the skip is reported", () => {
+    const many = Array.from({ length: ClassifierRelevance.MAX_SECTIONS_PER_REQUEST + 5 }, (_, i) => ({
+      id: `s${i}`,
+      text: `t${i}`,
+    }))
+    const capped = ClassifierRelevance.capSections(many)
+    expect(capped.considered).toBe(many.length)
+    expect(capped.requested).toBe(ClassifierRelevance.MAX_SECTIONS_PER_REQUEST)
+    expect(capped.skipped).toBe(5)
+    // Most RECENT N — the tail, not the head.
+    expect(capped.sections[0]?.id).toBe("s5")
+    expect(capped.sections.at(-1)?.id).toBe(`s${many.length - 1}`)
+  })
+})
+
+describe("failOpen", () => {
+  /**
+   * The un-swallow contract, tested at the handler itself. `failOpen` is the
+   * exact handler wired into every prompt.ts/processor.ts seam via
+   * `Effect.catchCause`; a full-loop test would need a whole session turn, so we
+   * assert the two properties that matter directly: (1) a WARNING is logged with
+   * the seam name and session id, and (2) the effect SUCCEEDS (error channel
+   * `never`) — i.e. fail-open, the turn still proceeds.
+   */
+  const it = testEffect(
+    Logger.layer([
+      Logger.make<unknown, void>((options) => {
+        const [name, payload] = options.message as ReadonlyArray<unknown>
+        if (name === "classifier seam failed (fail-open)" && typeof payload === "object" && payload !== null) {
+          events.push(payload as Record<string, unknown>)
+        }
+      }),
+    ]),
+  )
+  const events: Array<Record<string, unknown>> = []
+
+  it.effect("logs a WARNING and still succeeds when the seam fails", () =>
+    Effect.gen(function* () {
+      events.length = 0
+      const failing = yield* Effect.fail(new Error("HTTP 400 over budget")).pipe(
+        Effect.catchCause(ClassifierClient.failOpen("relevance", "ses_123")),
+        Effect.exit,
+      )
+      expect(failing._tag).toBe("Success")
+      expect(events[0]).toMatchObject({ seam: "relevance", "session.id": "ses_123" })
+      expect(String(events[0]?.cause)).toContain("400")
+    }),
+  )
+
+  it.effect("also swallows a defect (throw), never dying into the loop", () =>
+    Effect.gen(function* () {
+      events.length = 0
+      const died = yield* Effect.die(new Error("boom")).pipe(
+        Effect.catchCause(ClassifierClient.failOpen("scoring", "ses_9")),
+        Effect.exit,
+      )
+      expect(died._tag).toBe("Success")
+      expect(events[0]).toMatchObject({ seam: "scoring", "session.id": "ses_9" })
+    }),
+  )
 })
 
 describe("evaluateRelevance", () => {

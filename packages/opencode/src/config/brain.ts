@@ -25,6 +25,7 @@ const BRAIN_PERMISSION_STRICT = () => ({
   glob: "allow",
   list: "allow",
   todowrite: "allow",
+  session_rename: "allow",
   skill: "allow",
   question: "allow",
   invalid: "allow",
@@ -40,6 +41,12 @@ const BRAIN_PERMISSION_STRICT = () => ({
   "web-reader_*": "allow",
   "web-search-prime_*": "allow",
   "zai-mcp-server_*": "allow",
+  bash: {
+    "*": "deny",
+    "echo *": "allow",
+    // "*>*" catches all redirection variants; last matching rule wins (permission/index.ts findLast)
+    "*>*": "deny",
+  },
   task: {
     "*": "deny",
     explorer: "allow",

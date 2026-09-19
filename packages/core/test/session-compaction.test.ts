@@ -155,10 +155,26 @@ test("trigger rejects out-of-range fractions at config validation", () => {
   expect(() => new ConfigCompaction.Info({ trigger: 0.01 })).toThrow()
 })
 
+test("default trigger is reachable within the config schema range", async () => {
+  // Regression: a default of 1 was outside the schema max (0.95), so when no
+  // trigger was configured the proactive budget collapsed onto the hard limit.
+  // The default must itself be a valid config value and fire below the hard limit.
+  expect(() => new ConfigCompaction.Info({ trigger: 0.95 })).not.toThrow()
+  const harness = await triggerHarness.makeCompaction({ buffer: 200 })
+  // Hard limit ≈ 9.8k, default trigger 0.95 → proactive budget ≈ 9.5k. A request
+  // above 9.5k but below the hard limit must still compact.
+  const between = triggerHarness.request(70) // ≈ 9.6k tokens estimated
+  expect(
+    await Effect.runPromise(
+      harness.compaction.compactIfNeeded({ ...between, sessionID: "ses_x" as never, model: harness.model }),
+    ),
+  ).toBe(true)
+})
+
 test("agent budget shrinks the effective compaction window", async () => {
   const harness = await triggerHarness.makeCompaction({ buffer: 200 })
   // 10k model context, 5k agent budget: compacts past 5k (trigger defaults
-  // to 1) instead of the ~9.8k hard limit.
+  // to 0.95) instead of the ~9.8k hard limit.
   const withinBudget = triggerHarness.request(25) // ≈ 3.8k tokens
   expect(
     await Effect.runPromise(

@@ -974,6 +974,8 @@ export const dict = {
   "settings.orchestration.row.classifierModel.placeholder": "provider/model",
   "settings.orchestration.classifier.enabled.title": "Classifier",
   "settings.orchestration.classifier.enabled.description": "Run a decision classifier during provider retries. Logs decisions only (shadow mode) — never changes agent behavior.",
+  "settings.orchestration.classifier.act.title": "Act on decisions",
+  "settings.orchestration.classifier.act.description": "Let the classifier stop retries when it confidently decides STOP or ESCALATE. Off by default; requires the classifier to be enabled.",
   "settings.orchestration.enforcement.title": "Enforcement",
   "settings.orchestration.enforcement.description": "Whether failed brain checks block or only warn",
   "settings.orchestration.enforcement.option.strict": "Strict",

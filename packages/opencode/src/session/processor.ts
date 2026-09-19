@@ -7,8 +7,10 @@ import { Cause, Clock, Deferred, Effect, Exit, Layer, Context, Option, Scope, Sc
 import { ClassifierClient } from "@/classifier/client"
 import { ClassifierOpenRouter } from "@/classifier/openrouter"
 import { ClassifierRetry } from "@/classifier/retry"
+import { ClassifierScoring } from "@/classifier/scoring"
 import { ClassifierService } from "@/classifier/service"
 import { ClassifierTelemetry } from "@/classifier/telemetry"
+import { ClassifierTrigger } from "@/classifier/trigger"
 import { ClassifierVerdict } from "@/classifier/verdict"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Stream from "effect/Stream"
@@ -189,12 +191,99 @@ function observeShadowRetryClassifier(input: {
       sessionID: input.sessionID,
       attempt: input.attempt,
     })
-  }).pipe(
+  }  ).pipe(
     // Bounded: the fiber is detached, so a hung classifier must not leak forever.
     Effect.timeout(ClassifierClient.SYSTEMONE_TIMEOUT),
     Effect.asVoid,
     Effect.catchCause(() => Effect.void),
   ) // shadow failure is silently skipped, never logged as Jev's
+}
+
+/**
+ * Pure decision mapping for the scoring-risk action: the deployable signal is a
+ * retry-family ESCALATE mitigated by the accept threshold. Returns `undefined`
+ * for an absent (unanswered) risk dimension or a below-threshold score, so the
+ * caller emits nothing — the whole fail-open contract lives here, testable
+ * without a client. `threshold` is `retry_act.accept` (no scoring-specific
+ * threshold exists in config; see config/classifier.ts).
+ */
+export function scoringRiskDecision(
+  scores: ClassifierScoring.ScoreResult,
+  threshold: number,
+): { decision: "ESCALATE"; confidence: number; reasonCode: "SCORES_RATED"; threshold: number } | undefined {
+  const risk = scores["risk"]
+  if (!risk || risk.value < threshold) return undefined
+  return { decision: "ESCALATE", confidence: risk.confidence, reasonCode: "SCORES_RATED", threshold }
+}
+
+/**
+ * Scoring seam (#1) at the retry point: ONE batched score over risk/complexity/
+ * likely_success. ACT, not shadow: when the `risk` dimension reaches the accept
+ * threshold the seam emits an `actedOn: true` telemetry decision — the signal is
+ * recorded (session.id + attempt + threshold), and nothing else. It does NOT
+ * touch retry counts, `shouldStopRetries`, model routing, or the halt path.
+ * Detached (`Effect.runFork`), so the retry schedule gains zero latency; the
+ * emitted line IS the action. Fail-open and gated: off/absent ⇒ Effect.void.
+ * `classifier.model` is mandatory as the request body needs a bare id.
+ */
+function actOnScoringRisk(input: {
+  providerID: string
+  modelID: string
+  sessionID: SessionID
+  attempt: string | number
+  message: string
+  model: string | undefined
+  /** Accept threshold for the risk dimension; `retry_act.accept` (no scoring-specific one exists). */
+  threshold: number
+  enabled: boolean
+  client: ClassifierClient.Interface | undefined
+}) {
+  if (!input.enabled) return
+  if (!input.model) return
+  if (!input.client) return
+  const client = input.client
+  const model = input.model
+  return Effect.gen(function* () {
+    const started = yield* Clock.currentTimeMillis
+    const state = ClassifierRetry.buildDecisionState({
+      goal: `complete the assistant turn on ${input.providerID}/${input.modelID}`,
+      step: Number(input.attempt),
+      latestAction: `retry attempt ${input.attempt}`,
+      latestResult: input.message,
+    })
+    const result = yield* ClassifierScoring.classifyScores({
+      client,
+      model,
+      state: JSON.stringify(state),
+      subject: `retry attempt ${input.attempt}: ${input.message}`,
+      dimensions: ["risk", "complexity", "likely_success"],
+    })
+    const ended = yield* Clock.currentTimeMillis
+    // Fail-open: an absent risk dimension (unanswered batch) never acts.
+    const acted = scoringRiskDecision(result.scores, input.threshold)
+    if (!acted) return
+    // Elevated risk maps to the retry-family ESCALATE signal; `actedOn: true` +
+    // the threshold make the recording self-describing. The line is the action.
+    yield* ClassifierTelemetry.decision({
+      decision: {
+        decision: acted.decision,
+        confidence: acted.confidence,
+        reasonCode: acted.reasonCode,
+        classifier: "scoring:risk",
+        latencyMs: ended - started,
+        fallbackUsed: false,
+      },
+      sessionID: input.sessionID,
+      attempt: Number(input.attempt),
+      actedOn: true,
+      threshold: acted.threshold,
+    })
+  }).pipe(
+    Effect.timeout(ClassifierClient.SYSTEMONE_TIMEOUT),
+    Effect.asVoid,
+    // Fail-open but LOUD: a silent swallow here hides classifier outages.
+    Effect.catchCause(ClassifierClient.failOpen("scoring", String(input.sessionID))),
+  ) // scoring failure never blocks the retry path, but is now observable
 }
 
 const layer = Layer.effect(
@@ -216,6 +305,9 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     // Optional: the shadow classifier must not force a classifier layer into every build.
     const classifier = yield* Effect.serviceOption(ClassifierService.Service)
+    // Optional: the scoring seam reaches the System One client directly (bypasses
+    // the service's retry-shaped interface). Absent ⇒ scoring is silently a no-op.
+    const classifierClient = yield* Effect.serviceOption(ClassifierClient.Service)
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
@@ -834,6 +926,25 @@ const layer = Layer.effect(
                     : undefined
                   // Forked, detached: the shadow run cannot delay or affect this retry path.
                   if (shadow) Effect.runFork(Effect.provideService(shadow, RuntimeFlags.Service, flags))
+                  // #1 scoring seam: gated + detached; the emitted `actedOn` signal
+                  // IS the action. Off/absent ⇒ no fiber, no telemetry, no latency.
+                  const scoring = actOnScoringRisk({
+                    providerID: input.model.providerID,
+                    modelID: input.model.id,
+                    sessionID: ctx.sessionID,
+                    attempt: info.attempt,
+                    message: info.message,
+                    model: ClassifierRetry.resolveClassifierModel({
+                      brainModel: turnConfig.brain?.classifier_model,
+                      classifierModel: classifierConfig?.model,
+                    }),
+                    threshold:
+                      classifierConfig?.thresholds?.retry_act?.accept ??
+                      ClassifierRetry.DEFAULT_THRESHOLDS.retry_act.accept,
+                    enabled: ClassifierTrigger.isEnabled("scoring", classifierConfig),
+                    client: Option.isSome(classifierClient) ? classifierClient.value : undefined,
+                  })
+                  if (scoring) Effect.runFork(scoring)
                   return status.set(ctx.sessionID, {
                     type: "retry",
                     attempt: info.attempt,
