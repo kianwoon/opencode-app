@@ -7,7 +7,7 @@ import {
   type EffortTier,
   type JevEffortConfig,
   type TierResult,
-} from "../plugin-lib/jev-effort"
+} from "../plugin-lib/jev-effort.ts"
 
 /**
  * Task Effort Router — a self-adjusting reasoning-effort governor.
