@@ -214,6 +214,23 @@ export function jevKeepTools(payload: unknown, names: string[], threshold: numbe
   return jevFoldTools(payload, names, threshold)?.keep
 }
 
+/**
+ * Floor guard for tool routing: must a folded keep-set be applied, or should the
+ * caller fail open to the un-narrowed list?
+ *
+ * The fold is one-sided by design (only a confident `use` + score keeps), so a
+ * response that confidently skips almost everything can fold a 35-tool turn down
+ * to 2. That is a REAL decision, not a parse miss — but applying it leaves the
+ * turn unable to act, and the decision is CACHED for the whole turn, so no later
+ * step recovers (observed: `ses_f4545cf6` folded 35 → 2 at `threshold=0.7`).
+ * Below `floor` the caller keeps the full list instead.
+ *
+ * `kept === 0` is deliberately NOT this guard's business: an empty fold already
+ * reaches the caller's own keep-all fallback and is reported as `tools_after: 0`,
+ * so flagging it here would only hide that distinct signal.
+ */
+export const jevBelowFloor = (kept: number, floor: number): boolean => kept > 0 && kept < floor
+
 export interface JevDecision {
   readonly keep?: Set<string>
   // Present only when the endpoint rejected the request, so the fallback log

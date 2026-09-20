@@ -221,8 +221,8 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // model. The transport + verdict algebra live in the shared, zero-dependency
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
-export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide } from "@/jev/client"
-import { jevDecide } from "@/jev/client"
+export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor } from "@/jev/client"
+import { jevBelowFloor, jevDecide } from "@/jev/client"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
 
 function jevPromptText(parts: readonly unknown[]): string {
@@ -2088,26 +2088,44 @@ const layer = Layer.effect(
                   narrowed["StructuredOutput"] = tools["StructuredOutput"]
                 }
                 const after = Object.keys(narrowed).length
-                // Fires for 0 as well as a small-but-non-empty list: either way
-                // the turn's decision produced a tool set too small to act with,
-                // which is the invisible failure this counter exists to expose.
-                if (step === 1 && after < JEV_ALARM_MIN_TOOLS) {
-                  // Alarm: routing must never leave a turn with a near-empty
-                  // tool list — the model has no way to act and burns the turn,
-                  // and the mistake is invisible without this counter.
-                  jevAlarms++
-                  yield* Effect.logError("jev.tool-routing ALARM tools_after below floor", {
+                // Floor guard: a confident skip-all can fold a 35-tool turn down
+                // to a handful (observed: `ses_f4545cf6`, 35 → 2 at 0.7), and the
+                // decision is CACHED for the whole turn, so applying it leaves the
+                // model unable to act with no later recovery. Refuse the narrowing
+                // (keep-all) and keep the ALARM counter for telemetry/grep.
+                // `tools_after` reports the refused decision's count; `tools_kept`
+                // is what the turn really runs with.
+                if (jevBelowFloor(after, JEV_ALARM_MIN_TOOLS)) {
+                  if (step === 1) {
+                    jevAlarms++
+                    yield* Effect.logError("jev.tool-routing ALARM tools_after below floor", {
+                      "session.id": sessionID,
+                      step,
+                      reason: "tools-after-below-floor",
+                      threshold: jevTurn.threshold,
+                      tools_before: names.length,
+                      tools_after: after,
+                      floor: JEV_ALARM_MIN_TOOLS,
+                      alarms: jevAlarms,
+                      tools_kept: names.length,
+                    })
+                  }
+                } else if (after === 0) {
+                  // Empty fold: the decision pruned every routable tool and the
+                  // turn carried no exempt tool to anchor on. Apply nothing —
+                  // keep the full list and report the distinct tools_after: 0
+                  // signal the alarm/grep looks for (jevBelowFloor deliberately
+                  // leaves this case to the caller).
+                  yield* Effect.logInfo("jev.tool-routing fallback", {
                     "session.id": sessionID,
                     step,
-                    reason: "tools-after-below-floor",
+                    reason: "empty-narrowing",
                     threshold: jevTurn.threshold,
-                    tools_before: names.length,
-                    tools_after: after,
-                    floor: JEV_ALARM_MIN_TOOLS,
-                    alarms: jevAlarms,
+                    tools: names.length,
+                    tools_after: 0,
+                    tools_kept: names.length,
                   })
-                }
-                if (after > 0) {
+                } else {
                   turnTools = narrowed
                   yield* Effect.logInfo("jev.tool-routing applied", {
                     "session.id": sessionID,
@@ -2115,24 +2133,9 @@ const layer = Layer.effect(
                     reason: "applied",
                     threshold: jevTurn.threshold,
                     tools_before: names.length,
-                    // Never blank: the applied list is non-empty by construction
-                    // (the `after > 0` branch), so this is the real count.
+                    // Never blank: the applied list meets the floor by construct.
                     tools_after: after,
                     removed: names.length - after,
-                  })
-                } else {
-                  yield* Effect.logInfo("jev.tool-routing fallback", {
-                    "session.id": sessionID,
-                    step,
-                    reason: "empty-narrowing",
-                    threshold: jevTurn.threshold,
-                    // tools_after: 0 is the number the DECISION produced and the
-                    // signal the alarm/grep looks for; `tools_kept` is what the
-                    // turn really runs with (the un-narrowed list), so neither
-                    // number is ever blank or ambiguous.
-                    tools: names.length,
-                    tools_after: 0,
-                    tools_kept: names.length,
                   })
                 }
               }

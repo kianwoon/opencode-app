@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { jevFoldTools, jevKeepTools, jevVerdict } from "@/session/prompt"
+import { jevBelowFloor, jevFoldTools, jevKeepTools, jevVerdict } from "@/session/prompt"
 
 // Shapes below are verbatim captures from the live decisions endpoint
 // (answers keyed q1..qN, choice + probabilities + confidence per row).
@@ -110,6 +110,48 @@ describe("jevKeepTools", () => {
   test("fails open when the payload carries no answers", () => {
     expect(jevKeepTools({}, ["read"], 0.7)).toBeUndefined()
     expect(jevKeepTools(null, ["read"], 0.7)).toBeUndefined()
+  })
+})
+
+describe("floor guard — a confident skip-all must not strip the turn", () => {
+  test("a confident skip-all fold is refused when it lands below the floor", () => {
+    // Live regression (ses_f4545cf6): 35 tools, threshold 0.7, every row a
+    // confident skip → the fold legitimately keeps too few to act with. The fold
+    // is still a real decision; the GUARD is what refuses to apply it.
+    const names = [
+      "bash",
+      "edit",
+      "read",
+      "glob",
+      "grep",
+      "write",
+      "webfetch",
+      "task",
+      "StructuredOutput",
+      "cua-driver_click",
+      "cua-driver_type_text",
+    ]
+    const answers = Object.fromEntries(
+      names.map((name) => [name, { type: "choice", choice: "skip", probabilities: { skip: 1, use: 0 } }]),
+    )
+    const keep = jevKeepTools({ answers }, names, 0.7)
+    // Exempts survive; everything routable drops — a genuinely tiny keep-set.
+    expect(keep).toBeDefined()
+    const after = keep?.size ?? 0
+    expect(after).toBeLessThan(8)
+    // The guard is what stops the turn from running with that set.
+    expect(jevBelowFloor(after, 8)).toBe(true)
+  })
+
+  test("a fold at or above the floor is applied, not refused", () => {
+    const names = ["read", "edit", "bash", "glob", "grep", "write", "webfetch", "task"]
+    const answers = Object.fromEntries(
+      names.map((name) => [name, { type: "choice", choice: "use", probabilities: { use: 0.9, skip: 0.1 } }]),
+    )
+    const keep = jevKeepTools({ answers }, names, 0.7)
+    const after = keep?.size ?? 0
+    expect(after).toBeGreaterThanOrEqual(8)
+    expect(jevBelowFloor(after, 8)).toBe(false)
   })
 })
 

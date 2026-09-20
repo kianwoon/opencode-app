@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { JEV_EXEMPT_TOOLS, clearJevMemo, jevDecide, jevKeepTools } from "@/jev/client"
+import { JEV_EXEMPT_TOOLS, clearJevMemo, jevDecide, jevKeepTools, jevBelowFloor } from "@/jev/client"
 
 // Live `cua-driver list-tools` names, namespaced by the MCP `server_tool` key.
 const OBSERVERS = [
@@ -37,6 +37,25 @@ const skipAll = (names: string[]) => ({
       { type: "choice", choice: "skip", probabilities: { skip: 1, use: 0 }, confidence: 1 },
     ]),
   ),
+})
+
+describe("jevBelowFloor — the guard that refuses an over-narrowed turn", () => {
+  test("refuses a non-empty fold below the floor", () => {
+    // The live regression: 35 tools folded to 2 at threshold 0.7.
+    expect(jevBelowFloor(2, 8)).toBe(true)
+    expect(jevBelowFloor(7, 8)).toBe(true)
+  })
+
+  test("applies a fold that meets the floor", () => {
+    expect(jevBelowFloor(8, 8)).toBe(false)
+    expect(jevBelowFloor(26, 8)).toBe(false)
+  })
+
+  test("leaves an empty fold to the caller's own keep-all fallback", () => {
+    // kept === 0 already fails open upstream as `tools_after: 0`; the guard must
+    // not claim it or that distinct signal is hidden.
+    expect(jevBelowFloor(0, 8)).toBe(false)
+  })
 })
 
 describe("JEV_EXEMPT_TOOLS — CUA actuators", () => {
