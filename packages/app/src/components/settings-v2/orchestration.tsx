@@ -91,6 +91,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
   const jev = createMemo(() => serverSync().data.config.jev ?? {})
   const governor = createMemo(() => serverSync().data.config.governor ?? {})
+  const brainBooster = createMemo(() => serverSync().data.config.brainBooster ?? {})
   const models = useModels()
 
   const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
@@ -181,6 +182,15 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
+  const commitBrainBooster = (patch: { enabled?: boolean }) => {
+    void serverSync()
+      .updateConfig({ brainBooster: { ...brainBooster(), ...patch } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
   return (
     <>
       <div class="settings-v2-tab-header">
@@ -236,6 +246,19 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
                 hideLabel
               >
                 Toggle context governor
+              </Switch>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Brain booster"
+              description="Advisory-only Jev reasoning judgement (switch/verify/contradiction/finish) injected per provider turn. OFF emits nothing."
+            >
+              <Switch
+                checked={brainBooster().enabled ?? false}
+                onChange={() => commitBrainBooster({ enabled: !(brainBooster().enabled ?? false) })}
+                hideLabel
+              >
+                Toggle brain booster
               </Switch>
             </SettingsRowV2>
           </SettingsListV2>

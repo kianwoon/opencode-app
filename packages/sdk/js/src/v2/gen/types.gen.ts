@@ -2117,6 +2117,11 @@ export type Config = {
     threshold?: number
     timeoutMs?: number
   }
+  brainBooster?: {
+    enabled?: boolean
+    threshold?: number
+    timeoutMs?: number
+  }
   attachment?: AttachmentConfig
   enterprise?: {
     url?: string

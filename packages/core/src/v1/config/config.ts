@@ -165,6 +165,24 @@ export const Info = Schema.Struct({
     description:
       "Global context governor switch (all agents/sessions). ON = drop-only relevance gating of conversation context; OFF = current behavior.",
   }),
+  brainBooster: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable the brain booster: advisory-only Jev reasoning judgement injected as an ephemeral system block per provider turn. OFF = current behavior.",
+      }),
+      threshold: Schema.optional(Schema.Finite).annotate({
+        description: "Choice-probability threshold for brain booster switch/verify decisions (default 0.7).",
+      }),
+      timeoutMs: Schema.optional(PositiveInt).annotate({
+        description:
+          "Timeout in milliseconds for the brain booster decision request (default 3000). Fail-open emits no advisory block.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Global brain booster switch (Jev reasoning advisory). ON = advisory-only reasoning judgement injected per provider turn; OFF = current behavior.",
+  }),
   attachment: Schema.optional(ConfigAttachmentV1.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
   }),
