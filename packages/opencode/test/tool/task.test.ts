@@ -16,7 +16,12 @@ import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 
-import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import {
+  IDENTICAL_TASK_WINDOW_MS,
+  MAX_IDENTICAL_TASK_ATTEMPTS,
+  TaskTool,
+  type TaskPromptOps,
+} from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -348,6 +353,82 @@ describe("tool.task", () => {
       const ok = yield* def.execute(other, ctx)
       expect(ok.output).toContain('state="completed"')
       expect(yield* sessions.children(chat.id)).toHaveLength(1)
+    }),
+  )
+
+  it.instance("execute refuses the 6th identical task within the retry window, whatever the error", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const args = {
+        description: "execute the live 3-label probe",
+        prompt: "run the live 3-label probe",
+        subagent_type: "general",
+      }
+      // Five identical FAILED attempts in the history, each carrying a
+      // NON-orphan error (the shape the observed storm had: "Subagent depth
+      // limit reached"). The old guard matched only the boot-sweep text, so
+      // the storm sailed past it.
+      const failed = Array.from({ length: MAX_IDENTICAL_TASK_ATTEMPTS }, (_, i) => ({
+        id: PartID.ascending(),
+        messageID: assistant.id,
+        sessionID: chat.id,
+        type: "tool",
+        callID: `call-${i}`,
+        tool: TaskTool.id,
+        state: {
+          status: "error",
+          error: "Subagent depth limit reached (1). Increase \"subagent_depth\" to allow nested subagents.",
+          input: args,
+          time: { start: Date.now(), end: Date.now() },
+        },
+      })) satisfies SessionV1.ToolPart[]
+      const ctx = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        extra: { promptOps: stubOps() },
+        messages: [{ info: assistant, parts: failed }],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      const exit = yield* def.execute(args, ctx).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) throw new Error("expected retry-storm refusal")
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error("expected Error defect")
+      expect(failure.message).toContain("Terminal: this exact general task")
+      expect(failure.message).toContain(`already failed ${MAX_IDENTICAL_TASK_ATTEMPTS} times`)
+      // The real cause is echoed so the model can act on it.
+      expect(failure.message).toContain("Subagent depth limit reached")
+      // Refused at the boundary: no child session minted for the 6th attempt.
+      expect(yield* sessions.children(chat.id)).toHaveLength(0)
+
+      // One fewer failure is NOT refused — the window is exact, not a
+      // permanent ban on a repeatedly-failing description.
+      const under = yield* def.execute(args, {
+        ...ctx,
+        messages: [{ info: assistant, parts: failed.slice(1) }],
+      })
+      expect(under.output).toContain('state="completed"')
+
+      // An identical task whose failures fell OUTSIDE the window is allowed:
+      // a legit retry after the cause is fixed must not be blocked forever.
+      const stale = failed.map((part) => ({
+        ...part,
+        state: { ...part.state, time: { ...part.state.time, end: Date.now() - IDENTICAL_TASK_WINDOW_MS - 1_000 } },
+      })) satisfies SessionV1.ToolPart[]
+      const afterWindow = yield* def.execute(args, {
+        ...ctx,
+        messages: [{ info: assistant, parts: stale }],
+      })
+      expect(afterWindow.output).toContain('state="completed"')
     }),
   )
 

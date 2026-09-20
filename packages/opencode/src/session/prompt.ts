@@ -95,6 +95,45 @@ const reentries = new Map<SessionID, { count: number; windowStart: number }>()
 // The map only needs recent sessions; once it grows past this many entries,
 // drop entries whose window has expired to bound memory on long-lived servers.
 const REENTRY_PRUNE_MIN = 128
+// Workflow re-dispatch bound, keyed by workflow PART id (not session): the
+// loop re-collects a workflow part on every drain until an assistant message
+// with a non-null `finish` exists after it (MessageV2.latest's consumption
+// boundary). A workflow that repeatedly settles without a terminal assistant
+// message — every step failing on the first turn, as when steps delegate via
+// `task` while `subagent_depth` is 1 — is re-run forever: 5,419 identical step
+// executions over ~4 minutes in one session, with every assistant message left
+// `finish: null`. Past this many attempts the step hard-fails, the summary is
+// written, and the workflow part is marked terminal so it is never re-collected.
+export const MAX_STEP_ATTEMPTS_PER_WORKFLOW = 3
+const workflowAttempts = new Map<string, number>()
+// Bounded like `reentries`, but keyed by part id and therefore with no expiry
+// clock: sweep the least-recently-bumped entries once the map grows past the
+// cap, so a long-lived server that admits many workflows cannot leak memory.
+// A part id is unique per admission, so an evicted entry can only mean a
+// workflow that has not been re-collected in a very long time — it restarts
+// its count instead of being permanently refused.
+export const WORKFLOW_ATTEMPTS_PRUNE_MIN = 512
+
+/**
+ * Increment the re-dispatch counter for a workflow part, pruning the map when
+ * it grows. Re-insertion on every bump keeps Map insertion order as recency
+ * order, so eviction drops the coldest entries first.
+ * @internal Exported for testing
+ */
+export function bumpWorkflowAttempts(id: string) {
+  const attempts = (workflowAttempts.get(id) ?? 0) + 1
+  workflowAttempts.delete(id)
+  workflowAttempts.set(id, attempts)
+  if (workflowAttempts.size > WORKFLOW_ATTEMPTS_PRUNE_MIN) {
+    for (const key of workflowAttempts.keys()) {
+      if (workflowAttempts.size <= WORKFLOW_ATTEMPTS_PRUNE_MIN) break
+      // Never evict the entry being bumped: it is the one under test.
+      if (key === id) continue
+      workflowAttempts.delete(key)
+    }
+  }
+  return attempts
+}
 // Wall-clock backstop for a single drain: a drain that makes no
 // user-visible progress for 45 minutes is failed, not slow. The ceiling is
 // checked between steps (never mid-stream) so healthy long single steps are
@@ -528,10 +567,17 @@ const layer = Layer.effect(
         messageID: assistantMessage.id,
       }))
 
+      // `result` is undefined on the failure path (catchCause above recovers
+      // the fiber with `void`), yet hooks still receive the output object and
+      // write `output.metadata` / `output.title`. Passing undefined made every
+      // plugin throw "Cannot read properties of undefined (reading 'metadata')",
+      // which REPLACED the real task failure — a depth-limit rejection surfaced
+      // in the workflow summary as that TypeError. Hand hooks a well-formed
+      // empty result so the true error survives.
       yield* plugin.trigger(
         "tool.execute.after",
         { tool: TaskTool.id, sessionID, callID: part.id, args: taskArgs },
-        result,
+        result ?? { title: "", output: "", metadata: {} },
       )
 
       assistantMessage.finish = "tool-calls"
@@ -656,6 +702,40 @@ const layer = Layer.effect(
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
 
+      // Settle a terminal assistant message AFTER the workflow part: a message
+      // with a non-null `finish` is the task-consumption boundary in
+      // MessageV2.latest, so a dead/rejected workflow cannot be re-collected
+      // and re-dispatched on every later drain. Without this the loop re-runs
+      // the same workflow part forever (5,419 re-runs, every assistant message
+      // left `finish: null`).
+      const settleTerminal = (text: string) =>
+        Effect.gen(function* () {
+          const terminal: SessionV1.Assistant = {
+            id: MessageID.ascending(),
+            sessionID,
+            parentID: lastUser.id,
+            mode: lastUser.agent,
+            agent: lastUser.agent,
+            cost: 0,
+            path: { cwd: (yield* InstanceState.context).directory, root: (yield* InstanceState.context).worktree },
+            time: { created: Date.now(), completed: Date.now() },
+            finish: "stop",
+            role: "assistant",
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            modelID: model.id,
+            providerID: model.providerID,
+          }
+          yield* sessions.updateMessage(terminal)
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: terminal.id,
+            sessionID,
+            type: "text",
+            text,
+            synthetic: true,
+          } satisfies SessionV1.TextPart)
+        })
+
       // Same admission as the workflow tool: the direct API path
       // (PromptInput with a workflow part) must not bypass graph-shape,
       // step-count, or agent-name enforcement.
@@ -664,40 +744,42 @@ const layer = Layer.effect(
       if ("_tag" in dag) {
         const error = new NamedError.Unknown({ message: workflowErrorMessage(task.title, dag) })
         yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
-        // Settle a terminal assistant message AFTER the workflow part before
-        // throwing: the settled message is the task-consumption boundary in
-        // MessageV2.latest, so a rejected WorkflowPart cannot be re-collected
-        // and re-dispatched on every later prompt (which would poison the
-        // session — the next user message would never reach the model).
-        const rejected: SessionV1.Assistant = {
-          id: MessageID.ascending(),
-          sessionID,
-          parentID: lastUser.id,
-          mode: lastUser.agent,
-          agent: lastUser.agent,
-          cost: 0,
-          path: { cwd: (yield* InstanceState.context).directory, root: (yield* InstanceState.context).worktree },
-          time: { created: Date.now(), completed: Date.now() },
-          finish: "stop",
-          role: "assistant",
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          modelID: model.id,
-          providerID: model.providerID,
-        }
-        yield* sessions.updateMessage(rejected)
-        yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: rejected.id,
-          sessionID,
-          type: "text",
-          text: error.message,
-          synthetic: true,
-        } satisfies SessionV1.TextPart)
+        // Settle before throwing so the rejected WorkflowPart cannot be
+        // re-collected and re-dispatched on every later prompt (which would
+        // poison the session — the next user message would never reach the
+        // model).
+        yield* settleTerminal(error.message)
         throw error
       }
 
       const cfg = yield* config.get()
       const concurrency = Math.max(1, cfg.experimental?.workflow_concurrency ?? 4)
+
+      // Re-dispatch bound. The loop re-collects this same workflow part on
+      // every drain until a terminal assistant message exists after it, so a
+      // workflow that settles without one is re-run indefinitely. Count
+      // attempts on the PART (the durable identity): past the limit, hard-fail
+      // every step, write the summary, and settle terminally so the part is
+      // consumed. `record()` on the bounded path keeps the invariant that a
+      // step is never left neither completed nor failed.
+      const attempts = bumpWorkflowAttempts(task.id)
+      if (attempts > MAX_STEP_ATTEMPTS_PER_WORKFLOW) {
+        const terminalError = new NamedError.Unknown({
+          message:
+            `Workflow "${task.title}" stopped after ${MAX_STEP_ATTEMPTS_PER_WORKFLOW} attempts: it keeps settling ` +
+            `without completing (every step failed). Likely cause: a step delegates via the task tool while ` +
+            `"subagent_depth" is 1 — workflow steps must do their own work, not nest subagents. ` +
+            `Fix the step definition or raise subagent_depth, then re-run.`,
+        })
+        yield* events.publish(Session.Event.Error, { sessionID, error: terminalError.toObject() })
+        yield* Effect.logWarning("workflow re-dispatch cap hit", {
+          "session.id": sessionID,
+          workflow: task.title,
+          attempts,
+        })
+        yield* settleTerminal(terminalError.message)
+        return
+      }
 
       const completed = new Set<string>()
       const skipped = new Set<string>()
@@ -712,8 +794,9 @@ const layer = Layer.effect(
       const inflight = new Set<string>()
       const running = new Map<string, Fiber.Fiber<void>>()
 
-      /** Record a step outcome (sync, atomic). */
+      /** Record a step outcome (sync, atomic). Idempotent: the first outcome wins. */
       const record = (stepId: string, result: SubagentResult) => {
+        if (settled.has(stepId)) return
         settled.add(stepId)
         if (result.ok) {
           completed.add(stepId)

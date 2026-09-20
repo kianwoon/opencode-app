@@ -34,7 +34,7 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
-import { SessionPrompt } from "../../src/session/prompt"
+import { MAX_STEP_ATTEMPTS_PER_WORKFLOW, SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -2982,6 +2982,36 @@ it.instance(
     }),
   15_000,
 )
+
+describe("workflow re-dispatch cap", () => {
+  test("counts attempts per workflow part, caps at MAX_STEP_ATTEMPTS_PER_WORKFLOW, and stays bounded", async () => {
+    const { MAX_STEP_ATTEMPTS_PER_WORKFLOW, WORKFLOW_ATTEMPTS_PRUNE_MIN, bumpWorkflowAttempts } = await import(
+      "../../src/session/prompt"
+    )
+
+    // A fresh part is allowed at attempt 1..N and refused past N.
+    const part = `prt_${Math.random().toString(36).slice(2)}`
+    for (let i = 1; i <= MAX_STEP_ATTEMPTS_PER_WORKFLOW; i++) {
+      expect(bumpWorkflowAttempts(part)).toBe(i)
+    }
+    expect(bumpWorkflowAttempts(part)).toBe(MAX_STEP_ATTEMPTS_PER_WORKFLOW + 1)
+
+    // Counters are per part, not global: another workflow starts fresh.
+    const other = `prt_${Math.random().toString(36).slice(2)}`
+    expect(bumpWorkflowAttempts(other)).toBe(1)
+
+    // Regression guard: the map is bounded. Saturating it evicts cold entries
+    // (their count restarts — a workflow untouched for that long is free to
+    // try again), but NEVER the entry being bumped: a hot workflow keeps
+    // accumulating past the cap instead of being silently reset to 1.
+    for (let i = 0; i < WORKFLOW_ATTEMPTS_PRUNE_MIN + 50; i++) bumpWorkflowAttempts(`prt_fill_${i}`)
+    const hot = `prt_hot_${Math.random().toString(36).slice(2)}`
+    expect(bumpWorkflowAttempts(hot)).toBe(1)
+    expect(bumpWorkflowAttempts(hot)).toBe(2)
+    expect(bumpWorkflowAttempts(hot)).toBe(3)
+    expect(bumpWorkflowAttempts(hot)).toBeGreaterThan(MAX_STEP_ATTEMPTS_PER_WORKFLOW)
+  })
+})
 
 describe("drain wall ceiling", () => {
   test("drainCeilingExceeded trips only past the ceiling", async () => {

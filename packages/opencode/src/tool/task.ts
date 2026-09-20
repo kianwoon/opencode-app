@@ -55,6 +55,27 @@ export const FOREGROUND_SUBAGENT_TIMEOUT_MS = 30 * 60_000
 // call. Refused at the tool boundary so no rows are allocated.
 export const MAX_PARALLEL_TASKS_PER_TURN = 5
 
+// Cross-message retry bound. The per-turn cap above cannot see a storm that
+// retries the SAME task across successive messages (observed: 5,419 identical
+// workflow-step task parts over ~4 minutes, one per assistant message, each
+// failing instantly with "Subagent depth limit reached"). The existing orphan
+// guard was blind to it twice over: it required the specific boot-sweep error
+// text, and it matched per-message (parallel always 1). Counting identical
+// FAILED attempts across the whole projected history within a time window is
+// error-agnostic, so any instantly-failing delegation is caught.
+export const MAX_IDENTICAL_TASK_ATTEMPTS = 5
+export const IDENTICAL_TASK_WINDOW_MS = 60_000
+
+/** Terminal refusal for a repeated identical task. Shared so the wording stays in one place. */
+function identicalTaskRefusal(input: { count: number; subagentType: string; description: string; last: string }) {
+  const seconds = Math.round(IDENTICAL_TASK_WINDOW_MS / 1000)
+  return new Error(
+    `Terminal: this exact ${input.subagentType} task ("${input.description}") already failed ${input.count} times in ` +
+      `the last ${seconds}s — do not retry it automatically. Fix the underlying cause (the last error was: ${input.last}) ` +
+      `or ask the user how to proceed.`,
+  )
+}
+
 // Child-process isolation for foreground subagents (default ON), but only when
 // a SAFE child binary is resolvable. Read synchronously at call time (not module
 // load) so tests and the CLI can toggle it per process. Enabled unless opted out
@@ -188,24 +209,45 @@ export const TaskTool = Tool.define(
       // refuse WITHOUT creating a child session or a new part, and say so, so
       // the model stops re-delegating. Matched against the already-projected
       // parent history (ctx.messages) — no extra query, no new dependency.
-      const duplicate = ctx.messages
+      //
+      // Matched on identity ONLY — deliberately error-agnostic. The previous
+      // version required `state.error.includes(ORPHAN_ERROR)`, so a retry loop
+      // failing with any other error ("Subagent depth limit reached") sailed
+      // straight past it: 5,434 identical parts in one session.
+      const identical = ctx.messages
         .flatMap((message) => message.parts)
-        .find(
-          (part): part is SessionV1.ToolPart =>
+        .filter(
+          (part): part is SessionV1.ToolPart & { state: SessionV1.ToolStateError } =>
             part.type === "tool" &&
             part.tool === id &&
             part.state.status === "error" &&
-            part.state.error.includes(ORPHAN_ERROR) &&
             part.state.input.subagent_type === params.subagent_type &&
             part.state.input.description === params.description &&
             part.state.input.prompt === params.prompt,
         )
+      const duplicate = identical.find((part) => part.state.error.includes(ORPHAN_ERROR))
       if (duplicate) {
         return yield* Effect.fail(
           new Error(
             `Terminal: child orphaned by restart, do not retry automatically — ask user. ` +
               `The identical ${params.subagent_type} task (callID: ${duplicate.callID}) already failed at boot and was not re-dispatched.`,
           ),
+        )
+      }
+      // Retry storm bound: N identical failed attempts inside the window is
+      // terminal regardless of the error each one carried. Bounded to the
+      // window so a legitimate retry hours later (after the cause is fixed)
+      // is never permanently blocked.
+      const now = Date.now()
+      const recent = identical.filter((part) => now - part.state.time.end < IDENTICAL_TASK_WINDOW_MS)
+      if (recent.length >= MAX_IDENTICAL_TASK_ATTEMPTS) {
+        return yield* Effect.fail(
+          identicalTaskRefusal({
+            count: recent.length,
+            subagentType: params.subagent_type,
+            description: params.description,
+            last: recent[recent.length - 1].state.error,
+          }),
         )
       }
 
