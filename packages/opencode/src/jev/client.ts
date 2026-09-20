@@ -20,10 +20,54 @@ export const JEV_DEFAULT_THRESHOLD = 0.7
 
 /**
  * Tools that must never be routed away: subagent delegation, structured output,
- * and the unknown-tool sentinel. Dropping these silently breaks delegation or
- * the json_schema finish path, so they are always kept.
+ * the unknown-tool sentinel, and the computer-aid observation AND actuator
+ * primitives. Dropping these silently breaks delegation, the json_schema finish
+ * path, or strips a GUI hand of the look-before-you-act / act calls it needs.
+ *
+ * Actuators are exempt on the same footing as the observers: the routing
+ * decision is computed ONCE per user turn and reused across every LLM step, so a
+ * single wrong drop removes the only way the hand can perform input for the rest
+ * of the turn — there is no re-decision and no recovery path.
+ *
+ * Session-lifecycle tools are exempt for the same single-shot reason: a fresh
+ * hand can inherit a dead transport session (the driver rejects every action
+ * with "session has ended"), and `start_session` is the ONLY revive path.
+ *
+ * Namespaced MCP tools use the `server_tool` key from McpCatalog.toolName, so
+ * the `cua-driver` server surfaces as `cua-driver_<tool>`.
  */
-export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["task", "StructuredOutput", "invalid"])
+export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
+  "task",
+  "StructuredOutput",
+  "invalid",
+  "cua-driver_get_window_state",
+  "cua-driver_get_accessibility_tree",
+  "cua-driver_get_desktop_state",
+  "cua-driver_list_windows",
+  "cua-driver_verify_state",
+  "cua-driver_zoom",
+  // Actuators — every cua-driver act-tool that routes input to the desktop.
+  // Verified against `cua-driver list-tools` (v0.28.2); keeping them never
+  // over-keeps, it only narrows less.
+  "cua-driver_click",
+  "cua-driver_bring_to_front",
+  "cua-driver_hotkey",
+  "cua-driver_press_key",
+  "cua-driver_clipboard_write",
+  "cua-driver_type_text",
+  "cua-driver_scroll",
+  "cua-driver_drag",
+  "cua-driver_set_value",
+  // Session lifecycle — `start_session` is the ONLY revive path when a fresh
+  // hand inherits a transport session that already ended ("session has ended"
+  // rejects every action). Routing it away leaves the hand with no recovery at
+  // all, since the decision is made once per turn. `end_session` is deliberately
+  // NOT exempt: a hand does not need it to act, and keeping it routable only
+  // narrows less on the one tool that can kill a sibling hand's session.
+  "cua-driver_start_session",
+  "cua-driver_get_session",
+  "cua-driver_list_sessions",
+])
 
 export interface JevVerdict {
   readonly use: boolean
@@ -134,7 +178,9 @@ export interface JevDecision {
 
 // ---------------------------------------------------------------------------
 // Memo: id + content-hash keyed, bounded FIFO. A hit is byte-identical to the
-// original decision and skips the network entirely.
+// original decision and skips the network entirely. The THRESHOLD is part of the
+// key: a keep-set folded at 0.7 is not the same decision as one folded at 0.01,
+// so a config change must re-evaluate rather than replay the stale set.
 // ---------------------------------------------------------------------------
 const MEMO_MAX = 500
 const memo = new Map<string, JevDecision>()
@@ -145,11 +191,15 @@ const djb2 = (s: string): string => {
   return (h >>> 0).toString(36)
 }
 
-const memoKey = (id: string, state: string, names: readonly string[]): string =>
-  `${id}:${djb2(state)}\u0000${djb2(names.join("\u0001"))}`
+const memoKey = (id: string, state: string, names: readonly string[], threshold: number): string =>
+  `${id}:${djb2(state)}\u0000${djb2(names.join("\u0001"))}\u0000${threshold}`
 
-export const memoizedDecision = (id: string, state: string, names: readonly string[]): JevDecision | undefined =>
-  memo.get(memoKey(id, state, names))
+export const memoizedDecision = (
+  id: string,
+  state: string,
+  names: readonly string[],
+  threshold: number,
+): JevDecision | undefined => memo.get(memoKey(id, state, names, threshold))
 
 export const clearJevMemo = (): void => memo.clear()
 
@@ -178,7 +228,7 @@ export interface JevDecideInput {
  */
 export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
   const id = input.id ?? "tools"
-  const cached = memoizedDecision(id, input.state, input.names)
+  const cached = memoizedDecision(id, input.state, input.names, input.threshold)
   if (cached) return Promise.resolve(cached)
   const questions: Record<string, unknown> = {}
   for (const name of input.names) {
@@ -206,7 +256,7 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
         .then((payload) => ({ keep: jevKeepTools(payload, input.names, input.threshold) }))
     })
     .then((decision) => {
-      remember(memoKey(id, input.state, input.names), decision)
+      remember(memoKey(id, input.state, input.names, input.threshold), decision)
       return decision
     })
     .catch(() => ({}))

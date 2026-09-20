@@ -217,6 +217,7 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // this re-export keeps the historical import path used by tests stable.
 export { jevKeepTools, jevVerdict, jevDecide } from "@/jev/client"
 import { jevDecide } from "@/jev/client"
+import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
 
 function jevPromptText(parts: readonly unknown[]): string {
   return parts
@@ -2004,8 +2005,10 @@ const layer = Layer.effect(
                 const openrouter = yield* provider.getProvider(ProviderV2.ID.openrouter).pipe(Effect.option)
                 const jevKey = Option.isSome(openrouter) ? openrouter.value.key : undefined
                 if (jevKey) {
-                  const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : 0.7
-                  const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : 3000
+                  // One default for every reader: config wins, else the shared
+                  // constant (never a second literal that can drift).
+                  const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : JEV_DEFAULT_THRESHOLD
+                  const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
                   const decided = yield* Effect.promise(() =>
                     jevDecide({ key: jevKey, state: jevPromptText(lastUserMsg?.parts ?? []), names, threshold, timeoutMs }),
                   )
