@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { jevKeepTools, jevVerdict } from "@/session/prompt"
+import { jevFoldTools, jevKeepTools, jevVerdict } from "@/session/prompt"
 
 // Shapes below are verbatim captures from the live decisions endpoint
 // (answers keyed q1..qN, choice + probabilities + confidence per row).
@@ -51,7 +51,11 @@ describe("jevKeepTools", () => {
     expect(keep?.has("invalid")).toBe(true)
   })
 
-  test("maps answers by id when the endpoint echoes tool names", () => {
+  test("discards answers whose id was never asked about instead of pairing by position", () => {
+    // Regression: positional fallback (names[i]) paired q1→read, q2→bash, so a
+    // verdict the endpoint never gave about `bash` removed `bash` from the
+    // turn's tool list. Unknown ids are now counted and dropped, and the tools
+    // they would have been misattributed to fail open (stay in the list).
     const keep = round(
       {
         q1: { type: "choice", choice: "use", probabilities: { skip: 0.1, use: 0.9 }, confidence: 0.9 },
@@ -59,8 +63,37 @@ describe("jevKeepTools", () => {
       },
       ["read", "bash"],
     )
+    // Neither tool is removed: the rows name no tool this request asked about,
+    // and an unattributable verdict is never evidence to strip a tool.
+    expect(keep?.has("read")).toBe(true)
+    expect(keep?.has("bash")).toBe(true)
+    expect(jevFoldTools({ answers: { q1: {}, q2: {} } }, ["read", "bash"], 0.7)?.dropped.unknownId).toBe(2)
+    // The all-unknown case keeps everything: with no attributable row there is
+    // no opinion to act on, and an empty keep-set would strip the turn's tools.
+    const allUnknown = jevFoldTools({ answers: { q1: { type: "choice", choice: "skip" } } }, ["read", "bash"], 0.7)
+    expect(allUnknown?.keep.has("read")).toBe(true)
+    expect(allUnknown?.keep.has("bash")).toBe(true)
+    expect(allUnknown?.dropped.unknownId).toBe(1)
+  })
+
+  test("pairs by id when the endpoint echoes the tool names it was asked about", () => {
+    const keep = round(
+      {
+        read: { type: "choice", choice: "use", probabilities: { skip: 0.1, use: 0.9 }, confidence: 0.9 },
+        bash: { type: "choice", choice: "skip", probabilities: { skip: 0.9, use: 0.1 }, confidence: 0.9 },
+      },
+      ["read", "bash"],
+    )
     expect(keep?.has("read")).toBe(true)
     expect(keep?.has("bash")).toBe(false)
+  })
+
+  test("fails open on a row with no probabilities instead of grouping an assumed score", () => {
+    // A `use` with no measured probability must not be treated as strength 1:
+    // the fold reports it as unmeasured and keeps the tool (fail-open).
+    const fold = jevFoldTools({ answers: { read: { type: "choice", choice: "use" } } }, ["read"], 0.7)
+    expect(fold?.keep.has("read")).toBe(true)
+    expect(fold?.dropped.unmeasured).toBe(1)
   })
 
   test("keeps exempt tools even when a partial response omits their answer", () => {
@@ -88,8 +121,10 @@ describe("jevVerdict", () => {
     })
   })
 
-  test("falls back to the choice when probabilities are absent", () => {
-    expect(jevVerdict({ choice: "use" })).toEqual({ use: true, strength: 1 })
+  test("flags an absent probability map as assumed, not as a measured 1", () => {
+    // `strength: 1` here stands in for "no score received"; `assumed` is what
+    // stops the fold from gating that fabricated number through the threshold.
+    expect(jevVerdict({ choice: "use" })).toEqual({ use: true, strength: 1, assumed: true })
   })
 
   test("ignores a non-categorical answer", () => {

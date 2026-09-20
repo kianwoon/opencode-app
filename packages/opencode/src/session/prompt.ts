@@ -197,6 +197,12 @@ const REPETITION_WARN = 3
 const REPETITION_WRAPUP = 6
 const REPETITION_BREAK = 10
 
+// Jev tool routing: a turn narrowed below this many tools is almost certainly a
+// routing mistake (nothing left to act with), so it is logged at error level
+// with a process-lifetime counter to make the event visible in telemetry.
+const JEV_ALARM_MIN_TOOLS = 8
+let jevAlarms = 0
+
 // Fingerprint one completed assistant turn from its persisted parts: text
 // content, every tool name+input, and the finish reason. Identical turns
 // produce identical fingerprints; reordered tool calls still match.
@@ -215,7 +221,7 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // model. The transport + verdict algebra live in the shared, zero-dependency
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
-export { jevKeepTools, jevVerdict, jevDecide } from "@/jev/client"
+export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide } from "@/jev/client"
 import { jevDecide } from "@/jev/client"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
 
@@ -1650,7 +1656,10 @@ const layer = Layer.effect(
           computed: boolean
           keep: Set<string> | null
           names: Set<string>
-        } = { key: "", computed: false, keep: null, names: new Set() }
+          // Threshold actually used for this turn's decision, so every log line
+          // reports the number the fold ran with instead of a re-derived guess.
+          threshold: number
+        } = { key: "", computed: false, keep: null, names: new Set(), threshold: JEV_DEFAULT_THRESHOLD }
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         // Re-entry cap (module-level state, survives within the process).
@@ -1991,6 +2000,13 @@ const layer = Layer.effect(
             // turnTools, so wrapUp/json_schema masking is still respected;
             // tools that surface after the decision (e.g. find_tools
             // promotions) were never evaluated, so they fail open and stay.
+            //
+            // Config owner: `opencode.json` (the UI-editable file) owns tool
+            // routing. `context-optimizer.json`'s `jev` block is IGNORED here —
+            // that plugin's own config must not become a second source of truth
+            // for `enabled`/`threshold`/`timeoutMs`; the threshold read below is
+            // `cfg.jev.threshold` from opencode.json alone (else the shared
+            // JEV_DEFAULT_THRESHOLD). Do not migrate this key.
             const jevEnabled = cfg.jev?.enabled === true
             if (jevEnabled && !wrapUp) {
               const names = Object.keys(turnTools)
@@ -1999,6 +2015,7 @@ const layer = Layer.effect(
                 jevTurn.computed = false
                 jevTurn.keep = null
                 jevTurn.names = new Set()
+                jevTurn.threshold = JEV_DEFAULT_THRESHOLD
               }
               if (!jevTurn.computed && names.length > 0) {
                 jevTurn.computed = true
@@ -2009,6 +2026,7 @@ const layer = Layer.effect(
                   // constant (never a second literal that can drift).
                   const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : JEV_DEFAULT_THRESHOLD
                   const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
+                  jevTurn.threshold = threshold
                   const decided = yield* Effect.promise(() =>
                     jevDecide({ key: jevKey, state: jevPromptText(lastUserMsg?.parts ?? []), names, threshold, timeoutMs }),
                   )
@@ -2016,22 +2034,48 @@ const layer = Layer.effect(
                   // the same turn do not retry the HTTP call.
                   jevTurn.keep = decided.keep ?? null
                   jevTurn.names = new Set(names)
+                  const discarded = (decided.dropped?.unknownId ?? 0) + (decided.dropped?.unmeasured ?? 0)
                   if (!jevTurn.keep) {
+                    // Abstained: no keep-set to apply, so the full list stands.
+                    // `tools_after` is the count the turn actually runs with.
                     yield* Effect.logInfo("jev.tool-routing fallback", {
                       "session.id": sessionID,
-                      reason: "no-decision",
-                      tools: names.length,
+                      reason: decided.failure ? `no-decision:${decided.failure}` : "no-decision",
+                      abstained: true,
                       status: decided.status,
+                      threshold,
+                      tools: names.length,
+                      tools_after: names.length,
+                      discarded,
+                    })
+                  } else if (discarded > 0) {
+                    // Rows discarded, not scored: the tools they referenced stay
+                    // in the list (fail-open), which is why tools_after can equal
+                    // tools_before even on a confident response.
+                    yield* Effect.logInfo("jev.tool-routing discarded-rows", {
+                      "session.id": sessionID,
+                      step,
+                      reason: decided.dropped?.unknownId ? "unknown-id" : "unmeasured",
+                      unknown_id: decided.dropped?.unknownId ?? 0,
+                      unmeasured: decided.dropped?.unmeasured ?? 0,
+                      threshold,
+                      tools: names.length,
                     })
                   }
                 } else if (step === 1) {
                   yield* Effect.logInfo("jev.tool-routing skipped", {
                     "session.id": sessionID,
                     reason: "no-openrouter-key",
+                    threshold: jevTurn.threshold,
                   })
                 }
               } else if (step === 1 && names.length === 0) {
-                yield* Effect.logInfo("jev.tool-routing skipped", { "session.id": sessionID, reason: "no-tools" })
+                yield* Effect.logInfo("jev.tool-routing skipped", {
+                  "session.id": sessionID,
+                  reason: "no-tools",
+                  threshold: jevTurn.threshold,
+                  tools_after: Object.keys(turnTools).length,
+                })
               }
               const keep = jevTurn.keep
               if (keep) {
@@ -2043,25 +2087,62 @@ const layer = Layer.effect(
                 if (format.type === "json_schema" && tools["StructuredOutput"]) {
                   narrowed["StructuredOutput"] = tools["StructuredOutput"]
                 }
-                if (Object.keys(narrowed).length > 0) {
+                const after = Object.keys(narrowed).length
+                // Fires for 0 as well as a small-but-non-empty list: either way
+                // the turn's decision produced a tool set too small to act with,
+                // which is the invisible failure this counter exists to expose.
+                if (step === 1 && after < JEV_ALARM_MIN_TOOLS) {
+                  // Alarm: routing must never leave a turn with a near-empty
+                  // tool list — the model has no way to act and burns the turn,
+                  // and the mistake is invisible without this counter.
+                  jevAlarms++
+                  yield* Effect.logError("jev.tool-routing ALARM tools_after below floor", {
+                    "session.id": sessionID,
+                    step,
+                    reason: "tools-after-below-floor",
+                    threshold: jevTurn.threshold,
+                    tools_before: names.length,
+                    tools_after: after,
+                    floor: JEV_ALARM_MIN_TOOLS,
+                    alarms: jevAlarms,
+                  })
+                }
+                if (after > 0) {
                   turnTools = narrowed
                   yield* Effect.logInfo("jev.tool-routing applied", {
                     "session.id": sessionID,
                     step,
+                    reason: "applied",
+                    threshold: jevTurn.threshold,
                     tools_before: names.length,
-                    tools_after: Object.keys(narrowed).length,
+                    // Never blank: the applied list is non-empty by construction
+                    // (the `after > 0` branch), so this is the real count.
+                    tools_after: after,
+                    removed: names.length - after,
                   })
                 } else {
                   yield* Effect.logInfo("jev.tool-routing fallback", {
                     "session.id": sessionID,
                     step,
                     reason: "empty-narrowing",
+                    threshold: jevTurn.threshold,
+                    // tools_after: 0 is the number the DECISION produced and the
+                    // signal the alarm/grep looks for; `tools_kept` is what the
+                    // turn really runs with (the un-narrowed list), so neither
+                    // number is ever blank or ambiguous.
                     tools: names.length,
+                    tools_after: 0,
+                    tools_kept: names.length,
                   })
                 }
               }
             } else if (!jevEnabled && step === 1) {
-              yield* Effect.logInfo("jev.tool-routing skipped", { "session.id": sessionID, reason: "disabled" })
+              yield* Effect.logInfo("jev.tool-routing skipped", {
+                "session.id": sessionID,
+                reason: "disabled",
+                threshold: JEV_DEFAULT_THRESHOLD,
+                tools_after: Object.keys(turnTools).length,
+              })
             }
 
             if (step === 1)

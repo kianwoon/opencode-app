@@ -72,6 +72,14 @@ export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
 export interface JevVerdict {
   readonly use: boolean
   readonly strength: number
+  /**
+   * True when the row carried no usable `probabilities[choice]`: `strength`
+   * below is then a stand-in (1 for `use`, 0 for `skip`), NOT a measured
+   * score. Callers must fail open on it instead of gating a silent 1/0 through
+   * the threshold — a degraded echo would otherwise keep/drop on a fabricated
+   * number with nothing in the logs to show it.
+   */
+  readonly assumed?: true
 }
 
 /** A single choice answer (categorical + per-label probabilities). */
@@ -90,8 +98,10 @@ export function jevVerdict(value: unknown): JevVerdict | undefined {
     typeof probabilities === "object" && probabilities !== null
       ? (probabilities as Record<string, unknown>)["use"]
       : undefined
-  const strength = typeof probUse === "number" && Number.isFinite(probUse) ? probUse : choice === "use" ? 1 : 0
-  return { use: choice === "use", strength }
+  const measured = typeof probUse === "number" && Number.isFinite(probUse) ? probUse : undefined
+  const use = choice === "use"
+  const strength = measured ?? (use ? 1 : 0)
+  return measured === undefined ? { use, strength, assumed: true } : { use, strength }
 }
 
 /**
@@ -115,57 +125,93 @@ export function jevChoice(value: unknown): JevChoice | undefined {
 }
 
 /**
+ * Fold result: the kept set plus counters for rows that were DISCARDED instead
+ * of scored. Both causes fail open (the tool stays in the list):
+ *  - `unknownId`: the response echoed an id this request never asked about, so
+ *    the row belongs to no tool — pairing it by position would attribute one
+ *    tool's verdict to another tool.
+ *  - `unmeasured`: `choice` arrived without `probabilities[choice]`, so there
+ *    is no score to gate on.
+ * Counters are aggregate, never per-name, to keep caller logs bounded.
+ */
+export interface JevFold {
+  readonly keep: Set<string>
+  readonly dropped: { readonly unknownId: number; readonly unmeasured: number }
+}
+
+/**
  * Narrow a tool list from a raw decisions payload. Returns:
  *  - `undefined` → parse miss / no answers → caller fails open to the full list.
- *  - `Set` (possibly empty) → a real decision; empty means "kept nothing".
+ *  - `JevFold` → a real decision; an empty `keep` means "kept nothing", which is
+ *    a real outcome distinct from a parse miss.
  */
-export function jevKeepTools(payload: unknown, names: string[], threshold: number): Set<string> | undefined {
+export function jevFoldTools(payload: unknown, names: string[], threshold: number): JevFold | undefined {
   if (typeof payload !== "object" || payload === null) return undefined
   const root = payload as Record<string, unknown>
   const raw = root["decisions"] ?? root["results"] ?? root["choices"]
-  // Live Jev echoes question ids: answers is keyed by the same ids the
-  // questions used (tool name when available), so prefer a name match and
-  // fall back to positional pairing.
+  // The pairing contract is the question ID: this client sends `questions`
+  // keyed by tool name, so answers come back under the same names (jev.md §2).
+  // An id we never asked about CANNOT be resolved to a tool: positional
+  // fallback would hand tool N the verdict of whatever row landed at index N,
+  // which is a silent misattribution (wrong verdict, right-looking keep-set).
+  // Such rows are counted and dropped from the fold; the caller logs the count.
   const answers = root["answers"]
   const nameSet = new Set(names)
-  const entries: [string, unknown][] =
+  const rowPairs: [string, unknown][] =
     typeof answers === "object" && answers !== null
-      ? Object.entries(answers as Record<string, unknown>).map(
-          // Prefer the echoed id when it matches a known tool name; otherwise
-          // assume answers preserve question order and pair positionally
-          // (names count may differ from answers count and is left as-is).
-          ([id, item], i) => [nameSet.has(id) ? id : (names[i] ?? id), item] as [string, unknown],
-        )
+      ? Object.entries(answers as Record<string, unknown>).filter(([id]) => nameSet.has(id))
+      : []
+  const unknownId =
+    typeof answers === "object" && answers !== null
+      ? Object.keys(answers as Record<string, unknown>).filter((id) => !nameSet.has(id)).length
+      : 0
+  const entries: [string, unknown][] =
+    rowPairs.length > 0
+      ? rowPairs
       : Array.isArray(raw)
-        ? raw.map((item, i) => {
-            if (typeof item === "object" && item !== null) {
-              const r = item as Record<string, unknown>
-              const name = r["tool"] ?? r["name"] ?? r["question"]
-              if (typeof name === "string") return [name, item] as [string, unknown]
-            }
-            return [names[i] ?? "", item] as [string, unknown]
+        ? raw.flatMap((item) => {
+            if (typeof item !== "object" || item === null) return []
+            const r = item as Record<string, unknown>
+            const name = r["tool"] ?? r["name"] ?? r["question"]
+            return typeof name === "string" && nameSet.has(name) ? ([[name, item]] as [string, unknown][]) : []
           })
         : typeof raw === "object" && raw !== null
-          ? Object.entries(raw as Record<string, unknown>)
+          ? Object.entries(raw as Record<string, unknown>).filter(([name]) => nameSet.has(name))
           : []
-  if (entries.length === 0) return undefined
+  if (entries.length === 0 && unknownId === 0) return undefined
   const keep = new Set<string>()
-  // Exempt tools are seeded unconditionally, independent of what the response
-  // echoed: a partial response that omits an exempt question must never drop
-  // `task`/`StructuredOutput`/`invalid` from the narrowed set.
-  for (const name of names) if (JEV_EXEMPT_TOOLS.has(name)) keep.add(name)
+  // Seed with every name and prune only on an explicit, ATTRIBUTED drop verdict.
+  // The gate for removing a tool is deliberately one-sided (`use` + score), so
+  // starting from "keep nothing" made every un-echoed, non-categorical, or
+  // un-measured row a silent removal — which is how a partial response stripped
+  // a turn's tools. Everything except a confident `use` fails open.
+  for (const name of names) keep.add(name)
+  let unmeasured = 0
   for (const [name, value] of entries) {
-    if (JEV_EXEMPT_TOOLS.has(name)) {
-      keep.add(name)
+    // Exempt tools are never pruned, whatever the response says: a unanimous
+    // `skip` on `task`/`StructuredOutput`/the cua primitives must still keep
+    // them, and a partial echo that omits their question cannot drop them
+    // either, since they are already seeded above.
+    if (JEV_EXEMPT_TOOLS.has(name)) continue
+    const verdict = jevVerdict(value)
+    // Not a drop verdict: keep, and note why when the row simply had no score
+    // to gate on (the fabricated 1/0 no longer passes through the threshold).
+    if (!verdict) continue
+    if (verdict.assumed) {
+      unmeasured++
       continue
     }
-    const verdict = jevVerdict(value)
-    if (verdict?.use && verdict.strength >= threshold) keep.add(name)
+    if (!verdict.use || verdict.strength < threshold) keep.delete(name)
   }
-  // Return the parsed set even when empty: 'the decision kept nothing' is a
-  // real outcome the caller reports as empty-narrowing, distinct from a
-  // parse failure (undefined), which fails open to the full tool list.
-  return keep
+  return { keep, dropped: { unknownId, unmeasured } }
+}
+
+/**
+ * Thin accessor for callers that only need the kept set (controller, tests).
+ * The counters are folded inside `jevFoldTools`; routing calls that one.
+ */
+export function jevKeepTools(payload: unknown, names: string[], threshold: number): Set<string> | undefined {
+  return jevFoldTools(payload, names, threshold)?.keep
 }
 
 export interface JevDecision {
@@ -174,6 +220,15 @@ export interface JevDecision {
   // can distinguish an HTTP rejection (e.g. unknown model alias) from a
   // response-parse miss. No secrets.
   readonly status?: number
+  /**
+   * Why there is no `keep` set; surfaced in the caller's fallback log so a
+   * silent fail-open is diagnosable. `http` pairs with `status`, `parse` means
+   * a 2xx body that carried no usable answer, `transport` a timeout/network
+   * failure (the abort in the memoized call).
+   */
+  readonly failure?: "http" | "parse" | "transport"
+  /** Rows discarded by the fold instead of scored (see `JevFold`). */
+  readonly dropped?: JevFold["dropped"]
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +278,9 @@ export interface JevDecideInput {
 
 /**
  * One detached decisions call for tool routing. Builds a `choice` question per
- * tool name (use/skip) and folds the response with `jevKeepTools`. Fail-open:
- * any error/timeout/missing answer resolves `{}` (no `keep`), never throws.
+ * tool name (use/skip) and folds the response with `jevFoldTools`. Fail-open:
+ * any error/timeout/missing answer resolves a decision WITHOUT `keep` (plus a
+ * `failure` tag for the caller's log), never throws.
  */
 export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
   const id = input.id ?? "tools"
@@ -250,14 +306,16 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
     signal: AbortSignal.timeout(input.timeoutMs),
   })
     .then((res): Promise<JevDecision> => {
-      if (!res.ok) return Promise.resolve({ status: res.status })
-      return res
-        .json()
-        .then((payload) => ({ keep: jevKeepTools(payload, input.names, input.threshold) }))
+      if (!res.ok) return Promise.resolve({ status: res.status, failure: "http" })
+      return res.json().then((payload): JevDecision => {
+        const folded = jevFoldTools(payload, input.names, input.threshold)
+        if (!folded) return { failure: "parse" }
+        return { keep: folded.keep, dropped: folded.dropped }
+      })
     })
     .then((decision) => {
       remember(memoKey(id, input.state, input.names, input.threshold), decision)
       return decision
     })
-    .catch(() => ({}))
+    .catch(() => ({ failure: "transport" }) satisfies JevDecision)
 }
