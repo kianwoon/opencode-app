@@ -534,6 +534,47 @@ function recordRetrieval(sessionID: string, path: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase-2 triage survey (observable-only: never changes `system[0]`).
+// Within a task the gate's drop set is NOT monotonic today — `droppedScoped`
+// is re-derived from the current scope snapshot (applyGate:358), and a
+// snapshot refresh after an activity-entry eviction can return an empty set,
+// reviving every dropped section at once. This records the monotonic
+// (drop-only) set per task boundary and logs revivals, so Phase 2 can decide
+// whether freezing drops for real is worth the byte-churn. The boundary is
+// `chat.message` (new user message = new task); the frozen set lives here, the
+// same session-keyed-Map shape as `retrievedPaths`/JEV's governor head.
+// ---------------------------------------------------------------------------
+
+/** session → paths dropped so far in the current task (grows only). */
+const triageDrops = new Map<string, Set<string>>()
+/** session → task generation, bumped by the `chat.message` boundary hook. */
+const taskGeneration = new Map<string, number>()
+
+function resetTriage(sessionID: string) {
+  if (triageDrops.size >= MAX_SESSIONS) triageDrops.delete(triageDrops.keys().next().value!)
+  triageDrops.set(sessionID, new Set())
+  taskGeneration.set(sessionID, (taskGeneration.get(sessionID) ?? 0) + 1)
+}
+
+/** Record this turn's drops; report paths dropped earlier that are active again. */
+function observeDrops(sessionID: string, dropped: Section[], active: Set<string>) {
+  let paths = triageDrops.get(sessionID)
+  if (!paths) {
+    if (triageDrops.size >= MAX_SESSIONS) triageDrops.delete(triageDrops.keys().next().value!)
+    paths = new Set()
+    triageDrops.set(sessionID, paths)
+  }
+  const revived: string[] = []
+  for (const section of dropped) {
+    const path = section.path
+    if (!path) continue
+    if (paths.has(path) && active.has(path)) revived.push(path)
+    paths.add(path)
+  }
+  if (revived.length > 0) log("triage-revival", { sessionID, task: taskGeneration.get(sessionID), paths: revived })
+}
+
+// ---------------------------------------------------------------------------
 // Memoization: stable output within a turn keeps the provider cache warm.
 // Key = session + activity fingerprint + per-section content hash + config.
 // Content hash (not length): a same-length AGENTS.md edit must NOT serve
@@ -858,6 +899,17 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
   const summarizeCtx: SummarizeContext = { client: input.client, sessionModel: new Map() }
 
   const hooks: Hooks = {
+    // Task boundary (observable-only): a new user message starts a new task,
+    // so the triage drop set resets here — never inside gateSystem, which
+    // would make the set turn-scoped rather than task-scoped.
+    "chat.message": async (hookInput) => {
+      try {
+        if (hookInput.sessionID) resetTriage(hookInput.sessionID)
+      } catch {
+        // Triage tracking must never break message handling.
+      }
+    },
+
     // Retrieval hook: when the model reads a withheld guide's file, promote
     // it — the read is recorded as a pinned override so the NEXT gateSystem
     // keeps the guide for the rest of the session. Read-only hook; fail-open.
@@ -945,6 +997,9 @@ async function gateSystem(
   // have kept. Fail-open per section: a summarization failure keeps the
   // original text and the gate proceeds normally.
   const config = loadConfig()
+  // Both reductions off ⇒ pure pass-through: return before any mutation so the
+  // emitted system[0] stays byte-identical to the input (parse/join is lossy).
+  if (!config.scopingEnabled && !config.summarizeEnabled) return
   const expanded: Section[] = []
   // Cap LLM flights at one per transform call: later true-miss sections serve
   // fallback without spawning, so a single loop-step can never fan out into a
@@ -975,6 +1030,8 @@ async function gateSystem(
   const scopes = turnScopes(sessionID)
   const pinned = retrievedPaths.get(sessionID)
   const decision = applyGate(prologue, sections, scopes, config, pinned)
+  // Observation only: `decision.output` below is written unchanged.
+  observeDrops(sessionID, decision.dropped, scopes)
 
   const key = memoKey(sessionID, decision, sections, prologue, config)
   const cached = memo.get(key)

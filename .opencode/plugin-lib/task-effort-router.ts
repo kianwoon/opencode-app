@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 import {
+  classifyNoul,
   classifyTier,
   memoResult,
   resolveJevModel,
@@ -38,6 +39,8 @@ type Effort = (typeof LADDER)[number]
  * Router config mirroring effort-router.json. Every threshold, list and
  * identity string the router uses lives here — nothing is hardcoded.
  */
+type GuardrailConfig = { enabled: boolean; model: string; denyBelow: number; abstainBelow: number }
+
 type RouterConfig = {
   minimalWords: number
   mediumWords: number
@@ -48,7 +51,10 @@ type RouterConfig = {
   brainAgent: string
   budgetBands: { low: number; medium: number }
   jev: JevEffortConfig
+  guardrail: GuardrailConfig
 }
+
+const DEFAULT_GUARDRAIL: GuardrailConfig = { enabled: false, model: "typesafe/jev-1.13", denyBelow: 0.3, abstainBelow: 0.7 }
 
 const DEFAULTS: RouterConfig = {
   minimalWords: 12,
@@ -60,10 +66,24 @@ const DEFAULTS: RouterConfig = {
   brainAgent: "brain",
   budgetBands: { low: 8000, medium: 20000 },
   jev: { enabled: false, model: "typesafe/jev-1.13", threshold: 0.5 },
+  guardrail: DEFAULT_GUARDRAIL,
+}
+
+/** Coerce the optional `guardrail` block (OFF by default); bands clamp to 0..1. */
+function resolveGuardrailConfig(raw: unknown): GuardrailConfig {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
+  const band = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1 ? v : d)
+  const d = DEFAULT_GUARDRAIL
+  return {
+    enabled: r.enabled === true,
+    model: typeof r.model === "string" && r.model.length > 0 ? r.model : d.model,
+    denyBelow: band(r.denyBelow, d.denyBelow),
+    abstainBelow: band(r.abstainBelow, d.abstainBelow),
+  }
 }
 
 /** Shape-check a loaded value so malformed configs fail open, never throw. */
-function isConfig(value: unknown): value is Omit<RouterConfig, "jev"> {
+function isConfig(value: unknown): value is Omit<RouterConfig, "jev" | "guardrail"> {
   if (!value || typeof value !== "object") return false
   const cfg = value as Record<string, unknown>
   const num = (v: unknown) => typeof v === "number" && Number.isFinite(v)
@@ -256,8 +276,12 @@ async function loadRouterConfig(): Promise<RouterConfig> {
     if (stat.mtimeMs !== configCache.mtimeMs) {
       const parsed: unknown = JSON.parse(await fs.readFile(file, "utf8"))
       if (isConfig(parsed)) {
-        // `jev` is optional and OFF by default; resolve it from the same file.
-        configCache.config = { ...parsed, jev: resolveJevEffortConfig((parsed as Record<string, unknown>).jev) }
+        // `jev`/`guardrail` are optional and OFF by default; resolve both from the same file.
+        configCache.config = {
+          ...parsed,
+          jev: resolveJevEffortConfig((parsed as Record<string, unknown>).jev),
+          guardrail: resolveGuardrailConfig((parsed as Record<string, unknown>).guardrail),
+        }
         configCache.mtimeMs = stat.mtimeMs
       }
     }
@@ -327,8 +351,17 @@ const MAX_SESSIONS = 1_000
 /** Window in which an identical chat.message fire is treated as a duplicate. */
 const DEDUP_WINDOW_MS = 2_000
 
+/**
+ * Sessions whose risk notice has already appeared. The notice must stay
+ * present on every later turn, not just the first risky one: a mid-session
+ * add/remove transition rewrites the cached prompt prefix and breaks
+ * upstream cache hits. Sticky for the session's lifetime, bounded like state.
+ */
+const riskNoticeShown = new Set<string>()
+
 function trackSession(sessionID: string) {
   state.delete(sessionID)
+  riskNoticeShown.delete(sessionID)
   state.set(sessionID, {
     escalated: undefined,
     baseline: undefined,
@@ -340,7 +373,10 @@ function trackSession(sessionID: string) {
   if (state.size > MAX_SESSIONS) {
     // Map preserves insertion order — evict the oldest session.
     const oldest = state.keys().next().value
-    if (oldest !== undefined) state.delete(oldest)
+    if (oldest !== undefined) {
+      state.delete(oldest)
+      riskNoticeShown.delete(oldest)
+    }
   }
 }
 
@@ -680,6 +716,24 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
       })
     },
 
+    // Pre-execution Noul guardrail (OFF by default): one `noul` question on a
+    // risky tool BEFORE it runs. Denial is by THROW — tool.execute.before
+    // return values are discarded; every failure path fails open.
+    "tool.execute.before": async (input, output) => {
+      const cfg = await loadRouterConfig()
+      if (!cfg.guardrail.enabled) return
+      if (!cfg.riskyTools.some((n) => n.toLowerCase() === input.tool.toLowerCase())) return
+      // Bounded summary only: full args/file contents never reach the wire.
+      const args = JSON.stringify(output.args ?? {}).slice(0, 200)
+      const noul = await classifyNoul(JSON.stringify({ tool: input.tool, argsSummary: args, sessionRisky: state.get(input.sessionID)?.risky === true }), cfg.guardrail.model)
+      const fields = { sessionID: input.sessionID, tool: input.tool }
+      if (noul === null) return log("noul-failopen", fields)
+      const action = noul < cfg.guardrail.denyBelow ? "deny" : noul < cfg.guardrail.abstainBelow ? "abstain" : "allow"
+      log("noul-decision", { ...fields, noul, action })
+      if (noul < cfg.guardrail.denyBelow) throw new Error(`guardrail denied: ${input.tool} (noul ${noul.toFixed(2)})`)
+      if (noul < cfg.guardrail.abstainBelow) log("noul-abstain", { ...fields, noul })
+    },
+
     // Risk from behavior, not words: actually running a mutating tool (per
     // the config's riskyTools list) marks the session's current task risky.
     "tool.execute.after": async (input) => {
@@ -708,7 +762,11 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
         ].join("\n"),
       )
       const entry = input.sessionID ? state.get(input.sessionID) : undefined
-      if (entry?.risky) {
+      // Sticky once shown: emit on every later turn of the session so the
+      // transition turn is the only one that changes the prefix (and only if
+      // that turn was not the session's first). Cache-stability measure.
+      if (input.sessionID && entry?.risky) riskNoticeShown.add(input.sessionID)
+      if (input.sessionID && riskNoticeShown.has(input.sessionID)) {
         output.system.push(
           "Task risk notice: this task touches a risk-sensitive domain (auth, credentials, schema/data, payments, production). Verify the blast radius before destructive steps and double-check edge cases before finishing.",
         )

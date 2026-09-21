@@ -1344,8 +1344,15 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
 export function options(input: {
   model: Provider.Model
   sessionID: string
+  // Stable content-identity key computed where the prompt head (agent + tools +
+  // system) is in scope. A cache key must name the shared prefix, not the session:
+  // a subagent spawn replays its parent's head, so a sessionID-derived key forces a
+  // 100% cold prefix on every spawn. Absent => fall back to the sessionID baseline.
+  cacheKey?: string
   providerOptions?: Record<string, any>
-}): Record<string, any> {  const result: Record<string, any> = {}
+}): Record<string, any> {
+  const key = input.cacheKey || input.sessionID
+  const result: Record<string, any> = {}
 
   if (
     input.model.api.npm === "@ai-sdk/google-vertex/anthropic" ||
@@ -1483,7 +1490,7 @@ export function options(input: {
     ) {
       // @ai-sdk/openai-compatible spreads providerOptions verbatim into the wire body, so a
       // camelCase `promptCacheKey` reaches strict decoders (e.g. Console Go) and is rejected.
-      result["prompt_cache_key"] = input.sessionID
+      result["prompt_cache_key"] = key
     } else if (
       input.model.api.npm === "@ai-sdk/openai" ||
       input.model.api.npm === "@ai-sdk/azure" ||
@@ -1493,12 +1500,12 @@ export function options(input: {
       input.model.api.npm === "@openrouter/ai-sdk-provider" ||
       input.providerOptions?.setCacheKey === true
     ) {
-      result["promptCacheKey"] = input.sessionID
+      result["promptCacheKey"] = key
       if (input.model.api.npm === "@openrouter/ai-sdk-provider") {
         // SDK spreads providerOptions.openrouter verbatim into the wire body;
         // OpenRouter reads snake_case `prompt_cache_key` + top-level `session_id` (session_id takes precedence as sticky key).
-        result["prompt_cache_key"] = input.sessionID
-        result["session_id"] = input.sessionID
+        result["prompt_cache_key"] = key
+        result["session_id"] = key
       }
     }
   }
@@ -1550,7 +1557,7 @@ export function options(input: {
       input.model.api.npm !== "@ai-sdk/openai-compatible" &&
       input.providerOptions?.setCacheKey !== false
     ) {
-      result["promptCacheKey"] = input.sessionID
+      result["promptCacheKey"] = key
       result["include"] = INCLUDE_ENCRYPTED_REASONING
       result["reasoningSummary"] = "auto"
     }

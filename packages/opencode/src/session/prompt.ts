@@ -2073,6 +2073,13 @@ const layer = Layer.effect(
             // answer.
             const wrapUp = isLastStep || forceWrapUp
             let turnTools = tools
+            // JEV-gated tool list, hoisted out of the `if (keep)` block below so
+            // the freezeHead call site can see it. Set ONLY when a verdict was
+            // actually applied (the `else` branch below); left undefined on every
+            // fail-open path (no verdict, below-floor, empty narrowing) and on
+            // wrap-up turns, where turnTools is the collapsed mask and must never
+            // become the session head.
+            let gatedHead: typeof tools | undefined
             if (wrapUp) {
               const keep =
                 format.type === "json_schema"
@@ -2305,6 +2312,7 @@ const layer = Layer.effect(
                   })
                 } else {
                   turnTools = narrowed
+                  gatedHead = narrowed
                   yield* Effect.logInfo("jev.tool-routing applied", {
                     "session.id": sessionID,
                     step,
@@ -2484,9 +2492,12 @@ const layer = Layer.effect(
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             // Prefix-cache invariant: the head (system blocks + sorted tool list)
             // is APPEND-ONLY across a session. Freeze once so every later turn
-            // emits byte-identical head bytes; the per-turn JEV decision is
-            // advisory only and never rewrites the emitted array.
-            const headTools = freezeHead(sessionID, tools)
+            // emits byte-identical head bytes. The JEV verdict becomes the
+            // session's INITIAL head (gatedHead is undefined on every fail-open
+            // path, so the full list is frozen exactly as before); once frozen,
+            // no later turn may rewrite it — a per-turn fold would re-bill the
+            // whole cached prefix.
+            const headTools = freezeHead(sessionID, gatedHead ?? tools)
             // Probe: one line per step with a short digest of the cache-relevant
             // head (joined system string + sorted tool names). Always on; the log
             // write is best-effort and must never break the turn.

@@ -11,6 +11,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { SystemPrompt } from "../system"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Record } from "effect"
+import { createHash } from "node:crypto"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
@@ -53,6 +54,16 @@ export type Prepared = {
 const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
   mergeDeep(target, source ?? {}) as Record<string, any>
 
+// Cache keys name the shared prompt prefix, not the session: a subagent spawn replays
+// its parent's head (system + tools), so a sessionID-derived key forces a 100% cold
+// prefix on every spawn. Hashing the same content yields the same key across sessions;
+// session-specific bytes (sessionID/parentSessionID) stay header-only and never enter.
+export const contentCacheKey = (agent: string, model: string, system: string[], tools: string[]) =>
+  createHash("sha256")
+    .update([agent, model, tools.toSorted().join(","), system.join("\n")].join("|"))
+    .digest("hex")
+    .slice(0, 32)
+
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
   const system = [
@@ -81,11 +92,14 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     !input.small && input.model.variants && input.user.model.variant
       ? input.model.variants[input.user.model.variant]
       : {}
+  const tools = resolveTools(input)
+  const cacheKey = contentCacheKey(input.agent.name, input.model.api.id, system, Object.keys(tools))
   const base = input.small
     ? ProviderTransform.smallOptions(input.model)
     : ProviderTransform.options({
         model: input.model,
         sessionID: input.sessionID,
+        cacheKey,
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
@@ -145,7 +159,6 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     },
   )
 
-  const tools = resolveTools(input)
   // Codex parity: OpenAI Responses-family providers hardcode `strict: false`
   // on every function tool so MCP-sourced and dynamic schemas that don't
   // satisfy OpenAI's structured-outputs constraints still register.

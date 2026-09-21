@@ -76,12 +76,15 @@ describe("jevBelowFloor — the guard that refuses an over-narrowed turn", () =>
 describe("JEV_EXEMPT_TOOLS — CUA actuators", () => {
   test("every observer and actuator survives a skip-all payload", () => {
     const exempt = [...OBSERVERS, ...ACTUATORS, ...SESSION]
-    const names = [...exempt, "bash", "edit"]
+    const names = [...exempt, "bash", "edit", "skill"]
     const keep = jevKeepTools(skipAll(names), names, 0.7)
     for (const name of exempt) expect(keep?.has(name)).toBe(true)
+    // Core execution tools are exempt too: the head is session-frozen, so a
+    // unanimous skip must not strip them for the rest of the session.
+    expect(keep?.has("bash")).toBe(true)
+    expect(keep?.has("edit")).toBe(true)
     // The exemption must stay narrow: genuinely routable tools still drop.
-    expect(keep?.has("bash")).toBe(false)
-    expect(keep?.has("edit")).toBe(false)
+    expect(keep?.has("skill")).toBe(false)
   })
 
   test("start_session survives a skip-all payload", () => {

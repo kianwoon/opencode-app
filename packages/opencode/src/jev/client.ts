@@ -161,6 +161,18 @@ export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
   "task",
   "StructuredOutput",
   "invalid",
+  // Core execution/tool-discovery tools. The head is session-frozen, so a
+  // first-turn drop cripples the agent for the rest of the session — and JEV's
+  // role is to ENHANCE agents, not remove their ability to act.
+  "bash",
+  "edit",
+  "write",
+  "read",
+  "glob",
+  "grep",
+  "patch",
+  "todowrite",
+  "webfetch",
   "cua-driver_get_window_state",
   "cua-driver_get_accessibility_tree",
   "cua-driver_get_desktop_state",

@@ -16,6 +16,7 @@ import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
+  const cacheKey = "content-head-key-abc"
 
   const mockModel = {
     id: "anthropic/claude-3-5-sonnet",
@@ -53,15 +54,17 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: mockModel,
       sessionID,
+      cacheKey,
       providerOptions: { setCacheKey: true },
     })
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should not set promptCacheKey when providerOptions.setCacheKey is false", () => {
     const result = ProviderTransform.options({
       model: mockModel,
       sessionID,
+      cacheKey,
       providerOptions: { setCacheKey: false },
     })
     expect(result.promptCacheKey).toBeUndefined()
@@ -71,13 +74,14 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: mockModel,
       sessionID,
+      cacheKey,
       providerOptions: undefined,
     })
     expect(result.promptCacheKey).toBeUndefined()
   })
 
   test("should not set promptCacheKey when providerOptions does not have setCacheKey", () => {
-    const result = ProviderTransform.options({ model: mockModel, sessionID, providerOptions: {} })
+    const result = ProviderTransform.options({ model: mockModel, sessionID, cacheKey, providerOptions: {} })
     expect(result.promptCacheKey).toBeUndefined()
   })
 
@@ -91,8 +95,8 @@ describe("ProviderTransform.options - setCacheKey", () => {
         npm: "@ai-sdk/openai",
       },
     }
-    const result = ProviderTransform.options({ model: openaiModel, sessionID, providerOptions: {} })
-    expect(result.promptCacheKey).toBe(sessionID)
+    const result = ProviderTransform.options({ model: openaiModel, sessionID, cacheKey, providerOptions: {} })
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should set promptCacheKey for the OpenAI SDK regardless of provider ID", () => {
@@ -103,9 +107,10 @@ describe("ProviderTransform.options - setCacheKey", () => {
         api: { id: "gpt-5", url: "https://example.com", npm: "@ai-sdk/openai" },
       },
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should set snake_case prompt_cache_key for the OpenAI-compatible SDK by default", () => {
@@ -116,9 +121,10 @@ describe("ProviderTransform.options - setCacheKey", () => {
         api: { id: "gpt-5", url: "https://example.com", npm: "@ai-sdk/openai-compatible" },
       },
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
-    expect(result.prompt_cache_key).toBe(sessionID)
+    expect(result.prompt_cache_key).toBe(cacheKey)
     expect(result.promptCacheKey).toBeUndefined()
   })
 
@@ -130,9 +136,10 @@ describe("ProviderTransform.options - setCacheKey", () => {
         api: { id: "openrouter/auto", url: "https://openrouter.ai/api/v1", npm: "@openrouter/ai-sdk-provider" },
       },
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should not set promptCacheKey for openai when explicitly disabled", () => {
@@ -148,6 +155,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: openaiModel,
       sessionID,
+      cacheKey,
       providerOptions: { setCacheKey: false },
     })
     expect(result.promptCacheKey).toBeUndefined()
@@ -163,8 +171,8 @@ describe("ProviderTransform.options - setCacheKey", () => {
         npm: "@ai-sdk/xai",
       },
     }
-    const result = ProviderTransform.options({ model: xaiModel, sessionID, providerOptions: {} })
-    expect(result.promptCacheKey).toBe(sessionID)
+    const result = ProviderTransform.options({ model: xaiModel, sessionID, cacheKey, providerOptions: {} })
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should not set promptCacheKey for the xAI SDK when explicitly disabled", () => {
@@ -180,6 +188,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: xaiModel,
       sessionID,
+      cacheKey,
       providerOptions: { setCacheKey: false },
     })
     expect(result.promptCacheKey).toBeUndefined()
@@ -198,6 +207,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: openaiModel,
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
     expect(result.store).toBe(false)
@@ -216,10 +226,11 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: xaiModel,
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
     expect(result.store).toBe(false)
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should set store=false for xAI SDK regardless of provider ID", () => {
@@ -235,6 +246,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: xaiModel,
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
     expect(result.store).toBe(false)
@@ -253,10 +265,11 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: azureModel,
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
     expect(result.store).toBe(false)
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should disable the Azure cache key without disabling store=false", () => {
@@ -267,6 +280,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
         api: { id: "gpt-5", url: "https://azure.com", npm: "@ai-sdk/azure" },
       },
       sessionID,
+      cacheKey,
       providerOptions: { setCacheKey: false },
     })
     expect(result.store).toBe(false)
@@ -281,11 +295,12 @@ describe("ProviderTransform.options - setCacheKey", () => {
         api: { id: "gpt-5.5", url: "https://azure.com", npm: "@ai-sdk/azure" },
       },
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
     expect(result.store).toBe(false)
     expect(result.reasoningSummary).toBe("auto")
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   for (const npm of ["@ai-sdk/deepinfra", "@ai-sdk/cerebras"]) {
@@ -293,9 +308,10 @@ describe("ProviderTransform.options - setCacheKey", () => {
       const result = ProviderTransform.options({
         model: { ...mockModel, providerID: "custom", api: { ...mockModel.api, npm } },
         sessionID,
+        cacheKey,
         providerOptions: {},
       })
-      expect(result.prompt_cache_key).toBe(sessionID)
+      expect(result.prompt_cache_key).toBe(cacheKey)
       expect(result.promptCacheKey).toBeUndefined()
     })
   }
@@ -304,9 +320,10 @@ describe("ProviderTransform.options - setCacheKey", () => {
     const result = ProviderTransform.options({
       model: { ...mockModel, providerID: "custom", api: { ...mockModel.api, npm: "@ai-sdk/mistral" } },
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
-    expect(result.promptCacheKey).toBe(sessionID)
+    expect(result.promptCacheKey).toBe(cacheKey)
   })
 
   test("should send snake_case sticky keys for the OpenRouter SDK", () => {
@@ -317,11 +334,76 @@ describe("ProviderTransform.options - setCacheKey", () => {
         api: { ...mockModel.api, npm: "@openrouter/ai-sdk-provider" },
       },
       sessionID,
+      cacheKey,
       providerOptions: {},
     })
+    expect(result.promptCacheKey).toBe(cacheKey)
+    expect(result.prompt_cache_key).toBe(cacheKey)
+    expect(result.session_id).toBe(cacheKey)
+  })
+
+  test("falls back to sessionID when no content key is provided", () => {
+    const result = ProviderTransform.options({ model: mockModel, sessionID, providerOptions: { setCacheKey: true } })
     expect(result.promptCacheKey).toBe(sessionID)
-    expect(result.prompt_cache_key).toBe(sessionID)
-    expect(result.session_id).toBe(sessionID)
+  })
+
+  test("uses the content key instead of sessionID for every cache-key field", () => {
+    const openrouter = ProviderTransform.options({
+      model: {
+        ...mockModel,
+        providerID: "openrouter",
+        api: { ...mockModel.api, npm: "@openrouter/ai-sdk-provider" },
+      },
+      sessionID,
+      cacheKey,
+      providerOptions: {},
+    })
+    expect(openrouter.promptCacheKey).toBe(cacheKey)
+    expect(openrouter.prompt_cache_key).toBe(cacheKey)
+    expect(openrouter.session_id).toBe(cacheKey)
+    expect(openrouter.session_id).not.toBe(sessionID)
+
+    const compatible = ProviderTransform.options({
+      model: { ...mockModel, api: { ...mockModel.api, npm: "@ai-sdk/openai-compatible" } },
+      sessionID,
+      cacheKey,
+      providerOptions: {},
+    })
+    expect(compatible.prompt_cache_key).toBe(cacheKey)
+    expect(compatible.prompt_cache_key).not.toBe(sessionID)
+  })
+})
+
+describe("LLMRequestPrep.contentCacheKey", () => {
+  const head = {
+    agent: "build",
+    model: "gpt-4",
+    system: ["You are opencode.", "Repo: opencode"],
+    tools: ["bash", "read", "edit"],
+  }
+
+  test("identical head content yields an identical key", () => {
+    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools)).toBe(
+      LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools),
+    )
+  })
+
+  test("tool order does not change the key", () => {
+    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, [...head.tools].reverse())).toBe(
+      LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools),
+    )
+  })
+
+  test("a different agent, model, tool set, or system changes the key", () => {
+    const key = LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools)
+    expect(LLMRequestPrep.contentCacheKey("plan", head.model, head.system, head.tools)).not.toBe(key)
+    expect(LLMRequestPrep.contentCacheKey(head.agent, "gpt-5", head.system, head.tools)).not.toBe(key)
+    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, ["bash"])).not.toBe(key)
+    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, ["You are opencode."], head.tools)).not.toBe(key)
+  })
+
+  test("the key is a fixed-length lowercase hex digest", () => {
+    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools)).toMatch(/^[0-9a-f]{32}$/)
   })
 })
 

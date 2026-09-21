@@ -135,6 +135,21 @@ export const resolveJevEffortConfig = (raw: unknown): JevEffortConfig => {
         : DEFAULT_JEV_EFFORT.threshold,
   }
 }
+/** One `noul` question (jev.md §2: numeric 0..1, never boolean). Fail-open null. */
+export const classifyNoul = async (state: string, model: string): Promise<number | null> => {
+  const t = jevTransport(model)
+  const key = t && jevKeyFor(t.provider)
+  if (!t || !key) return null
+  // A `noul` question carries NO `criteria` (jev.md §2/§3: it emits no
+  // confidence/probabilities, so there are no labels to describe); sending one 422s.
+  const questions = { guardrail: { type: "noul", instructions: "Is this proposed action permitted given the goal and policy state?" } }
+  try {
+    const res = await fetch(t.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model: t.id, state, questions }), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    if (!res.ok) return null
+    const noul = ((await res.json()) as { answers?: { guardrail?: { noul?: unknown } } }).answers?.guardrail?.noul
+    return typeof noul === "number" && Number.isFinite(noul) ? noul : null
+  } catch { return null }
+}
 
 /**
  * A categorical tier verdict. `strength` is the MEASURED score for the chosen
