@@ -266,6 +266,21 @@ function capMemo<T>(map: Map<SessionID, T>) {
   }
 }
 
+// Frozen per session so mid-session local edits (AGENTS.md / instruction files)
+// cannot rewrite the cached prefix bytes. The provider caches a byte prefix of
+// the request: any change to the system array forces a full upstream re-prefill
+// even when prompt_cache_key is unchanged. Later turns reuse the session's first
+// system array verbatim; edits apply to the NEXT session.
+const jevSystemPrefix = new Map<SessionID, string[]>()
+
+function freezeSystem(sessionID: SessionID, current: string[]): string[] {
+  const frozen = jevSystemPrefix.get(sessionID)
+  if (frozen) return frozen
+  jevSystemPrefix.set(sessionID, current)
+  capMemo(jevSystemPrefix)
+  return current
+}
+
 // Fingerprint one completed assistant turn from its persisted parts: text
 // content, every tool name+input, and the finish reason. Identical turns
 // produce identical fingerprints; reordered tool calls still match.
@@ -2476,7 +2491,8 @@ const layer = Layer.effect(
                 })
               }
             }
-            const system = [
+            const environmentDate = yield* sys.environmentDate()
+            const system = freezeSystem(sessionID, [
               ...gatedBlocks,
               // The frozen advisory must NOT ride the system prefix: `system[0]`
               // is the cached head (`messages[0]`), so any advisory text there
@@ -2487,8 +2503,8 @@ const layer = Layer.effect(
               // Volatile date goes AFTER the stable anchors so a day rollover
               // only re-misses the short trailing tail, keeping the long stable
               // prefix byte-identical across turns for implicit prefix caching.
-              yield* sys.environmentDate(),
-            ]
+              environmentDate,
+            ])
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             // Prefix-cache invariant: the head (system blocks + sorted tool list)
             // is APPEND-ONLY across a session. Freeze once so every later turn
