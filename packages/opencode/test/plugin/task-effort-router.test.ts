@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { Hooks } from "@opencode-ai/plugin"
-import { TaskEffortRouterPlugin } from "../../../../.opencode/plugin-lib/task-effort-router"
+import {
+  TaskEffortRouterPlugin,
+  resetSystemFreeze,
+} from "../../../../.opencode/plugin-lib/task-effort-router"
 
 const hooks = (await (TaskEffortRouterPlugin as (input: unknown) => Promise<Hooks>)({
   project: { id: "test" },
@@ -75,6 +78,9 @@ async function requestEffort(sessionID: string, args: { level?: "medium" | "high
 
 /** Reset per-session governor state between tests. */
 async function resetState(sessionID = "ses_test") {
+  // The system-suffix decision is frozen per session for cache stability, so
+  // tests must also drop it to start from turn 1.
+  resetSystemFreeze()
   await hooks["chat.message"]?.({ sessionID }, { message: {} as never, parts: [] })
 }
 
@@ -162,6 +168,7 @@ describe("task effort router", () => {
   })
 
   test("a mutating tool execution pushes a risk notice regardless of task text", async () => {
+    resetSystemFreeze()
     await hooks["chat.message"]?.(
       { sessionID: "ses_test" },
       {
@@ -460,12 +467,39 @@ describe("task effort router", () => {
     expect(withVariants.system.length).toBe(2)
     expect(withVariants.system[1]).toContain("request_effort")
 
+    // A distinct session: the suffix is frozen per session on its first
+    // request, so reusing ses_test would replay the already-decided array.
     const withoutVariants = { system: ["base prompt"] }
     await hooks["experimental.chat.system.transform"]?.(
-      { sessionID: "ses_test", model: model({ variants: undefined }) } as never,
+      { sessionID: "ses_novariants", model: model({ variants: undefined }) } as never,
       withoutVariants as never,
     )
     expect(withoutVariants.system).toEqual(["base prompt"])
+  })
+
+  test("system suffix is frozen on the first request and never grows mid-session", async () => {
+    await resetState()
+    // Turn 1: not yet risky -> governor only, and that decision is frozen.
+    const first = { system: ["base"] }
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "ses_test", model: model() } as never,
+      first as never,
+    )
+    expect(first.system.length).toBe(2)
+    expect(first.system[1]).toContain("request_effort")
+
+    // A mutating tool flips `risky` AFTER the prefix was decided.
+    await hooks["tool.execute.after"]?.(
+      { sessionID: "ses_test", tool: "edit", callID: "call_2", args: {} } as never,
+      { title: "edit", output: "ok", metadata: {} } as never,
+    )
+    const later = { system: ["base"] }
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "ses_test", model: model() } as never,
+      later as never,
+    )
+    // Same bytes as turn 1: growing the array here would change the cache key.
+    expect(later.system).toEqual(first.system)
   })
 
   test("requesting the same or lower level is a no-op", async () => {

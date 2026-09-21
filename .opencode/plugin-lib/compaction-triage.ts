@@ -13,7 +13,7 @@
  * never logged; only the verdict and its strength leave this module.
  */
 
-import { DEFAULT_JEV_EFFORT, jevKeyFor, jevTransport, resolveJevModel } from "./jev-effort"
+import { DEFAULT_JEV_EFFORT, jevKeyFor, jevTransport, resolveJevModel } from "./jev-effort.ts"
 
 export type TriageDecision = "keep" | "summarize" | "drop"
 

@@ -1,7 +1,7 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
-import { classifyCompaction } from "./compaction-triage"
+import { classifyCompaction } from "./compaction-triage.ts"
 
 /**
  * Context Gate — a permanent policy engine for fixed context overhead.

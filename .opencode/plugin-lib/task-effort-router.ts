@@ -15,7 +15,7 @@ import {
 // The fold is PURE (no Effect, no clock, no fetch) so a plugin can import it
 // directly: ranking lives in one place instead of a plugin-lib copy that could
 // drift from the unit-tested original.
-import { arbitrate, arbitrateLogRows, type ArbitrateEntry } from "../../packages/opencode/src/session/arbitrate"
+import { arbitrate, arbitrateLogRows, type ArbitrateEntry } from "../../packages/opencode/src/session/arbitrate.ts"
 
 /**
  * Task Effort Router — a self-adjusting reasoning-effort governor.
@@ -357,13 +357,28 @@ const MAX_SESSIONS = 1_000
 /** Window in which an identical chat.message fire is treated as a duplicate. */
 const DEDUP_WINDOW_MS = 2_000
 
+const GOVERNOR_SYSTEM = [
+  "Reasoning effort governor:",
+  "- Start lean. Solve with your current reasoning effort first.",
+  "- If the task is clearly harder than expected (deep architecture changes, gnarly debugging), call `request_effort` with a short reason to raise your reasoning effort.",
+  "- Effort never decreases during a task and is capped; do not call it reflexively.",
+].join("\n")
+
+const RISK_NOTICE_SYSTEM =
+  "Task risk notice: this task touches a risk-sensitive domain (auth, credentials, schema/data, payments, production). Verify the blast radius before destructive steps and double-check edge cases before finishing."
+
 /**
- * Sessions whose risk notice has already appeared. The notice must stay
- * present on every later turn, not just the first risky one: a mid-session
- * add/remove transition rewrites the cached prompt prefix and breaks
- * upstream cache hits. Sticky for the session's lifetime, bounded like state.
+ * Frozen system-suffix bytes per session. `output.system` is hashed into the
+ * content cache key (`session/llm/request.ts`) and pinned as a cached prompt
+ * prefix (`provider/transform.ts`), so an entry appearing mid-session rewrites
+ * the prefix and cold-starts every later turn. Decide once, replay unchanged.
  */
-const riskNoticeShown = new Set<string>()
+const frozenSystem = new Map<string, readonly string[]>()
+
+/** Test-only: drop the frozen decisions so each case starts from turn 1. */
+function resetSystemFreeze() {
+  frozenSystem.clear()
+}
 
 /**
  * LOG-ONLY arbitration telemetry (Phase 3b item 1). Task calls settle
@@ -450,7 +465,6 @@ async function runArbiter(sessionID: string, entries: readonly SettledTask[]) {
 
 function trackSession(sessionID: string) {
   state.delete(sessionID)
-  riskNoticeShown.delete(sessionID)
   state.set(sessionID, {
     escalated: undefined,
     baseline: undefined,
@@ -464,7 +478,7 @@ function trackSession(sessionID: string) {
     const oldest = state.keys().next().value
     if (oldest !== undefined) {
       state.delete(oldest)
-      riskNoticeShown.delete(oldest)
+      frozenSystem.delete(oldest)
     }
   }
 }
@@ -473,7 +487,7 @@ function rank(effort: Effort): number {
   return LADDER.indexOf(effort)
 }
 
-export { DEFAULTS, assess, effective, isBrainAgent, isBrainModel, noteToolUse, normalize, pinnedEffort, variantFor }
+export { DEFAULTS, assess, effective, frozenSystem, isBrainAgent, isBrainModel, noteToolUse, normalize, pinnedEffort, resetSystemFreeze, variantFor }
 
 /**
  * Exact agent-name identity from config: equality against cfg.brainAgent,
@@ -846,26 +860,29 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
     },
 
     "experimental.chat.system.transform": async (input, output) => {
+      const sessionID = input.sessionID
+      if (!sessionID) return
+      const frozen = frozenSystem.get(sessionID)
+      if (frozen) {
+        output.system.push(...frozen)
+        return
+      }
+      // First request of this session decides the suffix ONCE, from the
+      // signals available now (variants, and `risky` as of this turn). Later
+      // turns — including one where `risky` flips true — replay these exact
+      // bytes: the system array is cache-keyed and prefix-pinned, so a
+      // mid-session add/remove cold-starts the whole upstream prefix.
       const variants = variantsOf(input.model)
       if (!variants || Object.keys(variants).length === 0) return
-      output.system.push(
-        [
-          "Reasoning effort governor:",
-          "- Start lean. Solve with your current reasoning effort first.",
-          "- If the task is clearly harder than expected (deep architecture changes, gnarly debugging), call `request_effort` with a short reason to raise your reasoning effort.",
-          "- Effort never decreases during a task and is capped; do not call it reflexively.",
-        ].join("\n"),
-      )
-      const entry = input.sessionID ? state.get(input.sessionID) : undefined
-      // Sticky once shown: emit on every later turn of the session so the
-      // transition turn is the only one that changes the prefix (and only if
-      // that turn was not the session's first). Cache-stability measure.
-      if (input.sessionID && entry?.risky) riskNoticeShown.add(input.sessionID)
-      if (input.sessionID && riskNoticeShown.has(input.sessionID)) {
-        output.system.push(
-          "Task risk notice: this task touches a risk-sensitive domain (auth, credentials, schema/data, payments, production). Verify the blast radius before destructive steps and double-check edge cases before finishing.",
-        )
+      const decided = [GOVERNOR_SYSTEM]
+      if (state.get(sessionID)?.risky) decided.push(RISK_NOTICE_SYSTEM)
+      frozenSystem.set(sessionID, decided)
+      if (frozenSystem.size > MAX_SESSIONS) {
+        // Map preserves insertion order — evict the oldest session.
+        const oldest = frozenSystem.keys().next().value
+        if (oldest !== undefined) frozenSystem.delete(oldest)
       }
+      output.system.push(...decided)
     },
 
     tool: {
