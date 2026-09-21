@@ -16,10 +16,87 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const AUTH_FILE = join(homedir(), ".local", "share", "opencode", "auth.json")
-const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
+const GLOBAL_CONFIG_FILE = join(homedir(), ".config", "opencode", "opencode.json")
 const MEMO_MAX = 200
 const REQUEST_TIMEOUT_MS = 3_000
 const EXCERPT_CHARS = 400
+
+/**
+ * Provider-aware transport, copied from packages/opencode/src/jev/client.ts:55-99
+ * (plugin-lib must stay zero-dependency, so the pattern is mirrored not imported).
+ * A `provider/model-id` spec resolves to its own endpoint: a `typesafe/*` spec
+ * NEVER goes to openrouter.ai. Unknown providers return undefined so the caller
+ * fails open instead of POSTing a decisions payload at a provider that cannot
+ * answer it.
+ */
+const JEV_ENDPOINTS: Readonly<Record<string, string>> = {
+  typesafe: "https://api.typesafe.ai/v1/systemone",
+  openrouter: "https://openrouter.ai/api/alpha/decisions",
+}
+
+/** typesafe aliases normalized to a wire-accepted id; unknown ids → jev-latest. */
+const JEV_TYPESAFE_MODELS: Readonly<Record<string, string>> = {
+  "jev-latest": "jev-latest",
+  "jev-1.13": "jev-latest",
+  "jev-1.13.0": "jev-1.13.0",
+}
+
+const typesafeWireId = (id: string): string => JEV_TYPESAFE_MODELS[id] ?? "jev-latest"
+
+/** Env var per provider namespace, tried after the matching auth.json entry. */
+const JEV_KEY_ENV: Readonly<Record<string, string>> = { typesafe: "TYPESAFE_API_KEY", openrouter: "OPENROUTER_API_KEY" }
+
+export type JevTransport = { provider: string; id: string; endpoint: string }
+
+/**
+ * Resolve a `provider/model-id` spec to a transport. typesafe ids are normalized
+ * to a wire id; openrouter ids pass through verbatim. A missing provider/id or an
+ * unknown provider prefix returns undefined (fail-open).
+ */
+export const jevTransport = (spec: string): JevTransport | undefined => {
+  const raw = spec.trim()
+  const slash = raw.indexOf("/")
+  if (slash <= 0) return undefined
+  const provider = raw.slice(0, slash)
+  const rawId = raw.slice(slash + 1)
+  if (!rawId) return undefined
+  const endpoint = JEV_ENDPOINTS[provider]
+  if (!endpoint) return undefined
+  const id = provider === "typesafe" ? typesafeWireId(rawId) : rawId
+  return { provider, id, endpoint }
+}
+
+/**
+ * Read the key for a provider namespace from auth.json, then its env var. The
+ * key is never logged. An unknown namespace has no env var and fails open.
+ */
+export const jevKeyFor = (provider: string): string | undefined => {
+  try {
+    const auth = JSON.parse(readFileSync(AUTH_FILE, "utf8")) as Record<string, { key?: string }>
+    const k = auth[provider]?.key
+    if (typeof k === "string" && k.length > 0) return k
+  } catch {
+    // fall through to env
+  }
+  const name = JEV_KEY_ENV[provider]
+  const env = name ? process.env[name] : undefined
+  return typeof env === "string" && env.length > 0 ? env : undefined
+}
+
+/**
+ * Read the global `jevDefault.model` from ~/.config/opencode/opencode.json so an
+ * effort-router.json that omits `model` inherits the user's default Jev provider
+ * instead of the shipped constant. Fail-open undefined if unreadable.
+ */
+export const readGlobalJevDefaultModel = (): string | undefined => {
+  try {
+    const parsed = JSON.parse(readFileSync(GLOBAL_CONFIG_FILE, "utf8")) as { jevDefault?: { model?: unknown } }
+    const m = parsed.jevDefault?.model
+    return typeof m === "string" && m.length > 0 ? m : undefined
+  } catch {
+    return undefined
+  }
+}
 
 export type EffortTier = "minimal" | "low" | "medium" | "high"
 
@@ -98,18 +175,6 @@ export const __testRemember = remember
 // ---------------------------------------------------------------------------
 // Effectful: one detached decisions call. NEVER awaited on the critical path.
 // ---------------------------------------------------------------------------
-const readKey = (): string | undefined => {
-  try {
-    const auth = JSON.parse(readFileSync(AUTH_FILE, "utf8")) as Record<string, { key?: string }>
-    const k = auth.openrouter?.key
-    if (typeof k === "string" && k.length > 0) return k
-  } catch {
-    // fall through to env
-  }
-  const env = process.env.OPENROUTER_API_KEY
-  return typeof env === "string" && env.length > 0 ? env : undefined
-}
-
 const excerpt = (text: string): string => (text.length <= EXCERPT_CHARS ? text : text.slice(0, EXCERPT_CHARS))
 
 const buildQuestions = (text: string): Record<string, { type: "choice"; instructions: string; criteria: Record<string, string | null> }> => ({
@@ -143,18 +208,25 @@ export const classifyTier = async (text: string, cfg: JevEffortConfig = DEFAULT_
   if (!cfg.enabled) return null
   const cached = memoResult(text)
   if (cached) return cached
-  const key = readKey()
+  const spec = cfg.model || readGlobalJevDefaultModel() || DEFAULT_JEV_EFFORT.model
+  const transport = jevTransport(spec)
+  if (!transport) return null
+  const key = jevKeyFor(transport.provider)
   if (!key) return null
   try {
-    const res = await fetch(DECISIONS_URL, {
+    const res = await fetch(transport.endpoint, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({ model: cfg.model, state: STATE, questions: buildQuestions(text) }),
+      body: JSON.stringify({ model: transport.id, state: STATE, questions: buildQuestions(text) }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
+    if (process.env.OPENCODE_JEV_DEBUG) {
+      // Server-side only: endpoint HOST + model id, never the key.
+      console.debug(`jev-effort: ${transport.provider}/${transport.id} -> ${new URL(transport.endpoint).host} ok=${res.ok}`)
+    }
     if (!res.ok) return null
     const result = foldAnswer(await res.json())
     if (result) remember(text, result)
