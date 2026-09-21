@@ -10,7 +10,6 @@ import { GrepTool } from "./grep"
 import { QuestionTool } from "./question"
 import { ReadTool } from "./read"
 import { ScheduleTaskTool } from "./schedule-task"
-import { SessionRenameTool } from "./session-rename"
 import { SkillTool } from "./skill"
 import { TodoWriteTool } from "./todowrite"
 import { WebFetchTool } from "./webfetch"
@@ -42,7 +41,6 @@ export const node = makeLocationNode({
     QuestionTool.node,
     ReadTool.node,
     ScheduleTaskTool.node,
-    SessionRenameTool.node,
     SkillTool.node,
     TodoWriteTool.node,
     WebFetchTool.node,
