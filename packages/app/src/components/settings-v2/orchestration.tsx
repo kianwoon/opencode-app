@@ -1,12 +1,15 @@
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
-import { Show, type Component, createMemo, For } from "solid-js"
+import { Tag } from "@opencode-ai/ui/v2/badge-v2"
+import { Show, type Component, createMemo, createResource, For } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 import type { ModelKey } from "@/context/local"
+import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { showToast } from "@/utils/toast"
@@ -22,6 +25,10 @@ const enforcementOptions: Enforcement[] = ["strict", "advisory"]
 // bundle cannot import from the server package, so keep this literal in sync:
 // the shared default is `provider/model-id`, resolved to the SystemOne path.
 const JEV_DEFAULT_MODEL = "typesafe/jev-latest"
+
+// Mirrors JEV_DEFAULT_THRESHOLD in packages/opencode/src/jev/client.ts — same
+// bundle-boundary reason as the model literal above.
+const JEV_DEFAULT_THRESHOLD = 0.7
 
 type BrainConfig = {
   model?: string
@@ -90,8 +97,26 @@ const ModelFieldControl: Component<{ field: string; state: FieldState }> = (prop
     />
   )
 }
+// Read-only rendering helpers for the effort-router status + Jev verdict tail.
+// Verdict records are unknown-shaped (the server passes through whatever the
+// plugin logged), so every field is coerced defensively.
+const verdictTime = (ts: unknown) => {
+  if (typeof ts !== "number" || !Number.isFinite(ts)) return "--:--:--"
+  return new Date(ts).toLocaleTimeString()
+}
+
+const verdictDetail = (verdict: Record<string, unknown>) => {
+  const parts: string[] = []
+  if (verdict.tier !== undefined) parts.push(`tier ${String(verdict.tier)}`)
+  if (verdict.strength !== undefined) parts.push(`strength ${String(verdict.strength)}`)
+  if (verdict.action !== undefined) parts.push(`action ${String(verdict.action)}`)
+  if (verdict.reason !== undefined) parts.push(String(verdict.reason))
+  return parts.join(" · ") || String(verdict.sessionID ?? "")
+}
+
 export const SettingsOrchestrationV2: Component = () => {  const language = useLanguage()
   const serverSync = useServerSync()
+  const serverSDK = useServerSDK()
 
   const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
   const jev = createMemo(() => serverSync().data.config.jev ?? {})
@@ -99,6 +124,20 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const brainBooster = createMemo(() => serverSync().data.config.brainBooster ?? {})
   const jevDefault = createMemo(() => serverSync().data.config.jevDefault ?? {})
   const models = useModels()
+
+  // Panel-mount reads of the server-owned effort-router state. Both fail
+  // SILENT: `createResource` parks a failure in `.error`, so a missing/older
+  // server or a malformed record renders "unknown" and never breaks the tab,
+  // which stays usable for config writes.
+  const [effortRouter] = createResource(async () => {
+    const result = await serverSDK().client.global.effortRouter.get()
+    return result.data ?? undefined
+  })
+
+  const [verdicts] = createResource(async () => {
+    const result = await serverSDK().client.global.jevVerdicts.list({ limit: "5" })
+    return result.data ?? []
+  })
 
   const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
     const value = brain()[field] ?? ""
@@ -210,13 +249,22 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
-  const commitJev = (patch: { enabled?: boolean }) => {
+  const commitJev = (patch: { enabled?: boolean; threshold?: number }) => {
     void serverSync()
       .updateConfig({ jev: { ...jev(), ...patch } })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })
       })
+  }
+
+  // Threshold is a confidence floor, not a probability the user can reason
+  // about continuously: commit on `change` (blur/Enter), never on every
+  // keystroke, so a partially typed "0." never persists as a floor of 0.
+  const commitThreshold = (raw: string) => {
+    const value = Number(raw)
+    if (!Number.isFinite(value) || value < 0 || value > 1) return
+    commitJev({ threshold: value })
   }
 
   const commitGovernor = (patch: { enabled?: boolean }) => {
@@ -298,6 +346,26 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
             </SettingsRowV2>
 
             <SettingsRowV2
+              title="Tool routing threshold"
+              description="Confidence floor (0-1) a Jev row must reach to keep/drop a tool. Below it the row fails open and the tool stays. Default 0.7."
+            >
+              <div class="w-full sm:w-[220px]">
+                <TextInputV2
+                  data-action="settings-orchestration-jev-threshold"
+                  type="number"
+                  appearance="base"
+                  numeric
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={String(jev().threshold ?? JEV_DEFAULT_THRESHOLD)}
+                  onChange={(event) => commitThreshold(event.currentTarget.value)}
+                  aria-label="Tool routing threshold"
+                />
+              </div>
+            </SettingsRowV2>
+
+            <SettingsRowV2
               title="Context governor"
               description={`Drop-only relevance gating of conversation context via ${modelLabel("governor")}. OFF keeps all context.`}
             >
@@ -332,6 +400,54 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
             <SettingsRowV2 title="Brain booster model" description="Decision model for the brain booster (any provider; typesafe routes to SystemOne).">
               <div class="w-full sm:w-[220px]">
                 <ModelFieldControl field="brainBooster-model" state={sectionStateFor("brainBooster")} />
+              </div>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Effort router status"
+              description="Resolved from effort-router.json at panel mount. Read-only; edit the file to change the router itself."
+            >
+              <Tag variant="neutral" data-action="settings-orchestration-effort-router-status">
+                {effortRouter() === undefined ? "unknown" : effortRouter()?.jev.enabled ? "jev enabled" : "jev disabled"}
+              </Tag>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Guardrail status"
+              description="Pre-execution Noul guardrail bands for risky tools. Read-only; OFF means risky tools run unchecked."
+            >
+              <Tag variant="neutral" data-action="settings-orchestration-guardrail-status">
+                {effortRouter() === undefined
+                  ? "unknown"
+                  : effortRouter()?.guardrail.enabled
+                    ? "guardrail enabled"
+                    : "guardrail disabled"}
+              </Tag>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Recent Jev verdicts"
+              description="Newest effort-router decisions from effort-router.jsonl (up to 5). Read-only."
+            >
+              <div class="w-full sm:w-[260px] flex flex-col gap-1" data-action="settings-orchestration-jev-verdicts">
+                <Show
+                  when={(verdicts()?.length ?? 0) > 0}
+                  fallback={
+                    <span class="truncate leading-4 opacity-60">
+                      {verdicts.error ? "unknown" : verdicts.loading ? "" : "No recent verdicts"}
+                    </span>
+                  }
+                >
+                  <For each={verdicts()}>
+                    {(verdict) => (
+                      <div class="flex items-baseline gap-2 leading-4">
+                        <span class="shrink-0 opacity-60" style={{ "font-variant-numeric": "tabular-nums" }}>{verdictTime(verdict.ts)}</span>
+                        <span class="truncate">{String(verdict.event ?? "unknown")}</span>
+                        <span class="truncate opacity-60">{verdictDetail(verdict)}</span>
+                      </div>
+                    )}
+                  </For>
+                </Show>
               </div>
             </SettingsRowV2>
           </SettingsListV2>

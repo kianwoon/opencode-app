@@ -7,6 +7,8 @@ import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
+import { FSUtil } from "@opencode-ai/core/fs-util"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
@@ -28,6 +30,7 @@ const apiLayer = HttpRouter.serve(
   { disableListenLog: true, disableLogger: true },
 ).pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
+  Layer.provide(LayerNode.compile(FSUtil.node)),
   Layer.provide(Layer.mock(Auth.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(MoveSession.Service)({})),
@@ -85,6 +88,40 @@ describe("global HttpApi", () => {
       )
 
       expect(response.status).toBe(415)
+    }),
+  )
+
+  // Reads the real user config/JSONL on this machine: assert the resolved
+  // shape only, never contents, so the test stays hermetic.
+  it.live("resolves the effort-router config without exposing secrets", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(GlobalPaths.effortRouter).pipe(HttpClient.execute)
+      expect(response.status).toBe(200)
+      const body = (yield* response.json) as Record<string, unknown>
+      const jev = body.jev as Record<string, unknown>
+      const guardrail = body.guardrail as Record<string, unknown>
+      expect(typeof jev.enabled).toBe("boolean")
+      expect(typeof jev.threshold).toBe("number")
+      expect(typeof guardrail.enabled).toBe("boolean")
+      expect(guardrail.denyBelow as number).toBeGreaterThanOrEqual(0)
+      expect(Array.isArray(body.riskyTools)).toBe(true)
+      expect(JSON.stringify(body)).not.toMatch(/api[_-]?key|secret|token|password/i)
+    }),
+  )
+
+  it.live("returns newest-first jev verdicts and honours limit=0", () =>
+    Effect.gen(function* () {
+      const empty = yield* HttpClientRequest.get(`${GlobalPaths.jevVerdicts}?limit=0`).pipe(HttpClient.execute)
+      expect(empty.status).toBe(200)
+      expect(yield* empty.json).toEqual([])
+
+      const response = yield* HttpClientRequest.get(`${GlobalPaths.jevVerdicts}?limit=5`).pipe(HttpClient.execute)
+      expect(response.status).toBe(200)
+      const body = (yield* response.json) as Array<Record<string, unknown>>
+      expect(Array.isArray(body)).toBe(true)
+      expect(body.length).toBeLessThanOrEqual(5)
+      const times = body.map((entry) => entry.ts as number)
+      expect(times).toEqual([...times].sort((a, b) => b - a))
     }),
   )
 })

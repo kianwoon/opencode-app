@@ -88,10 +88,14 @@ import type {
   GlobalConfigUpdateResponses,
   GlobalDisposeErrors,
   GlobalDisposeResponses,
+  GlobalEffortRouterGetErrors,
+  GlobalEffortRouterGetResponses,
   GlobalEventErrors,
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalJevVerdictsListErrors,
+  GlobalJevVerdictsListResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1452,6 +1456,46 @@ export class Config extends HeyApiClient {
   }
 }
 
+export class EffortRouter extends HeyApiClient {
+  /**
+   * Get resolved effort-router config
+   *
+   * Read the resolved task-effort-router configuration (Jev tool routing, guardrail bands, risky tools).
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalEffortRouterGetResponses,
+      GlobalEffortRouterGetErrors,
+      ThrowOnError
+    >({ url: "/global/effort-router", ...options })
+  }
+}
+
+export class JevVerdicts extends HeyApiClient {
+  /**
+   * List recent Jev verdicts
+   *
+   * Tail the newest effort-router decision records (newest first).
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "limit" }] }])
+    return (options?.client ?? this.client).get<
+      GlobalJevVerdictsListResponses,
+      GlobalJevVerdictsListErrors,
+      ThrowOnError
+    >({
+      url: "/global/jev-verdicts",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -1516,6 +1560,16 @@ export class Global extends HeyApiClient {
   private _config?: Config
   get config(): Config {
     return (this._config ??= new Config({ client: this.client }))
+  }
+
+  private _effortRouter?: EffortRouter
+  get effortRouter(): EffortRouter {
+    return (this._effortRouter ??= new EffortRouter({ client: this.client }))
+  }
+
+  private _jevVerdicts?: JevVerdicts
+  get jevVerdicts(): JevVerdicts {
+    return (this._jevVerdicts ??= new JevVerdicts({ client: this.client }))
   }
 }
 

@@ -7651,6 +7651,73 @@ export type GlobalConfigUpdateResponses = {
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
 
+export type GlobalEffortRouterGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/effort-router"
+}
+
+export type GlobalEffortRouterGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalEffortRouterGetError = GlobalEffortRouterGetErrors[keyof GlobalEffortRouterGetErrors]
+
+export type GlobalEffortRouterGetResponses = {
+  /**
+   * Resolved effort-router configuration
+   */
+  200: {
+    jev: {
+      enabled: boolean
+      model: string
+      threshold: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+    guardrail: {
+      enabled: boolean
+      model: string
+      denyBelow: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      abstainBelow: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }
+    riskyTools: Array<string>
+  }
+}
+
+export type GlobalEffortRouterGetResponse = GlobalEffortRouterGetResponses[keyof GlobalEffortRouterGetResponses]
+
+export type GlobalJevVerdictsListData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: string
+  }
+  url: "/global/jev-verdicts"
+}
+
+export type GlobalJevVerdictsListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalJevVerdictsListError = GlobalJevVerdictsListErrors[keyof GlobalJevVerdictsListErrors]
+
+export type GlobalJevVerdictsListResponses = {
+  /**
+   * Recent verdict records
+   */
+  200: Array<{
+    [key: string]: unknown
+  }>
+}
+
+export type GlobalJevVerdictsListResponse = GlobalJevVerdictsListResponses[keyof GlobalJevVerdictsListResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

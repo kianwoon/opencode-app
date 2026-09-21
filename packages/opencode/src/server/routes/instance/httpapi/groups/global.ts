@@ -65,12 +65,40 @@ const GlobalUpgradeResult = Schema.Union([
   }),
 ])
 
+/**
+ * Resolved effort-router configuration. Mirrors the coercion the router plugin
+ * applies to `effort-router.json` (booleans default false, bands clamp to 0..1,
+ * absent models fall back). Deliberately contains no key material.
+ */
+const EffortRouterConfig = Schema.Struct({
+  jev: Schema.Struct({
+    enabled: Schema.Boolean,
+    model: Schema.String,
+    threshold: Schema.Number,
+  }),
+  guardrail: Schema.Struct({
+    enabled: Schema.Boolean,
+    model: Schema.String,
+    denyBelow: Schema.Number,
+    abstainBelow: Schema.Number,
+  }),
+  riskyTools: Schema.Array(Schema.String),
+})
+
+export const JevVerdictsQuery = Schema.Struct({
+  limit: Schema.optional(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(100)),
+  ),
+})
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  effortRouter: "/global/effort-router",
+  jevVerdicts: "/global/jev-verdicts",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -112,6 +140,26 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.config.update",
           summary: "Update global configuration",
           description: "Update global OpenCode configuration settings and preferences.",
+        }),
+      ),
+      HttpApiEndpoint.get("effortRouter", GlobalPaths.effortRouter, {
+        success: described(EffortRouterConfig, "Resolved effort-router configuration"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.effortRouter.get",
+          summary: "Get resolved effort-router config",
+          description:
+            "Read the resolved task-effort-router configuration (Jev tool routing, guardrail bands, risky tools).",
+        }),
+      ),
+      HttpApiEndpoint.get("jevVerdicts", GlobalPaths.jevVerdicts, {
+        query: JevVerdictsQuery,
+        success: described(Schema.Array(Schema.Record(Schema.String, Schema.Unknown)), "Recent verdict records"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.jevVerdicts.list",
+          summary: "List recent Jev verdicts",
+          description: "Tail the newest effort-router decision records (newest first).",
         }),
       ),
       HttpApiEndpoint.post("dispose", GlobalPaths.dispose, {

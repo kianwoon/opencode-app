@@ -1,6 +1,7 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
+import { classifyCompaction } from "./compaction-triage"
 
 /**
  * Context Gate — a permanent policy engine for fixed context overhead.
@@ -62,6 +63,13 @@ export interface GateConfig {
   summarizeWordLimit: number
   /** "provider/model" override for the summarizer; defaults to the session's model. */
   summarizerModel: string
+  /**
+   * LLM triage of each oversize section BEFORE summarizing it: a decisive
+   * "keep" emits the section verbatim (no compression, cache-stable), "drop"
+   * still emits it (the gate has no drop path) and is informational only.
+   * OFF by default — a weak/absent verdict always falls back to summarizing.
+   */
+  triageEnabled: boolean
   /** A file-read of a withheld guide path pins it for the rest of the session (default on). */
   retrievalPromotion: boolean
 }
@@ -75,6 +83,7 @@ const DEFAULTS: GateConfig = {
   summarizeEnabled: true,
   summarizeWordLimit: 2_000,
   summarizerModel: "",
+  triageEnabled: false,
   retrievalPromotion: true,
 }
 
@@ -108,6 +117,7 @@ function loadConfig(): GateConfig {
         if (typeof parsed.summarizeWordLimit === "number") next.summarizeWordLimit = parsed.summarizeWordLimit
         if (typeof parsed.summarizerModel === "string") next.summarizerModel = parsed.summarizerModel
         if (typeof parsed.retrievalPromotion === "boolean") next.retrievalPromotion = parsed.retrievalPromotion
+        if (typeof parsed.triageEnabled === "boolean") next.triageEnabled = parsed.triageEnabled
         break
       }
       configCache = next
@@ -1015,6 +1025,19 @@ async function gateSystem(
       continue
     }
     try {
+      // Triage (opt-in, default OFF): only a decisive "keep" changes behavior —
+      // the section rides through byte-identical and summarizeSection is never
+      // called for it. Every other outcome (weak row, "drop", transport error,
+      // absent key) falls through to today's summary path, so enabling triage
+      // can never withhold a section the gate would previously have kept.
+      if (config.triageEnabled) {
+        const verdict = await classifyCompaction(section.path!, section.text)
+        log("triage", { sessionID, path: section.path, decision: verdict?.decision ?? "summarize", strength: verdict?.strength ?? null })
+        if (verdict?.decision === "keep") {
+          expanded.push(section)
+          continue
+        }
+      }
       const result = await summarizeSection(section, summarizeCtx, sessionID, { spawnFlight: !flightSpawned })
       expanded.push(result)
       // Only a call that actually created this flight counts against the

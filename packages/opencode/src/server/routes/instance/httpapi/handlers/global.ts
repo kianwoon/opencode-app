@@ -1,11 +1,13 @@
 import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
+import { Global } from "@opencode-ai/core/global"
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { Effect, Queue } from "effect"
+import { Effect, Option, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -13,7 +15,50 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
 
-function eventData(data: unknown): Sse.Event {
+/**
+ * Resolved effort-router config, mirroring the plugin's coercion so the panel
+ * shows what the router will actually use. Deliberately returns no key material.
+ */
+const DEFAULT_JEV = { enabled: false, model: "typesafe/jev-1.13", threshold: 0.5 }
+const DEFAULT_GUARDRAIL = { enabled: false, model: "typesafe/jev-1.13", denyBelow: 0.3, abstainBelow: 0.7 }
+const DEFAULT_RISKY_TOOLS = ["edit", "write", "patch", "bash"]
+
+const DEFAULT_VERDICT_LIMIT = 20
+const MAX_VERDICT_LIMIT = 100
+// Per-line budget for the bounded tail read; real records are well under this.
+const VERDICT_BYTES_PER_LINE = 512
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
+const band = (value: unknown, fallback: number) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback
+
+const text = (value: unknown, fallback: string) =>
+  typeof value === "string" && value.length > 0 ? value : fallback
+
+function resolveEffortRouterConfig(raw: unknown) {
+  const root = record(raw)
+  const jev = record(root.jev)
+  const guardrail = record(root.guardrail)
+  const riskyTools = Array.isArray(root.riskyTools) ? root.riskyTools.filter((t) => typeof t === "string") : []
+  return {
+    jev: {
+      enabled: jev.enabled === true,
+      model: text(jev.model, DEFAULT_JEV.model),
+      threshold: band(jev.threshold, DEFAULT_JEV.threshold),
+    },
+    guardrail: {
+      enabled: guardrail.enabled === true,
+      model: text(guardrail.model, DEFAULT_GUARDRAIL.model),
+      denyBelow: band(guardrail.denyBelow, DEFAULT_GUARDRAIL.denyBelow),
+      abstainBelow: band(guardrail.abstainBelow, DEFAULT_GUARDRAIL.abstainBelow),
+    },
+    riskyTools: riskyTools.length > 0 ? riskyTools : DEFAULT_RISKY_TOOLS,
+  }
+}
+
+export function eventData(data: unknown): Sse.Event {
   return {
     _tag: "Event",
     event: "message",
@@ -61,6 +106,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
   Effect.gen(function* () {
     const config = yield* Config.Service
     const installation = yield* Installation.Service
+    const fs = yield* FSUtil.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -73,6 +119,47 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
       return yield* config.getGlobal()
+    })
+
+    // The router plugin (`.opencode/plugin-lib/task-effort-router.ts`) is not a
+    // server dependency — its lib is repo-local and Bun-plugin shaped — so the
+    // route re-reads the same on-disk file and re-applies its coercion. Absent
+    // or malformed config fails open to the plugin's DEFAULTS, never an error.
+    const effortRouter = Effect.fn("GlobalHttpApi.effortRouter")(function* () {
+      const file = `${Global.Path.config}/effort-router.json`
+      const raw = yield* fs.readFileStringSafe(file).pipe(Effect.orElseSucceed(() => undefined))
+      if (!raw) return resolveEffortRouterConfig(undefined)
+      return resolveEffortRouterConfig(
+        Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw)),
+      )
+    })
+
+    // Read-only, bounded tail: stat for the size, seek to a window of
+    // `limit * VERDICT_BYTES_PER_LINE` bytes from the end, never the whole file.
+    const jevVerdicts = Effect.fn("GlobalHttpApi.jevVerdicts")(function* (ctx: {
+      query: { limit?: number }
+    }) {
+      const limit = Math.min(ctx.query.limit ?? DEFAULT_VERDICT_LIMIT, MAX_VERDICT_LIMIT)
+      if (limit === 0) return []
+      const file = `${Global.Path.data}/effort-router.jsonl`
+      const info = yield* fs.stat(file).pipe(Effect.orElseSucceed(() => undefined))
+      if (!info) return []
+      const tailBytes = Math.min(Number(info.size), limit * VERDICT_BYTES_PER_LINE)
+      const chunk = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const handle = yield* fs.open(file, { flag: "r" })
+          yield* handle.seek(Number(info.size) - tailBytes, "start")
+          return Option.getOrElse(yield* handle.readAlloc(tailBytes), () => new Uint8Array())
+        }),
+      ).pipe(Effect.orElseSucceed(() => new Uint8Array()))
+      const lines = new TextDecoder().decode(chunk).split("\n").filter((line) => line.length > 0)
+      // A seek into the middle of a line leaves a partial first entry: drop it.
+      const whole = Number(info.size) > tailBytes ? lines.slice(1) : lines
+      return whole.slice(-limit).flatMap((line) => {
+        const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(line))
+        if (!parsed || typeof parsed !== "object") return []
+        return [parsed as Record<string, unknown>]
+      }).reverse()
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
@@ -122,6 +209,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("health", health)
       .handleRaw("event", event)
       .handle("configGet", configGet)
+      .handle("effortRouter", effortRouter)
+      .handle("jevVerdicts", jevVerdicts)
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)

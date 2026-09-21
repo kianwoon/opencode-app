@@ -33,6 +33,7 @@ const CONFIG: GateConfig = {
   summarizeEnabled: false,
   summarizeWordLimit: 2_000,
   summarizerModel: "",
+  triageEnabled: false,
   retrievalPromotion: true,
 }
 
