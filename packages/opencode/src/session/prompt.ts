@@ -230,6 +230,30 @@ const jevBoostTurn = new Map<SessionID, { turnId: string; label: string; advisor
 // every later step of the SAME turn. Keyed by user message id because block
 // indexes are positional and only restore at a turn boundary.
 const jevGovDropped = new Map<SessionID, { turnId: string; blocksHash: string; dropped: ReadonlySet<number> }>()
+// SESSION-frozen head: the system block selection and the emitted tool list are
+// folded ONCE per session and reused verbatim on every later turn. A per-turn
+// fold shrinks `messages[0]` between turns (observed: 32137 → 989 chars), and any
+// shrink or reorder of the head re-bills the entire cached prefix. Frozen keyed
+// by block-composition hash so a genuinely different block set (a changed
+// instruction/env block) is not paired with stale positional indexes. The JEV
+// verdicts still run and still log — only the EMITTED head is monotonic.
+const jevGovHead = new Map<SessionID, { blocksHash: string; dropped: ReadonlySet<number> }>()
+// Keyed by SessionID ALONE: the emitted tool list must not re-freeze when
+// per-turn state changes (wrapUp flag, tool count). Keying on those let a
+// narrowed turn (or a wrap-up flip) rewrite the array and re-bill the whole
+// cached prefix.
+const jevHeadTools = new Map<SessionID, Record<string, unknown>>()
+
+function freezeHead<T extends Record<string, unknown>>(sessionID: SessionID, current: T): T {
+  const frozen = jevHeadTools.get(sessionID)
+  if (frozen) return frozen as T
+  // Insertion order IS the emitted order, so sort by name once here: the same
+  // session can otherwise resolve tools in a different order between turns.
+  const sorted = Object.fromEntries(Object.keys(current).toSorted().map((name) => [name, current[name]]))
+  jevHeadTools.set(sessionID, sorted)
+  capMemo(jevHeadTools)
+  return sorted as T
+}
 
 // Module-global session-keyed memos never get an explicit session-end hook, so
 // cap them: oldest-inserted entry is evicted past 50 sessions. Only observability
@@ -2237,6 +2261,11 @@ const layer = Layer.effect(
                   narrowed["StructuredOutput"] = tools["StructuredOutput"]
                 }
                 const after = Object.keys(narrowed).length
+                // EMITTED head is frozen: the JEV verdict must NOT rewrite the
+                // `tools[]` array, because dropping or reordering tools between
+                // turns invalidates the whole cached prefix (observed: 35 → 22
+                // tools across turns). The decision is still applied to `turnTools`
+                // for behavior/telemetry, then the session-frozen full list wins.
                 // Floor guard: a confident skip-all can fold a 35-tool turn down
                 // to a handful (observed: `ses_f4545cf6`, 35 → 2 at 0.7), and the
                 // decision is CACHED for the whole turn, so applying it leaves the
@@ -2325,11 +2354,18 @@ const layer = Layer.effect(
               govPrevTask !== undefined &&
               govPrevTask.turnId === lastUser.id &&
               govPrevTask.blocksHash === govBlocksHash
+            const govFrozen = jevGovHead.get(sessionID)
             let govDroppedSet: ReadonlySet<number>
             let govStickySize = 0
             if (!govKey) {
               // Fail-open: disabled / no key → nothing dropped, never fold.
               govDroppedSet = new Set<number>()
+            } else if (govFrozen && govFrozen.blocksHash === govBlocksHash) {
+              // SESSION-frozen head: the emitted block list must not shrink
+              // between turns (prefix cache is append-only). The verdict is still
+              // computed and logged below; only the emission stays verbatim.
+              govDroppedSet = govFrozen.dropped
+              govStickySize = govFrozen.dropped.size
             } else if (govReuse) {
               // Same turn: reuse the frozen decision, do NOT call governorKeep.
               govDroppedSet = govPrevTask!.dropped
@@ -2357,6 +2393,10 @@ const layer = Layer.effect(
                 dropped: govDroppedSet,
               })
               capMemo(jevGovDropped)
+              if (!jevGovHead.has(sessionID)) {
+                jevGovHead.set(sessionID, { blocksHash: govBlocksHash, dropped: govDroppedSet })
+                capMemo(jevGovHead)
+              }
             }
             const gatedBlocks = applyDrops(govBlocks, govDroppedSet)
             const govDropped = govDroppedSet.size
@@ -2442,15 +2482,20 @@ const layer = Layer.effect(
               yield* sys.environmentDate(),
             ]
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            // Prefix-cache invariant: the head (system blocks + sorted tool list)
+            // is APPEND-ONLY across a session. Freeze once so every later turn
+            // emits byte-identical head bytes; the per-turn JEV decision is
+            // advisory only and never rewrites the emitted array.
+            const headTools = freezeHead(sessionID, tools)
             // Probe: one line per step with a short digest of the cache-relevant
             // head (joined system string + sorted tool names). Always on; the log
             // write is best-effort and must never break the turn.
             try {
-              const head = [...system, Object.keys(turnTools).toSorted().join(",")].join("\n")
+              const head = [...system, Object.keys(headTools).toSorted().join(",")].join("\n")
               const digestMsgs = JSON.stringify(modelMsgs)
               appendFileSync(
                 path.join(os.homedir(), ".local/share/opencode/head-hash.log"),
-                `${new Date().toISOString()} step=${step} turn=${lastUser.id} head=${createHash("sha256").update(head).digest("hex").slice(0, 12)} tools=${Object.keys(turnTools).length} msgs=${createHash("sha256").update(digestMsgs).digest("hex").slice(0, 12)} msgcount=${modelMsgs.length} syslen=${system.join("\n").length}\n`,
+                `${new Date().toISOString()} step=${step} turn=${lastUser.id} head=${createHash("sha256").update(head).digest("hex").slice(0, 12)} tools=${Object.keys(headTools).length} msgs=${createHash("sha256").update(digestMsgs).digest("hex").slice(0, 12)} msgcount=${modelMsgs.length} syslen=${system.join("\n").length}\n`,
               )
             } catch {}
             // Advisory rides the TAIL, not the cached head: append it as a
@@ -2489,7 +2534,7 @@ const layer = Layer.effect(
                     ]
                   : []),
               ],
-              tools: turnTools,
+              tools: headTools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
             })
