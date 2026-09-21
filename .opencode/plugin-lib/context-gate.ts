@@ -95,6 +95,10 @@ const CONFIG_PATHS = () => {
 }
 
 let configCache: GateConfig | undefined
+// False until the on-disk read resolves. Callers that MUTATE must consult this:
+// assuming "gates on" before the real config lands rewrites system[0] bytes and
+// breaks the content-derived cache prefix on a session's early turns.
+let configLoaded = false
 
 function loadConfig(): GateConfig {
   if (configCache) return configCache
@@ -121,12 +125,14 @@ function loadConfig(): GateConfig {
         break
       }
       configCache = next
+      configLoaded = true
       precompiledEvictable = next.evictablePaths.map((p) => ({
         path: p,
         re: p ? new RegExp(`(^|[^\\w.-])${escapeRegExp(p)}([^\\w.-]|$)`) : undefined,
       }))
     } catch {
-      // Defaults are fine.
+      // Defaults are fine — but they are only trusted once a read was ATTEMPTED.
+      configLoaded = true
     }
   })()
   return configCache
@@ -1009,7 +1015,9 @@ async function gateSystem(
   const config = loadConfig()
   // Both reductions off ⇒ pure pass-through: return before any mutation so the
   // emitted system[0] stays byte-identical to the input (parse/join is lossy).
-  if (!config.scopingEnabled && !config.summarizeEnabled) return
+  // Same fail-safe while the config read is still in flight: the placeholder
+  // defaults are gate-ON, and mutating on them would cold the cache prefix.
+  if (!configLoaded || (!config.scopingEnabled && !config.summarizeEnabled)) return
   const expanded: Section[] = []
   // Cap LLM flights at one per transform call: later true-miss sections serve
   // fallback without spawning, so a single loop-step can never fan out into a
