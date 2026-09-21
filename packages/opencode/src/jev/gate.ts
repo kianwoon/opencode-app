@@ -12,9 +12,15 @@
  * which `jevChoice` already folds into `strength`.
  */
 
-import { jevAsk, jevGaugeKeep, jevMeasuredChoice, jevModelFor, JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "./client"
-
-const SECTION_TEXT_MAX = 600
+import {
+  jevAsk,
+  jevGaugeKeep,
+  jevMeasuredChoice,
+  jevModelFor,
+  JEV_DEFAULT_CONFIDENCE_FLOOR,
+  JEV_DEFAULT_THRESHOLD,
+  JEV_DEFAULT_TIMEOUT_MS,
+} from "./client"
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
 
@@ -24,6 +30,8 @@ export interface GateConfig {
   readonly defaultModel?: string
   readonly threshold?: number
   readonly timeoutMs?: number
+  /** Minimum score strength to trust a row; below it a measured row fails open. */
+  readonly confidenceFloor?: number
 }
 
 export interface GateInput {
@@ -50,24 +58,28 @@ export async function governorKeep(input: GateInput, sections: readonly string[]
   const failOpen: GovernorKeepResult = { keep: sections, dropped: new Set() }
   if (input.config.enabled !== true || sections.length === 0) return failOpen
   const questions: Record<string, unknown> = {}
-  sections.forEach((text, i) => {
+  sections.forEach((_, i) => {
     questions[`s${i}`] = {
       type: "choice",
-      instructions:
-        "Is this context section relevant to the user's request? Keep it only if it helps answer the request.",
-      criteria: { keep: "Relevant to the request", drop: "Irrelevant to the request" },
-      context: clip(text, SECTION_TEXT_MAX),
+      instructions: "Given `request`, is `sections[i].text` relevant? Keep iff it helps answer `request`.",
+      criteria: { keep: "Section text helps answer the request", drop: "Section text is irrelevant to the request" },
     }
   })
+  const state = JSON.stringify({ request: input.state, sections: sections.map((t, i) => ({ index: i, text: clip(t, 600) })) })
   const answers = await jevAsk({
     key: input.key,
-    state: input.state,
+    state,
     questions,
     timeoutMs: input.config.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS,
     model: jevModelFor(input.config.model, input.config.defaultModel),
   })
   const ids = sections.map((_, i) => `s${i}`)
-  const keep = jevGaugeKeep(answers, ids, input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
+  const keep = jevGaugeKeep(
+    answers,
+    ids,
+    input.config.threshold ?? JEV_DEFAULT_THRESHOLD,
+    input.config.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR,
+  )
   if (!keep) return failOpen
   const dropped = new Set<number>()
   const kept: string[] = []
@@ -143,6 +155,10 @@ export async function boosterVerdict(input: GateInput): Promise<BoosterVerdict |
   // fails open (emit nothing), never gates on a fabricated strength.
   const row = answers ? jevMeasuredChoice(answers["advice"]) : undefined
   if (!row) return undefined
+  // Below the confidence floor the model did not stand behind the row: treat it
+  // as unmeasured and fail open (emit nothing).
+  const floor = input.config.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
+  if (row.strength < floor) return undefined
   const text = BOOSTER_LABELS[row.choice]
   if (!text) return { label: row.choice, emitted: false }
   const emitted = row.choice !== "continue" && row.strength >= (input.config.threshold ?? JEV_DEFAULT_THRESHOLD)

@@ -155,6 +155,10 @@ export const Info = Schema.Struct({
       threshold: Schema.optional(Schema.Finite).annotate({
         description: "Confidence threshold for Jev keep/drop decisions (default 0.7).",
       }),
+      confidenceFloor: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))).annotate({
+        description:
+          "Minimum score strength a Jev row must carry to be trusted (default 0.3). Below this a measured row fails open (keep).",
+      }),
       timeoutMs: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for the Jev decision request (default 3000). Fail-open keeps the full tool list.",
       }),

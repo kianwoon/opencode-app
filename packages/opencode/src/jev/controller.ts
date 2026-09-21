@@ -25,9 +25,10 @@ import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
+  JEV_DEFAULT_CONFIDENCE_FLOOR,
   JEV_DEFAULT_THRESHOLD,
   JEV_DEFAULT_TIMEOUT_MS,
-  jevChoice,
+  jevMeasuredChoice,
   jevTransport,
   type JevChoice,
 } from "./client"
@@ -65,6 +66,8 @@ export interface ControllerInput extends ControllerState {
   readonly model?: string
   readonly timeoutMs?: number
   readonly threshold?: number
+  /** Minimum action strength to trust; below it the decision fails open (null). */
+  readonly confidenceFloor?: number
   /** Memo namespace, tied to the batch identity. */
   readonly id?: string
 }
@@ -87,10 +90,10 @@ const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(
  * never reduced here (the same full list is supplied separately as criteria).
  */
 export function buildState(input: ControllerState): string {
-  const goals = clip(input.goal ?? "", STATE_MAX)
-  const last = clip(input.lastAction ?? "(none — first step)", 400)
-  const body = `GOAL: ${goals}\nLAST ACTION: ${last}`
-  return clip(body, STATE_MAX)
+  const goal = clip(input.goal ?? "", 2_000)
+  const lastAction = clip(input.lastAction ?? "(none — first step)", 400)
+  const controls = input.controls.slice(0, CONTROLS_MAX).map((label) => clip(label, LABEL_MAX))
+  return clip(JSON.stringify({ goal, lastAction, controls }), STATE_MAX)
 }
 
 const authFile = join(homedir(), ".local", "share", "opencode", "auth.json")
@@ -136,13 +139,13 @@ export function buildControllerQuestions(
   return {
     action: {
       type: "choice",
-      instructions: "Given the goal and the last action, what is the single next step?",
+      instructions: "Given `goal` and `lastAction`, what is the single next step?",
       criteria: allActions,
     },
     target: {
       type: "choice",
       instructions:
-        "Which on-screen control is the target of the next step? Pick exactly one label, or the control labeled none.",
+        "Which on-screen control is the target of the next step? Pick exactly one `controls[i]` label, or the control labeled none.",
       criteria: { ...targetCriteria, none: "No visible control applies" },
     },
     success: {
@@ -165,14 +168,21 @@ export function buildControllerQuestions(
 
 const isAction = (v: string): v is JevAction => (ACTIONS as string[]).includes(v)
 
-export const foldController = (body: unknown, threshold: number): ControllerDecision | null => {
+export const foldController = (
+  body: unknown,
+  threshold: number,
+  floor = JEV_DEFAULT_CONFIDENCE_FLOOR,
+): ControllerDecision | null => {
   if (typeof body !== "object" || body === null) return null
   const answers = (body as Record<string, unknown>).answers
   if (typeof answers !== "object" || answers === null) return null
   const rows = answers as Record<string, unknown>
-  const actionRow = jevChoice(rows["action"])
-  if (!actionRow || !isAction(actionRow.choice) || actionRow.strength < threshold) return null
-  const targetRow = jevChoice(rows["target"])
+  // Measured only — fabricated strength=1 would emit a blind click. A row below
+  // the confidence floor is treated as unmeasured and fails open (null).
+  const actionRow = jevMeasuredChoice(rows["action"])
+  if (!actionRow || !isAction(actionRow.choice) || actionRow.strength < floor || actionRow.strength < threshold)
+    return null
+  const targetRow = jevMeasuredChoice(rows["target"])
   const target =
     targetRow && targetRow.strength >= threshold && targetRow.choice !== "none"
       ? targetRow.choice.replace(/^\d+:/, "")
@@ -180,9 +190,9 @@ export const foldController = (body: unknown, threshold: number): ControllerDeci
   return {
     action: actionRow.choice,
     target,
-    success: jevChoice(rows["success"])?.choice === "yes",
-    stuck: jevChoice(rows["stuck"])?.choice === "yes",
-    needScreenshot: jevChoice(rows["need_screenshot"])?.choice === "yes",
+    success: jevMeasuredChoice(rows["success"])?.choice === "yes",
+    stuck: jevMeasuredChoice(rows["stuck"])?.choice === "yes",
+    needScreenshot: jevMeasuredChoice(rows["need_screenshot"])?.choice === "yes",
     strength: actionRow.strength,
   }
 }
@@ -190,6 +200,11 @@ export const foldController = (body: unknown, threshold: number): ControllerDeci
 /**
  * One detached controller call. Returns the gated action+target, or `null`
  * fail-open on any error/timeout/sub-threshold action. The key is never logged.
+ *
+ * A module-level memo (TTL 60s, max 200 FIFO) short-circuits an identical
+ * request — same id, threshold and state — returning the byte-identical cached
+ * decision. Only the success path is memoized: miss/timeout/error paths bypass
+ * the memo entirely and are not cached, so a transient failure never sticks.
  */
 export async function jevControl(input: ControllerInput): Promise<ControllerDecision | null> {
   const questions = buildControllerQuestions(input.controls)
@@ -197,7 +212,12 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
   const transport = jevTransport(input.model)
   if (!transport) return null
   const threshold = input.threshold ?? JEV_DEFAULT_THRESHOLD
+  const floor = input.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
   const timeoutMs = input.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS
+  const state = buildState(input)
+  const key = `${input.id ?? "ctl"}:${threshold}:${controllerHash(state)}`
+  const hit = controllerMemo.get(key)
+  if (hit && hit.expires > Date.now()) return hit.decision
   try {
     const res = await fetch(transport.endpoint, {
       method: "POST",
@@ -207,12 +227,33 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
         "HTTP-Referer": "https://opencode.ai/",
         "X-Title": "opencode",
       },
-      body: JSON.stringify({ model: transport.id, state: buildState(input), questions }),
+      body: JSON.stringify({ model: transport.id, state, questions }),
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (!res.ok) return null
-    return foldController(await res.json(), threshold)
+    const decision = foldController(await res.json(), threshold, floor)
+    if (decision) controllerRemember(key, decision)
+    return decision
   } catch {
     return null
   }
+}
+
+const CONTROLLER_MEMO_MAX = 200
+const CONTROLLER_MEMO_TTL_MS = 60_000
+const controllerMemo = new Map<string, { decision: ControllerDecision; expires: number }>()
+
+/** Inline djb2 string hash — no imports, matching the client's memo keying. */
+const controllerHash = (s: string): string => {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+const controllerRemember = (key: string, decision: ControllerDecision): void => {
+  if (controllerMemo.size >= CONTROLLER_MEMO_MAX) {
+    const oldest = controllerMemo.keys().next().value
+    if (oldest !== undefined) controllerMemo.delete(oldest)
+  }
+  controllerMemo.set(key, { decision, expires: Date.now() + CONTROLLER_MEMO_TTL_MS })
 }

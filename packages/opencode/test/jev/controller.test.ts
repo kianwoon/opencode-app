@@ -54,6 +54,19 @@ describe("foldController", () => {
     expect(foldController({}, 0.7)).toBeNull()
     expect(foldController(null, 0.7)).toBeNull()
   })
+
+  test("a choice with no probabilities map fails open (no blind click)", () => {
+    // Degraded echo: a label without `probabilities[choice]` carries no score to
+    // trust. Emitting the click here would be a blind click at threshold 0.
+    const d = foldController({ answers: { action: { type: "choice", choice: "click" } } }, 0)
+    expect(d).toBeNull()
+  })
+
+  test("an action strength below the confidence floor fails open (null)", () => {
+    // threshold 0 but floor 0.3: a 0.1-strength click must not be trusted.
+    const d = foldController({ answers: { action: ans("click", { click: 0.1, wait: 0.9 }) } }, 0, 0.3)
+    expect(d).toBeNull()
+  })
 })
 
 describe("buildControllerQuestions", () => {
@@ -82,10 +95,18 @@ describe("buildControllerQuestions", () => {
 })
 
 describe("buildState", () => {
-  test("clips the composed state to STATE_MAX and keeps goal + last action", () => {
+  test("emits JSON clipped to STATE_MAX and keeps goal + last action", () => {
     const s = buildState({ goal: "g".repeat(6000), lastAction: "typed foo", controls: [] })
-    expect(s.length).toBe(4000)
-    expect(s.startsWith("GOAL: ")).toBe(true)
+    expect(s.length).toBeLessThanOrEqual(4000)
+    const parsed = JSON.parse(s)
+    expect(parsed.goal.length).toBe(2000)
+    expect(parsed.lastAction).toBe("typed foo")
+    expect(parsed.controls).toEqual([])
+  })
+
+  test("carries the control labels as JSON controls[]", () => {
+    const s = buildState({ goal: "open settings", lastAction: "(first step)", controls: ["File", "Settings"] })
+    expect(JSON.parse(s).controls).toEqual(["File", "Settings"])
   })
 })
 

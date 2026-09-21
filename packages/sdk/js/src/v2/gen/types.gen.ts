@@ -2114,6 +2114,10 @@ export type Config = {
     enabled?: boolean
     model?: string
     threshold?: number
+    /**
+     * Minimum score strength a Jev row must carry to be trusted (default 0.3). Below this a measured row fails open (keep).
+     */
+    confidenceFloor?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     timeoutMs?: number
   }
   governor?: {

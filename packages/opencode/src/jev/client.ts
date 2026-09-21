@@ -34,6 +34,17 @@ export const JEV_OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decision
 export const JEV_OPENROUTER_MODEL = "openrouter/typesafe/jev-latest"
 export const JEV_DEFAULT_TIMEOUT_MS = 3_000
 export const JEV_DEFAULT_THRESHOLD = 0.7
+/**
+ * Minimum score strength a row must carry to be TRUSTED. Below this a measured
+ * row is treated as unmeasured and fails open (keep / null) instead of gating on
+ * a score the model itself did not stand behind (jev.md §4.4). Only binds when a
+ * caller lowers `threshold` under the floor.
+ */
+export const JEV_DEFAULT_CONFIDENCE_FLOOR = 0.3
+/** Cheap-prefilter cut for the numeric `noul` score (jev.md §3). */
+export const JEV_DEFAULT_NOUL_THRESHOLD = 0.7
+/** One-line tool description budget used for the routing criteria labels. */
+const TOOL_DESCRIPTION_MAX = 160
 
 /** Provider prefix → decisions endpoint. Only these two speak the protocol. */
 const JEV_ENDPOINTS: Readonly<Record<string, string>> = {
@@ -256,6 +267,34 @@ export function jevMeasuredChoice(value: unknown): JevChoice | undefined {
 }
 
 /**
+ * Noul keep predicate (jev.md §3). Keeps unless a NUMERIC `noul` score falls
+ * below `threshold`; fail-open on missing/non-numeric, and a boolean `noul` is
+ * ignored (the spec score is numeric-only). `value` may be the bare score or a
+ * row carrying `noul`.
+ */
+export function jevNoulKeep(value: unknown, threshold = JEV_DEFAULT_NOUL_THRESHOLD): boolean {
+  const noul =
+    typeof value === "number"
+      ? value
+      : typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)["noul"]
+        : undefined
+  if (typeof noul !== "number" || !Number.isFinite(noul)) return true
+  return noul >= threshold
+}
+
+/** Extract a numeric `score` from a bare number or a row carrying `score`. */
+export function jevScoreRank(value: unknown): number | undefined {
+  const score =
+    typeof value === "number"
+      ? value
+      : typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)["score"]
+        : undefined
+  return typeof score === "number" && Number.isFinite(score) ? score : undefined
+}
+
+/**
  * Fold result: the kept set plus counters for rows that were DISCARDED instead
  * of scored. Both causes fail open (the tool stays in the list):
  *  - `unknownId`: the response echoed an id this request never asked about, so
@@ -370,10 +409,38 @@ export function jevAsk(input: JevAskInput): Promise<Record<string, unknown> | un
     .then((payload): Record<string, unknown> | undefined => {
       if (typeof payload !== "object" || payload === null) return undefined
       const root = payload as Record<string, unknown>
+      if (typeof input.onUsage === "function") input.onUsage(jevUsage(root, transport.id))
       const answers = root["answers"] ?? root["decisions"] ?? root["results"]
       return typeof answers === "object" && answers !== null ? (answers as Record<string, unknown>) : undefined
     })
     .catch(() => undefined)
+}
+
+/**
+ * Extract usage/cost/model from a decisions response envelope, tolerating both
+ * snake_case (`input_tokens`) and camelCase (`inputTokens`) shapes. Never
+ * throws; absent fields stay `undefined`.
+ */
+function jevUsage(
+  root: Record<string, unknown>,
+  model: string,
+): { inputTokens?: number; cost?: number; model?: string } {
+  const usage = root["usage"]
+  const u = typeof usage === "object" && usage !== null ? (usage as Record<string, unknown>) : root
+  const inputTokens =
+    typeof u["input_tokens"] === "number"
+      ? u["input_tokens"]
+      : typeof u["inputTokens"] === "number"
+        ? u["inputTokens"]
+        : undefined
+  const cost =
+    typeof u["cost"] === "number"
+      ? u["cost"]
+      : typeof root["cost"] === "number"
+        ? (root["cost"] as number)
+        : undefined
+  const resolvedModel = typeof u["model"] === "string" ? u["model"] : model
+  return { inputTokens, cost, model: resolvedModel }
 }
 
 export interface JevAskInput {
@@ -381,6 +448,7 @@ export interface JevAskInput {
   readonly state: string
   readonly questions: Record<string, unknown>
   readonly timeoutMs: number
+  readonly onUsage?: (u: { inputTokens?: number; cost?: number; model?: string }) => void
   /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
   readonly model?: string
 }
@@ -393,7 +461,12 @@ export interface JevAskInput {
  * `probabilities[choice]` all keep (the routing lesson: gate on choice +
  * probabilities[choice], never `confidence`).
  */
-export function jevGaugeKeep(payload: unknown, ids: readonly string[], threshold: number): Set<string> | undefined {
+export function jevGaugeKeep(
+  payload: unknown,
+  ids: readonly string[],
+  threshold: number,
+  floor = JEV_DEFAULT_CONFIDENCE_FLOOR,
+): Set<string> | undefined {
   if (typeof payload !== "object" || payload === null) return undefined
   const rows = payload as Record<string, unknown>
   if (Object.keys(rows).length === 0) return undefined
@@ -412,7 +485,8 @@ export function jevGaugeKeep(payload: unknown, ids: readonly string[], threshold
         : undefined
     const prob =
       typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>)["drop"] : undefined
-    if (typeof prob !== "number" || !Number.isFinite(prob) || prob < threshold) continue
+    // Below `floor` the model did not stand behind the row: fail open (keep).
+    if (typeof prob !== "number" || !Number.isFinite(prob) || prob < floor || prob < threshold) continue
     const choice = jevChoice(value)?.choice
     if (choice !== "drop") continue
     keep.delete(id)
@@ -488,6 +562,8 @@ export interface JevDecideInput {
   readonly key: string
   readonly state: string
   readonly names: string[]
+  /** Optional one-line tool descriptions, keyed by tool name. */
+  readonly descriptions?: Record<string, string>
   readonly threshold: number
   readonly timeoutMs: number
   /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
@@ -503,19 +579,25 @@ export interface JevDecideInput {
  * `failure` tag for the caller's log), never throws. An unknown provider prefix
  * (no endpoint to POST to) is a `parse` failure — fail-open, no request made.
  */
+/** Rich `use` criterion label: `Use ${name} — ${desc}`, or a bare fallback. */
+export function jevToolUseLabel(name: string, description?: string): string {
+  const desc = typeof description === "string" ? description.trim().slice(0, TOOL_DESCRIPTION_MAX) : ""
+  return desc.length > 0 ? `Use ${name} — ${desc}` : `Use ${name} for this request`
+}
+
 export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
   const id = input.id ?? "tools"
   const transport = jevTransport(input.model)
   if (!transport) return Promise.resolve({ failure: "parse" })
-  const memo = memoKey(id, input.state, input.names, input.threshold, `${transport.provider}/${transport.id}`)
+  const state = JSON.stringify({ request: input.state, tools: input.names })
+  const memo = memoKey(id, state, input.names, input.threshold, `${transport.provider}/${transport.id}`)
   const cached = memoizedDecision(memo)
   if (cached) return Promise.resolve(cached)
   const questions: Record<string, unknown> = {}
-  for (const name of input.names) {
-    questions[name] = {
+  for (const name of input.names) {    questions[name] = {
       type: "choice",
-      instructions: `Should ${name} be used?`,
-      criteria: { use: "Tool is needed for this request", skip: "Tool is not needed" },
+      instructions: `Given \`request\`, should tool \`${name}\` be used? Use iff it helps answer \`request\`.`,
+      criteria: { use: jevToolUseLabel(name, input.descriptions?.[name]), skip: `Do not use \`${name}\` for this request` },
     }
   }
   return fetch(transport.endpoint, {
@@ -526,7 +608,7 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
       "HTTP-Referer": "https://opencode.ai/",
       "X-Title": "opencode",
     },
-    body: JSON.stringify({ model: transport.id, state: input.state, questions }),
+    body: JSON.stringify({ model: transport.id, state, questions }),
     signal: AbortSignal.timeout(input.timeoutMs),
   })
     .then((res): Promise<JevDecision> => {

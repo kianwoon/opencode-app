@@ -2125,6 +2125,12 @@ const layer = Layer.effect(
                       key: resolvedJevKey,
                       state: jevPromptText(lastUserMsg?.parts ?? []),
                       names,
+                      descriptions: Object.fromEntries(
+                        names.flatMap((name) => {
+                          const desc = (turnTools[name] as { description?: unknown } | undefined)?.description
+                          return typeof desc === "string" && desc.length > 0 ? [[name, desc] as [string, string]] : []
+                        }),
+                      ),
                       threshold,
                       timeoutMs,
                       model: jevSpec,
@@ -2314,7 +2320,7 @@ const layer = Layer.effect(
             const govDecision = govKey
               ? yield* Effect.promise(() =>
                   governorKeep(
-                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: { ...govCfg, enabled: true, defaultModel: cfg.jevDefault?.model } },
+                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: { ...govCfg, enabled: true, defaultModel: cfg.jevDefault?.model, confidenceFloor: cfg.jev?.confidenceFloor } },
                     govBlocks,
                   ),
                 )
@@ -2368,7 +2374,7 @@ const layer = Layer.effect(
                   boosterVerdict({
                     key: boostKey,
                     state: jevPromptText(lastUserMsg?.parts ?? []),
-                    config: { ...boostCfg, defaultModel: cfg.jevDefault?.model },
+                    config: { ...boostCfg, defaultModel: cfg.jevDefault?.model, confidenceFloor: cfg.jev?.confidenceFloor },
                   }),
                 )
               : undefined

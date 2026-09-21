@@ -6,6 +6,8 @@ import {
   JEV_DEFAULT_MODEL,
   clearJevMemo,
   jevDecide,
+  jevNoulKeep,
+  jevScoreRank,
   jevGaugeKeep,
   jevKeepTools,
   jevBelowFloor,
@@ -231,6 +233,12 @@ describe("jevGaugeKeep — drop-only governor fold", () => {
     expect(keep?.has("s0")).toBe(true)
   })
 
+  test("a drop measured below the confidence floor keeps the section", () => {
+    // threshold 0 but floor 0.3: a 0.1 drop is not trusted → fail open keep.
+    const keep = jevGaugeKeep({ s0: row("drop", 0.1) }, ["s0"], 0, 0.3)
+    expect(keep?.has("s0")).toBe(true)
+  })
+
   test("an empty/unusable payload fails open (undefined ⇒ keep all)", () => {
     expect(jevGaugeKeep({}, ["s0"], 0.7)).toBeUndefined()
     expect(jevGaugeKeep(undefined, ["s0"], 0.7)).toBeUndefined()
@@ -283,5 +291,46 @@ describe("jevModelFor — feature model ⇒ shared default ⇒ built-in", () => 
     expect(jevModelFor("", "openrouter/bar")).toBe("openrouter/bar")
     expect(jevModelFor("   ", "typesafe/bar")).toBe("typesafe/bar")
     expect(jevModelFor("", "")).toBe(JEV_DEFAULT_MODEL)
+  })
+})
+
+describe("jevNoulKeep — numeric-only, fail-open prefilter", () => {
+  test("keeps a numeric noul at or above the threshold", () => {
+    expect(jevNoulKeep(0.7)).toBe(true)
+    expect(jevNoulKeep({ noul: 0.95 })).toBe(true)
+  })
+
+  test("drops a numeric noul below the threshold", () => {
+    expect(jevNoulKeep(0.2)).toBe(false)
+    expect(jevNoulKeep({ noul: 0.1 })).toBe(false)
+  })
+
+  test("fails open on missing/non-numeric noul", () => {
+    expect(jevNoulKeep(undefined)).toBe(true)
+    expect(jevNoulKeep({})).toBe(true)
+    expect(jevNoulKeep({ noul: "high" })).toBe(true)
+  })
+
+  test("ignores a boolean noul (spec is numeric-only)", () => {
+    expect(jevNoulKeep({ noul: false })).toBe(true)
+    expect(jevNoulKeep(true)).toBe(true)
+  })
+
+  test("ignores a truthy boolean noul in a row", () => {
+    expect(jevNoulKeep({ noul: true })).toBe(true)
+  })
+})
+
+describe("jevScoreRank — numeric score or undefined", () => {
+  test("returns a finite numeric score", () => {
+    expect(jevScoreRank(0.42)).toBe(0.42)
+    expect(jevScoreRank({ score: 0.9 })).toBe(0.9)
+  })
+
+  test("returns undefined for a missing/non-numeric score", () => {
+    expect(jevScoreRank(undefined)).toBeUndefined()
+    expect(jevScoreRank({})).toBeUndefined()
+    expect(jevScoreRank({ score: "0.9" })).toBeUndefined()
+    expect(jevScoreRank(Number.NaN)).toBeUndefined()
   })
 })
