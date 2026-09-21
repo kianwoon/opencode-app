@@ -145,6 +145,7 @@ export interface Interface {
     sessionID: SessionSchema.ID
     model: ModelV2.Ref
   }) => Effect.Effect<void, NotFoundError>
+  readonly setTitle: (input: { sessionID: SessionSchema.ID; title: string }) => Effect.Effect<void, NotFoundError>
   readonly prompt: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
@@ -474,6 +475,15 @@ const layer = Layer.effect(
           messageID: SessionMessage.ID.create(),
           timestamp: yield* DateTime.now,
           model: input.model,
+        })
+      }),
+      setTitle: Effect.fn("V2Session.setTitle")(function* (input) {
+        yield* result.get(input.sessionID)
+        yield* events.publish(SessionEvent.TitleRenamed, {
+          sessionID: input.sessionID,
+          messageID: SessionMessage.ID.create(),
+          timestamp: yield* DateTime.now,
+          title: input.title,
         })
       }),
       compact: Effect.fn("V2Session.compact")(function* (input) {

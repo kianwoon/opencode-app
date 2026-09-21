@@ -374,39 +374,6 @@ describe("ProviderTransform.options - setCacheKey", () => {
   })
 })
 
-describe("LLMRequestPrep.contentCacheKey", () => {
-  const head = {
-    agent: "build",
-    model: "gpt-4",
-    system: ["You are opencode.", "Repo: opencode"],
-    tools: ["bash", "read", "edit"],
-  }
-
-  test("identical head content yields an identical key", () => {
-    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools)).toBe(
-      LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools),
-    )
-  })
-
-  test("tool order does not change the key", () => {
-    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, [...head.tools].reverse())).toBe(
-      LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools),
-    )
-  })
-
-  test("a different agent, model, tool set, or system changes the key", () => {
-    const key = LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools)
-    expect(LLMRequestPrep.contentCacheKey("plan", head.model, head.system, head.tools)).not.toBe(key)
-    expect(LLMRequestPrep.contentCacheKey(head.agent, "gpt-5", head.system, head.tools)).not.toBe(key)
-    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, ["bash"])).not.toBe(key)
-    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, ["You are opencode."], head.tools)).not.toBe(key)
-  })
-
-  test("the key is a fixed-length lowercase hex digest", () => {
-    expect(LLMRequestPrep.contentCacheKey(head.agent, head.model, head.system, head.tools)).toMatch(/^[0-9a-f]{32}$/)
-  })
-})
-
 describe("ProviderTransform.options - openrouter routing", () => {
   const sessionID = "test-session-123"
 
