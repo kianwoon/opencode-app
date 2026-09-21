@@ -91,6 +91,22 @@ export const JevVerdictsQuery = Schema.Struct({
   ),
 })
 
+/**
+ * Resolved context-gate configuration as the plugin would coerce it from
+ * `context-gate.json`. Read-only fields mirror the toggle state; only
+ * `triageEnabled` is writable here (the others live elsewhere / in the file).
+ * Contains no key material.
+ */
+const GateConfig = Schema.Struct({
+  scopingEnabled: Schema.Boolean,
+  summarizeEnabled: Schema.Boolean,
+  triageEnabled: Schema.Boolean,
+})
+
+export const GateConfigUpdateInput = Schema.Struct({
+  triageEnabled: Schema.optional(Schema.Boolean),
+})
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
@@ -99,6 +115,7 @@ export const GlobalPaths = {
   upgrade: "/global/upgrade",
   effortRouter: "/global/effort-router",
   jevVerdicts: "/global/jev-verdicts",
+  gateConfig: "/global/gate-config",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -160,6 +177,28 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.jevVerdicts.list",
           summary: "List recent Jev verdicts",
           description: "Tail the newest effort-router decision records (newest first).",
+        }),
+      ),
+      HttpApiEndpoint.get("gateConfig", GlobalPaths.gateConfig, {
+        success: described(GateConfig, "Resolved context-gate configuration"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.gateConfig.get",
+          summary: "Get resolved context-gate config",
+          description:
+            "Read the resolved context-gate configuration (scoping, summarization, compaction triage) from context-gate.json.",
+        }),
+      ),
+      HttpApiEndpoint.patch("gateConfigUpdate", GlobalPaths.gateConfig, {
+        payload: GateConfigUpdateInput,
+        success: described(GateConfig, "Updated context-gate configuration"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.gateConfig.update",
+          summary: "Update context-gate config",
+          description:
+            "Update the writable context-gate toggle (compaction triage) in context-gate.json, preserving all other keys.",
         }),
       ),
       HttpApiEndpoint.post("dispose", GlobalPaths.dispose, {

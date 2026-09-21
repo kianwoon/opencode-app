@@ -139,6 +139,23 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     return result.data ?? []
   })
 
+  // Context-gate config: server-owned file state, read at mount and after each
+  // write. Read-only fields are displayed; only triage is writable here.
+  const [gateConfig, gateConfigActions] = createResource(async () => {
+    const result = await serverSDK().client.global.gateConfig.get()
+    return result.data ?? undefined
+  })
+
+  const commitGateTriage = (value: boolean) => {
+    void serverSDK()
+      .client.global.gateConfig.update({ triageEnabled: value })
+      .then(() => gateConfigActions.refetch())
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
   const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
     const value = brain()[field] ?? ""
     const [providerID, ...rest] = value.split("/")
@@ -401,6 +418,50 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
               <div class="w-full sm:w-[220px]">
                 <ModelFieldControl field="brainBooster-model" state={sectionStateFor("brainBooster")} />
               </div>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Context scoping"
+              description="Withhold guide sections until session activity mentions them. Read-only; edit context-gate.json to change."
+            >
+              <Tag variant="neutral" data-action="settings-orchestration-gate-scoping-status">
+                {gateConfig() === undefined
+                  ? "unknown"
+                  : gateConfig()?.scopingEnabled
+                    ? "scoping on"
+                    : "scoping off"}
+              </Tag>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Section summarization"
+              description="Compress oversize markdown sections before they enter context. Read-only; edit context-gate.json to change."
+            >
+              <Tag variant="neutral" data-action="settings-orchestration-gate-summarize-status">
+                {gateConfig() === undefined
+                  ? "unknown"
+                  : gateConfig()?.summarizeEnabled
+                    ? "summarize on"
+                    : "summarize off"}
+              </Tag>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Compaction triage"
+              description={
+                gateConfig()?.scopingEnabled === false
+                  ? "Requires scoping: the gate early-returns when both scoping and summarization are off, so triage never runs."
+                  : "Classify each oversize section before summarizing: only a decisive keep preserves it verbatim."
+              }
+            >
+              <Switch
+                checked={gateConfig()?.triageEnabled ?? false}
+                onChange={() => commitGateTriage(!(gateConfig()?.triageEnabled ?? false))}
+                disabled={gateConfig() === undefined || gateConfig()?.scopingEnabled === false}
+                hideLabel
+              >
+                Toggle compaction triage
+              </Switch>
             </SettingsRowV2>
 
             <SettingsRowV2

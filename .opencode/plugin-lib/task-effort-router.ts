@@ -2,14 +2,20 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 import {
   classifyNoul,
+  classifyScores,
   classifyTier,
   memoResult,
   resolveJevModel,
   resolveJevEffortConfig,
+  scoreState,
   type EffortTier,
   type JevEffortConfig,
   type TierResult,
 } from "../plugin-lib/jev-effort.ts"
+// The fold is PURE (no Effect, no clock, no fetch) so a plugin can import it
+// directly: ranking lives in one place instead of a plugin-lib copy that could
+// drift from the unit-tested original.
+import { arbitrate, arbitrateLogRows, type ArbitrateEntry } from "../../packages/opencode/src/session/arbitrate"
 
 /**
  * Task Effort Router — a self-adjusting reasoning-effort governor.
@@ -358,6 +364,89 @@ const DEDUP_WINDOW_MS = 2_000
  * upstream cache hits. Sticky for the session's lifetime, bounded like state.
  */
 const riskNoticeShown = new Set<string>()
+
+/**
+ * LOG-ONLY arbitration telemetry (Phase 3b item 1). Task calls settle
+ * independently and are persisted the moment each lands
+ * (`SessionTools.resolve` -> `processor.completeToolCall`); there is no batch
+ * barrier at this layer, so the join is built here: buffer the `task` results
+ * that settle inside a short window, then score and LOG an advisory ranking.
+ *
+ * Hard constraints (do not weaken):
+ *   - LOG ONLY. Nothing in this path writes result bytes, parts, history,
+ *     system, tools or request options. `completeToolCall` has already
+ *     persisted by the time this hook runs.
+ *   - Fail open: disabled config, a single result, an absent key, a timeout or
+ *     a non-2xx all produce SILENCE — never a dropped or altered result.
+ *   - Bounded: at most ARBITRATE_ENTRIES_MAX rows/turn and a bounded
+ *     `scoreState` excerpt per row (goal + result head), so a 100k-char child
+ *     transcript is never shipped or logged.
+ */
+const ARBITRATE_WINDOW_MS = 750
+const ARBITRATE_ENTRIES_MAX = 5
+
+/**
+ * The `task` tool id, mirrored as a literal rather than imported: the real
+ * `packages/opencode/src/tool/task.ts` carries Effect/session deps, and
+ * importing it here would pull the whole runtime into the plugin (jev.md §7).
+ */
+const TASK_TOOL_ID = "task"
+
+type SettledTask = { callID: string; state: string }
+
+const arbiter = new Map<string, { at: number; entries: SettledTask[]; timer?: ReturnType<typeof setTimeout> }>()
+
+/**
+ * Buffer one settled `task` result and schedule the log-only join. Bounded:
+ * at most `ARBITRATE_ENTRIES_MAX` rows per turn and one whole-transcript never
+ * enters `state` (bounded head, or the delegating goal when this session is
+ * mid-task). A later settle inside the same window resets the timer so a fan-out
+ * of 5 joins once, after the last one lands.
+ */
+function noteSettledTask(sessionID: string, callID: string, output: string) {
+  const now = Date.now()
+  const existing = arbiter.get(sessionID)
+  // A new turn (window expired) starts a fresh batch; an in-window settle joins it.
+  const batch = existing && now - existing.at <= ARBITRATE_WINDOW_MS ? existing.entries : []
+  batch.push({ callID, state: scoreState(state.get(sessionID)?.lastMessage?.text, output) })
+  if (batch.length > ARBITRATE_ENTRIES_MAX) batch.shift()
+  if (existing?.timer) clearTimeout(existing.timer)
+  const timer = setTimeout(() => {
+    arbiter.delete(sessionID)
+    void runArbiter(sessionID, batch)
+  }, ARBITRATE_WINDOW_MS)
+  // `unref` keeps a pending join from holding the host process open.
+  const unref = (timer as { unref?: () => void }).unref
+  if (unref) unref.call(timer)
+  arbiter.set(sessionID, { at: now, entries: batch, timer })
+}
+
+/**
+ * Score the buffered batch and log ONE bounded `arbitrate` row set. Ordering is
+ * advisory telemetry only: `arbitrate` returns a NEW array and the `order` field
+ * is deliberately NOT applied anywhere — no persisted byte depends on it.
+ */
+async function runArbiter(sessionID: string, entries: readonly SettledTask[]) {
+  try {
+    if (entries.length < 2) return
+    const cfg = await loadRouterConfig()
+    // Reuse the router's JEV block (enabled/model): one config surface, and the
+    // whole path stays off unless the user already opted into JEV.
+    const scored = await classifyScores(
+      entries.map((entry) => ({ id: entry.callID, state: entry.state })),
+      cfg.jev,
+    )
+    const foldEntries: ArbitrateEntry[] = entries.map((entry) => ({ callID: entry.callID, output: entry.state }))
+    const result = arbitrate({
+      entries: foldEntries,
+      scores: new Map(Object.entries(scored).map(([id, score]) => [id, score ?? undefined])),
+      threshold: cfg.jev.threshold,
+    })
+    log("arbitrate", { sessionID, ranked: result.ranked, rows: arbitrateLogRows(result) })
+  } catch {
+    // Telemetry is best-effort: a scoring failure must be invisible.
+  }
+}
 
 function trackSession(sessionID: string) {
   state.delete(sessionID)
@@ -736,7 +825,13 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
 
     // Risk from behavior, not words: actually running a mutating tool (per
     // the config's riskyTools list) marks the session's current task risky.
-    "tool.execute.after": async (input) => {
+    "tool.execute.after": async (input, output) => {
+      // LOG-ONLY arbitration telemetry. Runs AFTER the result settled;
+      // `output` is READ here and never written back, so persisted bytes are
+      // untouched (see noteSettledTask). Only `task` fans out per turn.
+      if (input.tool === TASK_TOOL_ID) {
+        noteSettledTask(input.sessionID, input.callID, typeof output.output === "string" ? output.output : "")
+      }
       const cfg = await loadRouterConfig()
       const existing = state.get(input.sessionID)
       if (existing) {

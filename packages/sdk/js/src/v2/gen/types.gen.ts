@@ -7718,6 +7718,66 @@ export type GlobalJevVerdictsListResponses = {
 
 export type GlobalJevVerdictsListResponse = GlobalJevVerdictsListResponses[keyof GlobalJevVerdictsListResponses]
 
+export type GlobalGateConfigGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/gate-config"
+}
+
+export type GlobalGateConfigGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalGateConfigGetError = GlobalGateConfigGetErrors[keyof GlobalGateConfigGetErrors]
+
+export type GlobalGateConfigGetResponses = {
+  /**
+   * Resolved context-gate configuration
+   */
+  200: {
+    scopingEnabled: boolean
+    summarizeEnabled: boolean
+    triageEnabled: boolean
+  }
+}
+
+export type GlobalGateConfigGetResponse = GlobalGateConfigGetResponses[keyof GlobalGateConfigGetResponses]
+
+export type GlobalGateConfigUpdateData = {
+  body?: {
+    triageEnabled?: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/gate-config"
+}
+
+export type GlobalGateConfigUpdateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalGateConfigUpdateError = GlobalGateConfigUpdateErrors[keyof GlobalGateConfigUpdateErrors]
+
+export type GlobalGateConfigUpdateResponses = {
+  /**
+   * Updated context-gate configuration
+   */
+  200: {
+    scopingEnabled: boolean
+    summarizeEnabled: boolean
+    triageEnabled: boolean
+  }
+}
+
+export type GlobalGateConfigUpdateResponse = GlobalGateConfigUpdateResponses[keyof GlobalGateConfigUpdateResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

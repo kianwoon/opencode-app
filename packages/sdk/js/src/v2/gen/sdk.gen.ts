@@ -92,6 +92,10 @@ import type {
   GlobalEffortRouterGetResponses,
   GlobalEventErrors,
   GlobalEventResponses,
+  GlobalGateConfigGetErrors,
+  GlobalGateConfigGetResponses,
+  GlobalGateConfigUpdateErrors,
+  GlobalGateConfigUpdateResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
   GlobalJevVerdictsListErrors,
@@ -1496,6 +1500,48 @@ export class JevVerdicts extends HeyApiClient {
   }
 }
 
+export class GateConfig extends HeyApiClient {
+  /**
+   * Get resolved context-gate config
+   *
+   * Read the resolved context-gate configuration (scoping, summarization, compaction triage) from context-gate.json.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalGateConfigGetResponses, GlobalGateConfigGetErrors, ThrowOnError>({
+      url: "/global/gate-config",
+      ...options,
+    })
+  }
+
+  /**
+   * Update context-gate config
+   *
+   * Update the writable context-gate toggle (compaction triage) in context-gate.json, preserving all other keys.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      triageEnabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "triageEnabled" }] }])
+    return (options?.client ?? this.client).patch<
+      GlobalGateConfigUpdateResponses,
+      GlobalGateConfigUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/global/gate-config",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -1570,6 +1616,11 @@ export class Global extends HeyApiClient {
   private _jevVerdicts?: JevVerdicts
   get jevVerdicts(): JevVerdicts {
     return (this._jevVerdicts ??= new JevVerdicts({ client: this.client }))
+  }
+
+  private _gateConfig?: GateConfig
+  get gateConfig(): GateConfig {
+    return (this._gateConfig ??= new GateConfig({ client: this.client }))
   }
 }
 

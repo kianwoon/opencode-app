@@ -124,4 +124,28 @@ describe("global HttpApi", () => {
       expect(times).toEqual([...times].sort((a, b) => b - a))
     }),
   )
+
+  // Reads the real user context-gate.json on this machine: assert the shape
+  // only, never contents, so the test stays hermetic.
+  it.live("resolves the context-gate config without exposing secrets", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(GlobalPaths.gateConfig).pipe(HttpClient.execute)
+      expect(response.status).toBe(200)
+      const body = (yield* response.json) as Record<string, unknown>
+      expect(typeof body.scopingEnabled).toBe("boolean")
+      expect(typeof body.summarizeEnabled).toBe("boolean")
+      expect(typeof body.triageEnabled).toBe("boolean")
+      expect(JSON.stringify(body)).not.toMatch(/api[_-]?key|secret|token|password/i)
+    }),
+  )
+
+  it.live("rejects a gate-config update without a boolean triageEnabled", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.patch(GlobalPaths.gateConfig).pipe(
+        HttpClientRequest.bodyJsonUnsafe({}),
+        HttpClient.execute,
+      )
+      expect(response.status).toBe(400)
+    }),
+  )
 })

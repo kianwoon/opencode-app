@@ -253,6 +253,116 @@ export const foldEffortAnswer = (body: unknown): TierResult | null => {
   return { tier: choice, strength: raw }
 }
 
+// ---------------------------------------------------------------------------
+// `score` batches: ADVISORY ranking only (jev.md §3 — "score for ordering,
+// never for gating"). Used by the log-only arbitration telemetry, never on the
+// request path and never to rewrite persisted bytes.
+// ---------------------------------------------------------------------------
+
+/**
+ * Envelope state for a score batch. The wire requires one `state` per call and
+ * each question carries its own entry text in `instructions`, so the envelope
+ * only has to say WHAT is being judged. Constant keeps the payload bounded.
+ */
+const SCORE_STATE = "Judge each settled subagent result independently against the shared goal."
+
+/**
+ * Criteria are a LIST for `score` questions, not the `label -> description`
+ * record that `choice` uses: posting the record shape is rejected with HTTP 422
+ * (`Input should be a valid list`) — verified live against the decisions
+ * endpoint. The returned `legend` ({"0":..,"1":..,"2":..}) is what the score is
+ * scaled to, so the cut points here must stay in legend order.
+ *
+ * Measured live on this list: a result that directly advances the goal scores
+ * ~1.6/2, a vague non-result ~0.05/2 — wide enough that the fold's 0.5 cut on
+ * the 0..1 fraction discriminates.
+ */
+const SCORE_CRITERIA = ["0", "1", "2"] as const
+
+const buildScoreQuestions = (entries: readonly { id: string; state: string }[]) =>
+  Object.fromEntries(
+    entries.map((entry) => [
+      entry.id,
+      {
+        type: "score" as const,
+        instructions: `Score how directly this settled subagent result advances its goal. ${entry.state}`,
+        criteria: SCORE_CRITERIA,
+      },
+    ]),
+  )
+
+/**
+ * Compose the judged text for ONE settled result: the delegating goal plus the
+ * result's head. BOTH are required — judging the goal alone scores the REQUEST
+ * rather than the RESULT (observed: every row collapsed to ~0.04/1 with an
+ * identical goal), so the score carries no signal. Each half is bounded, so a
+ * 100k-char child transcript never reaches the wire.
+ */
+export const scoreState = (goal: string | undefined, output: string): string => {
+  const half = Math.floor(EXCERPT_CHARS / 2)
+  const bounded = (text: string) => (text.length <= half ? text : text.slice(0, half))
+  return `Goal: ${bounded(goal?.trim() ?? "")}\nSettled result: ${bounded(output.trim())}`
+}
+
+/**
+ * Normalize one score row to a 0..1 fraction of its own legend.
+ *
+ * REQUIRED: a `score` answer is scaled to its `legend` (observed raw 0..2),
+ * while `arbitrate`'s threshold default (0.5) is defined on a 0..1 fraction.
+ * Dividing by the legend max keeps ONE meaning of 0.5 across every criteria
+ * list; a row without a usable legend fails open (undefined) rather than
+ * mixing two scales inside one batch.
+ */
+const foldScoreRow = (row: unknown): number | undefined => {
+  if (!row || typeof row !== "object") return undefined
+  const r = row as Record<string, unknown>
+  if (typeof r.score !== "number" || !Number.isFinite(r.score)) return undefined
+  const legend = r.legend
+  if (!legend || typeof legend !== "object") return undefined
+  const max = Object.keys(legend as Record<string, unknown>).length - 1
+  if (max <= 0) return undefined
+  return r.score / max
+}
+
+/**
+ * Score every entry in ONE batch (jev.md §1: one call = one batch) and return a
+ * 0..1 score per id. Fail-open: `undefined` for any entry whose row was
+ * absent/unmeasured, and for every entry when the call fails. Never throws,
+ * never gates — the caller only logs an advisory ranking.
+ */
+export const classifyScores = async (
+  entries: readonly { id: string; state: string }[],
+  cfg: JevEffortConfig = DEFAULT_JEV_EFFORT,
+): Promise<Record<string, number | undefined>> => {
+  const empty: Record<string, number | undefined> = {}
+  for (const entry of entries) empty[entry.id] = undefined
+  if (!cfg.enabled || entries.length === 0) return empty
+  const transport = jevTransport(resolveJevModel(cfg))
+  if (!transport) return empty
+  const key = jevKeyFor(transport.provider)
+  if (!key) return empty
+  try {
+    const res = await fetch(transport.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: transport.id,
+        state: SCORE_STATE,
+        questions: buildScoreQuestions(entries),
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+    if (!res.ok) return empty
+    const answers = ((await res.json()) as { answers?: unknown }).answers
+    if (!answers || typeof answers !== "object") return empty
+    const rows = answers as Record<string, unknown>
+    for (const entry of entries) empty[entry.id] = foldScoreRow(rows[entry.id])
+    return empty
+  } catch {
+    return empty
+  }
+}
+
 /**
  * Classify a request into an effort tier. One choice question. Fail-open null on
  * any error/timeout (3s)/missing key. The key is never printed.

@@ -10,10 +10,10 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Option, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput } from "../groups/global"
+import { GateConfigUpdateInput, GlobalUpgradeInput } from "../groups/global"
 
 /**
  * Resolved effort-router config, mirroring the plugin's coercion so the panel
@@ -33,6 +33,20 @@ const record = (value: unknown): Record<string, unknown> =>
 
 const band = (value: unknown, fallback: number) =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback
+
+// Mirrors the plugin's `DEFAULTS` in `.opencode/plugin-lib/context-gate.ts`
+// (scoping/summarize on, triage off) so an absent file reports what the gate
+// would actually do rather than a false "disabled".
+const GATE_DEFAULTS = { scopingEnabled: true, summarizeEnabled: true, triageEnabled: false }
+
+function resolveGateConfig(raw: unknown) {
+  const root = record(raw)
+  return {
+    scopingEnabled: typeof root.scopingEnabled === "boolean" ? root.scopingEnabled : GATE_DEFAULTS.scopingEnabled,
+    summarizeEnabled: typeof root.summarizeEnabled === "boolean" ? root.summarizeEnabled : GATE_DEFAULTS.summarizeEnabled,
+    triageEnabled: typeof root.triageEnabled === "boolean" ? root.triageEnabled : GATE_DEFAULTS.triageEnabled,
+  }
+}
 
 const text = (value: unknown, fallback: string) =>
   typeof value === "string" && value.length > 0 ? value : fallback
@@ -162,6 +176,45 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       }).reverse()
     })
 
+    // Same repo-local-plugin reasoning as `effortRouter` below: re-read the
+    // on-disk file and re-apply the plugin's coercion. Absent/malformed fails
+    // open to the plugin DEFAULTS, never an error.
+    const gateConfigPath = `${Global.Path.config}/context-gate.json`
+
+    const gateConfig = Effect.fn("GlobalHttpApi.gateConfig")(function* () {
+      const raw = yield* fs.readFileStringSafe(gateConfigPath).pipe(Effect.orElseSucceed(() => undefined))
+      if (!raw) return resolveGateConfig(undefined)
+      return resolveGateConfig(Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw)))
+    })
+
+    // Only `triageEnabled` is writable here; every other on-disk key is
+    // preserved verbatim. The current file is backed up before a write so a bad
+    // toggle is recoverable without git.
+    const gateConfigUpdate = Effect.fn("GlobalHttpApi.gateConfigUpdate")(function* (ctx: {
+      payload: typeof GateConfigUpdateInput.Type
+    }) {
+      if (ctx.payload.triageEnabled === undefined) return yield* new HttpApiError.BadRequest({})
+      const raw = yield* fs.readFileStringSafe(gateConfigPath).pipe(Effect.orElseSucceed(() => undefined))
+      const parsed = raw
+        ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw))
+        : undefined
+      const existing = record(parsed)
+      const current = resolveGateConfig(existing)
+      if (ctx.payload.triageEnabled === current.triageEnabled) return current
+      if (raw)
+        yield* fs
+          .writeWithDirs(
+            `${Global.Path.config}/.cache-fix-backup-20260921-212521/context-gate.json.pre-toggle-${Date.now()}`,
+            raw,
+          )
+          .pipe(Effect.orElseSucceed(() => undefined))
+      const next = { ...existing, triageEnabled: ctx.payload.triageEnabled }
+      yield* fs
+        .writeWithDirs(gateConfigPath, `${JSON.stringify(next, null, 2)}\n`)
+        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+      return resolveGateConfig(next)
+    })
+
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
@@ -211,6 +264,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configGet", configGet)
       .handle("effortRouter", effortRouter)
       .handle("jevVerdicts", jevVerdicts)
+      .handle("gateConfig", gateConfig)
+      .handle("gateConfigUpdate", gateConfigUpdate)
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
