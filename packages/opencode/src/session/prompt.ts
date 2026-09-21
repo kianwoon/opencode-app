@@ -13,7 +13,8 @@ import { assess } from "./effort"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
-import { type Tool as AITool, tool, jsonSchema } from "ai"
+import { type Tool as AITool, tool, jsonSchema, type ModelMessage } from "ai"
+import { createHash } from "node:crypto"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
@@ -2428,9 +2429,11 @@ const layer = Layer.effect(
             }
             const system = [
               ...gatedBlocks,
-              // Frozen advisory rides the system prefix (constant for the turn)
-              // and sits BEFORE the binding ruleAnchor so the anchor stays last.
-              ...(advisory ? [advisory] : []),
+              // The frozen advisory must NOT ride the system prefix: `system[0]`
+              // is the cached head (`messages[0]`), so any advisory text there
+              // makes the head turn-variable and kills prefix-cache reads. It is
+              // appended to the trailing user message instead (below), where a
+              // change only invalidates the tail.
               ...(ruleAnchor ? [ruleAnchor] : []),
               // Volatile date goes AFTER the stable anchors so a day rollover
               // only re-misses the short trailing tail, keeping the long stable
@@ -2438,6 +2441,34 @@ const layer = Layer.effect(
               yield* sys.environmentDate(),
             ]
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            // Probe: one line per step with a short digest of the cache-relevant
+            // head (joined system string + sorted tool names). Opt-in only.
+            if (process.env.OPENCODE_JEV_DEBUG) {
+              const head = [...system, Object.keys(turnTools).toSorted().join(",")].join("\n")
+              yield* Effect.logInfo("jev.debug head", {
+                "session.id": sessionID,
+                step,
+                headSha256: createHash("sha256").update(head).digest("hex").slice(0, 12),
+                systemBlocks: system.length,
+                tools: Object.keys(turnTools).length,
+              })
+            }
+            // Advisory rides the TAIL, not the cached head: append it as a
+            // trailing text part of the last user message so head bytes stay
+            // stable across turns and prefix-cache reads survive.
+            const lastUserIdx = advisory
+              ? modelMsgs.findLastIndex((m) => m.role === "user")
+              : -1
+            const outboundMsgs: ModelMessage[] =
+              advisory && lastUserIdx >= 0
+                ? modelMsgs.map((m, i): ModelMessage => {
+                    if (i !== lastUserIdx) return m
+                    const content = Array.isArray(m.content)
+                      ? [...m.content, { type: "text" as const, text: advisory }]
+                      : [{ type: "text" as const, text: m.content }, { type: "text" as const, text: advisory }]
+                    return { ...m, content } as ModelMessage
+                  })
+                : modelMsgs
             const result = yield* handle.process({
               user: lastUser,
               agent,
@@ -2446,7 +2477,7 @@ const layer = Layer.effect(
               parentSessionID: session.parentID,
               system,
               messages: [
-                ...modelMsgs,
+                ...outboundMsgs,
                 ...(wrapUp
                   ? [
                       {

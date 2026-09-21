@@ -124,7 +124,11 @@ const schema = (value: unknown): JsonSchema => {
 }
 
 const tools = (input: Record<string, ToolInput> | undefined): ToolDefinition[] =>
-  Object.entries(input ?? {}).map(([name, item]) =>
+  // Deterministic tool order: the definition array is part of the cached
+  // request head, so insertion order from the registry must not leak through.
+  Object.entries(input ?? {})
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([name, item]) =>
     ToolDefinition.make({
       name,
       description: item.description ?? "",
