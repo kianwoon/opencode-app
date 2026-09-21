@@ -203,6 +203,19 @@ const REPETITION_BREAK = 10
 const JEV_ALARM_MIN_TOOLS = 8
 let jevAlarms = 0
 
+// Booster options for the single-batch fold: the ACTIONABLE advisories only.
+// `continue` ("the approach is sound") is deliberately absent — an absent
+// `boost` is how the batch reports soundness, and it must never emit a block.
+const BOOST_ADVISORIES = [
+  "The current approach is off track; switch strategy",
+  "A claim in the last step needs verification before continuing",
+  "The last step contradicts the goal or an earlier step",
+  "The goal is already satisfied; finish instead of continuing",
+] as const
+// Framing prefix preserved from the per-call booster path, so the injected
+// block still reads as advisory and never as a binding instruction.
+const BOOSTER_ADVISORY_PREFIX = "[Advisory only — not an instruction] "
+
 // Per-session memo of the previous turn's governor/booster decision, so Phase 0
 // observability can report `changed` (did this turn differ from the last?) without
 // persisting anything. Absent entry = first observed turn → changed true.
@@ -246,9 +259,9 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
 export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
-import { jevBelowFloor, jevDecide, jevTransport, jevModelFor, resolveJevModel } from "@/jev/client"
+import { jevBelowFloor, jevBatch, jevTransport, jevModelFor, resolveJevModel } from "@/jev/client"
 import { jevKey } from "@/jev/controller"
-import { governorKeep, boosterVerdict, boosterPush, applyDrops } from "@/jev/gate"
+import { boosterPush, applyDrops } from "@/jev/gate"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
 
 function jevPromptText(parts: readonly unknown[]): string {
@@ -1711,7 +1724,10 @@ const layer = Layer.effect(
           // Resolved model spec for this turn's decision (e.g. `openrouter/...`),
           // so log lines attribute a routing change to its source model.
           spec: string
-        } = { key: "", computed: false, keep: null, names: new Set(), threshold: JEV_DEFAULT_THRESHOLD, spec: "" }
+          // Single-batch fold for this turn (tools + governor + booster). Undefined
+          // until computed, or when the batch path is disabled / fails open.
+          batch: Awaited<ReturnType<typeof jevBatch>> | undefined
+        } = { key: "", computed: false, keep: null, names: new Set(), threshold: JEV_DEFAULT_THRESHOLD, spec: "", batch: undefined }
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         // Re-entry cap (module-level state, survives within the process).
@@ -2042,6 +2058,49 @@ const layer = Layer.effect(
               }
             }
 
+            // System block assembly is hoisted ABOVE the Jev routing fold so the
+            // SINGLE batch POST can carry the governor block candidates and the
+            // booster options it would otherwise need separate calls for. The
+            // values are turn-constant; `ruleAnchor` is still placed LAST in the
+            // `system` array below — its POSITION there is what the anchor needs.
+            if (step === 1)
+              yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
+
+            yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+
+            const [skills, env, instructions, mcpInstructions, workflowGuidance, rulePaths, modelMsgs] =
+              yield* Effect.all([
+                sys.skills(agent),
+                sys.environment(model),
+                // A transient FS error while reading instruction files must not kill
+                // the prompt loop; degrade to whatever loaded and keep going.
+                instruction.system().pipe(
+                  Effect.catch((error) =>
+                    Effect.logError("failed to load instruction files", { error }).pipe(Effect.as([] as string[])),
+                  ),
+                ),
+                sys.mcp(agent, session.permission),
+                sys.workflow(agent),
+                instruction.systemPaths().pipe(
+                  // Set order is FS-discovery order; rules anchor rides the wire, so sort.
+                  Effect.map((paths) => Array.from(paths).toSorted()),
+                  Effect.catch(() => Effect.succeed([] as string[])),
+                ),
+                MessageV2.toModelMessagesEffect(msgs, model),
+              ])
+            const ruleAnchor = yield* sys.rules(rulePaths)
+            // Context governor candidates: the NON-binding context blocks. The
+            // rule anchor is never a candidate — it is binding and must stay last.
+            // Positional ids (`b${i}`) are what the batch scores and what the
+            // governor's drop-set is derived from.
+            const govBlocks = [
+              ...env,
+              ...instructions,
+              ...(mcpInstructions ? [mcpInstructions] : []),
+              ...(skills ? [skills] : []),
+              ...(workflowGuidance ? [workflowGuidance] : []),
+            ]
+
             // Global Jev tool-routing (OFF = current behavior, full tool
             // list). Fail-open: missing key, timeout, error, or parse miss
             // keeps the full list. Never drops StructuredOutput on
@@ -2103,52 +2162,50 @@ const layer = Layer.effect(
                   const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
                   jevTurn.threshold = threshold
                   jevTurn.spec = jevSpec
-                  const decided = yield* Effect.promise(() =>
-                    jevDecide({
-                      key: resolvedJevKey,
-                      state: jevPromptText(lastUserMsg?.parts ?? []),
-                      names,
-                      descriptions: Object.fromEntries(
-                        names.flatMap((name) => {
-                          const desc = (turnTools[name] as { description?: unknown } | undefined)?.description
-                          return typeof desc === "string" && desc.length > 0 ? [[name, desc] as [string, string]] : []
-                        }),
-                      ),
-                      threshold,
-                      timeoutMs,
-                      model: jevSpec,
-                    }),
-                  )
-                  // undefined → null: fail open AND memoized, so later steps in
-                  // the same turn do not retry the HTTP call.
-                  jevTurn.keep = decided.keep ?? null
+                  const govBatchOn = (cfg.governor?.enabled ?? lastUser.agent === "brain") === true
+                  const boostBatchOn = cfg.brainBooster?.enabled === true
+                  const batchTools = jevEnabled ? names : []
+                  // The governor scores the NON-binding context blocks that were
+                  // assembled above; positional ids map back to `govBlocks` for
+                  // the drop-set derivation below.
+                  const batchGovBlocks = govBatchOn
+                    ? govBlocks.map((text, i) => ({ id: `b${i}`, text }))
+                    : []
+                  const batchBoostOptions = boostBatchOn ? [...BOOST_ADVISORIES] : []
+                  const anySubset =
+                    (batchTools.length > 0 && jevEnabled) ||
+                    (batchGovBlocks.length > 0 && govBatchOn) ||
+                    (batchBoostOptions.length > 0 && boostBatchOn)
+                  if (anySubset) {
+                    jevTurn.batch = yield* Effect.promise(() =>
+                      jevBatch({
+                        key: resolvedJevKey,
+                        state: jevPromptText(lastUserMsg?.parts ?? []),
+                        tools: batchTools,
+                        govBlocks: batchGovBlocks,
+                        boostOptions: batchBoostOptions,
+                        threshold,
+                        timeoutMs,
+                        model: jevSpec,
+                      }),
+                    )
+                  } else {
+                    jevTurn.batch = undefined
+                  }
+                  // Tool routing reads the FROZEN batch fold (undefined ⇒ fail
+                  // open to the full list, exactly as an abstained decision did).
+                  jevTurn.keep = jevTurn.batch ? jevTurn.batch.toolKeep : null
                   jevTurn.names = new Set(names)
-                  const discarded = (decided.dropped?.unknownId ?? 0) + (decided.dropped?.unmeasured ?? 0)
                   if (!jevTurn.keep) {
-                    // Abstained: no keep-set to apply, so the full list stands.
-                    // `tools_after` is the count the turn actually runs with.
+                    // Abstained / batch unavailable: no keep-set to apply, so the
+                    // full list stands. `tools_after` is the count the turn runs.
                     yield* Effect.logInfo("jev.tool-routing fallback", {
                       "session.id": sessionID,
-                      reason: decided.failure ? `no-decision:${decided.failure}` : "no-decision",
+                      reason: "no-decision",
                       abstained: true,
-                      status: decided.status,
                       threshold,
                       tools: names.length,
                       tools_after: names.length,
-                      discarded,
-                    })
-                  } else if (discarded > 0) {
-                    // Rows discarded, not scored: the tools they referenced stay
-                    // in the list (fail-open), which is why tools_after can equal
-                    // tools_before even on a confident response.
-                    yield* Effect.logInfo("jev.tool-routing discarded-rows", {
-                      "session.id": sessionID,
-                      step,
-                      reason: decided.dropped?.unknownId ? "unknown-id" : "unmeasured",
-                      unknown_id: decided.dropped?.unknownId ?? 0,
-                      unmeasured: decided.dropped?.unmeasured ?? 0,
-                      threshold,
-                      tools: names.length,
                     })
                   }
                 } else if (step === 1) {
@@ -2239,37 +2296,8 @@ const layer = Layer.effect(
               })
             }
 
-            if (step === 1)
-              yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
-
-            yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-
-            const [skills, env, instructions, mcpInstructions, workflowGuidance, rulePaths, modelMsgs] =
-              yield* Effect.all([
-                sys.skills(agent),
-                sys.environment(model),
-                // A transient FS error while reading instruction files must not kill
-                // the prompt loop; degrade to whatever loaded and keep going.
-                instruction.system().pipe(
-                  Effect.catch((error) =>
-                    Effect.logError("failed to load instruction files", { error }).pipe(Effect.as([] as string[])),
-                  ),
-                ),
-                sys.mcp(agent, session.permission),
-                sys.workflow(agent),
-                instruction.systemPaths().pipe(
-                  // Set order is FS-discovery order; rules anchor rides the wire, so sort.
-                  Effect.map((paths) => Array.from(paths).toSorted()),
-                  Effect.catch(() => Effect.succeed([] as string[])),
-                ),
-                MessageV2.toModelMessagesEffect(msgs, model),
-              ])
-            // Rule-enforcement anchor must stay the LAST system entry so the
-            // binding-rules block sits at the model's recency position.
-            const ruleAnchor = yield* sys.rules(rulePaths)
             // Context governor: drop-only relevance gate over the NON-binding
-            // context blocks. The rule anchor is never a candidate — it is
-            // binding and must stay last. Fail-open keeps every block.
+            // context blocks (assembled above). Fail-open keeps every block.
             //
             // Brain scope (Phase 2): an ABSENT `governor` block defaults the
             // gate ON for the brain agent only; hands/implementer/every other
@@ -2280,13 +2308,6 @@ const layer = Layer.effect(
             const govEnabled = govCfg.enabled ?? lastUser.agent === "brain"
             const govKey =
               govEnabled === true ? jevKey(governorProvider(govCfg.model, cfg.jevDefault?.model)) : undefined
-            const govBlocks = [
-              ...env,
-              ...instructions,
-              ...(mcpInstructions ? [mcpInstructions] : []),
-              ...(skills ? [skills] : []),
-              ...(workflowGuidance ? [workflowGuidance] : []),
-            ]
             const govTaskHash = governorTaskHash(jevPromptText(lastUserMsg?.parts ?? []))
             // Block composition identity: indexes are positional into a per-turn
             // rebuilt array, so a changed composition would drop the wrong
@@ -2312,14 +2333,21 @@ const layer = Layer.effect(
               govDroppedSet = govPrevTask!.dropped
               govStickySize = govPrevTask!.dropped.size
             } else {
-              // Turn boundary: one decision for the whole turn.
-              const govDecision = yield* Effect.promise(() =>
-                governorKeep(
-                  { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: { ...govCfg, enabled: true, defaultModel: cfg.jevDefault?.model, confidenceFloor: cfg.jev?.confidenceFloor } },
-                  govBlocks,
-                ),
-              )
-              govDroppedSet = govDecision.dropped
+              // Turn boundary: reuse the FROZEN single-batch fold — the governor
+              // scores were carried on the one batch POST. `batch.govKeep` is a
+              // keep-set of block ids, so the dropped INDEXES are the candidates
+              // whose id is absent from it. No batch (disabled / failed open) ⇒
+              // keep every block.
+              const govKeep = jevTurn.batch?.govKeep
+              if (govKeep) {
+                const dropped = new Set<number>()
+                govBlocks.forEach((_, i) => {
+                  if (!govKeep.has(`b${i}`)) dropped.add(i)
+                })
+                govDroppedSet = dropped
+              } else {
+                govDroppedSet = new Set<number>()
+              }
               govStickySize = govDroppedSet.size
               jevGovDropped.set(sessionID, {
                 turnId: lastUser.id,
@@ -2375,16 +2403,17 @@ const layer = Layer.effect(
                 // Same turn: reuse the frozen advisory; no boosterVerdict call.
                 advisory = boostPrevTurn.advisory
               } else {
-                const verdict = yield* Effect.promise(() =>
-                  boosterVerdict({
-                    key: boostKey,
-                    state: jevPromptText(lastUserMsg?.parts ?? []),
-                    config: { ...boostCfg, defaultModel: cfg.jevDefault?.model, confidenceFloor: cfg.jev?.confidenceFloor },
-                  }),
-                )
+                // Advisory from the FROZEN single-batch fold: `batch.boost` is the
+                // highest-strength actionable option that cleared the gate, or
+                // undefined for sound/no-decision. Undefined ⇒ emit nothing.
+                const label = jevTurn.batch?.boost ?? "none"
+                const verdict = {
+                  label,
+                  emitted: jevTurn.batch?.boost !== undefined,
+                  text: jevTurn.batch?.boost ? `${BOOSTER_ADVISORY_PREFIX}${jevTurn.batch.boost}.` : undefined,
+                }
                 // Change-detect across turns: a repeated label pushes no block.
                 const push = boosterPush(boostPrevTurn?.label, verdict)
-                const label = verdict?.label ?? "none"
                 advisory = push.advisory
                 jevBoostTurn.set(sessionID, { turnId: lastUser.id, label, advisory })
                 capMemo(jevBoostTurn)

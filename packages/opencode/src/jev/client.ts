@@ -494,6 +494,132 @@ export function jevGaugeKeep(
   return keep
 }
 
+/** One-line governor block budget used for the batch criteria labels. */
+const BATCH_SECTION_TEXT_MAX = 600
+
+export interface JevBatchInput {
+  readonly key: string
+  readonly state: string
+  readonly tools: readonly string[]
+  readonly govBlocks: readonly { readonly id: string; readonly text: string }[]
+  readonly boostOptions: readonly string[]
+  readonly threshold: number
+  readonly timeoutMs?: number
+  /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
+  readonly model?: string
+}
+
+/**
+ * One-fold result of a single batch: the tools to keep, the governor block ids
+ * to keep, and the advisory option the model stood behind (or `undefined`).
+ */
+export interface JevBatchResult {
+  readonly toolKeep: Set<string>
+  readonly govKeep: Set<string>
+  readonly boost: string | undefined
+}
+
+/** Keep an exempt tool, and every unmeasured / assumed row (fail open). */
+const batchToolKeep = (answers: Record<string, unknown>, tools: readonly string[], gate: number): Set<string> => {
+  const keep = new Set<string>()
+  for (const name of tools) {
+    if (JEV_EXEMPT_TOOLS.has(name)) {
+      keep.add(name)
+      continue
+    }
+    const verdict = jevVerdict(answers[`tool:${name}`])
+    if (!verdict || verdict.assumed) {
+      keep.add(name)
+      continue
+    }
+    if (verdict.use && verdict.strength >= gate) keep.add(name)
+  }
+  return keep
+}
+
+/** Highest-scoring measured `use` advisory that clears the gate, else `undefined`. */
+const batchBoost = (answers: Record<string, unknown>, options: readonly string[], gate: number): string | undefined => {
+  let best: string | undefined
+  let bestStrength = 0
+  for (const opt of options) {
+    const row = jevMeasuredChoice(answers[`boost:${opt}`])
+    if (row?.choice !== "use" || row.strength < gate || row.strength <= bestStrength) continue
+    best = opt
+    bestStrength = row.strength
+  }
+  return best
+}
+
+/**
+ * SINGLE-batch transport: one `jevAsk` carrying every routing (tool), governor
+ * (`gov`) and booster (`boost`) choice question for a turn, folded locally into
+ * one result. Categorical only — no `score`/`noul` rows yet. Same gate as the
+ * per-call paths: gate on `choice` + `probabilities[choice]` (never
+ * `confidence`), keep exempt tools, and fail open below `confidenceFloor`.
+ *
+ * Fail-open: on any transport error, timeout, unknown provider, or missing
+ * answers envelope the WHOLE call resolves `undefined`, so the caller keeps its
+ * existing per-call behaviour instead of acting on a partial fold.
+ */
+export async function jevBatch(input: JevBatchInput): Promise<JevBatchResult | undefined> {
+  const questions: Record<string, unknown> = {}
+  for (const name of input.tools) {
+    questions[`tool:${name}`] = {
+      type: "choice",
+      instructions: `Given \`request\`, should tool \`${name}\` be used? Use iff it helps answer \`request\`.`,
+      criteria: { use: jevToolUseLabel(name), skip: `Do not use \`${name}\` for this request` },
+    }
+  }
+  for (const block of input.govBlocks) {
+    questions[`gov:${block.id}`] = {
+      type: "choice",
+      instructions: "Given `request`, is `sections[i].text` relevant? Keep iff it helps answer `request`.",
+      criteria: { keep: "Section text helps answer the request", drop: "Section text is irrelevant to the request" },
+    }
+  }
+  for (const opt of input.boostOptions) {
+    questions[`boost:${opt}`] = {
+      type: "choice",
+      instructions: "Given `request`, does this reasoning advisory apply right now?",
+      criteria: { use: opt, skip: "No advisory; the approach is sound" },
+    }
+  }
+  const state = JSON.stringify({
+    request: input.state,
+    tools: input.tools,
+    sections: input.govBlocks.map((block) => ({
+      id: block.id,
+      text: block.text.length <= BATCH_SECTION_TEXT_MAX ? block.text : block.text.slice(0, BATCH_SECTION_TEXT_MAX),
+    })),
+    advisories: input.boostOptions,
+  })
+  try {
+    const answers = await jevAsk({
+      key: input.key,
+      state,
+      questions,
+      timeoutMs: input.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS,
+      model: input.model,
+    })
+    if (!answers) return undefined
+    // `threshold` and the floor both bind: a row under EITHER is untrusted and
+    // fails open (keep), mirroring `jevGaugeKeep`.
+    const gate = Math.max(input.threshold, JEV_DEFAULT_CONFIDENCE_FLOOR)
+    const govIds = input.govBlocks.map((block) => `gov:${block.id}`)
+    const govKept = jevGaugeKeep(answers, govIds, input.threshold, JEV_DEFAULT_CONFIDENCE_FLOOR)
+    const govKeep = new Set(
+      input.govBlocks.filter((block) => govKept?.has(`gov:${block.id}`) !== false).map((block) => block.id),
+    )
+    return {
+      toolKeep: batchToolKeep(answers, input.tools, gate),
+      govKeep,
+      boost: batchBoost(answers, input.boostOptions, gate),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Floor guard for tool routing: must a folded keep-set be applied, or should the
  * caller fail open to the un-narrowed list?
