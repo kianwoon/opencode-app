@@ -331,9 +331,14 @@ const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: 
   return messages
 })
 
+// `prompt_cache_key` is an OpenAI-native routing hint. Raw third-party
+// OpenAI-compatible endpoints share this protocol and reject unknown fields,
+// so emit only for OpenAI itself and opencode-hosted (Go) models.
+const supportsPromptCacheKey = (provider: string) => provider === "openai" || provider.startsWith("opencode")
+
 const lowerOptions = Effect.fn("OpenAIChat.lowerOptions")(function* (request: LLMRequest) {
   const store = OpenAIOptions.store(request)
-  const promptCacheKey = request.model.provider === "openai" ? OpenAIOptions.promptCacheKey(request) : undefined
+  const promptCacheKey = supportsPromptCacheKey(request.model.provider) ? OpenAIOptions.promptCacheKey(request) : undefined
   const reasoningEffort = OpenAIOptions.reasoningEffort(request)
   if (reasoningEffort && !OpenAIOptions.isReasoningEffort(reasoningEffort))
     return yield* invalid(`OpenAI Chat does not support reasoning effort ${reasoningEffort}`)

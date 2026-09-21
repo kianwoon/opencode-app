@@ -62,6 +62,28 @@ describe("OpenAI-compatible Chat route", () => {
     }),
   )
 
+  it.effect("sends prompt_cache_key for opencode-hosted (Go) models", () =>
+    Effect.gen(function* () {
+      const hosted = OpenAICompatibleChat.route
+        .with({
+          provider: "opencode",
+          endpoint: { baseURL: "https://opencode.test/v1/" },
+          auth: Auth.bearer("test-key"),
+        })
+        .model({ id: "claude-sonnet-4" })
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          id: "req_go",
+          model: hosted,
+          prompt: "Say hello.",
+          providerOptions: { openai: { promptCacheKey: "session_go" } },
+        }),
+      )
+
+      expect(prepared.body).toMatchObject({ prompt_cache_key: "session_go" })
+    }),
+  )
+
   it.effect("prepares generic Chat target", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare(

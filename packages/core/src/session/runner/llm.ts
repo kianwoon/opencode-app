@@ -314,6 +314,10 @@ const layer = Layer.effect(
             "x-session-affinity": session.id,
             "X-Session-Id": session.id,
             ...(session.parentID ? { "x-parent-session-id": session.parentID } : {}),
+            // opencode-hosted (Go) models read sticky routing from
+            // `x-opencode-session`; mirror v1's header contract without
+            // dropping the generic session correlation headers above.
+            ...(model.provider.startsWith("opencode") ? { "x-opencode-session": session.id } : {}),
           },
         },
         providerOptions: {

@@ -2624,6 +2624,21 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("adds x-opencode-session for opencode-hosted models", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = Model.make({ id: "go-model", provider: "opencode", route: OpenAIChat.route })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run hosted request" }), resume: false })
+
+      requests.length = 0
+      yield* session.resume(sessionID)
+
+      expect(requests[0]?.http?.headers?.["x-opencode-session"]).toBe(sessionID)
+      expect(requests[0]?.http?.headers?.["x-session-affinity"]).toBe(sessionID)
+    }),
+  )
+
   it.effect("adds the parent session header to child model requests", () =>
     Effect.gen(function* () {
       yield* setup
