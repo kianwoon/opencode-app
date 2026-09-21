@@ -97,6 +97,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const jev = createMemo(() => serverSync().data.config.jev ?? {})
   const governor = createMemo(() => serverSync().data.config.governor ?? {})
   const brainBooster = createMemo(() => serverSync().data.config.brainBooster ?? {})
+  const jevDefault = createMemo(() => serverSync().data.config.jevDefault ?? {})
   const models = useModels()
 
   const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
@@ -131,9 +132,9 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   // so it needs its own reader/writer rather than the brain `model` field.
   type FeatureSection = "jev" | "governor" | "brainBooster"
 
-  const section = (name: FeatureSection) => serverSync().data.config[name] ?? {}
+  const section = (name: FeatureSection | "jevDefault") => serverSync().data.config[name] ?? {}
 
-  const currentSectionModel = (name: FeatureSection) => {
+  const currentSectionModel = (name: FeatureSection | "jevDefault") => {
     const value = section(name).model ?? ""
     const [providerID, ...rest] = value.split("/")
     const modelID = rest.join("/")
@@ -141,7 +142,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     return models.find({ providerID, modelID })
   }
 
-  const commitSection = (name: FeatureSection, model: string) => {
+  const commitSection = (name: FeatureSection | "jevDefault", model: string) => {
     void serverSync()
       .updateConfig({ [name]: { ...section(name), model } })
       .catch((err: unknown) => {
@@ -150,7 +151,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
-  const sectionStateFor = (name: FeatureSection) => ({
+  const sectionStateFor = (name: FeatureSection | "jevDefault") => ({
     ready: models.ready,
     list: models.list,
     current: () => currentSectionModel(name),
@@ -162,9 +163,10 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     recent: models.recent,
   })
 
-  // Rendered description reflects the RESOLVED model (config or the shared
-  // default), never a hardcoded literal that can drift from the runtime.
-  const modelLabel = (name: FeatureSection) => section(name).model || JEV_DEFAULT_MODEL
+  // Rendered description reflects the RESOLVED model: the feature's own model,
+  // else the shared default, else the built-in literal. Never a hardcoded
+  // literal that can drift from the runtime.
+  const modelLabel = (name: FeatureSection) => section(name).model || jevDefault().model || JEV_DEFAULT_MODEL
 
   const modelRows = [
     {
@@ -272,6 +274,15 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
                   commit({ enforcement: option })
                 }}
               />
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Default Jev model"
+              description={`Fallback decision model for tool routing, governor and booster when their own model is unset (currently ${modelLabel("jev")}).`}
+            >
+              <div class="w-full sm:w-[220px]">
+                <ModelFieldControl field="jev-default-model" state={sectionStateFor("jevDefault")} />
+              </div>
             </SettingsRowV2>
 
             <SettingsRowV2 title="Tool routing" description={`Route tools via ${modelLabel("jev")}. OFF keeps the full tool list.`}>

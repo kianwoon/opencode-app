@@ -2107,6 +2107,9 @@ export type Config = {
   tools?: {
     [key: string]: boolean
   }
+  jevDefault?: {
+    model?: string
+  }
   jev?: {
     enabled?: boolean
     model?: string

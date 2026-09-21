@@ -75,6 +75,17 @@ export interface JevTransport {
  * model id, returns `undefined` so the caller fails open rather than POSTing a
  * decisions payload at a provider that cannot answer it.
  */
+/**
+ * Resolve the effective model spec for a Jev feature: its own explicit model
+ * wins, else the shared `jevDefault.model`, else the built-in default. Empty or
+ * whitespace-only strings fall through, matching `jevTransport`/`resolveJevModel`.
+ */
+export function jevModelFor(featureModel?: string, defaultModel?: string): string {
+  if (typeof featureModel === "string" && featureModel.trim().length > 0) return featureModel.trim()
+  if (typeof defaultModel === "string" && defaultModel.trim().length > 0) return defaultModel.trim()
+  return JEV_DEFAULT_MODEL
+}
+
 export function jevTransport(spec?: string): JevTransport | undefined {
   const raw = typeof spec === "string" && spec.trim().length > 0 ? spec.trim() : JEV_DEFAULT_MODEL
   const [provider, ...rest] = raw.split("/")

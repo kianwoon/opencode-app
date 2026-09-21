@@ -222,7 +222,7 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
 export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
-import { jevBelowFloor, jevDecide, jevTransport, resolveJevModel, JEV_DEFAULT_MODEL } from "@/jev/client"
+import { jevBelowFloor, jevDecide, jevTransport, jevModelFor, resolveJevModel } from "@/jev/client"
 import { jevKey } from "@/jev/controller"
 import { governorKeep, boosterAdvisory } from "@/jev/gate"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
@@ -242,9 +242,8 @@ function jevPromptText(parts: readonly unknown[]): string {
  * Auth namespace for a governor/booster model spec: the `provider` prefix of
  * `provider/model-id`, or `typesafe` (the SystemOne default) when absent.
  */
-function governorProvider(model?: string): string {
-  const spec = typeof model === "string" && model.trim().length > 0 ? model.trim() : JEV_DEFAULT_MODEL
-  return spec.split("/")[0] || "typesafe"
+function governorProvider(model?: string, defaultModel?: string): string {
+  return jevModelFor(model, defaultModel).split("/")[0] || "typesafe"
 }
 
 export interface Interface {
@@ -2033,7 +2032,10 @@ const layer = Layer.effect(
                 // Provider-aware: the model spec's prefix selects the transport,
                 // so the key must come from the same provider namespace. Absent
                 // spec defaults to the SystemOne (typesafe) path.
-                const { spec: jevSpec, fallback: jevFallback } = resolveJevModel(cfg.jev?.model, jevKey)
+                const { spec: jevSpec, fallback: jevFallback } = resolveJevModel(
+                  jevModelFor(cfg.jev?.model, cfg.jevDefault?.model),
+                  jevKey,
+                )
                 const jevTransportResolved = jevTransport(jevSpec)
                 // Key from the SAME provider namespace as the transport: the
                 // typesafe and openrouter decision endpoints take different
@@ -2219,7 +2221,8 @@ const layer = Layer.effect(
             // context blocks. The rule anchor is never a candidate — it is
             // binding and must stay last. Fail-open keeps every block.
             const govCfg = cfg.governor ?? {}
-            const govKey = govCfg.enabled === true ? jevKey(governorProvider(govCfg.model)) : undefined
+            const govKey =
+              govCfg.enabled === true ? jevKey(governorProvider(govCfg.model, cfg.jevDefault?.model)) : undefined
             const govBlocks = [
               ...env,
               ...instructions,
@@ -2230,7 +2233,7 @@ const layer = Layer.effect(
             const gatedBlocks = govKey
               ? yield* Effect.promise(() =>
                   governorKeep(
-                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: govCfg },
+                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: { ...govCfg, defaultModel: cfg.jevDefault?.model } },
                     govBlocks,
                   ),
                 )
@@ -2247,10 +2250,15 @@ const layer = Layer.effect(
             // Brain booster: advisory-only reasoning judgement injected as an
             // ephemeral system block per provider turn. Fail-open emits nothing.
             const boostCfg = cfg.brainBooster ?? {}
-            const boostKey = boostCfg.enabled === true ? jevKey(governorProvider(boostCfg.model)) : undefined
+            const boostKey =
+              boostCfg.enabled === true ? jevKey(governorProvider(boostCfg.model, cfg.jevDefault?.model)) : undefined
             const advisory = boostKey
               ? yield* Effect.promise(() =>
-                  boosterAdvisory({ key: boostKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: boostCfg }),
+                  boosterAdvisory({
+                    key: boostKey,
+                    state: jevPromptText(lastUserMsg?.parts ?? []),
+                    config: { ...boostCfg, defaultModel: cfg.jevDefault?.model },
+                  }),
                 )
               : undefined
             const system = [

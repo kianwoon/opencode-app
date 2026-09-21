@@ -12,7 +12,7 @@
  * which `jevChoice` already folds into `strength`.
  */
 
-import { jevAsk, jevGaugeKeep, jevMeasuredChoice, JEV_DEFAULT_MODEL, JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "./client"
+import { jevAsk, jevGaugeKeep, jevMeasuredChoice, jevModelFor, JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "./client"
 
 const SECTION_TEXT_MAX = 600
 
@@ -21,6 +21,7 @@ const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(
 export interface GateConfig {
   readonly enabled?: boolean
   readonly model?: string
+  readonly defaultModel?: string
   readonly threshold?: number
   readonly timeoutMs?: number
 }
@@ -54,7 +55,7 @@ export async function governorKeep(input: GateInput, sections: readonly string[]
     state: input.state,
     questions,
     timeoutMs: input.config.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS,
-    model: input.config.model ?? JEV_DEFAULT_MODEL,
+    model: jevModelFor(input.config.model, input.config.defaultModel),
   })
   const ids = sections.map((_, i) => `s${i}`)
   const keep = jevGaugeKeep(answers, ids, input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
@@ -90,7 +91,7 @@ export async function boosterAdvisory(input: GateInput): Promise<string | undefi
       },
     },
     timeoutMs: input.config.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS,
-    model: input.config.model ?? JEV_DEFAULT_MODEL,
+    model: jevModelFor(input.config.model, input.config.defaultModel),
   })
   // Require an EXPLICIT measured `probabilities[choice]`: `jevChoice` fabricates
   // strength=1 on a label without a probability map, which would clear this gate

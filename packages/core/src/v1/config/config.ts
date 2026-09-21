@@ -132,6 +132,17 @@ export const Info = Schema.Struct({
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  jevDefault: Schema.optional(
+    Schema.Struct({
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Default Jev decision model as "provider/model-id" used by tool routing, governor and booster when their own model is unset.',
+      }),
+    }),
+  ).annotate({
+    description:
+      "Shared default Jev decision model applied to tool routing, governor and booster when their per-feature model is unset.",
+  }),
   jev: Schema.optional(
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean).annotate({

@@ -10,6 +10,7 @@ import {
   jevKeepTools,
   jevBelowFloor,
   jevTransport,
+  jevModelFor,
   resolveJevModel,
 } from "@/jev/client"
 
@@ -262,5 +263,25 @@ describe("resolveJevModel — default-provider silent-disable fallback", () => {
     const r = resolveJevModel(undefined, keyMap({}))
     expect(r.spec).toBe(JEV_DEFAULT_MODEL)
     expect(r.fallback).toBe(false)
+  })
+})
+
+describe("jevModelFor — feature model ⇒ shared default ⇒ built-in", () => {
+  test("feature model wins when set", () => {
+    expect(jevModelFor("openrouter/foo", "typesafe/bar")).toBe("openrouter/foo")
+  })
+
+  test("shared default applies when feature model is unset", () => {
+    expect(jevModelFor(undefined, "openrouter/bar")).toBe("openrouter/bar")
+  })
+
+  test("built-in default when both are unset", () => {
+    expect(jevModelFor(undefined, undefined)).toBe(JEV_DEFAULT_MODEL)
+  })
+
+  test("empty/whitespace strings fall through to the default", () => {
+    expect(jevModelFor("", "openrouter/bar")).toBe("openrouter/bar")
+    expect(jevModelFor("   ", "typesafe/bar")).toBe("typesafe/bar")
+    expect(jevModelFor("", "")).toBe(JEV_DEFAULT_MODEL)
   })
 })
