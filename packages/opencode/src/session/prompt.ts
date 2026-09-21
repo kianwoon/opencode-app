@@ -2195,7 +2195,7 @@ const layer = Layer.effect(
                   const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
                   jevTurn.threshold = threshold
                   jevTurn.spec = jevSpec
-                  const govBatchOn = (cfg.governor?.enabled ?? lastUser.agent === "brain") === true
+                  const govBatchOn = cfg.governor?.enabled === true
                   const boostBatchOn = cfg.brainBooster?.enabled === true
                   const batchTools = jevEnabled ? names : []
                   // The governor scores the NON-binding context blocks that were
@@ -2338,13 +2338,13 @@ const layer = Layer.effect(
             // Context governor: drop-only relevance gate over the NON-binding
             // context blocks (assembled above). Fail-open keeps every block.
             //
-            // Brain scope (Phase 2): an ABSENT `governor` block defaults the
-            // gate ON for the brain agent only; hands/implementer/every other
-            // agent default OFF. An EXPLICIT `governor.enabled` always wins for
-            // every agent. This is the one canonical enablement source; the
-            // plugin-side governor path is retired (disabled-by-default).
+            // Explicit-enable only: an ABSENT `governor` block means OFF for
+            // every agent. The brain-only default made the governor rewrite
+            // content per turn, breaking the cached prefix. This is the one
+            // canonical enablement source; the plugin-side governor path is
+            // retired (disabled-by-default).
             const govCfg = cfg.governor ?? {}
-            const govEnabled = govCfg.enabled ?? lastUser.agent === "brain"
+            const govEnabled = govCfg.enabled === true
             const govKey =
               govEnabled === true ? jevKey(governorProvider(govCfg.model, cfg.jevDefault?.model)) : undefined
             const govTaskHash = governorTaskHash(jevPromptText(lastUserMsg?.parts ?? []))
