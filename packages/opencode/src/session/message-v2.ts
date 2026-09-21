@@ -388,6 +388,11 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               })
             continue
           }
+          // OpenAI-compatible chat/completions does not accept replayed reasoning
+          // content. Emitting it makes the replayed assistant message differ from
+          // the form that was streamed in the same turn, so the provider's prefix
+          // cache misses from the first assistant message onward on every turn.
+          if (model.api.npm === "@ai-sdk/openai-compatible") continue
           assistantMessage.parts.push({
             type: "reasoning",
             text: part.text,
