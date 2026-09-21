@@ -15,7 +15,7 @@ import { Provider } from "@/provider/provider"
 
 import { type Tool as AITool, tool, jsonSchema, type ModelMessage } from "ai"
 import { createHash } from "node:crypto"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
@@ -244,12 +244,51 @@ const jevGovHead = new Map<SessionID, { blocksHash: string; dropped: ReadonlySet
 // cached prefix.
 const jevHeadTools = new Map<SessionID, Record<string, unknown>>()
 
+// Durable per-session freeze of the cache-relevant prefix (system blocks + tool
+// names). The provider caches a byte prefix of the request, so any change to the
+// system array or the tool set forces a full upstream re-prefill. An in-memory
+// freeze did not survive a process restart: the relaunch re-froze the head from
+// the live, still-settling tool set and cost one cold prefix. Persisting it means
+// a restart replays the exact same bytes.
+const headFreezeDir = path.join(os.homedir(), ".local/share/opencode", "session-head")
+
+const headFreezePath = (sessionID: SessionID) =>
+  path.join(headFreezeDir, `${createHash("sha256").update(sessionID).digest("hex").slice(0, 16)}.json`)
+
+function readPersistedHead(sessionID: SessionID): { system: string[]; tools: string[] } | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(headFreezePath(sessionID), "utf8")) as {
+      system?: unknown
+      tools?: unknown
+    }
+    if (!Array.isArray(parsed.system) || !parsed.system.every((item) => typeof item === "string")) return undefined
+    return {
+      system: parsed.system,
+      tools: Array.isArray(parsed.tools) ? parsed.tools.filter((item): item is string => typeof item === "string") : [],
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function writePersistedHead(sessionID: SessionID, system: string[], tools: string[]) {
+  try {
+    mkdirSync(headFreezeDir, { recursive: true })
+    writeFileSync(headFreezePath(sessionID), JSON.stringify({ system, tools }))
+  } catch {}
+}
+
 function freezeHead<T extends Record<string, unknown>>(sessionID: SessionID, current: T): T {
   const frozen = jevHeadTools.get(sessionID)
   if (frozen) return frozen as T
+  const persisted = readPersistedHead(sessionID)
+  const names = persisted
+    ? Object.keys(current).filter((name) => persisted.tools.includes(name))
+    : Object.keys(current)
+  const keep = names.length > 0 ? names : Object.keys(current)
   // Insertion order IS the emitted order, so sort by name once here: the same
   // session can otherwise resolve tools in a different order between turns.
-  const sorted = Object.fromEntries(Object.keys(current).toSorted().map((name) => [name, current[name]]))
+  const sorted = Object.fromEntries(keep.toSorted().map((name) => [name, current[name]]))
   jevHeadTools.set(sessionID, sorted)
   capMemo(jevHeadTools)
   return sorted as T
@@ -276,9 +315,10 @@ const jevSystemPrefix = new Map<SessionID, string[]>()
 function freezeSystem(sessionID: SessionID, current: string[]): string[] {
   const frozen = jevSystemPrefix.get(sessionID)
   if (frozen) return frozen
-  jevSystemPrefix.set(sessionID, current)
+  const value = readPersistedHead(sessionID)?.system ?? current
+  jevSystemPrefix.set(sessionID, value)
   capMemo(jevSystemPrefix)
-  return current
+  return value
 }
 
 // Fingerprint one completed assistant turn from its persisted parts: text
@@ -2524,6 +2564,11 @@ const layer = Layer.effect(
                 path.join(os.homedir(), ".local/share/opencode/head-hash.log"),
                 `${new Date().toISOString()} step=${step} turn=${lastUser.id} head=${createHash("sha256").update(head).digest("hex").slice(0, 12)} tools=${Object.keys(headTools).length} msgs=${createHash("sha256").update(digestMsgs).digest("hex").slice(0, 12)} msgcount=${modelMsgs.length} syslen=${system.join("\n").length}\n`,
               )
+            } catch {}
+            try {
+              if (!readPersistedHead(sessionID)) {
+                writePersistedHead(sessionID, system, Object.keys(headTools))
+              }
             } catch {}
             // Advisory rides the TAIL, not the cached head: append it as a
             // trailing text part of the last user message so head bytes stay
