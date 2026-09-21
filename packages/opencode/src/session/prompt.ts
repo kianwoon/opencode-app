@@ -15,6 +15,7 @@ import { Provider } from "@/provider/provider"
 
 import { type Tool as AITool, tool, jsonSchema, type ModelMessage } from "ai"
 import { createHash } from "node:crypto"
+import { appendFileSync } from "node:fs"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
@@ -2442,17 +2443,16 @@ const layer = Layer.effect(
             ]
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             // Probe: one line per step with a short digest of the cache-relevant
-            // head (joined system string + sorted tool names). Opt-in only.
-            if (process.env.OPENCODE_JEV_DEBUG) {
+            // head (joined system string + sorted tool names). Always on; the log
+            // write is best-effort and must never break the turn.
+            try {
               const head = [...system, Object.keys(turnTools).toSorted().join(",")].join("\n")
-              yield* Effect.logInfo("jev.debug head", {
-                "session.id": sessionID,
-                step,
-                headSha256: createHash("sha256").update(head).digest("hex").slice(0, 12),
-                systemBlocks: system.length,
-                tools: Object.keys(turnTools).length,
-              })
-            }
+              const digestMsgs = JSON.stringify(modelMsgs)
+              appendFileSync(
+                path.join(os.homedir(), ".local/share/opencode/head-hash.log"),
+                `${new Date().toISOString()} step=${step} turn=${lastUser.id} head=${createHash("sha256").update(head).digest("hex").slice(0, 12)} tools=${Object.keys(turnTools).length} msgs=${createHash("sha256").update(digestMsgs).digest("hex").slice(0, 12)} msgcount=${modelMsgs.length} syslen=${system.join("\n").length}\n`,
+              )
+            } catch {}
             // Advisory rides the TAIL, not the cached head: append it as a
             // trailing text part of the last user message so head bytes stay
             // stable across turns and prefix-cache reads survive.
