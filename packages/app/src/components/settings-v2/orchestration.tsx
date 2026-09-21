@@ -18,6 +18,11 @@ type Enforcement = "strict" | "advisory"
 
 const enforcementOptions: Enforcement[] = ["strict", "advisory"]
 
+// Mirrors JEV_DEFAULT_MODEL in packages/opencode/src/jev/client.ts. The app
+// bundle cannot import from the server package, so keep this literal in sync:
+// the shared default is `provider/model-id`, resolved to the SystemOne path.
+const JEV_DEFAULT_MODEL = "typesafe/jev-latest"
+
 type BrainConfig = {
   model?: string
   hands_model?: string
@@ -121,6 +126,45 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     setVisibility: (item: ModelKey, visible: boolean) => models.setVisibility(item, visible),
     recent: models.recent,
   })
+
+  // A jev/governor/brainBooster model field lives inside its OWN config block,
+  // so it needs its own reader/writer rather than the brain `model` field.
+  type FeatureSection = "jev" | "governor" | "brainBooster"
+
+  const section = (name: FeatureSection) => serverSync().data.config[name] ?? {}
+
+  const currentSectionModel = (name: FeatureSection) => {
+    const value = section(name).model ?? ""
+    const [providerID, ...rest] = value.split("/")
+    const modelID = rest.join("/")
+    if (!providerID || !modelID) return
+    return models.find({ providerID, modelID })
+  }
+
+  const commitSection = (name: FeatureSection, model: string) => {
+    void serverSync()
+      .updateConfig({ [name]: { ...section(name), model } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
+  const sectionStateFor = (name: FeatureSection) => ({
+    ready: models.ready,
+    list: models.list,
+    current: () => currentSectionModel(name),
+    set(item: ModelKey | undefined) {
+      commitSection(name, item ? `${item.providerID}/${item.modelID}` : "")
+    },
+    visible: (item: ModelKey) => models.visible(item),
+    setVisibility: (item: ModelKey, visible: boolean) => models.setVisibility(item, visible),
+    recent: models.recent,
+  })
+
+  // Rendered description reflects the RESOLVED model (config or the shared
+  // default), never a hardcoded literal that can drift from the runtime.
+  const modelLabel = (name: FeatureSection) => section(name).model || JEV_DEFAULT_MODEL
 
   const modelRows = [
     {
@@ -230,15 +274,21 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
               />
             </SettingsRowV2>
 
-            <SettingsRowV2 title="Tool routing" description="Route tools via typesafe/jev-1.13. OFF keeps the full tool list.">
+            <SettingsRowV2 title="Tool routing" description={`Route tools via ${modelLabel("jev")}. OFF keeps the full tool list.`}>
               <Switch checked={jev().enabled ?? false} onChange={() => commitJev({ enabled: !(jev().enabled ?? false) })} hideLabel>
                 Toggle Jev tool routing
               </Switch>
             </SettingsRowV2>
 
+            <SettingsRowV2 title="Tool routing model" description="Decision model for Jev tool routing (any provider; typesafe routes to SystemOne).">
+              <div class="w-full sm:w-[220px]">
+                <ModelFieldControl field="jev-model" state={sectionStateFor("jev")} />
+              </div>
+            </SettingsRowV2>
+
             <SettingsRowV2
               title="Context governor"
-              description="Drop-only relevance gating of conversation context via typesafe/jev-1.13. OFF keeps all context."
+              description={`Drop-only relevance gating of conversation context via ${modelLabel("governor")}. OFF keeps all context.`}
             >
               <Switch
                 checked={governor().enabled ?? false}
@@ -249,9 +299,15 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
               </Switch>
             </SettingsRowV2>
 
+            <SettingsRowV2 title="Context governor model" description="Decision model for the context governor (any provider; typesafe routes to SystemOne).">
+              <div class="w-full sm:w-[220px]">
+                <ModelFieldControl field="governor-model" state={sectionStateFor("governor")} />
+              </div>
+            </SettingsRowV2>
+
             <SettingsRowV2
               title="Brain booster"
-              description="Advisory-only Jev reasoning judgement (switch/verify/contradiction/finish) injected per provider turn. OFF emits nothing."
+              description={`Advisory-only Jev reasoning judgement (switch/verify/contradiction/finish) via ${modelLabel("brainBooster")} injected per provider turn. OFF emits nothing.`}
             >
               <Switch
                 checked={brainBooster().enabled ?? false}
@@ -260,6 +316,12 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
               >
                 Toggle brain booster
               </Switch>
+            </SettingsRowV2>
+
+            <SettingsRowV2 title="Brain booster model" description="Decision model for the brain booster (any provider; typesafe routes to SystemOne).">
+              <div class="w-full sm:w-[220px]">
+                <ModelFieldControl field="brainBooster-model" state={sectionStateFor("brainBooster")} />
+              </div>
             </SettingsRowV2>
           </SettingsListV2>
         </div>

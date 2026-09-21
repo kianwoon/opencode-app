@@ -2109,16 +2109,19 @@ export type Config = {
   }
   jev?: {
     enabled?: boolean
+    model?: string
     threshold?: number
     timeoutMs?: number
   }
   governor?: {
     enabled?: boolean
+    model?: string
     threshold?: number
     timeoutMs?: number
   }
   brainBooster?: {
     enabled?: boolean
+    model?: string
     threshold?: number
     timeoutMs?: number
   }

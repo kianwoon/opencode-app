@@ -221,8 +221,10 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // model. The transport + verdict algebra live in the shared, zero-dependency
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
-export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor } from "@/jev/client"
-import { jevBelowFloor, jevDecide } from "@/jev/client"
+export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
+import { jevBelowFloor, jevDecide, jevTransport, resolveJevModel, JEV_DEFAULT_MODEL } from "@/jev/client"
+import { jevKey } from "@/jev/controller"
+import { governorKeep, boosterAdvisory } from "@/jev/gate"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
 
 function jevPromptText(parts: readonly unknown[]): string {
@@ -234,6 +236,15 @@ function jevPromptText(parts: readonly unknown[]): string {
     })
     .map((p) => p.text)
     .join("\n")
+}
+
+/**
+ * Auth namespace for a governor/booster model spec: the `provider` prefix of
+ * `provider/model-id`, or `typesafe` (the SystemOne default) when absent.
+ */
+function governorProvider(model?: string): string {
+  const spec = typeof model === "string" && model.trim().length > 0 ? model.trim() : JEV_DEFAULT_MODEL
+  return spec.split("/")[0] || "typesafe"
 }
 
 export interface Interface {
@@ -2019,16 +2030,43 @@ const layer = Layer.effect(
               }
               if (!jevTurn.computed && names.length > 0) {
                 jevTurn.computed = true
-                const openrouter = yield* provider.getProvider(ProviderV2.ID.openrouter).pipe(Effect.option)
-                const jevKey = Option.isSome(openrouter) ? openrouter.value.key : undefined
-                if (jevKey) {
+                // Provider-aware: the model spec's prefix selects the transport,
+                // so the key must come from the same provider namespace. Absent
+                // spec defaults to the SystemOne (typesafe) path.
+                const { spec: jevSpec, fallback: jevFallback } = resolveJevModel(cfg.jev?.model, jevKey)
+                const jevTransportResolved = jevTransport(jevSpec)
+                // Key from the SAME provider namespace as the transport: the
+                // typesafe and openrouter decision endpoints take different
+                // credentials. auth.json namespace first, then the env var.
+                // A missing/unknown provider fails open (skip routing).
+                const resolvedJevKey = jevTransportResolved ? jevKey(jevTransportResolved.provider) : undefined
+                // Default-provider gotcha: a default/typesafe spec with no
+                // typesafe key but a present OpenRouter key falls back to the
+                // OpenRouter decisions endpoint instead of silently disabling
+                // routing. One diagnostic line, matching the skip-reason form.
+                if (jevFallback && step === 1) {
+                  yield* Effect.logInfo("jev.tool-routing provider-fallback", {
+                    "session.id": sessionID,
+                    reason: "no-typesafe-key",
+                    provider: "openrouter",
+                    threshold: jevTurn.threshold,
+                  })
+                }
+                if (resolvedJevKey && jevTransportResolved) {
                   // One default for every reader: config wins, else the shared
                   // constant (never a second literal that can drift).
                   const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : JEV_DEFAULT_THRESHOLD
                   const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
                   jevTurn.threshold = threshold
                   const decided = yield* Effect.promise(() =>
-                    jevDecide({ key: jevKey, state: jevPromptText(lastUserMsg?.parts ?? []), names, threshold, timeoutMs }),
+                    jevDecide({
+                      key: resolvedJevKey,
+                      state: jevPromptText(lastUserMsg?.parts ?? []),
+                      names,
+                      threshold,
+                      timeoutMs,
+                      model: jevSpec,
+                    }),
                   )
                   // undefined → null: fail open AND memoized, so later steps in
                   // the same turn do not retry the HTTP call.
@@ -2065,7 +2103,8 @@ const layer = Layer.effect(
                 } else if (step === 1) {
                   yield* Effect.logInfo("jev.tool-routing skipped", {
                     "session.id": sessionID,
-                    reason: "no-openrouter-key",
+                    reason: jevTransportResolved ? "no-key" : "unknown-provider",
+                    provider: jevTransportResolved?.provider,
                     threshold: jevTurn.threshold,
                   })
                 }
@@ -2176,13 +2215,50 @@ const layer = Layer.effect(
             // Rule-enforcement anchor must stay the LAST system entry so the
             // binding-rules block sits at the model's recency position.
             const ruleAnchor = yield* sys.rules(rulePaths)
-            const system = [
+            // Context governor: drop-only relevance gate over the NON-binding
+            // context blocks. The rule anchor is never a candidate — it is
+            // binding and must stay last. Fail-open keeps every block.
+            const govCfg = cfg.governor ?? {}
+            const govKey = govCfg.enabled === true ? jevKey(governorProvider(govCfg.model)) : undefined
+            const govBlocks = [
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
               ...(workflowGuidance ? [workflowGuidance] : []),
+            ]
+            const gatedBlocks = govKey
+              ? yield* Effect.promise(() =>
+                  governorKeep(
+                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: govCfg },
+                    govBlocks,
+                  ),
+                )
+              : govBlocks
+            if (govKey && gatedBlocks.length < govBlocks.length) {
+              yield* Effect.logInfo("jev.governor dropped", {
+                "session.id": sessionID,
+                step,
+                before: govBlocks.length,
+                after: gatedBlocks.length,
+                threshold: govCfg.threshold ?? JEV_DEFAULT_THRESHOLD,
+              })
+            }
+            // Brain booster: advisory-only reasoning judgement injected as an
+            // ephemeral system block per provider turn. Fail-open emits nothing.
+            const boostCfg = cfg.brainBooster ?? {}
+            const boostKey = boostCfg.enabled === true ? jevKey(governorProvider(boostCfg.model)) : undefined
+            const advisory = boostKey
+              ? yield* Effect.promise(() =>
+                  boosterAdvisory({ key: boostKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: boostCfg }),
+                )
+              : undefined
+            const system = [
+              ...gatedBlocks,
               ...(ruleAnchor ? [ruleAnchor] : []),
+              // Advisory sits between the binding rule anchor and the volatile
+              // date: it is ephemeral per turn, so nothing stable is displaced.
+              ...(advisory ? [advisory] : []),
               // Volatile date goes AFTER the stable anchors so a day rollover
               // only re-misses the short trailing tail, keeping the long stable
               // prefix byte-identical across turns for implicit prefix caching.

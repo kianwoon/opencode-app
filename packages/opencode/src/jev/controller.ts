@@ -27,9 +27,8 @@ import { join } from "node:path"
 import {
   JEV_DEFAULT_THRESHOLD,
   JEV_DEFAULT_TIMEOUT_MS,
-  JEV_ENDPOINT,
-  JEV_MODEL,
   jevChoice,
+  jevTransport,
   type JevChoice,
 } from "./client"
 
@@ -96,16 +95,23 @@ export function buildState(input: ControllerState): string {
 
 const authFile = join(homedir(), ".local", "share", "opencode", "auth.json")
 
-/** Read the OpenRouter key from auth.json, then env. Never logs the key. */
-export function jevKey(): string | undefined {
+/** Env var per provider namespace, tried after the matching auth.json entry. */
+const JEV_KEY_ENV: Readonly<Record<string, string>> = { typesafe: "TYPESAFE_API_KEY", openrouter: "OPENROUTER_API_KEY" }
+
+/**
+ * Read the key for a provider namespace from auth.json, then its env var.
+ * The key is never logged. An unknown namespace has no env var and fails open.
+ */
+export function jevKey(provider = "typesafe"): string | undefined {
   try {
     const auth = JSON.parse(readFileSync(authFile, "utf8")) as Record<string, { key?: string }>
-    const k = auth.openrouter?.key
+    const k = auth[provider]?.key
     if (typeof k === "string" && k.length > 0) return k
   } catch {
     // fall through to env
   }
-  const env = process.env.OPENROUTER_API_KEY
+  const name = JEV_KEY_ENV[provider]
+  const env = name ? process.env[name] : undefined
   return typeof env === "string" && env.length > 0 ? env : undefined
 }
 
@@ -188,10 +194,12 @@ export const foldController = (body: unknown, threshold: number): ControllerDeci
 export async function jevControl(input: ControllerInput): Promise<ControllerDecision | null> {
   const questions = buildControllerQuestions(input.controls)
   if (!questions) return null
+  const transport = jevTransport(input.model)
+  if (!transport) return null
   const threshold = input.threshold ?? JEV_DEFAULT_THRESHOLD
   const timeoutMs = input.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS
   try {
-    const res = await fetch(JEV_ENDPOINT, {
+    const res = await fetch(transport.endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${input.key}`,
@@ -199,7 +207,7 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
         "HTTP-Referer": "https://opencode.ai/",
         "X-Title": "opencode",
       },
-      body: JSON.stringify({ model: input.model ?? JEV_MODEL, state: buildState(input), questions }),
+      body: JSON.stringify({ model: transport.id, state: buildState(input), questions }),
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (!res.ok) return null

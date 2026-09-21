@@ -137,6 +137,10 @@ export const Info = Schema.Struct({
       enabled: Schema.optional(Schema.Boolean).annotate({
         description: "Enable Jev tool-routing: narrows the tool list per turn via the Jev decision model. OFF = full tool list.",
       }),
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Jev decision model as "provider/model-id" (default "typesafe/jev-latest"). "typesafe" routes to the SystemOne endpoint; "openrouter" routes to the OpenRouter decisions endpoint.',
+      }),
       threshold: Schema.optional(Schema.Finite).annotate({
         description: "Confidence threshold for Jev keep/drop decisions (default 0.7).",
       }),
@@ -152,6 +156,10 @@ export const Info = Schema.Struct({
       enabled: Schema.optional(Schema.Boolean).annotate({
         description:
           "Enable the context governor: drop-only relevance gate over conversation context at the shared v1 choke-point (brain, hands, agents). OFF = current behavior.",
+      }),
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Governor decision model as "provider/model-id" (default "typesafe/jev-latest"). "typesafe" routes to the SystemOne endpoint; "openrouter" routes to the OpenRouter decisions endpoint.',
       }),
       threshold: Schema.optional(Schema.Finite).annotate({
         description: "Choice-probability threshold for governor keep/drop decisions (default 0.7).",
@@ -170,6 +178,10 @@ export const Info = Schema.Struct({
       enabled: Schema.optional(Schema.Boolean).annotate({
         description:
           "Enable the brain booster: advisory-only Jev reasoning judgement injected as an ephemeral system block per provider turn. OFF = current behavior.",
+      }),
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Booster decision model as "provider/model-id" (default "typesafe/jev-latest"). "typesafe" routes to the SystemOne endpoint; "openrouter" routes to the OpenRouter decisions endpoint.',
       }),
       threshold: Schema.optional(Schema.Finite).annotate({
         description: "Choice-probability threshold for brain booster switch/verify decisions (default 0.7).",

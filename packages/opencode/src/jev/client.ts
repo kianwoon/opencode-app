@@ -13,10 +13,109 @@
  * with `probabilities[choice]` — never `confidence`.
  */
 
-export const JEV_MODEL = "typesafe/jev-1.13"
-export const JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+/**
+ * Default decision model. `provider/model-id`: the prefix selects the transport
+ * (typesafe → SystemOne, openrouter → OpenRouter decisions), the suffix is the
+ * model id sent on the wire. Only those two providers speak the decisions
+ * protocol; anything else fails open (see `jevTransport`).
+ */
+export const JEV_DEFAULT_MODEL = "typesafe/jev-latest"
+/** @deprecated use JEV_DEFAULT_MODEL — kept so older imports stay valid. */
+export const JEV_MODEL = JEV_DEFAULT_MODEL
+export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+export const JEV_OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+/**
+ * OpenRouter-transport form of the default spec. The OpenRouter decisions
+ * endpoint proxies the SystemOne model, so the wire model id keeps its
+ * `typesafe/` prefix and only the transport provider changes. Used as the
+ * fallback when a default/typesafe spec has no typesafe key but an OpenRouter
+ * credential is present (see `resolveJevModel`).
+ */
+export const JEV_OPENROUTER_MODEL = "openrouter/typesafe/jev-latest"
 export const JEV_DEFAULT_TIMEOUT_MS = 3_000
 export const JEV_DEFAULT_THRESHOLD = 0.7
+
+/** Provider prefix → decisions endpoint. Only these two speak the protocol. */
+const JEV_ENDPOINTS: Readonly<Record<string, string>> = {
+  typesafe: JEV_ENDPOINT,
+  openrouter: JEV_OPENROUTER_ENDPOINT,
+}
+
+/**
+ * SystemOne wire-id allowlist. The provider config exposes friendly aliases
+ * (`jev-latest`, `jev-1.13`) that resolve to a canonical release id, but only
+ * the canonical/`-latest` forms are accepted on the wire — POSTing the bare
+ * alias `jev-1.13` is rejected with HTTP 400, which the routing/booster paths
+ * fold as a fail-open `no-decision:http`. Normalize the typesafe id part here
+ * so a configured alias never reaches the endpoint verbatim. Unknown typesafe
+ * ids fall back to `jev-latest` (never denied — the user gets a working
+ * default rather than a silent 400). The OpenRouter path is untouched: it
+ * proxies the same model under its own naming.
+ */
+const JEV_TYPESAFE_MODELS: Readonly<Record<string, string>> = {
+  "jev-latest": "jev-latest",
+  "jev-1.13": "jev-latest",
+  "jev-1.13.0": "jev-1.13.0",
+}
+
+/** Canonical wire id for a typesafe spec; unknown ids degrade to `jev-latest`. */
+function typesafeWireId(id: string): string {
+  return JEV_TYPESAFE_MODELS[id] ?? "jev-latest"
+}
+
+export interface JevTransport {
+  readonly provider: string
+  readonly id: string
+  readonly endpoint: string
+}
+
+/**
+ * Resolve a `provider/model-id` spec to a transport. Empty/absent ⇒ the default
+ * `typesafe/jev-latest` ⇒ SystemOne. An unknown provider prefix, or a missing
+ * model id, returns `undefined` so the caller fails open rather than POSTing a
+ * decisions payload at a provider that cannot answer it.
+ */
+export function jevTransport(spec?: string): JevTransport | undefined {
+  const raw = typeof spec === "string" && spec.trim().length > 0 ? spec.trim() : JEV_DEFAULT_MODEL
+  const [provider, ...rest] = raw.split("/")
+  const rawId = rest.join("/")
+  if (!provider || !rawId) return undefined
+  const endpoint = JEV_ENDPOINTS[provider]
+  if (!endpoint) return undefined
+  // typesafe aliases are normalized to a wire-accepted id; every other
+  // (openrouter) id is passed through verbatim.
+  const id = provider === "typesafe" ? typesafeWireId(rawId) : rawId
+  return { provider, id, endpoint }
+}
+
+/**
+ * Pick the wire model spec to actually call, resolving the default-provider
+ * gotcha: the client defaults to a `typesafe/*` spec (SystemOne), but an
+ * existing user may hold only an OpenRouter key. Rather than silently disabling
+ * routing (`no-key` skip), fall the transport back to the OpenRouter decisions
+ * endpoint — which proxies the same model — WHEN the configured spec is
+ * `typesafe*` and has no typesafe key yet an OpenRouter key exists.
+ *
+ * Semantics are deliberately narrow:
+ *  - an explicitly configured non-typesafe spec is untouched (no cross-provider
+ *    redirect of a user's deliberate choice);
+ *  - when a typesafe key IS present the configured spec stands verbatim;
+ *  - unset-everything (no typesafe, no openrouter key) stays fail-open off —
+ *    the returned spec resolves to a transport the caller still cannot key.
+ *
+ * `keyFor(provider)` is injected by the caller so this stays zero-dependency
+ * (`@/jev/controller` owns auth.json/env access, and importing it here would
+ * pull the runtime this module is copyable without).
+ */
+export function resolveJevModel(
+  configured: string | undefined,
+  keyFor: (provider: string) => string | undefined,
+): { readonly spec: string; readonly fallback: boolean } {
+  const spec = typeof configured === "string" && configured.trim().length > 0 ? configured.trim() : JEV_DEFAULT_MODEL
+  const provider = spec.split("/")[0]
+  if (provider !== "typesafe" || keyFor("typesafe")) return { spec, fallback: false }
+  return keyFor("openrouter") ? { spec: JEV_OPENROUTER_MODEL, fallback: true } : { spec, fallback: false }
+}
 
 /**
  * Tools that must never be routed away: subagent delegation, structured output,
@@ -125,6 +224,27 @@ export function jevChoice(value: unknown): JevChoice | undefined {
 }
 
 /**
+ * Measured-only categorical fold: like `jevChoice` but returns `undefined`
+ * instead of fabricating `strength` when `probabilities[choice]` is absent or
+ * non-finite. Advisory consumers that emit on a HIGH score must gate on this,
+ * not `jevChoice` — a degraded echo (label without a probability map) would
+ * otherwise clear the threshold on a fabricated 1 and emit an unmeasured
+ * advisory (mirrors `jevGaugeKeep`, which keeps on an unmeasured drop row).
+ */
+export function jevMeasuredChoice(value: unknown): JevChoice | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const r = value as Record<string, unknown>
+  const choice = r["choice"] ?? r["answer"] ?? r["value"] ?? r["label"]
+  if (typeof choice !== "string") return undefined
+  const probabilities = r["probabilities"]
+  const raw =
+    typeof probabilities === "object" && probabilities !== null
+      ? (probabilities as Record<string, unknown>)[choice]
+      : undefined
+  return typeof raw === "number" && Number.isFinite(raw) ? { choice, strength: raw } : undefined
+}
+
+/**
  * Fold result: the kept set plus counters for rows that were DISCARDED instead
  * of scored. Both causes fail open (the tool stays in the list):
  *  - `unknownId`: the response echoed an id this request never asked about, so
@@ -215,6 +335,81 @@ export function jevKeepTools(payload: unknown, names: string[], threshold: numbe
 }
 
 /**
+ * Generic decisions call for the governor / brain booster. Sends one batch of
+ * named choice questions and returns the raw `answers` record, or `undefined`
+ * on any fail-open path (unknown provider prefix, HTTP rejection, transport
+ * error, or a response with no answers envelope). Callers fold with `jevChoice`
+ * and MUST gate on `choice` + `probabilities[choice]`, never `confidence`.
+ */
+export function jevAsk(input: JevAskInput): Promise<Record<string, unknown> | undefined> {
+  const transport = jevTransport(input.model)
+  if (!transport) return Promise.resolve(undefined)
+  return fetch(transport.endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.key}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://opencode.ai/",
+      "X-Title": "opencode",
+    },
+    body: JSON.stringify({ model: transport.id, state: input.state, questions: input.questions }),
+    signal: AbortSignal.timeout(input.timeoutMs),
+  })
+    .then((res) => (res.ok ? res.json() : undefined))
+    .then((payload): Record<string, unknown> | undefined => {
+      if (typeof payload !== "object" || payload === null) return undefined
+      const root = payload as Record<string, unknown>
+      const answers = root["answers"] ?? root["decisions"] ?? root["results"]
+      return typeof answers === "object" && answers !== null ? (answers as Record<string, unknown>) : undefined
+    })
+    .catch(() => undefined)
+}
+
+export interface JevAskInput {
+  readonly key: string
+  readonly state: string
+  readonly questions: Record<string, unknown>
+  readonly timeoutMs: number
+  /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
+  readonly model?: string
+}
+
+/**
+ * Drop-only fold for one batch of keep/drop rows. Returns the ids to KEEP, or
+ * `undefined` when the payload carried nothing usable (fail open = keep every
+ * section). An id is dropped ONLY on an explicit, measured `drop` that clears
+ * the threshold; a missing row, an unknown choice, or a row without
+ * `probabilities[choice]` all keep (the routing lesson: gate on choice +
+ * probabilities[choice], never `confidence`).
+ */
+export function jevGaugeKeep(payload: unknown, ids: readonly string[], threshold: number): Set<string> | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined
+  const rows = payload as Record<string, unknown>
+  if (Object.keys(rows).length === 0) return undefined
+  const idSet = new Set(ids)
+  const keep = new Set<string>(ids)
+  for (const [id, value] of Object.entries(rows)) {
+    if (!idSet.has(id)) continue
+    // require an INVERSE measure: only a `drop` with an explicit finite
+    // probabilities[drop] clears the gate. `jevChoice` falls back strength=1
+    // when the map is absent, which for a drop-only gate would turn a degraded
+    // echo (label without score) into a silent removal — exactly the failure
+    // the routing lesson warns about, so it must keep instead.
+    const raw =
+      typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)["probabilities"]
+        : undefined
+    const prob =
+      typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>)["drop"] : undefined
+    if (typeof prob !== "number" || !Number.isFinite(prob) || prob < threshold) continue
+    const choice = jevChoice(value)?.choice
+    if (choice !== "drop") continue
+    keep.delete(id)
+  }
+  return keep
+}
+
+/**
  * Floor guard for tool routing: must a folded keep-set be applied, or should the
  * caller fail open to the un-narrowed list?
  *
@@ -263,15 +458,10 @@ const djb2 = (s: string): string => {
   return (h >>> 0).toString(36)
 }
 
-const memoKey = (id: string, state: string, names: readonly string[], threshold: number): string =>
-  `${id}:${djb2(state)}\u0000${djb2(names.join("\u0001"))}\u0000${threshold}`
+const memoKey = (id: string, state: string, names: readonly string[], threshold: number, model: string): string =>
+  `${id}:${model}:${djb2(state)}\u0000${djb2(names.join("\u0001"))}\u0000${threshold}`
 
-export const memoizedDecision = (
-  id: string,
-  state: string,
-  names: readonly string[],
-  threshold: number,
-): JevDecision | undefined => memo.get(memoKey(id, state, names, threshold))
+export const memoizedDecision = (key: string): JevDecision | undefined => memo.get(key)
 
 export const clearJevMemo = (): void => memo.clear()
 
@@ -289,6 +479,8 @@ export interface JevDecideInput {
   readonly names: string[]
   readonly threshold: number
   readonly timeoutMs: number
+  /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
+  readonly model?: string
   /** Memo namespace; callers that share a state shape should pass a stable id. */
   readonly id?: string
 }
@@ -297,11 +489,15 @@ export interface JevDecideInput {
  * One detached decisions call for tool routing. Builds a `choice` question per
  * tool name (use/skip) and folds the response with `jevFoldTools`. Fail-open:
  * any error/timeout/missing answer resolves a decision WITHOUT `keep` (plus a
- * `failure` tag for the caller's log), never throws.
+ * `failure` tag for the caller's log), never throws. An unknown provider prefix
+ * (no endpoint to POST to) is a `parse` failure — fail-open, no request made.
  */
 export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
   const id = input.id ?? "tools"
-  const cached = memoizedDecision(id, input.state, input.names, input.threshold)
+  const transport = jevTransport(input.model)
+  if (!transport) return Promise.resolve({ failure: "parse" })
+  const memo = memoKey(id, input.state, input.names, input.threshold, `${transport.provider}/${transport.id}`)
+  const cached = memoizedDecision(memo)
   if (cached) return Promise.resolve(cached)
   const questions: Record<string, unknown> = {}
   for (const name of input.names) {
@@ -311,7 +507,7 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
       criteria: { use: "Tool is needed for this request", skip: "Tool is not needed" },
     }
   }
-  return fetch(JEV_ENDPOINT, {
+  return fetch(transport.endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.key}`,
@@ -319,7 +515,7 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
       "HTTP-Referer": "https://opencode.ai/",
       "X-Title": "opencode",
     },
-    body: JSON.stringify({ model: JEV_MODEL, state: input.state, questions }),
+    body: JSON.stringify({ model: transport.id, state: input.state, questions }),
     signal: AbortSignal.timeout(input.timeoutMs),
   })
     .then((res): Promise<JevDecision> => {
@@ -331,7 +527,7 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
       })
     })
     .then((decision) => {
-      remember(memoKey(id, input.state, input.names, input.threshold), decision)
+      remember(memo, decision)
       return decision
     })
     .catch(() => ({ failure: "transport" }) satisfies JevDecision)
