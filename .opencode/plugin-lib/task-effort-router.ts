@@ -3,6 +3,7 @@ import { tool } from "@opencode-ai/plugin"
 import {
   classifyTier,
   memoResult,
+  resolveJevModel,
   resolveJevEffortConfig,
   type EffortTier,
   type JevEffortConfig,
@@ -471,11 +472,16 @@ function variantFor(model: unknown, tier: Effort, direction: "down" | "up") {
 }
 
 /**
- * Apply a Jev tier verdict to a session's baseline. Only when the classifier
- * is confident enough (>= cfg.threshold) AND the tier differs from the shape
- * baseline. `wasDefinitive` records whether the shape already had an opinion,
- * selecting the log event ("jev-override" vs "jev-baseline"). Never called on
- * the request critical path unless the verdict was a synchronous memo hit.
+ * Apply a Jev tier verdict to a session's baseline. Gating follows the routing
+ * lesson: Jev is categorical, so keep iff the MEASURED score
+ * `probabilities[choice]` (`result.strength`) clears the threshold — never
+ * `confidence`, which is confidence in the LABEL (a confident SKIP would
+ * otherwise be adopted). `foldAnswer` already drops unmeasured rows, so an
+ * absent strength can never reach here. Also requires the tier to differ from
+ * the shape baseline. `wasDefinitive` records whether the shape already had an
+ * opinion, selecting the log event ("jev-override" vs "jev-baseline"). Never
+ * called on the request critical path unless the verdict was a synchronous memo
+ * hit.
  */
 function adoptJevTier(
   sessionID: string,
@@ -484,8 +490,8 @@ function adoptJevTier(
   wasDefinitive: boolean,
   expected?: State,
 ): boolean {
-  if (result.confidence < cfg.threshold) {
-    log("jev-skip", { sessionID, tier: result.tier, confidence: result.confidence, reason: "below-threshold" })
+  if (result.strength < cfg.threshold) {
+    log("jev-skip", { sessionID, tier: result.tier, strength: result.strength, reason: "below-threshold" })
     return false
   }
   const entry = state.get(sessionID)
@@ -494,7 +500,7 @@ function adoptJevTier(
   // object written by the firing that launched the call; identity mismatch
   // means a fresh task owns the session, so this verdict is stale — drop it.
   if (expected !== undefined && entry !== expected) {
-    log("jev-skip", { sessionID, tier: result.tier, confidence: result.confidence, reason: "stale-task" })
+    log("jev-skip", { sessionID, tier: result.tier, strength: result.strength, reason: "stale-task" })
     return false
   }
   if (!entry) return false
@@ -506,7 +512,7 @@ function adoptJevTier(
     sessionID,
     tier,
     previous,
-    confidence: result.confidence,
+    strength: result.strength,
   })
   return true
 }
@@ -580,7 +586,10 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
       // new task replaced the entry is dropped instead of contaminating it.
       if (cfg.jev.enabled && text.trim().length > 0) {
         const wasDefinitive = profile.baseline !== undefined
-        const cached = memoResult(text)
+        // Memo key is (text, resolved spec): a spec change must not reuse a
+        // verdict from the previous model. resolveJevModel is the single source
+        // of truth shared with classifyTier.
+        const cached = memoResult(text, resolveJevModel(cfg.jev))
         if (cached) {
           adoptJevTier(input.sessionID, cached, cfg.jev, wasDefinitive, written)
         } else {

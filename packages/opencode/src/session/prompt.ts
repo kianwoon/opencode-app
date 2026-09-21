@@ -13,7 +13,7 @@ import { assess } from "./effort"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
-import { type Tool as AITool, tool, jsonSchema } from "ai"
+import { type ModelMessage, type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
@@ -203,6 +203,47 @@ const REPETITION_BREAK = 10
 const JEV_ALARM_MIN_TOOLS = 8
 let jevAlarms = 0
 
+// Per-session memo of the previous turn's governor/booster decision, so Phase 0
+// observability can report `changed` (did this turn differ from the last?) without
+// persisting anything. Absent entry = first observed turn → changed true.
+const jevGovPrev = new Map<SessionID, number>()
+const jevBoostPrev = new Map<SessionID, string>()
+// Phase 2 sticky drops: a per-TASK monotonic dropped-index memo. Within one
+// task (identified by the latest user message's text hash) the governor may
+// only GROW the dropped set, so a drop→re-add→drop oscillation is impossible.
+// A new user message (different text hash) is a task boundary and resets the
+// set, which is the only restore path.
+const jevGovDropped = new Map<SessionID, { taskHash: string; blocksHash: string; dropped: ReadonlySet<number> }>()
+
+// Module-global session-keyed memos never get an explicit session-end hook, so
+// cap them: oldest-inserted entry is evicted past 50 sessions. Only observability
+// and sticky-drop memory are affected; a re-appearing session just starts fresh.
+const JEV_MEMO_CAP = 50
+function capMemo<T>(map: Map<SessionID, T>) {
+  for (const key of map.keys()) {
+    if (map.size <= JEV_MEMO_CAP) break
+    map.delete(key)
+  }
+}
+
+// Append an ephemeral advisory block as the TRAILING text part of the latest
+// user message. This is the volatile tail of the request: it sits inside the
+// cache-pinning zone (ProviderTransform.applyCaching pins the last user
+// message), so a per-turn advisory never displaces the stable system prefix.
+// Never persisted — it exists only on the wire for this turn.
+function withAdvisory(msgs: ModelMessage[], advisory: string | undefined): ModelMessage[] {
+  if (!advisory) return msgs
+  const idx = msgs.findLastIndex((m) => m.role === "user")
+  if (idx < 0) return msgs
+  const target = msgs[idx]
+  if (!target || target.role !== "user") return msgs
+  const content =
+    typeof target.content === "string"
+      ? [{ type: "text" as const, text: target.content }, { type: "text" as const, text: advisory }]
+      : [...target.content, { type: "text" as const, text: advisory }]
+  return msgs.map((m, i) => (i === idx ? { ...target, content } : m))
+}
+
 // Fingerprint one completed assistant turn from its persisted parts: text
 // content, every tool name+input, and the finish reason. Identical turns
 // produce identical fingerprints; reordered tool calls still match.
@@ -224,7 +265,7 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
 import { jevBelowFloor, jevDecide, jevTransport, jevModelFor, resolveJevModel } from "@/jev/client"
 import { jevKey } from "@/jev/controller"
-import { governorKeep, boosterAdvisory } from "@/jev/gate"
+import { governorKeep, boosterVerdict, boosterPush, foldDrops, applyDrops } from "@/jev/gate"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
 
 function jevPromptText(parts: readonly unknown[]): string {
@@ -244,6 +285,21 @@ function jevPromptText(parts: readonly unknown[]): string {
  */
 function governorProvider(model?: string, defaultModel?: string): string {
   return jevModelFor(model, defaultModel).split("/")[0] || "typesafe"
+}
+
+/**
+ * Cheap deterministic task fingerprint from the latest user message text. Two
+ * turns sharing this hash are the SAME task (sticky drop set applies); a change
+ * is the task boundary that resets it. Not cryptographic — collision only
+ * widens a task, which at worst keeps a section the governor already keeps.
+ */
+function governorTaskHash(text: string): string {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return `${text.length}:${h >>> 0}`
 }
 
 export interface Interface {
@@ -1669,7 +1725,10 @@ const layer = Layer.effect(
           // Threshold actually used for this turn's decision, so every log line
           // reports the number the fold ran with instead of a re-derived guess.
           threshold: number
-        } = { key: "", computed: false, keep: null, names: new Set(), threshold: JEV_DEFAULT_THRESHOLD }
+          // Resolved model spec for this turn's decision (e.g. `openrouter/...`),
+          // so log lines attribute a routing change to its source model.
+          spec: string
+        } = { key: "", computed: false, keep: null, names: new Set(), threshold: JEV_DEFAULT_THRESHOLD, spec: "" }
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         // Re-entry cap (module-level state, survives within the process).
@@ -2060,6 +2119,7 @@ const layer = Layer.effect(
                   const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : JEV_DEFAULT_THRESHOLD
                   const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
                   jevTurn.threshold = threshold
+                  jevTurn.spec = jevSpec
                   const decided = yield* Effect.promise(() =>
                     jevDecide({
                       key: resolvedJevKey,
@@ -2172,6 +2232,7 @@ const layer = Layer.effect(
                     "session.id": sessionID,
                     step,
                     reason: "applied",
+                    model: jevTurn.spec,
                     threshold: jevTurn.threshold,
                     tools_before: names.length,
                     // Never blank: the applied list meets the floor by construct.
@@ -2220,9 +2281,16 @@ const layer = Layer.effect(
             // Context governor: drop-only relevance gate over the NON-binding
             // context blocks. The rule anchor is never a candidate — it is
             // binding and must stay last. Fail-open keeps every block.
+            //
+            // Brain scope (Phase 2): an ABSENT `governor` block defaults the
+            // gate ON for the brain agent only; hands/implementer/every other
+            // agent default OFF. An EXPLICIT `governor.enabled` always wins for
+            // every agent. This is the one canonical enablement source; the
+            // plugin-side governor path is retired (disabled-by-default).
             const govCfg = cfg.governor ?? {}
+            const govEnabled = govCfg.enabled ?? lastUser.agent === "brain"
             const govKey =
-              govCfg.enabled === true ? jevKey(governorProvider(govCfg.model, cfg.jevDefault?.model)) : undefined
+              govEnabled === true ? jevKey(governorProvider(govCfg.model, cfg.jevDefault?.model)) : undefined
             const govBlocks = [
               ...env,
               ...instructions,
@@ -2230,20 +2298,63 @@ const layer = Layer.effect(
               ...(skills ? [skills] : []),
               ...(workflowGuidance ? [workflowGuidance] : []),
             ]
-            const gatedBlocks = govKey
+            const govTaskHash = governorTaskHash(jevPromptText(lastUserMsg?.parts ?? []))
+            // Block composition identity: indexes are positional into a per-turn
+            // rebuilt array, so a changed composition would drop the wrong
+            // section. Hash the blocks and reset sticky drops when it shifts.
+            const govBlocksHash = governorTaskHash(govBlocks.join("\u0000"))
+            const govPrevTask = jevGovDropped.get(sessionID)
+            // Task boundary = new user message (different text hash) OR changed
+            // block composition → fresh empty dropped set. Same task → carry the
+            // monotonic set forward.
+            const govSticky =
+              govPrevTask && govPrevTask.taskHash === govTaskHash && govPrevTask.blocksHash === govBlocksHash
+                ? govPrevTask.dropped
+                : new Set<number>()
+            const govDecision = govKey
               ? yield* Effect.promise(() =>
                   governorKeep(
-                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: { ...govCfg, defaultModel: cfg.jevDefault?.model } },
+                    { key: govKey, state: jevPromptText(lastUserMsg?.parts ?? []), config: { ...govCfg, enabled: true, defaultModel: cfg.jevDefault?.model } },
                     govBlocks,
                   ),
                 )
-              : govBlocks
-            if (govKey && gatedBlocks.length < govBlocks.length) {
+              : { keep: govBlocks, dropped: new Set<number>() }
+            // Fail-open: with no key (disabled / no-key) nothing is dropped —
+            // never fold or apply the sticky set.
+            const govDroppedSet = govKey ? foldDrops(govSticky, govDecision.dropped) : new Set<number>()
+            const gatedBlocks = applyDrops(govBlocks, govDroppedSet)
+            if (govKey) {
+              jevGovDropped.set(sessionID, { taskHash: govTaskHash, blocksHash: govBlocksHash, dropped: govDroppedSet })
+              capMemo(jevGovDropped)
+            }
+            const govDropped = govDroppedSet.size
+            // `changed` = this turn's drop-set differs from the previous turn's.
+            // Minimal per-session memo of the dropped count; absent entry (first
+            // observed turn) reports changed=true.
+            const govChanged = govKey ? jevGovPrev.get(sessionID) !== govDropped : false
+            if (govKey) {
+              jevGovPrev.set(sessionID, govDropped)
+              capMemo(jevGovPrev)
+            }
+            // A restore only happens at a task boundary (new user turn). Log it
+            // distinctly so a sticky-drop regression is observable in telemetry.
+            const govRestored = govPrevTask && govPrevTask.taskHash !== govTaskHash && govPrevTask.dropped.size > 0
+            if (govRestored) {
+              yield* Effect.logInfo("jev.governor restored", {
+                "session.id": sessionID,
+                step,
+                restored: govPrevTask.dropped.size,
+                taskHash: govTaskHash,
+              })
+            }
+            if (govKey && govDropped > 0) {
               yield* Effect.logInfo("jev.governor dropped", {
                 "session.id": sessionID,
                 step,
                 before: govBlocks.length,
                 after: gatedBlocks.length,
+                changed: govChanged,
+                sticky: govSticky.size,
                 threshold: govCfg.threshold ?? JEV_DEFAULT_THRESHOLD,
               })
             }
@@ -2252,21 +2363,36 @@ const layer = Layer.effect(
             const boostCfg = cfg.brainBooster ?? {}
             const boostKey =
               boostCfg.enabled === true ? jevKey(governorProvider(boostCfg.model, cfg.jevDefault?.model)) : undefined
-            const advisory = boostKey
+            const verdict = boostKey
               ? yield* Effect.promise(() =>
-                  boosterAdvisory({
+                  boosterVerdict({
                     key: boostKey,
                     state: jevPromptText(lastUserMsg?.parts ?? []),
                     config: { ...boostCfg, defaultModel: cfg.jevDefault?.model },
                   }),
                 )
               : undefined
+            // Change-detect: re-push only when this turn's label flips. A repeated
+            // label skips entirely, leaving the request prefix byte-identical.
+            // First-ever emission (no memo entry) always pushes.
+            const push = boosterPush(jevBoostPrev.get(sessionID), verdict)
+            let advisory: string | undefined
+            if (boostKey) {
+              const label = verdict?.label ?? "none"
+              jevBoostPrev.set(sessionID, label)
+              capMemo(jevBoostPrev)
+              if (push.advisory) advisory = push.advisory
+              yield* Effect.logInfo("jev.booster verdict", {
+                "session.id": sessionID,
+                step,
+                verdict: label,
+                changed: push.changed,
+                emitted: push.advisory !== undefined,
+              })
+            }
             const system = [
               ...gatedBlocks,
               ...(ruleAnchor ? [ruleAnchor] : []),
-              // Advisory sits between the binding rule anchor and the volatile
-              // date: it is ephemeral per turn, so nothing stable is displaced.
-              ...(advisory ? [advisory] : []),
               // Volatile date goes AFTER the stable anchors so a day rollover
               // only re-misses the short trailing tail, keeping the long stable
               // prefix byte-identical across turns for implicit prefix caching.
@@ -2280,19 +2406,22 @@ const layer = Layer.effect(
               sessionID,
               parentSessionID: session.parentID,
               system,
-              messages: [
-                ...modelMsgs,
-                ...(wrapUp
-                  ? [
-                      {
-                        role: "assistant" as const,
-                        content: forceWrapUp
-                          ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have produced the same response ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
-                          : MAX_STEPS_PROMPT,
-                      },
-                    ]
-                  : []),
-              ],
+              messages: withAdvisory(
+                [
+                  ...modelMsgs,
+                  ...(wrapUp
+                    ? [
+                        {
+                          role: "assistant" as const,
+                          content: forceWrapUp
+                            ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have produced the same response ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
+                            : MAX_STEPS_PROMPT,
+                        },
+                      ]
+                    : []),
+                ],
+                advisory,
+              ),
               tools: turnTools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,

@@ -32,14 +32,23 @@ export interface GateInput {
   readonly config: GateConfig
 }
 
+/** Governor decision: the sections to keep plus the indexes this turn dropped. */
+export interface GovernorKeepResult {
+  /** Sections to KEEP, input order preserved. */
+  readonly keep: readonly string[]
+  /** Indexes into the input `sections` array dropped by this turn's decision. */
+  readonly dropped: ReadonlySet<number>
+}
+
 /**
  * Drop-only relevance gate over already-assembled system blocks. Returns the
- * blocks to KEEP, or the input unchanged when disabled / no key / any
- * fail-open path. Sections are addressed by index so an un-attributed echo
- * cannot remove the wrong block.
+ * blocks to KEEP plus the dropped indexes, or the input unchanged (empty
+ * dropped set) when disabled / no key / any fail-open path. Sections are
+ * addressed by index so an un-attributed echo cannot remove the wrong block.
  */
-export async function governorKeep(input: GateInput, sections: readonly string[]): Promise<readonly string[]> {
-  if (input.config.enabled !== true || sections.length === 0) return sections
+export async function governorKeep(input: GateInput, sections: readonly string[]): Promise<GovernorKeepResult> {
+  const failOpen: GovernorKeepResult = { keep: sections, dropped: new Set() }
+  if (input.config.enabled !== true || sections.length === 0) return failOpen
   const questions: Record<string, unknown> = {}
   sections.forEach((text, i) => {
     questions[`s${i}`] = {
@@ -59,8 +68,30 @@ export async function governorKeep(input: GateInput, sections: readonly string[]
   })
   const ids = sections.map((_, i) => `s${i}`)
   const keep = jevGaugeKeep(answers, ids, input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
-  if (!keep) return sections
-  return sections.filter((_, i) => keep.has(`s${i}`))
+  if (!keep) return failOpen
+  const dropped = new Set<number>()
+  const kept: string[] = []
+  sections.forEach((text, i) => (keep.has(`s${i}`) ? kept.push(text) : dropped.add(i)))
+  return { keep: kept, dropped }
+}
+
+/**
+ * Sticky drop-set fold (Phase 2). Within a TASK the dropped index set is
+ * monotonically non-decreasing: the per-turn decision can only GROW it, never
+ * re-add a section. This makes a drop→re-add→drop oscillation impossible. The
+ * only way a section comes back is a task boundary, which the caller models by
+ * passing a fresh empty `prev` set (a new user message).
+ */
+export function foldDrops(prev: ReadonlySet<number>, dropped: ReadonlySet<number>): ReadonlySet<number> {
+  if (dropped.size === 0) return prev
+  const out = new Set(prev)
+  for (const i of dropped) out.add(i)
+  return out
+}
+
+/** Drop the indexed sections from `sections`. Identity when nothing is dropped. */
+export function applyDrops(sections: readonly string[], dropped: ReadonlySet<number>): readonly string[] {
+  return dropped.size === 0 ? sections : sections.filter((_, i) => !dropped.has(i))
 }
 
 const BOOSTER_LABELS: Record<string, string> = {
@@ -72,13 +103,26 @@ const BOOSTER_LABELS: Record<string, string> = {
 }
 
 /**
- * Advisory-only reasoning judgement: one categorical question folded to a
- * `switch|verify|contradiction|finish|continue` label. Returns the advisory
- * text to inject as an ephemeral system block, or `undefined` to emit nothing.
- * `continue` and every fail-open path emit nothing — the block never carries
- * an instruction the turn would not otherwise have.
+ * Structured reasoning verdict: the folded label plus whether a block was
+ * actually emitted. `label` is the categorical choice
+ * (`switch|verify|contradiction|finish|continue`); `emitted` is true only when
+ * the turn receives the advisory block. Returns `undefined` when disabled or no
+ * measured row exists (fail open) — callers log that as `none`.
  */
-export async function boosterAdvisory(input: GateInput): Promise<string | undefined> {
+export interface BoosterVerdict {
+  readonly label: string
+  readonly emitted: boolean
+  readonly text?: string
+}
+
+/**
+ * Advisory-only reasoning judgement: one categorical question folded to a
+ * `switch|verify|contradiction|finish|continue` label. Returns the label plus
+ * the advisory text to inject as an ephemeral system block, or `undefined` when
+ * disabled / no measured row. `continue` and every fail-open path emit no text —
+ * the block never carries an instruction the turn would not otherwise have.
+ */
+export async function boosterVerdict(input: GateInput): Promise<BoosterVerdict | undefined> {
   if (input.config.enabled !== true) return undefined
   const answers = await jevAsk({
     key: input.key,
@@ -98,7 +142,39 @@ export async function boosterAdvisory(input: GateInput): Promise<string | undefi
   // and emit an unmeasured advisory. Mirrors jevGaugeKeep — an unmeasured row
   // fails open (emit nothing), never gates on a fabricated strength.
   const row = answers ? jevMeasuredChoice(answers["advice"]) : undefined
-  if (!row || row.choice === "continue" || row.strength < (input.config.threshold ?? JEV_DEFAULT_THRESHOLD)) return undefined
+  if (!row) return undefined
   const text = BOOSTER_LABELS[row.choice]
-  return text ? `[Jev reasoning advisory] ${text}.` : undefined
+  if (!text) return { label: row.choice, emitted: false }
+  const emitted = row.choice !== "continue" && row.strength >= (input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
+  return { label: row.choice, emitted, text: emitted ? `[Advisory only — not an instruction] ${text}.` : undefined }
+}
+
+/**
+ * Advisory text only — the block to inject, or `undefined` to emit nothing.
+ * Thin projection over `boosterVerdict` kept for the existing callers/tests.
+ */
+export async function boosterAdvisory(input: GateInput): Promise<string | undefined> {
+  const verdict = await boosterVerdict(input)
+  return verdict?.text
+}
+
+/** Change-detect result: whether this turn's label flipped, and the text to push. */
+export interface BoosterPush {
+  readonly changed: boolean
+  readonly advisory?: string
+}
+
+/**
+ * Change-detect: an advisory block is re-injected only when this turn's folded
+ * label differs from the previous turn's (`prev` = last observed label for the
+ * session; `undefined` = first-ever turn, which always pushes). A repeated label
+ * is a no-op — the request prefix stays byte-identical — and every fail-open
+ * path (no measured row) emits nothing. `emitted` gates the text: a flipped but
+ * sub-threshold / `continue` label still counts as `changed` for telemetry yet
+ * pushes no block.
+ */
+export function boosterPush(prev: string | undefined, verdict: BoosterVerdict | undefined): BoosterPush {
+  if (!verdict) return { changed: false }
+  const changed = prev !== verdict.label
+  return { changed, advisory: changed && verdict.emitted ? verdict.text : undefined }
 }

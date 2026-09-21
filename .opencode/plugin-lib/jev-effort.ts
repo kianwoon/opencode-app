@@ -4,8 +4,10 @@
  * One detached choice question per user message: which reasoning-effort tier
  * does this request need? Fail-open: any error, timeout, or absent key returns
  * null, so a broken classifier never affects routing. Verdicts are memoized by
- * a djb2 hash of the exact text so a memo hit is byte-identical and sync — no
- * per-message recompute, no cache churn.
+ * a key of (djb2 hash of the exact text + "|" + resolved model spec) so a memo
+ * hit is byte-identical and sync — no per-message recompute, no cache churn.
+ * The spec is part of the key: the SAME prompt classified under two different
+ * models must never share a verdict.
  *
  * Config lives at `jev` in ~/.config/opencode/effort-router.json and is OFF by
  * default; nothing here runs unless the router opts in.
@@ -17,7 +19,7 @@ import { join } from "node:path"
 
 const AUTH_FILE = join(homedir(), ".local", "share", "opencode", "auth.json")
 const GLOBAL_CONFIG_FILE = join(homedir(), ".config", "opencode", "opencode.json")
-const MEMO_MAX = 200
+export const MEMO_MAX = 200
 const REQUEST_TIMEOUT_MS = 3_000
 const EXCERPT_CHARS = 400
 
@@ -98,6 +100,14 @@ export const readGlobalJevDefaultModel = (): string | undefined => {
   }
 }
 
+/**
+ * Resolve the effective model spec: explicit config wins, then the global
+ * `jevDefault.model`, then the shipped default. Single source of truth for both
+ * the network call and the memo key, so a spec change invalidates the memo.
+ */
+export const resolveJevModel = (cfg: JevEffortConfig = DEFAULT_JEV_EFFORT): string =>
+  cfg.model || readGlobalJevDefaultModel() || DEFAULT_JEV_EFFORT.model
+
 export type EffortTier = "minimal" | "low" | "medium" | "high"
 
 export type JevEffortConfig = {
@@ -126,7 +136,15 @@ export const resolveJevEffortConfig = (raw: unknown): JevEffortConfig => {
   }
 }
 
-export type TierResult = { tier: EffortTier; confidence: number }
+/**
+ * A categorical tier verdict. `strength` is the MEASURED score for the chosen
+ * label (`probabilities[choice]`), never `confidence` — confidence is the
+ * model's confidence in its own LABEL, so a confident SKIP would otherwise
+ * clear a threshold (see the routing lesson). An unmeasured row yields no
+ * TierResult at all (fail-open no-op), so gating can never run on a fabricated
+ * number.
+ */
+export type TierResult = { tier: EffortTier; strength: number }
 
 const STATE =
   "Route each developer request to the reasoning effort tier it needs to complete correctly. " +
@@ -146,8 +164,14 @@ const TIERS: EffortTier[] = ["minimal", "low", "medium", "high"]
 const isTier = (v: unknown): v is EffortTier => typeof v === "string" && (TIERS as string[]).includes(v)
 
 // ---------------------------------------------------------------------------
-// Memo: tier keyed by djb2(exact text), bounded to MEMO_MAX entries (FIFO).
-// A memo hit means the router can adopt the verdict synchronously, no I/O.
+// Memo: tier keyed by (djb2(exact text) + "|" + model spec), bounded to
+// MEMO_MAX entries (FIFO). The spec is part of the key so the same prompt under
+// a different model spec cannot share a verdict. Entries live for the task and
+// carry NO time-based expiry. Deliberately NOT cleared at the task boundary
+// (chat.message): a verdict is a pure function of (text, spec), so keeping it
+// across tasks can only turn a later identical request into a zero-I/O hit —
+// clearing would discard valid identical verdicts for no benefit. A config
+// change is handled by the spec being part of the key, not by a reset.
 // ---------------------------------------------------------------------------
 const memo = new Map<string, TierResult>()
 
@@ -157,14 +181,17 @@ const djb2 = (s: string): string => {
   return (h >>> 0).toString(36)
 }
 
-export const memoResult = (text: string): TierResult | undefined => memo.get(djb2(text))
+/** Resolve the effective model spec, then memo key = text hash + "|" + spec. */
+const memoKey = (text: string, spec: string): string => `${djb2(text)}|${spec}`
 
-const remember = (text: string, result: TierResult): void => {
+export const memoResult = (text: string, spec: string): TierResult | undefined => memo.get(memoKey(text, spec))
+
+const remember = (text: string, spec: string, result: TierResult): void => {
   if (memo.size >= MEMO_MAX) {
     const oldest = memo.keys().next().value
     if (oldest !== undefined) memo.delete(oldest)
   }
-  memo.set(djb2(text), result)
+  memo.set(memoKey(text, spec), result)
 }
 
 export const clearEffortMemo = (): void => memo.clear()
@@ -185,8 +212,15 @@ const buildQuestions = (text: string): Record<string, { type: "choice"; instruct
   },
 })
 
-/** Pull the chosen tier + confidence out of the answers record for "effort". */
-const foldAnswer = (body: unknown): TierResult | null => {
+/**
+ * Pull the chosen tier + its MEASURED strength out of the answers record for
+ * "effort". Mirrors `jevMeasuredChoice` in packages/opencode/src/jev/client.ts
+ * (plugin-lib stays zero-dependency, so the check is copied, not imported).
+ * Requires an explicit numeric `probabilities[choice]`; a row carrying only
+ * `confidence` (confidence in the LABEL) is unmeasured and returns null so the
+ * caller fails open instead of gating on it.
+ */
+export const foldEffortAnswer = (body: unknown): TierResult | null => {
   if (!body || typeof body !== "object") return null
   const answers = (body as { answers?: unknown }).answers
   if (!answers || typeof answers !== "object") return null
@@ -195,9 +229,13 @@ const foldAnswer = (body: unknown): TierResult | null => {
   const a = answer as Record<string, unknown>
   const choice = a.choice ?? a.answer ?? a.value
   if (!isTier(choice)) return null
-  const rawConf = a.confidence
-  const confidence = typeof rawConf === "number" && Number.isFinite(rawConf) ? rawConf : 1
-  return { tier: choice, confidence }
+  const probabilities = a.probabilities
+  const raw =
+    probabilities && typeof probabilities === "object"
+      ? (probabilities as Record<string, unknown>)[choice]
+      : undefined
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null
+  return { tier: choice, strength: raw }
 }
 
 /**
@@ -206,9 +244,9 @@ const foldAnswer = (body: unknown): TierResult | null => {
  */
 export const classifyTier = async (text: string, cfg: JevEffortConfig = DEFAULT_JEV_EFFORT): Promise<TierResult | null> => {
   if (!cfg.enabled) return null
-  const cached = memoResult(text)
+  const spec = resolveJevModel(cfg)
+  const cached = memoResult(text, spec)
   if (cached) return cached
-  const spec = cfg.model || readGlobalJevDefaultModel() || DEFAULT_JEV_EFFORT.model
   const transport = jevTransport(spec)
   if (!transport) return null
   const key = jevKeyFor(transport.provider)
@@ -228,8 +266,8 @@ export const classifyTier = async (text: string, cfg: JevEffortConfig = DEFAULT_
       console.debug(`jev-effort: ${transport.provider}/${transport.id} -> ${new URL(transport.endpoint).host} ok=${res.ok}`)
     }
     if (!res.ok) return null
-    const result = foldAnswer(await res.json())
-    if (result) remember(text, result)
+    const result = foldEffortAnswer(await res.json())
+    if (result) remember(text, spec, result)
     return result
   } catch {
     return null
