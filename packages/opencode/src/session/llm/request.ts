@@ -14,8 +14,19 @@ import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
+import { createHash } from "node:crypto"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
+
+// Cache keys name the shared prompt prefix, not the session. With instruction files
+// moved out of the system array (they now ride a trailing block), the hashed inputs
+// are stable across instruction edits, so this key stays put while AGENTS.md changes
+// and can be shared by any session or subagent that replays the same head.
+export const contentCacheKey = (agent: string, model: string, system: string[], tools: string[]) =>
+  createHash("sha256")
+    .update([agent, model, tools.toSorted().join(","), system.join("\n")].join("|"))
+    .digest("hex")
+    .slice(0, 32)
 
 type PrepareInput = {
   readonly user: SessionV1.User
@@ -82,11 +93,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       ? input.model.variants[input.user.model.variant]
       : {}
   const tools = resolveTools(input)
+  const cacheKey = contentCacheKey(input.agent.name, input.model.api.id, system, Object.keys(tools))
   const base = input.small
     ? ProviderTransform.smallOptions(input.model)
     : ProviderTransform.options({
         model: input.model,
         sessionID: input.sessionID,
+        cacheKey,
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)

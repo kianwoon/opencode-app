@@ -15,7 +15,7 @@ import { Provider } from "@/provider/provider"
 
 import { type Tool as AITool, tool, jsonSchema, type ModelMessage } from "ai"
 import { createHash } from "node:crypto"
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync } from "node:fs"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
@@ -58,7 +58,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionStableHeadTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { node as SessionTodoNode, Service as TodoService } from "./todo"
 import { SessionTools } from "./tools"
@@ -250,38 +250,29 @@ const jevHeadTools = new Map<SessionID, Record<string, unknown>>()
 // freeze did not survive a process restart: the relaunch re-froze the head from
 // the live, still-settling tool set and cost one cold prefix. Persisting it means
 // a restart replays the exact same bytes.
-const headFreezeDir = path.join(os.homedir(), ".local/share/opencode", "session-head")
+const readStableHead = (db: Database.Interface["db"], sessionID: SessionID) =>
+  Effect.gen(function* () {
+    const row = yield* db
+      .select()
+      .from(SessionStableHeadTable)
+      .where(eq(SessionStableHeadTable.session_id, sessionID))
+      .limit(1)
+    return row[0]
+  })
 
-const headFreezePath = (sessionID: SessionID) =>
-  path.join(headFreezeDir, `${createHash("sha256").update(sessionID).digest("hex").slice(0, 16)}.json`)
+const writeStableHead = (db: Database.Interface["db"], sessionID: SessionID, system: string[], tools: string[]) =>
+  db
+    .insert(SessionStableHeadTable)
+    .values({ session_id: sessionID, system, tools, time_created: Date.now() })
+    .onConflictDoNothing()
 
-function readPersistedHead(sessionID: SessionID): { system: string[]; tools: string[] } | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(headFreezePath(sessionID), "utf8")) as {
-      system?: unknown
-      tools?: unknown
-    }
-    if (!Array.isArray(parsed.system) || !parsed.system.every((item) => typeof item === "string")) return undefined
-    return {
-      system: parsed.system,
-      tools: Array.isArray(parsed.tools) ? parsed.tools.filter((item): item is string => typeof item === "string") : [],
-    }
-  } catch {
-    return undefined
-  }
-}
-
-function writePersistedHead(sessionID: SessionID, system: string[], tools: string[]) {
-  try {
-    mkdirSync(headFreezeDir, { recursive: true })
-    writeFileSync(headFreezePath(sessionID), JSON.stringify({ system, tools }))
-  } catch {}
-}
-
-function freezeHead<T extends Record<string, unknown>>(sessionID: SessionID, current: T): T {
+function freezeHead<T extends Record<string, unknown>>(
+  sessionID: SessionID,
+  current: T,
+  persisted: { system: string[]; tools: string[] } | undefined,
+): T {
   const frozen = jevHeadTools.get(sessionID)
   if (frozen) return frozen as T
-  const persisted = readPersistedHead(sessionID)
   const names = persisted
     ? Object.keys(current).filter((name) => persisted.tools.includes(name))
     : Object.keys(current)
@@ -312,10 +303,14 @@ function capMemo<T>(map: Map<SessionID, T>) {
 // system array verbatim; edits apply to the NEXT session.
 const jevSystemPrefix = new Map<SessionID, string[]>()
 
-function freezeSystem(sessionID: SessionID, current: string[]): string[] {
+function freezeSystem(
+  sessionID: SessionID,
+  current: string[],
+  persisted: { system: string[]; tools: string[] } | undefined,
+): string[] {
   const frozen = jevSystemPrefix.get(sessionID)
   if (frozen) return frozen
-  const value = readPersistedHead(sessionID)?.system ?? current
+  const value = persisted?.system ?? current
   jevSystemPrefix.set(sessionID, value)
   capMemo(jevSystemPrefix)
   return value
@@ -2183,7 +2178,6 @@ const layer = Layer.effect(
             // governor's drop-set is derived from.
             const govBlocks = [
               ...env,
-              ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
               ...(workflowGuidance ? [workflowGuidance] : []),
@@ -2532,6 +2526,7 @@ const layer = Layer.effect(
               }
             }
             const environmentDate = yield* sys.environmentDate()
+            const persistedHead = yield* readStableHead(db, sessionID).pipe(Effect.orDie)
             const system = freezeSystem(sessionID, [
               ...gatedBlocks,
               // The frozen advisory must NOT ride the system prefix: `system[0]`
@@ -2544,7 +2539,7 @@ const layer = Layer.effect(
               // only re-misses the short trailing tail, keeping the long stable
               // prefix byte-identical across turns for implicit prefix caching.
               environmentDate,
-            ])
+            ], persistedHead)
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             // Prefix-cache invariant: the head (system blocks + sorted tool list)
             // is APPEND-ONLY across a session. Freeze once so every later turn
@@ -2553,7 +2548,7 @@ const layer = Layer.effect(
             // path, so the full list is frozen exactly as before); once frozen,
             // no later turn may rewrite it — a per-turn fold would re-bill the
             // whole cached prefix.
-            const headTools = freezeHead(sessionID, gatedHead ?? tools)
+            const headTools = freezeHead(sessionID, gatedHead ?? tools, persistedHead)
             // Probe: one line per step with a short digest of the cache-relevant
             // head (joined system string + sorted tool names). Always on; the log
             // write is best-effort and must never break the turn.
@@ -2566,8 +2561,8 @@ const layer = Layer.effect(
               )
             } catch {}
             try {
-              if (!readPersistedHead(sessionID)) {
-                writePersistedHead(sessionID, system, Object.keys(headTools))
+              if (!persistedHead) {
+                yield* writeStableHead(db, sessionID, system, Object.keys(headTools)).pipe(Effect.catch(() => Effect.void))
               }
             } catch {}
             // Advisory rides the TAIL, not the cached head: append it as a
@@ -2602,6 +2597,19 @@ const layer = Layer.effect(
                         content: forceWrapUp
                           ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have produced the same response ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
                           : MAX_STEPS_PROMPT,
+                      },
+                    ]
+                  : []),
+                // Instructions ride a trailing block, NOT the system prefix: the provider
+                // caches a byte prefix of the request, so instruction-file content in the
+                // system array means any AGENTS.md edit re-bills the whole cached prefix.
+                // Regenerated identically every turn, after all history, so history bytes
+                // stay stable and only this tail block can move.
+                ...(instructions.length > 0
+                  ? [
+                      {
+                        role: "user" as const,
+                        content: [{ type: "text" as const, text: instructions.join("\n") }],
                       },
                     ]
                   : []),
