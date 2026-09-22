@@ -24,6 +24,17 @@ environmental, not broken. When writing new prompt-loop e2e tests, pin
 `model: "test/test-model"` (and `agent.build.model` in the harness config) so child
 subagent sessions cannot inherit a machine-global default provider.
 
+## Provider `limit` in Test Configs
+
+A config-declared model `limit` is NOT partially optional: `packages/core/src/v1/config/provider.ts:47-53`
+is `Schema.Struct({ context: Schema.Finite, input: Schema.optional(Schema.Finite), output: Schema.Finite })`.
+`limit: { input: 332_000 }` alone fails at config load (`ConfigInvalidError`, `SchemaError: Missing key
+at ["provider"][...]["limit"]["context"]`) and the test dies in `Config.loadInstanceState` before any
+`expect` runs. Always declare `context` and `output` too.
+
+Command: `cd packages/opencode && bun test test/provider/provider.test.ts -t "<test name>"`.
+Acceptance gate: 1 pass / 0 fail, and the run reaches the assertions rather than failing in `config/parse.ts`.
+
 ## Temporary Directory Fixture
 
 The `tmpdir` function in `fixture/fixture.ts` creates temporary directories for tests with automatic cleanup.
@@ -232,3 +243,18 @@ yield * prompt.cancel(chat.id)
 - Run tests from this package dir (`packages/opencode`), never from the repo root.
 - Selector quick rules: `it.effect` for pure/test-clock Effect, `it.live` when real time/FS/processes are involved, `it.instance` for live tests needing a scoped temp instance (see sections above).
 - Tests touching global config must run under `OPENCODE_CONFIG_DIR="$TMP_GLOBAL"` isolation (see top of this file).
+
+## `session/compaction.test.ts` is EXPECTED RED unisolated (2026-09-22)
+
+- Running `bun test test/session/compaction.test.ts -t "isOverflow"` unisolated on this
+  machine gives **6 fail / 5 pass** (of 11) at `:390 :414 :426 :488 :508 :529`, every one
+  `Expected: true / Received: false`. Under `OPENCODE_CONFIG_DIR` isolation it is
+  **11 pass / 0 fail**. It is machine-global config leakage (see "Global Config Isolation"
+  above), NOT an `isOverflow` bug — do not chase it as one.
+- Correct command:
+  `TMP_GLOBAL=$(mktemp -d) && echo '{"$schema":"https://opencode.ai/config.json"}' > "$TMP_GLOBAL/opencode.json" && cd packages/opencode && OPENCODE_CONFIG_DIR="$TMP_GLOBAL" bun test test/session/compaction.test.ts -t "isOverflow"`
+- Before reporting ANY test failure as a bug: (1) re-run it isolated as above, and (2) prove
+  it pre-existing by reverting the one line you changed and re-running — IDENTICAL failures
+  mean your change caused nothing. Also note `[secret-broker] standalone secret-broker
+  detected` is NOT a reliable marker of this leak (grep count 0 in both runs).
+- Acceptance gate: the isolation command above reports 11 pass / 0 fail.

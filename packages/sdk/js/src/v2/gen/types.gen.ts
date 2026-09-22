@@ -18,6 +18,7 @@ export type Event =
   | EventMessagePartRemoved
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
+  | EventSessionNextTitleRenamed
   | EventSessionNextMoved
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
@@ -909,6 +910,16 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.title.renamed"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+          title: string
+        }
+      }
+    | {
+        id: string
         type: "session.next.moved"
         properties: {
           timestamp: number
@@ -1697,6 +1708,7 @@ export type GlobalEvent = {
     | SyncEventMessagePartRemoved
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
+    | SyncEventSessionNextTitleRenamed
     | SyncEventSessionNextMoved
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
@@ -2145,6 +2157,7 @@ export type Config = {
     prune?: boolean
     tail_turns?: number
     preserve_recent_tokens?: number
+    trigger_tokens?: number
     reserved?: number
   }
   experimental?: {
@@ -2911,6 +2924,7 @@ export type UnknownError1 = {
 export type SessionDurableEvent =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
+  | SessionNextTitleRenamed
   | SessionNextMoved
   | SessionNextPrompted
   | SessionNextPromptAdmitted
@@ -3060,6 +3074,7 @@ export type V2Event =
   | MessagePartRemoved
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
+  | SessionNextTitleRenamed
   | SessionNextMoved
   | SessionNextPrompted
   | SessionNextPromptAdmitted
@@ -3531,6 +3546,23 @@ export type SyncEventSessionNextModelSwitched = {
       sessionID: string
       messageID: string
       model: ModelRef
+    }
+  }
+}
+
+export type SyncEventSessionNextTitleRenamed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.title.renamed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+      title: string
     }
   }
 }
@@ -4466,6 +4498,26 @@ export type SessionNextModelSwitched = {
     sessionID: string
     messageID: string
     model: ModelRef
+  }
+}
+
+export type SessionNextTitleRenamed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.title.renamed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    title: string
   }
 }
 
@@ -6572,6 +6624,17 @@ export type EventSessionNextModelSwitched = {
     sessionID: string
     messageID: string
     model: ModelRef
+  }
+}
+
+export type EventSessionNextTitleRenamed = {
+  id: string
+  type: "session.next.title.renamed"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    title: string
   }
 }
 

@@ -244,6 +244,10 @@ export const Info = Schema.Struct({
       preserve_recent_tokens: Schema.optional(NonNegativeInt).annotate({
         description: "Maximum number of tokens from recent turns to preserve verbatim after compaction",
       }),
+      trigger_tokens: Schema.optional(NonNegativeInt).annotate({
+        description:
+          "Total-token threshold that triggers compaction, overriding the model-derived fire point (the model's usable window). Unset keeps the model-derived behaviour.",
+      }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
       }),

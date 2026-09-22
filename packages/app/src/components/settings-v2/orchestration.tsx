@@ -123,6 +123,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   const governor = createMemo(() => serverSync().data.config.governor ?? {})
   const brainBooster = createMemo(() => serverSync().data.config.brainBooster ?? {})
   const jevDefault = createMemo(() => serverSync().data.config.jevDefault ?? {})
+  const compaction = createMemo(() => serverSync().data.config.compaction ?? {})
   const models = useModels()
 
   // Panel-mount reads of the server-owned effort-router state. Both fail
@@ -284,6 +285,29 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     commitJev({ threshold: value })
   }
 
+  // A token budget, not a probability: commit on `change` (blur/Enter), never per
+  // keystroke, so a partially typed "8" never persists as an 8-token budget.
+  const commitCompaction = (patch: { preserve_recent_tokens?: number; trigger_tokens?: number }) => {
+    void serverSync()
+      .updateConfig({ compaction: { ...compaction(), ...patch } })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("common.requestFailed"), description: message })
+      })
+  }
+
+  const commitPreserveRecentTokens = (raw: string) => {
+    const value = Number(raw)
+    if (!Number.isFinite(value) || value < 0) return
+    commitCompaction({ preserve_recent_tokens: value })
+  }
+
+  const commitTriggerTokens = (raw: string) => {
+    const value = Number(raw)
+    if (!Number.isFinite(value) || value < 0) return
+    commitCompaction({ trigger_tokens: value })
+  }
+
   const commitGovernor = (patch: { enabled?: boolean }) => {
     void serverSync()
       .updateConfig({ governor: { ...governor(), ...patch } })
@@ -431,6 +455,44 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
                     ? "scoping on"
                     : "scoping off"}
               </Tag>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Preserve recent tokens"
+              description="Tokens of recent turns kept verbatim after a compaction; the remainder is summarized. Unset uses the model-window default (25% of usable, clamped 2000-15000). Above the model's own max it has no effect."
+            >
+              <div class="w-full sm:w-[220px]">
+                <TextInputV2
+                  data-action="settings-orchestration-preserve-recent-tokens"
+                  type="number"
+                  appearance="base"
+                  numeric
+                  min={0}
+                  step={1000}
+                  value={String(compaction().preserve_recent_tokens ?? "")}
+                  onChange={(event) => commitPreserveRecentTokens(event.currentTarget.value)}
+                  aria-label="Preserve recent tokens"
+                />
+              </div>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Context trigger tokens"
+              description="Total tokens (including cache reads) that trigger compaction. Unset uses the model's own usable window. Fires at the next safe boundary; each event re-bills the prompt prefix once."
+            >
+              <div class="w-full sm:w-[220px]">
+                <TextInputV2
+                  data-action="settings-orchestration-compaction-trigger-tokens"
+                  type="number"
+                  appearance="base"
+                  numeric
+                  min={0}
+                  step={10000}
+                  value={String(compaction().trigger_tokens ?? "")}
+                  onChange={(event) => commitTriggerTokens(event.currentTarget.value)}
+                  aria-label="Context trigger tokens"
+                />
+              </div>
             </SettingsRowV2>
 
             <SettingsRowV2

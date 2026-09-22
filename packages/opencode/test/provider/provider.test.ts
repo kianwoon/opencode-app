@@ -16,6 +16,7 @@ import { Config } from "@/config/config"
 import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin/index"
 import { Provider } from "@/provider/provider"
+import { usable } from "@/session/overflow"
 
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Filesystem } from "@/util/filesystem"
@@ -212,6 +213,35 @@ it.instance(
     config: {
       provider: {
         anthropic: { models: { "my-alias": { id: "claude-sonnet-4-20250514", name: "My Custom Alias" } } },
+      },
+    },
+  },
+)
+
+it.instance(
+  "config-declared limit.input reaches the resolved model and drives usable",
+  Effect.gen(function* () {
+    yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")
+    const providers = yield* list
+    const anthropic = providers[ProviderV2.ID.anthropic]
+    expect(anthropic).toBeDefined()
+    const alias = anthropic.models["limit-alias"]
+    expect(alias).toBeDefined()
+    expect(alias.limit.input).toBe(332_000)
+    expect(usable({ cfg: { compaction: { reserved: 32_000 } }, model: alias })).toBe(300_000)
+  }),
+  {
+    config: {
+      provider: {
+        anthropic: {
+          models: {
+            "limit-alias": {
+              id: "claude-sonnet-4-6",
+              name: "Limit Alias",
+              limit: { context: 200_000, output: 64_000, input: 332_000 },
+            },
+          },
+        },
       },
     },
   },

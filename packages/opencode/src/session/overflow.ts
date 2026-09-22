@@ -30,5 +30,5 @@ export function isOverflow(input: {
 
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-  return count >= usable(input)
+  return count >= (input.cfg.compaction?.trigger_tokens ?? usable(input))
 }
