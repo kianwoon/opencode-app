@@ -430,4 +430,8 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
   changes that would break direct-construction test fixtures. Separately: adding a NEW
   dep (e.g. `RuntimeFlags.node`) to a widely-used node makes that node a hard dependency
   for every fixture that constructs it — check fixtures before adding. Acceptance gate:
-  `bun typecheck` clean AND affected targeted tests show no NEW failures vs baseline.
+   `bun typecheck` clean AND affected targeted tests show no NEW failures vs baseline.
+
+## Learnings
+
+**Session token rollup ≠ live context — never cap on it (2026-09-22).** `session.tokens` rollups (`tokens_input`/`tokens_cache_read`) SUM tokens ACROSS turns; `cache_read` alone grows ~20k/turn, so the rollup blows any sane cap after ~5-8 turns. First casualty: the task-tool hand-reuse cap (`HAND_REUSE_MAX_TOKENS` in `src/tool/task.ts`) gated on the rollup and denied every real resume while the session's live context was ~28k (rollup 405k). Fix: cap on the NEWEST assistant message's `cache.read + input` (the live prompt size). Acceptance gate: `bun test test/tool/task-reuse.test.ts` from packages/opencode — over-cap case seeds last-message tokens, no-message case resumable.

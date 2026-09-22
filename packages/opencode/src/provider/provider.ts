@@ -25,6 +25,7 @@ import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { isRecord } from "@/util/record"
 import { optional } from "@opencode-ai/core/schema"
+import { protocolFromNpm, suggestProtocolFromBaseURL } from "./protocol"
 import { ProviderTransform } from "./transform"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -1424,6 +1425,7 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
 // passthrough SDKs (Responses / Messages APIs). Resolving the native npm before
 // variants are computed makes reasoning variants produce payloads the native
 // SDKs understand (e.g. anthropic `effort` instead of compat `reasoningEffort`).
+
 function cloudflareGatewayNpm(providerID: string, modelID: string) {
   if (providerID !== "cloudflare-ai-gateway") return undefined
   if (modelID.startsWith("openai/")) return "@ai-sdk/openai"
@@ -1678,6 +1680,44 @@ const layer = Layer.effect(
               cloudflareGatewayNpm(providerID, apiID) ??
               modelsDev[providerID]?.npm ??
               (providerID === "deepseek" ? "@ai-sdk/deepseek" : "@ai-sdk/openai-compatible")
+            const apiUrl =
+              model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api ?? ""
+            const defaultedCompat =
+              apiNpm === "@ai-sdk/openai-compatible" &&
+              (model.provider?.npm ?? provider.npm ?? existingModel?.api.npm) === undefined &&
+              cloudflareGatewayNpm(providerID, apiID) === undefined &&
+              modelsDev[providerID]?.npm === undefined &&
+              providerID !== "deepseek"
+            if (defaultedCompat && suggestProtocolFromBaseURL(apiUrl) === "anthropic") {
+              Effect.runFork(
+                Effect.logWarning("provider protocol suggestion", {
+                  providerID,
+                  modelID,
+                  baseURL: apiUrl,
+                  suggestion: 'set provider npm to "@ai-sdk/anthropic" for this Anthropic endpoint',
+                }),
+              )
+            }
+            const declaredNpm = model.provider?.npm ?? provider.npm
+            const catalogNpm = modelsDev[providerID]?.npm
+            const baseUnsetOrOfficial = apiUrl === "" || apiUrl === (modelsDev[providerID]?.api ?? "")
+            if (
+              declaredNpm !== undefined &&
+              catalogNpm !== undefined &&
+              protocolFromNpm(declaredNpm) !== protocolFromNpm(catalogNpm) &&
+              baseUnsetOrOfficial
+            ) {
+              Effect.runFork(
+                Effect.logWarning("provider protocol contradiction", {
+                  providerID,
+                  modelID,
+                  declaredNpm,
+                  catalogNpm,
+                  declaredFamily: protocolFromNpm(declaredNpm),
+                  catalogFamily: protocolFromNpm(catalogNpm),
+                }),
+              )
+            }
             const name = iife(() => {
               if (model.name) return model.name
               if (model.id && model.id !== modelID) return modelID

@@ -6,7 +6,8 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
-import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
+import { APICallError, streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
+import { classifyProtocolError, protocolFromNpm } from "@/provider/protocol"
 import type { LLMEvent } from "@opencode-ai/llm"
 import { LLMClient } from "@opencode-ai/llm/route"
 import type { LLMClientService } from "@opencode-ai/llm/route"
@@ -299,6 +300,26 @@ const live: Layer.Layer<
                 ...(stall !== undefined ? { stallIdleMs: stall } : {}),
               }),
             )
+            const apiBody =
+              APICallError.isInstance(error) &&
+              typeof error.responseBody === "string" &&
+              error.responseBody.length > 0
+                ? error.responseBody
+                : undefined
+            const detected = apiBody !== undefined ? classifyProtocolError(apiBody) : undefined
+            const declared = protocolFromNpm(input.model.api.npm)
+            if (detected !== undefined && detected !== declared) {
+              bridge.fork(
+                Effect.logWarning("provider protocol mismatch", {
+                  providerID: input.model.providerID,
+                  modelID: input.model.id,
+                  declaredNpm: input.model.api.npm,
+                  detected,
+                  suggestion:
+                    "update provider npm to the matching SDK (openai-compatible vs anthropic) in config",
+                }),
+              )
+            }
           },
           // Copilot returns the authoritative billed amount only in provider-specific response fields.
           includeRawChunks: input.model.providerID.includes("github-copilot"),
