@@ -230,6 +230,21 @@ const layer = Layer.effect(
       const budget = preserveRecentBudget({ cfg: input.cfg, model: input.model })
       const all = turns(input.messages)
       if (!all.length) return { head: input.messages, tail_start_id: undefined }
+      // Advisory: a plugin may name the first message that survives verbatim.
+      // An unknown or absent id falls through to the deterministic walk below,
+      // so with no plugin installed this changes nothing.
+      const verdict = yield* plugin.trigger(
+        "experimental.compaction.select",
+        {
+          budget,
+          turns: all.map((turn) => ({ id: turn.id, start: turn.start, end: turn.end })),
+        },
+        { tail_start_id: undefined as string | undefined },
+      )
+      const chosen = verdict.tail_start_id ? all.find((turn) => turn.id === verdict.tail_start_id) : undefined
+      if (chosen && chosen.start > 0) {
+        return { head: input.messages.slice(0, chosen.start), tail_start_id: chosen.id }
+      }
       const recent = limit === undefined ? all : all.slice(-limit)
 
       let total = 0

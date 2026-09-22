@@ -287,7 +287,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
 
   // A token budget, not a probability: commit on `change` (blur/Enter), never per
   // keystroke, so a partially typed "8" never persists as an 8-token budget.
-  const commitCompaction = (patch: { preserve_recent_tokens?: number; trigger_tokens?: number }) => {
+  const commitCompaction = (patch: { auto?: boolean; preserve_recent_tokens?: number; trigger_tokens?: number }) => {
     void serverSync()
       .updateConfig({ compaction: { ...compaction(), ...patch } })
       .catch((err: unknown) => {
@@ -455,6 +455,20 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
                     ? "scoping on"
                     : "scoping off"}
               </Tag>
+            </SettingsRowV2>
+
+            <SettingsRowV2
+              title="Automatic compaction"
+              description="Master switch for compaction. While OFF, no threshold is consulted and the context grows unbounded — the other two settings below have no effect. Writes apply immediately."
+            >
+              <Switch
+                checked={compaction().auto ?? false}
+                onChange={() => commitCompaction({ auto: !(compaction().auto ?? false) })}
+                data-action="settings-orchestration-compaction-auto"
+                hideLabel
+              >
+                Toggle automatic compaction
+              </Switch>
             </SettingsRowV2>
 
             <SettingsRowV2

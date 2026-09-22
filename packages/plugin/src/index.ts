@@ -328,6 +328,13 @@ export interface Hooks {
     input: { sessionID: string; messageID: string; partID: string },
     output: { text: string },
   ) => Promise<void>
+  "experimental.compaction.select"?: (
+    input: {
+      budget: number
+      turns: { id: string; start: number; end: number }[]
+    },
+    output: { tail_start_id?: string },
+  ) => Promise<void>
   /**
    * Modify tool definitions (description and parameters) sent to LLM
    */
