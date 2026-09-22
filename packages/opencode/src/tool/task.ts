@@ -66,6 +66,9 @@ export const MAX_PARALLEL_TASKS_PER_TURN = 5
 export const MAX_IDENTICAL_TASK_ATTEMPTS = 5
 export const IDENTICAL_TASK_WINDOW_MS = 60_000
 
+export const HAND_REUSE_TTL_MS = 20 * 60 * 1000
+export const HAND_REUSE_MAX_TOKENS = 150_000
+
 /** Terminal refusal for a repeated identical task. Shared so the wording stays in one place. */
 function identicalTaskRefusal(input: { count: number; subagentType: string; description: string; last: string }) {
   const seconds = Math.round(IDENTICAL_TASK_WINDOW_MS / 1000)
@@ -298,6 +301,33 @@ export const TaskTool = Tool.define(
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
+      const reused = params.task_id
+        ? undefined
+        : yield* Effect.gen(function* () {
+            const kids = yield* sessions.children(ctx.sessionID)
+            const [newest] = kids
+              .filter((kid) => kid.agent === next.name)
+              .sort((a, b) => b.time.updated - a.time.updated)
+            if (!newest) return undefined
+            const tokens = newest.tokens
+            const total =
+              (tokens?.input ?? 0) +
+              (tokens?.output ?? 0) +
+              (tokens?.reasoning ?? 0) +
+              (tokens?.cache?.read ?? 0) +
+              (tokens?.cache?.write ?? 0)
+            if (total > HAND_REUSE_MAX_TOKENS) return undefined
+            const ageMs = Date.now() - newest.time.updated
+            if (ageMs > HAND_REUSE_TTL_MS) return undefined
+            const job = yield* background.get(newest.id)
+            if (job?.status === "running") return undefined
+            yield* Effect.logInfo("Reusing subagent session", {
+              agent: next.name,
+              sessionID: newest.id,
+              ageMinutes: Math.round((ageMs / 60000) * 10) / 10,
+            })
+            return newest
+          })
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -317,6 +347,7 @@ export const TaskTool = Tool.define(
       ]
       const nextSession =
         session ??
+        reused ??
         (yield* sessions.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${next.name} subagent)`,
