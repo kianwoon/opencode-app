@@ -88,6 +88,7 @@ export function expand(config: ConfigV1.Info) {
     ["guru", brain.guru_model],
     ["computer-aid", brain.computer_aid_model],
   ] as const) {
+    if (!model) continue
     const entry = agent[name]
     if (!entry) {
       agent[name] = {

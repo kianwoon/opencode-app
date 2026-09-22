@@ -164,8 +164,12 @@ describe("brain config expansion", () => {
               guru: "allow",
             },
           })
-          // bash/edit are no longer own keys — they fall under the "*" deny.
-          expect(permission?.bash).toBeUndefined()
+          // bash echo-allow + redirect-deny shape; edit falls under the "*" deny.
+          expect(permission?.bash).toMatchObject({
+            "*": "deny",
+            "echo *": "allow",
+            "*>*": "deny",
+          })
           expect(permission?.edit).toBeUndefined()
           for (const name of ["explorer", "implementer"] as const) {
             expect(config.agent?.[name]).toMatchObject({
@@ -225,8 +229,7 @@ describe("brain config expansion", () => {
         Effect.sync(() => {
           expect(config.agent?.brain).toMatchObject({ mode: "primary", model: "anthropic/brain" })
           for (const name of ["explorer", "implementer", "reviewer"] as const) {
-            expect(config.agent?.[name]).toMatchObject({ mode: "subagent" })
-            expect(config.agent?.[name]?.model).toBeUndefined()
+            expect(config.agent?.[name]).toBeUndefined()
           }
         }),
       ),
@@ -253,8 +256,7 @@ describe("brain config expansion", () => {
     load({ brain: { model: "anthropic/brain", enforcement: "strict" } }).pipe(
       Effect.tap((config) =>
         Effect.sync(() => {
-          expect(config.agent?.guru).toMatchObject({ mode: "subagent" })
-          expect(config.agent?.guru?.model).toBeUndefined()
+          expect(config.agent?.guru).toBeUndefined()
           expect(config.agent?.brain?.permission).toMatchObject({
             task: {
               "*": "deny",
@@ -296,8 +298,7 @@ describe("brain config expansion", () => {
     load({ brain: { model: "anthropic/brain", enforcement: "advisory" } }).pipe(
       Effect.tap((config) =>
         Effect.sync(() => {
-          expect(config.agent?.["computer-aid"]).toMatchObject({ mode: "subagent", permission: {} })
-          expect(config.agent?.["computer-aid"]?.model).toBeUndefined()
+          expect(config.agent?.["computer-aid"]).toBeUndefined()
         }),
       ),
       Effect.asVoid,
