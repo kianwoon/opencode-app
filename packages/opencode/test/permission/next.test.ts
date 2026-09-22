@@ -1250,3 +1250,19 @@ it.instance(
     }),
   { git: true },
 )
+
+test("disabled - exact session_rename allow survives trailing *:deny", () => {
+  const brainStrict: PermissionV1.Ruleset = [
+    { permission: "*", pattern: "*", action: "deny" },
+    { permission: "session_rename", pattern: "*", action: "allow" },
+  ]
+  const merged = Permission.merge(brainStrict, [{ permission: "*", pattern: "*", action: "deny" }])
+  const visible = Permission.visibleTools({ session_rename: {}, bash: {} }, merged)
+  expect("session_rename" in visible).toBe(true)
+  expect("bash" in visible).toBe(false)
+  const hidden = Permission.disabled(["bash", "edit", "write", "session_rename"], merged)
+  expect(hidden.has("bash")).toBe(true)
+  expect(hidden.has("edit")).toBe(true)
+  expect(hidden.has("write")).toBe(true)
+  expect(hidden.has("session_rename")).toBe(false)
+})

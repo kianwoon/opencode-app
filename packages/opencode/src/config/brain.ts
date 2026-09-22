@@ -8,7 +8,9 @@ import type { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 // therefore required so every current and future MCP server is denied to this
 // planner-only agent unless explicitly allow-listed below. Key order matters:
 // `Ruleset.findLast` (permission/index.ts:225) makes the LAST matching rule win, so
-// `"*": "deny"` must remain the FIRST key.
+// `"*": "deny"` must remain the FIRST key. `disabled()` prefers an exact
+// `rule.permission === permission` match before Wildcard fallback, so an exact
+// allow (e.g. session_rename) survives a trailing `"*": "deny".
 //
 // The allow-list is COMPLETE: read-only, planning, delegation, effort-escalation
 // and research tools are explicitly allowed; every execution tool stays denied by
