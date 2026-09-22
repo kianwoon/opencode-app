@@ -222,12 +222,34 @@ describe("tool.task auto-resume", () => {
     }),
   )
 
-  it.instance("skips when token rollup exceeds the cap", () =>
+  it.instance("skips when live context exceeds the cap", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
       const { chat, assistant } = yield* seed()
       const heavy = yield* sessions.create({ parentID: chat.id, title: "heavy", agent: "general" })
-      yield* touchRow(heavy.id, { tokens_input: HAND_REUSE_MAX_TOKENS + 1 })
+      const hUser = yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID: heavy.id,
+        agent: "general",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: hUser.id,
+        sessionID: heavy.id,
+        mode: "general",
+        agent: "general",
+        cost: 0,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: HAND_REUSE_MAX_TOKENS + 1, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        variant: "xhigh",
+        time: { created: Date.now() },
+      } satisfies SessionV1.Assistant)
       const tool = yield* TaskTool
       const def = yield* tool.init()
       const result = yield* def.execute(args, ctxFor(chat, assistant, stubOps()))
@@ -235,6 +257,23 @@ describe("tool.task auto-resume", () => {
       const kids = yield* sessions.children(chat.id)
       expect(kids).toHaveLength(2)
       expect(result.metadata.sessionId).not.toBe(heavy.id)
+    }),
+  )
+
+  it.instance("reuses child with no assistant message", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const empty = yield* sessions.create({ parentID: chat.id, title: "empty", agent: "general" })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+      const result = yield* def.execute(args, ctxFor(chat, assistant, stubOps({ onPrompt: (input) => (seen = input) })))
+
+      const kids = yield* sessions.children(chat.id)
+      expect(kids).toHaveLength(1)
+      expect(result.metadata.sessionId).toBe(empty.id)
+      expect(seen?.sessionID).toBe(empty.id)
     }),
   )
 

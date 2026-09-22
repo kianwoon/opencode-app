@@ -309,14 +309,15 @@ export const TaskTool = Tool.define(
               .filter((kid) => kid.agent === next.name)
               .sort((a, b) => b.time.updated - a.time.updated)
             if (!newest) return undefined
-            const tokens = newest.tokens
-            const total =
-              (tokens?.input ?? 0) +
-              (tokens?.output ?? 0) +
-              (tokens?.reasoning ?? 0) +
-              (tokens?.cache?.read ?? 0) +
-              (tokens?.cache?.write ?? 0)
-            if (total > HAND_REUSE_MAX_TOKENS) return undefined
+            const childMsgs = yield* sessions.messages({ sessionID: newest.id }).pipe(Effect.orDie)
+            let liveCtx = 0
+            for (let i = childMsgs.length - 1; i >= 0; i--) {
+              const m = childMsgs[i]
+              if (!m || m.info.role !== "assistant") continue
+              liveCtx = (m.info.tokens?.cache?.read ?? 0) + (m.info.tokens?.input ?? 0)
+              break
+            }
+            if (liveCtx > HAND_REUSE_MAX_TOKENS) return undefined
             const ageMs = Date.now() - newest.time.updated
             if (ageMs > HAND_REUSE_TTL_MS) return undefined
             const job = yield* background.get(newest.id)
