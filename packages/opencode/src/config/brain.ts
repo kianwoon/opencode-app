@@ -83,6 +83,11 @@ export function expand(config: ConfigV1.Info) {
     }
   }
 
+  // session_rename must always be directly callable: guarantee allow even when
+  // enforcement is not strict or a custom permission omits it.
+  agent.brain.permission ??= {}
+  agent.brain.permission.session_rename ??= "allow"
+
   for (const [name, model] of [
     ["explorer", brain.hands_model],
     ["implementer", brain.hands_model],

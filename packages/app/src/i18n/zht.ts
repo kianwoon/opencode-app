@@ -878,7 +878,13 @@ export const dict = {
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
   "sidebar.project.cleanupSessions.description":
     "Old session data will be permanently deleted and cannot be recovered.",
-  "sidebar.project.cleanupSessions.action": "Clean up",
+    "sidebar.project.cleanupSessions.action": "Clean up",
+  "sidebar.project.unarchiveSessions": "取消歸檔最近5個會話",
+  "sidebar.project.unarchiveSessions.title": "取消歸檔最近5個會話",
+  "sidebar.project.unarchiveSessions.confirm":
+    "要取消歸檔{{count}}個已歸檔會話嗎？這將還原最近歸檔的5個會話。",
+  "sidebar.project.unarchiveSessions.description": "已歸檔會話將還原到此專案。",
+  "sidebar.project.unarchiveSessions.action": "取消歸檔",
   "sidebar.empty.title": "未開啟任何專案",
   "sidebar.empty.description": "開啟專案以開始使用",
   "sidebar.drop.title": "拖放資料夾到這裡以新增專案",

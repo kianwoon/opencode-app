@@ -57,6 +57,25 @@ async function listProjectSessions(serverCtx: ServerCtx, directory: string) {
   )
 }
 
+// Fetches archived root sessions for a project directory, most recently
+// updated first. Mirrors listProjectSessions so unarchive targets the same
+// ordering the sidebar uses.
+async function listArchivedProjectSessions(serverCtx: ServerCtx, directory: string) {
+  // The server returns archived sessions only when archived:true is passed
+  // (the list filters isNull(time_archived) otherwise). The vendored api
+  // client types predate that param, so the call is cast at the boundary.
+  const result = await serverCtx.sdk.api.session.list({
+    directory,
+    parentID: null,
+    order: "desc",
+    limit: 10000,
+    ...({ archived: true } as { archived: boolean }),
+  } as never)
+  return (result.data ?? []).sort(
+    (a, b) => (b.time?.updated ?? b.time?.created ?? 0) - (a.time?.updated ?? a.time?.created ?? 0),
+  )
+}
+
 function isBackgroundOpen(event: MouseEvent) {
   return shouldOpenSessionInBackground({
     button: event.button,
@@ -337,6 +356,47 @@ export function NewSidebar() {
     ))
   }
 
+  // Restores the SESSION_CLEANUP_KEEP most recently archived sessions for a
+  // project. Unarchiving clears time.archived through the session update
+  // shape, mirroring the archive precedent in layout.tsx.
+  const unarchiveProjectSessions = (project: LocalProject) => {
+    const conn = currentServer()
+    if (!conn) return
+    const serverCtx = global.ensureServerCtx(conn)
+    const sdk = serverSDK()
+    const run = ++dialogRun
+    void dialog.show(() => (
+      <DialogCleanupSessions
+        project={project}
+        staleCountAccessor={async () => {
+          const sessions = await listArchivedProjectSessions(serverCtx, project.worktree)
+          return Math.min(sessions.length, SESSION_CLEANUP_KEEP)
+        }}
+        onConfirm={async () => {
+          if (dialogDead || dialogRun !== run) return
+          const sessions = await listArchivedProjectSessions(serverCtx, project.worktree)
+          const restore = sessions.slice(0, SESSION_CLEANUP_KEEP)
+          for (const session of restore) {
+            await sdk.client.session
+              .update({
+                sessionID: session.id,
+                directory: project.worktree,
+                // Clearing time.archived restores the session (setArchived clears on null).
+                time: { archived: null },
+              })
+              .catch(() => undefined)
+          }
+          await serverCtx.sync.project.loadSessions(project.worktree)
+        }}
+        titleKey="sidebar.project.unarchiveSessions.title"
+        confirmKey="sidebar.project.unarchiveSessions.confirm"
+        descriptionKey="sidebar.project.unarchiveSessions.description"
+        actionKey="sidebar.project.unarchiveSessions.action"
+        actionVariant="neutral"
+      />
+    ))
+  }
+
   const actions: SidebarActions = {
     projects,
     currentServer,
@@ -349,6 +409,7 @@ export function NewSidebar() {
     onCloseProject: closeProject,
     onEditProject: editProject,
     onCleanupSessions: cleanupProjectSessions,
+    onUnarchiveSessions: unarchiveProjectSessions,
     onNewSession: openProjectNewSession,
   }
 
@@ -408,6 +469,7 @@ type SidebarActions = {
   onCloseProject: (directory: string) => void
   onEditProject: (project: LocalProject) => void
   onCleanupSessions: (project: LocalProject) => void
+  onUnarchiveSessions: (project: LocalProject) => void
   onNewSession: (directory: string) => void
 }
 
@@ -795,6 +857,9 @@ function ProjectSection(
                 <MenuV2.Item onSelect={() => props.onCleanupSessions(props.project)}>
                   {language.t("sidebar.project.cleanupSessions")}
                 </MenuV2.Item>
+                <MenuV2.Item onSelect={() => props.onUnarchiveSessions(props.project)}>
+                  {language.t("sidebar.project.unarchiveSessions")}
+                </MenuV2.Item>
                 <MenuV2.Separator />
                 <MenuV2.Item onSelect={() => props.onCloseProject(props.project.worktree)}>
                   {language.t("common.close")}
@@ -1043,16 +1108,25 @@ function DialogCleanupSessions(props: {
   project: LocalProject
   staleCountAccessor: () => Promise<number>
   onConfirm: () => Promise<void>
+  titleKey?: string
+  confirmKey?: string
+  descriptionKey?: string
+  actionKey?: string
+  actionVariant?: "danger" | "neutral"
 }) {
   const dialog = useDialog()
   const language = useLanguage()
   const [state, setState] = createStore({ busy: false })
   const [staleCount] = createResource(() => props.staleCountAccessor())
   const count = () => staleCount() ?? 0
+  const titleKey = () => props.titleKey ?? "sidebar.project.cleanupSessions.title"
+  const confirmKey = () => props.confirmKey ?? "sidebar.project.cleanupSessions.confirm"
+  const descriptionKey = () => props.descriptionKey ?? "sidebar.project.cleanupSessions.description"
+  const actionKey = () => props.actionKey ?? "sidebar.project.cleanupSessions.action"
   return (
     <Dialog fit>
       <DialogHeader>
-        <DialogTitle>{language.t("sidebar.project.cleanupSessions.title")}</DialogTitle>
+        <DialogTitle>{language.t(titleKey())}</DialogTitle>
       </DialogHeader>
       <DialogBody class="flex w-full flex-col gap-4 px-4 pt-4 pb-1">
         <Show
@@ -1060,11 +1134,11 @@ function DialogCleanupSessions(props: {
           fallback={<div class="h-5 w-24 rounded bg-v2-background-bg-layer-01 animate-pulse" />}
         >
           <div class="text-v2-text-text-base [font-weight:440]">
-            {language.t("sidebar.project.cleanupSessions.confirm", { count: count() })}
+            {language.t(confirmKey(), { count: count() })}
           </div>
         </Show>
         <div class="text-[13px] leading-5 text-v2-text-text-muted [font-weight:440]">
-          {language.t("sidebar.project.cleanupSessions.description")}
+          {language.t(descriptionKey())}
         </div>
       </DialogBody>
       <DialogFooter>
@@ -1073,7 +1147,7 @@ function DialogCleanupSessions(props: {
         </ButtonV2>
         <ButtonV2
           type="button"
-          variant="danger"
+          variant={props.actionVariant ?? "danger"}
           disabled={state.busy || staleCount.loading || count() === 0}
           onClick={() => {
             setState("busy", true)
@@ -1083,7 +1157,7 @@ function DialogCleanupSessions(props: {
             })
           }}
         >
-          {language.t("sidebar.project.cleanupSessions.action")}
+          {language.t(actionKey())}
         </ButtonV2>
       </DialogFooter>
     </Dialog>

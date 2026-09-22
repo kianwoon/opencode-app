@@ -893,7 +893,7 @@ export const dict = {
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
   "sidebar.project.cleanupSessions.description":
     "Old session data will be permanently deleted and cannot be recovered.",
-  "sidebar.project.cleanupSessions.action": "Clean up",
+    "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Geen projecten geopend",
   "sidebar.empty.description": "Open een project om aan de slag te gaan",
   "sidebar.drop.title": "Sleep een map hierheen om een project toe te voegen",

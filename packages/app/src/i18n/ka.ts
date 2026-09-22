@@ -883,7 +883,7 @@ export const dict = {
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
   "sidebar.project.cleanupSessions.description":
     "Old session data will be permanently deleted and cannot be recovered.",
-  "sidebar.project.cleanupSessions.action": "Clean up",
+    "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "პროექტები არ არის გახსნილი",
   "sidebar.empty.description": "გახსენით პროექტი დასაწყებად",
   "sidebar.drop.title": "პროექტის დასამატებლად გადმოათავსეთ საქაღალდე აქ",

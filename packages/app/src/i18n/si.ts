@@ -881,7 +881,7 @@ export const dict: Record<string, string> = {
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
   "sidebar.project.cleanupSessions.description":
     "Old session data will be permanently deleted and cannot be recovered.",
-  "sidebar.project.cleanupSessions.action": "Clean up",
+    "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "ව්‍යාපෘති විවෘත නැත",
   "sidebar.empty.description": "ආරම්භ කිරීමට ව්‍යාපෘතියක් විවෘත කරන්න",
   "sidebar.drop.title": "ව්යාපෘතියක් එකතු කිරීමට ෆෝල්ඩරයක් මෙහි ඇද දමන්න",

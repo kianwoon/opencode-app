@@ -82,7 +82,14 @@ const historyTypesPatched = generatedTypes.replace(
 if (historyTypesPatched === generatedTypes) {
   throw new Error("Session history numeric query patch did not apply")
 }
-await Bun.write("./src/v2/gen/types.gen.ts", historyTypesPatched)
+const archivedTypesPatched = historyTypesPatched.replace(
+  /(export type SessionUpdateData = \{[\s\S]*?time\?: \{\s*archived\?: )number/,
+  "$1number | null",
+)
+if (archivedTypesPatched === historyTypesPatched) {
+  throw new Error("SessionUpdate archived null patch did not apply")
+}
+await Bun.write("./src/v2/gen/types.gen.ts", archivedTypesPatched)
 
 const generatedSdk = await Bun.file("./src/v2/gen/sdk.gen.ts").text()
 const historySdkPatched = generatedSdk.replace(
@@ -92,7 +99,14 @@ const historySdkPatched = generatedSdk.replace(
 if (historySdkPatched === generatedSdk) {
   throw new Error("Session history numeric SDK patch did not apply")
 }
-await Bun.write("./src/v2/gen/sdk.gen.ts", historySdkPatched)
+const archivedSdkPatched = historySdkPatched.replace(
+  /(public update<[\s\S]*?time\?: \{\s*archived\?: )number/,
+  "$1number | null",
+)
+if (archivedSdkPatched === historySdkPatched) {
+  throw new Error("SessionUpdate SDK archived null patch did not apply")
+}
+await Bun.write("./src/v2/gen/sdk.gen.ts", archivedSdkPatched)
 
 // Patch a @hey-api/openapi-ts codegen bug: SseFn incorrectly passes the
 // endpoint's TError into the second generic of ServerSentEventsResult, which

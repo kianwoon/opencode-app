@@ -872,6 +872,12 @@ export const dict = {
   "sidebar.project.cleanupSessions.description":
     "Old session data will be permanently deleted and cannot be recovered.",
   "sidebar.project.cleanupSessions.action": "Clean up",
+  "sidebar.project.unarchiveSessions": "Unarchive last 5 sessions",
+  "sidebar.project.unarchiveSessions.title": "Unarchive last 5 sessions",
+  "sidebar.project.unarchiveSessions.confirm":
+    "Unarchive {{count}} archived sessions? This restores the 5 most recently archived sessions.",
+  "sidebar.project.unarchiveSessions.description": "Archived sessions will be restored to this project.",
+  "sidebar.project.unarchiveSessions.action": "Unarchive",
   "sidebar.empty.title": "No projects open",
   "sidebar.empty.description": "Open a project to get started",
   "sidebar.drop.title": "Drop folder to add project",

@@ -891,7 +891,7 @@ export const dict = {
   "sidebar.project.cleanupSessions.confirm": "Delete {{count}} old sessions? This keeps the 5 most recent sessions.",
   "sidebar.project.cleanupSessions.description":
     "Old session data will be permanently deleted and cannot be recovered.",
-  "sidebar.project.cleanupSessions.action": "Clean up",
+    "sidebar.project.cleanupSessions.action": "Clean up",
   "sidebar.empty.title": "Hech qanday loyiha ochiq emas",
   "sidebar.empty.description": "Boshlash uchun loyihani oching",
   "sidebar.drop.title": "Loyiha qo'shish uchun jildni shu yerga tashlang",
