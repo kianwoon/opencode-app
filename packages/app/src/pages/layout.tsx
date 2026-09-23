@@ -1930,6 +1930,8 @@ export default function LegacyLayout(props: ParentProps) {
     const root = pathKey(local)
 
     setBusy(created.directory, true)
+    // Worktree events normally clear this; the timeout bounds a missed event so the sidebar never stays grey.
+    setTimeout(() => setBusy(created.directory, false), 60_000)
     WorktreeState.pending(serverSDK().scope, created.directory)
     setStore("workspaceExpanded", key, true)
     if (key !== created.directory) {

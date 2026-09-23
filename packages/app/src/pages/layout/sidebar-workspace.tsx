@@ -369,7 +369,8 @@ export const SortableWorkspace = (props: {
       use:sortable
       classList={{
         "opacity-30": sortable.isActiveDraggable,
-        "opacity-50 pointer-events-none": busy(),
+        // Dim-only cue; rows must stay clickable during worktree ops.
+        "opacity-50": busy(),
       }}
     >
       <Collapsible variant="ghost" open={open()} class="shrink-0" onOpenChange={openWrapper}>

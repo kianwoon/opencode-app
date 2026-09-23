@@ -8,7 +8,7 @@ import {
 } from "./deep-links"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import {
-  childSessionOnPath,
+  childSessions,
   closeHomeProject,
   compareSessionTime,
   displayName,
@@ -235,17 +235,31 @@ describe("layout workspace helpers", () => {
     expect(result?.id).toBe("root")
   })
 
-  test("finds the direct child on the active session path", () => {
+  test("lists all non-archived children newest first", () => {
     const list = [
       session({ id: "root", directory: "/workspace" }),
-      session({ id: "child", directory: "/workspace", parentID: "root" }),
-      session({ id: "leaf", directory: "/workspace", parentID: "child" }),
+      session({
+        id: "old",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 1, updated: 1, archived: undefined },
+      }),
+      session({
+        id: "new",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 2, updated: 2, archived: undefined },
+      }),
+      session({
+        id: "archived",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 3, updated: 3, archived: 3 },
+      }),
     ]
 
-    expect(childSessionOnPath(list, "root", "leaf")?.id).toBe("child")
-    expect(childSessionOnPath(list, "child", "leaf")?.id).toBe("leaf")
-    expect(childSessionOnPath(list, "root", "root")).toBeUndefined()
-    expect(childSessionOnPath(list, "root", "other")).toBeUndefined()
+    expect(childSessions(list, "root").map((item) => item.id)).toEqual(["new", "old"])
+    expect(childSessions(list, "missing")).toEqual([])
   })
 
   test("formats fallback project display name", () => {

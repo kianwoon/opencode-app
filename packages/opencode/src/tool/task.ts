@@ -143,6 +143,10 @@ export const Parameters = Schema.Struct({
     description:
       "Run the agent in the background. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress",
   }),
+  force: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Set true to deliberately re-run a task whose description+prompt already completed successfully in this session",
+  }),
 })
 
 function renderOutput(input: {
@@ -251,6 +255,26 @@ export const TaskTool = Tool.define(
             description: params.description,
             last: recent[recent.length - 1].state.error,
           }),
+        )
+      }
+
+      // Failure guards above are error-status-only and blind to green flights — a completed prod-rebuild task was silently re-fired twice; success parts are latched the same way failures are counted.
+      const done = ctx.messages
+        .flatMap((message) => message.parts)
+        .find(
+          (part): part is SessionV1.ToolPart & { state: SessionV1.ToolStateCompleted } =>
+            part.type === "tool" &&
+            part.tool === id &&
+            part.state.status === "completed" &&
+            part.state.input.subagent_type === params.subagent_type &&
+            part.state.input.description === params.description &&
+            part.state.input.prompt === params.prompt,
+        )
+      if (done && params.force !== true && !params.task_id) {
+        return yield* Effect.fail(
+          new Error(
+            `Terminal: this exact ${params.subagent_type} task ("${params.description}") already completed successfully in this session (callID: ${done.callID}) — its result began: "${done.state.output.slice(0, 200)}". Re-run only with force:true if you deliberately intend to repeat it; task_id resumes that subagent without re-running.`,
+          ),
         )
       }
 
