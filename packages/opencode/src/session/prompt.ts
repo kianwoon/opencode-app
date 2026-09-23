@@ -2557,7 +2557,9 @@ const layer = Layer.effect(
             // tool list is frozen after the first turn, so guidance (not removal) is the
             // honest per-turn channel.
             // Filtered to real tool names: the batch fold can emit garbage entries (observed live: "invalid") that must never reach the advisory text.
-            const keepReal = jevTurn.keep ? [...jevTurn.keep].filter((n) => jevTurn.names.has(n)) : []
+            // "invalid" itself IS a registered catch-all tool (tool/registry.ts:216) that llm.ts:347
+            // already excludes from activeTools — it is never a preference either.
+            const keepReal = jevTurn.keep ? [...jevTurn.keep].filter((n) => jevTurn.names.has(n) && n !== "invalid") : []
             const routingAdvisory =
               jevEnabled && keepReal.length > 0
                 ? `${BOOSTER_ADVISORY_PREFIX}For this step, prefer these tools: ${keepReal.slice(0, 8).join(", ")}${keepReal.length > 8 ? ", and others" : ""}.`
