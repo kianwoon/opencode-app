@@ -2206,6 +2206,12 @@ const layer = Layer.effect(
             // `cfg.jev.threshold` from opencode.json alone (else the shared
             // JEV_DEFAULT_THRESHOLD). Do not migrate this key.
             const jevEnabled = cfg.jev?.enabled === true
+            // Hoisted ABOVE the JEV fold (and above the freezeHead call site) so
+            // the routing telemetry can tell a first-turn freeze from a later
+            // verdict the session-frozen head swallows. 12-space scope: a
+            // declaration inside the `if` below would be invisible at the
+            // freezeHead/`system` sites further down.
+            const persistedHead = yield* readStableHead(db, sessionID).pipe(Effect.orDie)
             if (jevEnabled && !wrapUp) {
               const names = Object.keys(turnTools)
               if (jevTurn.key !== lastUser.id) {
@@ -2367,17 +2373,34 @@ const layer = Layer.effect(
                 } else {
                   turnTools = narrowed
                   gatedHead = narrowed
-                  yield* Effect.logInfo("jev.tool-routing applied", {
-                    "session.id": sessionID,
-                    step,
-                    reason: "applied",
-                    model: jevTurn.spec,
-                    threshold: jevTurn.threshold,
-                    tools_before: names.length,
-                    // Never blank: the applied list meets the floor by construct.
-                    tools_after: after,
-                    removed: names.length - after,
-                  })
+                  // The verdict reaches the request ONLY on the first freeze;
+                  // later turns are swallowed by the first-call-wins freezeHead
+                  // memo / persisted.tools filter, so "applied" is honest only
+                  // when the stable head is still unset.
+                  yield* Effect.logInfo(
+                    persistedHead ? "jev.tool-routing frozen-ignored" : "jev.tool-routing applied",
+                    persistedHead
+                      ? {
+                          "session.id": sessionID,
+                          step,
+                          reason: "frozen-ignored",
+                          model: jevTurn.spec,
+                          threshold: jevTurn.threshold,
+                          tools_before: names.length,
+                          verdict_tools: after,
+                        }
+                      : {
+                          "session.id": sessionID,
+                          step,
+                          reason: "applied",
+                          model: jevTurn.spec,
+                          threshold: jevTurn.threshold,
+                          tools_before: names.length,
+                          // Never blank: the applied list meets the floor by construct.
+                          tools_after: after,
+                          removed: names.length - after,
+                        },
+                  )
                 }
               }
             } else if (!jevEnabled && step === 1) {
@@ -2530,8 +2553,14 @@ const layer = Layer.effect(
                 })
               }
             }
+            // Per-turn tool preference rides the TAIL like the booster advisory: the emitted
+            // tool list is frozen after the first turn, so guidance (not removal) is the
+            // honest per-turn channel.
+            const routingAdvisory =
+              jevEnabled && jevTurn.keep && jevTurn.keep.size > 0
+                ? `${BOOSTER_ADVISORY_PREFIX}For this step, prefer these tools: ${[...jevTurn.keep].slice(0, 8).join(", ")}${jevTurn.keep.size > 8 ? ", and others" : ""}.`
+                : undefined
             const environmentDate = yield* sys.environmentDate()
-            const persistedHead = yield* readStableHead(db, sessionID).pipe(Effect.orDie)
             const system = freezeSystem(sessionID, [
               ...gatedBlocks,
               // The frozen advisory must NOT ride the system prefix: `system[0]`
@@ -2573,16 +2602,17 @@ const layer = Layer.effect(
             // Advisory rides the TAIL, not the cached head: append it as a
             // trailing text part of the last user message so head bytes stay
             // stable across turns and prefix-cache reads survive.
-            const lastUserIdx = advisory
+            const advisoryText = [advisory, routingAdvisory].filter(Boolean).join("\n")
+            const lastUserIdx = advisoryText
               ? modelMsgs.findLastIndex((m) => m.role === "user")
               : -1
             const outboundMsgs: ModelMessage[] =
-              advisory && lastUserIdx >= 0
+              advisoryText && lastUserIdx >= 0
                 ? modelMsgs.map((m, i): ModelMessage => {
                     if (i !== lastUserIdx) return m
                     const content = Array.isArray(m.content)
-                      ? [...m.content, { type: "text" as const, text: advisory }]
-                      : [{ type: "text" as const, text: m.content }, { type: "text" as const, text: advisory }]
+                      ? [...m.content, { type: "text" as const, text: advisoryText }]
+                      : [{ type: "text" as const, text: m.content }, { type: "text" as const, text: advisoryText }]
                     return { ...m, content } as ModelMessage
                   })
                 : modelMsgs

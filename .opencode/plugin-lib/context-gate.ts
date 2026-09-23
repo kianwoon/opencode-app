@@ -486,47 +486,38 @@ function escapeRegExp(text: string) {
 // flipping its bytes mid-turn (fallback → LLM summary, or a scope unlock that
 // changes kept sections) invalidates the cached prefix for every later chunk —
 // a full cache-write of the whole system block on the very next loop step.
-// Both caches trade minutes of staleness for byte-stable turns and fail open:
-// expiry just means "refresh on next read".
+// Both caches are STICKY for the session lifetime: a TTL expiry would re-read
+// live activity or adopt the real LLM summary and flip the bytes mid-session,
+// so entries persist until the session's `chat.message` reset clears them.
+// Fail open: a miss just means "derive on next read".
 // ---------------------------------------------------------------------------
 
-/** How long a served extractive-fallback variant stays pinned per (session, content). */
-const FALLBACK_PIN_MS = 5 * 60_000
-/** How long a scope snapshot is reused before live activity is re-read. */
-const SCOPE_SNAPSHOT_MS = 90_000
-
-/** (session, summaryCacheKey) → served-as-fallback-at. Content edits produce a new key and adopt fresh summaries immediately. */
-export const fallbackPins = new Map<string, Map<string, number>>()
-/** session → scope-set snapshot taken at the turn's first transform. */
-export const scopeSnapshots = new Map<string, { scopes: Set<string>; at: number }>()
+/** (session, summaryCacheKey) → pinned for the session. Content edits produce a new key and adopt fresh summaries immediately. */
+export const fallbackPins = new Map<string, Set<string>>()
+/** session → scope-set snapshot taken at the turn's first transform, then sticky. */
+export const scopeSnapshots = new Map<string, Set<string>>()
 
 function pinFallback(sessionID: string, key: string) {
   let pins = fallbackPins.get(sessionID)
   if (!pins) {
     if (fallbackPins.size >= MAX_SESSIONS) fallbackPins.delete(fallbackPins.keys().next().value!)
-    pins = new Map()
+    pins = new Set()
     fallbackPins.set(sessionID, pins)
   }
-  pins.set(key, Date.now())
+  pins.add(key)
 }
 
 function pinnedToFallback(sessionID: string, key: string): boolean {
-  const at = fallbackPins.get(sessionID)?.get(key)
-  if (at === undefined) return false
-  if (Date.now() - at > FALLBACK_PIN_MS) {
-    fallbackPins.get(sessionID)!.delete(key)
-    return false
-  }
-  return true
+  return fallbackPins.get(sessionID)?.has(key) ?? false
 }
 
-/** Snapshot view of activity scopes: new scopes adopted at most once per window. */
+/** Snapshot view of activity scopes: adopted at the turn's first transform, then sticky. */
 function turnScopes(sessionID: string): Set<string> {
   const snap = scopeSnapshots.get(sessionID)
-  if (snap && Date.now() - snap.at < SCOPE_SNAPSHOT_MS) return snap.scopes
+  if (snap) return snap
   const scopes = new Set(activity.get(sessionID)?.scopes)
   if (scopeSnapshots.size >= MAX_SESSIONS) scopeSnapshots.delete(scopeSnapshots.keys().next().value!)
-  scopeSnapshots.set(sessionID, { scopes, at: Date.now() })
+  scopeSnapshots.set(sessionID, scopes)
   return scopes
 }
 
@@ -920,7 +911,13 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
     // would make the set turn-scoped rather than task-scoped.
     "chat.message": async (hookInput) => {
       try {
-        if (hookInput.sessionID) resetTriage(hookInput.sessionID)
+        if (hookInput.sessionID) {
+          resetTriage(hookInput.sessionID)
+          // Session boundary: drop the sticky scoping + fallback pins so the new
+          // task re-derives its head once, then stays byte-stable again.
+          scopeSnapshots.delete(hookInput.sessionID)
+          fallbackPins.delete(hookInput.sessionID)
+        }
       } catch {
         // Triage tracking must never break message handling.
       }

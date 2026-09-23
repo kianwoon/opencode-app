@@ -295,10 +295,9 @@ describe("plugin hook", () => {
       { tool: "edit", sessionID, callID: "c1", args: { filePath: "/repo/packages/ui/src/button.tsx" } },
       { title: "button.tsx", output: "ok", metadata: {} },
     )
-    // Activity lands inside the 90s scope-snapshot window: rewind the snapshot
-    // to simulate the window having expired so the new scope is adopted now.
-    const snap = scopeSnapshots.get(sessionID)!
-    scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
+    // Sticky snapshot: a new scope is adopted only at a session boundary —
+    // clear it the way the chat.message reset hook does.
+    scopeSnapshots.delete(sessionID)
 
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
@@ -326,15 +325,15 @@ describe("plugin hook", () => {
       { tool: "task", sessionID, callID: "c2", args: { prompt: "review ui components" } },
       { title: "ui review", output: "explored /repo/packages/ui/src and found 3 issues", metadata: {} },
     )
-    const snap = scopeSnapshots.get(sessionID)!
-    scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
+    // Session boundary clears the sticky snapshot → next transform re-derives scopes.
+    scopeSnapshots.delete(sessionID)
 
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
     expect(after[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
   })
 
-  test("scope snapshot: activity added mid-window does not change output until window expires", async () => {
+  test("scope snapshot: activity added mid-session does not change output until the session resets", async () => {
     const sessionID = "ses_scope_snapshot"
     const block = joinedSystem([
       ["/repo/packages/llm/AGENTS.md", 100],
@@ -353,9 +352,8 @@ describe("plugin hook", () => {
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: during })
     expect(during[0]).toBe(before[0])
 
-    // Window expires → next transform adopts the new scope.
-    const snap = scopeSnapshots.get(sessionID)!
-    scopeSnapshots.set(sessionID, { scopes: snap.scopes, at: snap.at - 91_000 })
+    // Session boundary clears the sticky snapshot → next transform adopts the new scope.
+    scopeSnapshots.delete(sessionID)
     const after = [block]
     await hooks["experimental.chat.system.transform"]!({ sessionID, model }, { system: after })
     expect(after[0]).toContain("Instructions from: /repo/packages/ui/AGENTS.md")
@@ -588,8 +586,8 @@ describe("summarization", () => {
       const second = await summarizeSection(original, ctx, sessionID)
       expect(second.text).toBe(first.text)
 
-      // Pin expired (simulated) → the cached LLM summary is adopted.
-      fallbackPins.get(sessionID)!.set(key, Date.now() - 6 * 60_000)
+      // Session boundary clears the sticky pin → the cached LLM summary is adopted.
+      fallbackPins.delete(sessionID)
       const third = await summarizeSection(original, ctx, sessionID)
       expect(third.text).toContain("LLM SUMMARY CONTENT")
       expect(third.text).not.toBe(first.text)
