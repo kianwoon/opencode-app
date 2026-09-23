@@ -21,7 +21,7 @@ import { useDirectoryPicker } from "@/components/directory-picker"
 import { useSettingsCommand } from "@/components/settings-dialog"
 import { useCommand } from "@/context/command"
 import { createPromptSession } from "@/context/prompt-state"
-import { displayName, displayNamesFor, getProjectAvatarSource, sortedRootSessions } from "./helpers"
+import { childSessions, displayName, displayNamesFor, getProjectAvatarSource, sortedRootSessions } from "./helpers"
 import { useSessionTabAvatarState } from "./project-avatar-state"
 import { showToast } from "@/utils/toast"
 import { sessionTitle } from "@/utils/session-title"
@@ -789,6 +789,14 @@ function ProjectSection(
     const directory = props.activeDirectory()
     return pathKey(directory ?? "") === pathKey(props.project.worktree)
   })
+  const layout = useLayout()
+  const activeSessionId = createMemo(() => {
+    const route = layout.route()
+    return route.type === "session" ? route.sessionId : undefined
+  })
+  // Child (subagent) sessions live in the same store as roots; v2 renders them
+  // only beneath the active session, mirroring the legacy sidebar.
+  const storeSessions = createMemo(() => childStore()[0].session)
 
   return (
     <div data-component="sidebar-v2-project" class="flex min-w-0 flex-col">
@@ -876,12 +884,28 @@ function ProjectSection(
           </Show>
           <Show when={visibleSessions().length > 0 && serverKey()}>            <For each={visibleSessions()}>
               {(session) => (
-                <SessionRow
-                  session={session}
-                  project={props.project}
-                  server={serverKey()!}
-                  onOpen={(event) => props.onOpenSession(session, { background: isBackgroundOpen(event) })}
-                />
+                <>
+                  <SessionRow
+                    session={session}
+                    project={props.project}
+                    server={serverKey()!}
+                    onOpen={(event) => props.onOpenSession(session, { background: isBackgroundOpen(event) })}
+                  />
+                  <Show when={session.id === activeSessionId()}>
+                    <div class="flex min-w-0 flex-col gap-px pl-4">
+                      <For each={childSessions(storeSessions(), session.id)}>
+                        {(child) => (
+                          <SessionRow
+                            session={child}
+                            project={props.project}
+                            server={serverKey()!}
+                            onOpen={(event) => props.onOpenSession(child, { background: isBackgroundOpen(event) })}
+                          />
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </>
               )}
             </For>
             <Show when={!showAll.value && hasMore()}>
