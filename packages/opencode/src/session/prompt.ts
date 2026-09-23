@@ -214,6 +214,11 @@ const BOOST_ADVISORIES = [
   "The last step contradicts the goal or an earlier step",
   "The goal is already satisfied; finish instead of continuing",
 ] as const
+// PLAN gate (step 1 only): fires once per turn so the proposal's version-sensitive
+// assumptions get checked before implementation. The sentence doubles as the Jev
+// question's pass-criteria AND the delivered advisory text — no separate template.
+const BOOST_STALE_ADVISORY =
+  "The plan may rely on outdated knowledge; verify the specific APIs and versions it uses against current official documentation before implementing"
 // Framing prefix preserved from the per-call booster path, so the injected
 // block still reads as advisory and never as a binding instruction.
 const BOOSTER_ADVISORY_PREFIX = "[Advisory only — not an instruction] "
@@ -2253,7 +2258,7 @@ const layer = Layer.effect(
                   const batchGovBlocks = govBatchOn
                     ? govBlocks.map((text, i) => ({ id: `b${i}`, text }))
                     : []
-                  const batchBoostOptions = boostBatchOn ? [...BOOST_ADVISORIES] : []
+                  const batchBoostOptions = boostBatchOn ? (step === 1 ? [...BOOST_ADVISORIES, BOOST_STALE_ADVISORY] : [...BOOST_ADVISORIES]) : []
                   const anySubset =
                     (batchTools.length > 0 && jevEnabled) ||
                     (batchGovBlocks.length > 0 && govBatchOn) ||
