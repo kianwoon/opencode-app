@@ -1,5 +1,11 @@
 # opencode database guide
 
+## Session target isolation
+
+- `session_rename` has no target parameter; only the active project's root/main session may call it. `task.task_id` must be an existing same-project descendant and must be rejected before permission/prompt side effects.
+- Automatic subagent reuse holds a process-local lease until the actual run settles. An isolated `None` result retains the lease for fallback; success/failure/interruption release it, and background runs release through their `ensuring` finalizer.
+- Acceptance: from `packages/opencode`, run `bun test test/tool/session-rename.test.ts test/tool/task-reuse-title.test.ts` and `bun typecheck`; the isolated-fallback concurrency test must pass. Desktop rebuild is separate and requires the production commit/secret-scan protocol.
+
 ## Provider `options.timeout` is an IDLE timeout, not a whole-request deadline
 
 - `provider.<id>.options.timeout` in opencode.json used to be wired as `AbortSignal.timeout(ms)`

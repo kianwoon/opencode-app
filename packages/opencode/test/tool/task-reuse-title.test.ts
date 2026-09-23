@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Duration, Effect } from "effect"
+import { Cause, Duration, Effect, Exit, Fiber } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -197,6 +197,187 @@ describe("tool.task reuse title and claim", () => {
       // Exactly one adopted the seeded child (no new session); the other created a fresh one.
       expect([a.metadata.sessionId, b.metadata.sessionId]).toContain(seeded.metadata.sessionId)
       expect(yield* sessions.children(chat.id)).toHaveLength(2)
+    }),
+  )
+
+  it.instance("rejects a task_id outside the current parent lineage", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const outsideParent = yield* sessions.create({ title: "outside parent" })
+      const outside = yield* sessions.create({
+        parentID: outsideParent.id,
+        title: "outside task",
+        agent: "explore",
+      })
+      const prompts: SessionPrompt.PromptInput[] = []
+      const baseOps = stubOps()
+      const promptOps: TaskPromptOps = {
+        ...baseOps,
+        prompt: (input) => {
+          prompts.push(input)
+          return baseOps.prompt(input)
+        },
+      }
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const exit = yield* Effect.exit(
+        def.execute(
+          { description: "outside", prompt: "must not run", subagent_type: "explore", task_id: outside.id },
+          ctxWith(chat, assistant, promptOps, []),
+        ),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(Cause.prettyErrors(exit.cause).map(String).join("\n")).toContain("not a descendant")
+      }
+      expect(prompts).toHaveLength(0)
+      expect((yield* sessions.get(outside.id)).title).toBe("outside task")
+      expect(yield* sessions.children(chat.id)).toHaveLength(0)
+    }),
+  )
+
+  it.instance("reuses a valid descendant task_id", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const first = yield* def.execute(
+        { description: "first", prompt: "first prompt", subagent_type: "explore" },
+        ctxWith(chat, assistant, stubOps("first"), []),
+      )
+      const childID = SessionID.make(first.metadata.sessionId)
+      const child = yield* sessions.get(childID)
+      expect(child.parentID).toBe(chat.id)
+
+      const second = yield* def.execute(
+        { description: "continue", prompt: "continue prompt", subagent_type: "explore", task_id: childID },
+        ctxWith(chat, assistant, stubOps("continued"), []),
+      )
+
+      expect(second.metadata.sessionId).toBe(first.metadata.sessionId)
+      expect(second.output).toContain("continued")
+      expect(yield* sessions.children(chat.id)).toHaveLength(1)
+    }),
+  )
+
+  it.instance("keeps the adopted lease while isolated fallback starts", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const first = yield* def.execute(
+        { description: "isolation seed", prompt: "seed prompt", subagent_type: "explore" },
+        ctxWith(chat, assistant, stubOps(), []),
+      )
+      const childID = SessionID.make(first.metadata.sessionId)
+      const previousIsolate = process.env["OPENCODE_SUBAGENT_ISOLATE"]
+      const previousBinary = process.env["OPENCODE_BIN_PATH"]
+      process.env["OPENCODE_SUBAGENT_ISOLATE"] = "1"
+      process.env["OPENCODE_BIN_PATH"] = "/usr/bin/false"
+
+      yield* Effect.gen(function* () {
+        const baseOps = stubOps()
+        let fallbackStarted = false
+        let concurrentStarted = false
+        let allowFallback = false
+        const fallbackOps: TaskPromptOps = {
+          ...baseOps,
+          prompt: (input) =>
+            Effect.gen(function* () {
+              fallbackStarted = true
+              while (!allowFallback) yield* Effect.sleep(Duration.millis(1))
+              return yield* baseOps.prompt(input)
+            }),
+        }
+        const concurrentOps: TaskPromptOps = {
+          ...baseOps,
+          prompt: (input) =>
+            Effect.gen(function* () {
+              concurrentStarted = true
+              return yield* baseOps.prompt(input)
+            }),
+        }
+
+        const fallback = yield* Effect.forkScoped(
+          def.execute(
+            { description: "fallback", prompt: "fallback prompt", subagent_type: "explore" },
+            ctxWith(chat, assistant, fallbackOps, []),
+          ),
+        )
+        while (!fallbackStarted) yield* Effect.sleep(Duration.millis(1))
+        const concurrentFiber = yield* Effect.forkScoped(
+          def.execute(
+            { description: "concurrent", prompt: "concurrent prompt", subagent_type: "explore" },
+            ctxWith(chat, assistant, concurrentOps, []),
+          ),
+        )
+        while (!concurrentStarted) yield* Effect.sleep(Duration.millis(1))
+        allowFallback = true
+        const [reused, concurrent] = yield* Effect.all(
+          [Fiber.join(fallback), Fiber.join(concurrentFiber)],
+          { concurrency: 2 },
+        )
+
+        expect(reused.metadata.sessionId).toBe(childID)
+        expect(concurrent.metadata.sessionId).not.toBe(childID)
+        expect(yield* sessions.children(chat.id)).toHaveLength(2)
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (previousIsolate === undefined) delete process.env["OPENCODE_SUBAGENT_ISOLATE"]
+            else process.env["OPENCODE_SUBAGENT_ISOLATE"] = previousIsolate
+            if (previousBinary === undefined) delete process.env["OPENCODE_BIN_PATH"]
+            else process.env["OPENCODE_BIN_PATH"] = previousBinary
+          }),
+        ),
+      )
+    }),
+  )
+
+  it.instance("releases the adopted lease when promptOps is missing", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const first = yield* def.execute(
+        { description: "lease one", prompt: "lease prompt", subagent_type: "explore" },
+        ctxWith(chat, assistant, stubOps(), []),
+      )
+      const noPromptContext = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        messages: [{ info: assistant, parts: [] }],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+      const exit = yield* Effect.exit(
+        def.execute(
+          { description: "lease two", prompt: "must not prompt", subagent_type: "explore" },
+          noPromptContext,
+        ),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(Cause.prettyErrors(exit.cause).map(String).join("\n")).toContain("promptOps")
+      }
+
+      const second = yield* def.execute(
+        { description: "lease three", prompt: "reuse prompt", subagent_type: "explore" },
+        ctxWith(chat, assistant, stubOps(), []),
+      )
+      expect(second.metadata.sessionId).toBe(first.metadata.sessionId)
+      expect(yield* sessions.children(chat.id)).toHaveLength(1)
     }),
   )
 })

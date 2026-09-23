@@ -137,7 +137,7 @@ const BaseParameterFields = {
   subagent_type: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
   task_id: Schema.optional(Schema.String).annotate({
     description:
-      "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
+      "An existing task_id in the same project that is a descendant of the current session. It cannot target another session or project; omit it to create a new task.",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
 }
@@ -217,6 +217,55 @@ export const TaskTool = Tool.define(
           ),
         )
       }
+
+      if (params.task_id !== undefined) {
+        const context = yield* InstanceState.context
+        if (parent.projectID !== context.project.id) {
+          return yield* Effect.fail(
+            new Error(`Invalid task_id "${params.task_id}": current session project does not match the active project.`),
+          )
+        }
+      }
+
+      // Validate explicit task IDs before any permission or prompt side effects.
+      const taskSession = params.task_id !== undefined
+        ? yield* Effect.gen(function* () {
+            const task = yield* sessions.get(SessionID.make(params.task_id!)).pipe(
+              Effect.catchCause(() =>
+                Effect.fail(new Error(`Invalid task_id "${params.task_id!}": task session does not exist.`)),
+              ),
+            )
+            if (task.projectID !== parent.projectID) {
+              return yield* Effect.fail(
+                new Error(`Invalid task_id "${params.task_id!}": task session belongs to another project.`),
+              )
+            }
+            if (task.id === ctx.sessionID) {
+              return yield* Effect.fail(
+                new Error(
+                  `Invalid task_id "${params.task_id!}": task session must be a descendant of the current session.`,
+                ),
+              )
+            }
+            let ancestor = task
+            while (ancestor.id !== ctx.sessionID) {
+              const parentID = ancestor.parentID
+              if (!parentID) {
+                return yield* Effect.fail(
+                  new Error(
+                    `Invalid task_id "${params.task_id!}": task session is not a descendant of the current session.`,
+                  ),
+                )
+              }
+              ancestor = yield* sessions.get(parentID).pipe(
+                Effect.catchCause(() =>
+                  Effect.fail(new Error(`Invalid task_id "${params.task_id!}": task session lineage is incomplete.`)),
+                ),
+              )
+            }
+            return task
+          })
+        : undefined
 
       // Crash-retry storm guard. After a process restart the boot sweep marks
       // every in-flight part with ORPHAN_ERROR (see core SessionProjector).
@@ -333,10 +382,8 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
 
-      const session = params.task_id
-        ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        : undefined
-      const reused = params.task_id || params.reuse === false
+      const session = taskSession
+      const reused = params.task_id !== undefined || params.reuse === false
         ? undefined
         : yield* Effect.gen(function* () {
             const kids = yield* sessions.children(ctx.sessionID)
@@ -414,11 +461,19 @@ export const TaskTool = Tool.define(
         ? `Reusing subagent session ${nextSession.id} — re-running inside it; pass reuse:false for a fresh spawn.`
         : undefined
 
+      const releaseAdopted = Effect.sync(() => {
+        adoptedInFlight.delete(nextSession.id)
+      })
+      const owned = { handedOff: false }
+
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
         Effect.provideService(Database.Service, database),
         Effect.orDie,
       )
-      if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
+      if (msg.info.role !== "assistant") {
+        yield* releaseAdopted
+        return yield* Effect.fail(new Error("Not an assistant message"))
+      }
       const variant = msg.info.variant
 
       const model = next.model ?? {
@@ -432,13 +487,20 @@ export const TaskTool = Tool.define(
         ...(runInBackground ? { background: true } : {}),
       }
 
-      yield* ctx.metadata({
-        title: params.description,
-        metadata,
-      })
+      yield* ctx
+        .metadata({
+          title: params.description,
+          metadata,
+        })
+        .pipe(
+          Effect.catchCause((cause) => Effect.flatMap(releaseAdopted, () => Effect.failCause(cause))),
+        )
 
       const ops = ctx.extra?.promptOps as TaskPromptOps
-      if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
+      if (!ops) {
+        yield* releaseAdopted
+        return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
+      }
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
         const parts = yield* ops.resolvePromptParts(params.prompt)
@@ -603,128 +665,134 @@ export const TaskTool = Tool.define(
         }),
       )
 
-      if (!runInBackground && isolatedEnabled()) {
-        const attempt = yield* runIsolated
-        if (Option.isSome(attempt)) {
-          return {
-            title: params.description,
-            metadata,
-            output: renderOutput({ sessionID: nextSession.id, state: "completed", text: reuseNotice ? `${reuseNotice}\n${attempt.value}` : attempt.value }),
-          }
-        }
-      }
-
-      if (yield* background.extend({ id: nextSession.id, run: runTask() })) {
-        return {
-          title: params.description,
-          metadata: {
-            ...metadata,
-            background: true,
-            jobId: nextSession.id,
-          },
-          output: renderOutput({
-            sessionID: nextSession.id,
-            state: "running",
-            summary: "Background task updated",
-            text: BACKGROUND_UPDATED,
-          }),
-        }
-      }
-
-      const info = yield* background.start({
-        id: nextSession.id,
-        type: id,
-        title: params.description,
-        metadata,
-        onPromote: Effect.all([
-          ctx.metadata({
-            title: params.description,
-            metadata: { ...metadata, background: true, jobId: nextSession.id },
-          }),
-          notify(nextSession.id),
-        ]),
-        run: runTask().pipe(
-          Effect.onInterrupt(() => ops.cancel(nextSession.id)),
-          Effect.ensuring(
-            Effect.sync(() => {
-              adoptedInFlight.delete(nextSession.id)
-            }),
-          ),
-        ),
-      })
-
-      function backgroundResult() {
-        return {
-          title: params.description,
-          metadata: {
-            ...metadata,
-            background: true,
-            jobId: info.id,
-          },
-          output: renderOutput({
-            sessionID: nextSession.id,
-            state: "running",
-            summary: "Background task started",
-            text: BACKGROUND_STARTED,
-          }),
-        }
-      }
-
-      if (runInBackground) {
-        yield* notify(info.id)
-        return backgroundResult()
-      }
-
-      const runCancel = yield* EffectBridge.make()
-      const cancel = ops.cancel(nextSession.id)
-
-      function onAbort() {
-        runCancel.fork(cancel)
-      }
-
-      return yield* Effect.acquireUseRelease(
-        Effect.sync(() => {
-          ctx.abort.addEventListener("abort", onAbort)
-        }),
-        () =>
-          Effect.gen(function* () {
-            const result = yield* Effect.raceFirst(
-              background.wait({ id: nextSession.id }).pipe(Effect.map((waited) => waited.info)),
-              background.waitForPromotion(nextSession.id),
-            ).pipe(
-              Effect.timeoutOption(FOREGROUND_SUBAGENT_TIMEOUT_MS),
-              Effect.flatMap((option) =>
-                option._tag === "Some"
-                  ? Effect.succeed(option.value)
-                  : Effect.fail(
-                      new Error(
-                        `Subagent timed out after 30 minutes without settling (task_id: ${nextSession.id}). The child session may still be running; check its session or retry.`,
-                      ),
-                    ),
-              ),
-            )
-            if (result?.metadata?.background === true) return backgroundResult()
-            if (result?.status === "error") return yield* Effect.fail(new Error(result.error ?? "Task failed"))
-            if (result?.status === "cancelled") return yield* Effect.fail(new Error("Task cancelled"))
+      const dispatch = Effect.gen(function* () {
+        if (!runInBackground && isolatedEnabled()) {
+          const attempt = yield* runIsolated
+          if (Option.isSome(attempt)) {
             return {
               title: params.description,
               metadata,
-              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: reuseNotice ? `${reuseNotice}\n${result?.output ?? ""}` : (result?.output ?? "") }),
+              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: reuseNotice ? `${reuseNotice}\n${attempt.value}` : attempt.value }),
             }
-          }),
-        (_, exit) =>
-          Effect.gen(function* () {
-            // Timeout-failure must also cancel the orphan (parent already settled as error; child would otherwise run unbounded).
-            if (Exit.hasInterrupts(exit) || Exit.isFailure(exit))
-              yield* Effect.all([cancel, background.cancel(nextSession.id)], { discard: true })
-          }).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                ctx.abort.removeEventListener("abort", onAbort)
-              }),
-            ),
+          }
+        }
+
+        const extended = yield* background.extend({
+          id: nextSession.id,
+          run: runTask().pipe(Effect.ensuring(releaseAdopted)),
+        })
+        if (extended) {
+          owned.handedOff = true
+          return {
+            title: params.description,
+            metadata: {
+              ...metadata,
+              background: true,
+              jobId: nextSession.id,
+            },
+            output: renderOutput({
+              sessionID: nextSession.id,
+              state: "running",
+              summary: "Background task updated",
+              text: BACKGROUND_UPDATED,
+            }),
+          }
+        }
+
+        const info = yield* background.start({
+          id: nextSession.id,
+          type: id,
+          title: params.description,
+          metadata,
+          onPromote: Effect.all([
+            ctx.metadata({
+              title: params.description,
+              metadata: { ...metadata, background: true, jobId: nextSession.id },
+            }),
+            notify(nextSession.id),
+          ]),
+          run: runTask().pipe(
+            Effect.onInterrupt(() => ops.cancel(nextSession.id)),
+            Effect.ensuring(releaseAdopted),
           ),
-      )
+        })
+        owned.handedOff = true
+
+        function backgroundResult() {
+          return {
+            title: params.description,
+            metadata: {
+              ...metadata,
+              background: true,
+              jobId: info.id,
+            },
+            output: renderOutput({
+              sessionID: nextSession.id,
+              state: "running",
+              summary: "Background task started",
+              text: BACKGROUND_STARTED,
+            }),
+          }
+        }
+
+        if (runInBackground) {
+          yield* notify(info.id)
+          return backgroundResult()
+        }
+
+        const runCancel = yield* EffectBridge.make()
+        const cancel = ops.cancel(nextSession.id)
+
+        function onAbort() {
+          runCancel.fork(cancel)
+        }
+
+        return yield* Effect.acquireUseRelease(
+          Effect.sync(() => {
+            ctx.abort.addEventListener("abort", onAbort)
+          }),
+          () =>
+            Effect.gen(function* () {
+              const result = yield* Effect.raceFirst(
+                background.wait({ id: nextSession.id }).pipe(Effect.map((waited) => waited.info)),
+                background.waitForPromotion(nextSession.id),
+              ).pipe(
+                Effect.timeoutOption(FOREGROUND_SUBAGENT_TIMEOUT_MS),
+                Effect.flatMap((option) =>
+                  option._tag === "Some"
+                    ? Effect.succeed(option.value)
+                    : Effect.fail(
+                        new Error(
+                          `Subagent timed out after 30 minutes without settling (task_id: ${nextSession.id}). The child session may still be running; check its session or retry.`,
+                        ),
+                      ),
+                ),
+              )
+              if (result?.metadata?.background === true) return backgroundResult()
+              if (result?.status === "error") return yield* Effect.fail(new Error(result.error ?? "Task failed"))
+              if (result?.status === "cancelled") return yield* Effect.fail(new Error("Task cancelled"))
+              return {
+                title: params.description,
+                metadata,
+                output: renderOutput({ sessionID: nextSession.id, state: "completed", text: reuseNotice ? `${reuseNotice}\n${result?.output ?? ""}` : (result?.output ?? "") }),
+              }
+            }),
+          (_, exit) =>
+            Effect.gen(function* () {
+              // Timeout-failure must also cancel the orphan (parent already settled as error; child would otherwise run unbounded).
+              if (Exit.hasInterrupts(exit) || Exit.isFailure(exit))
+                yield* Effect.all([cancel, background.cancel(nextSession.id)], { discard: true })
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  ctx.abort.removeEventListener("abort", onAbort)
+                }),
+              ),
+            ),
+        )
+      })
+
+      return yield* dispatch.pipe(Effect.ensuring(Effect.suspend(() => (owned.handedOff ? Effect.void : releaseAdopted))))
     })
 
     return {
