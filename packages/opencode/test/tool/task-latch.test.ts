@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Option, Schema } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -15,7 +15,7 @@ import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
-import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import { Parameters, TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -244,6 +244,60 @@ describe("tool.task success latch", () => {
       const result = yield* def.execute(args, ctxWith(chat, assistant, stubOps(), [varied]))
 
       expect(result.metadata.sessionId).toBeDefined()
+    }),
+  )
+})
+
+describe("tool.task reuse", () => {
+  it.instance("schema exposes reuse and defaults to enabled when absent", () =>
+    Effect.gen(function* () {
+      yield* TaskTool
+      const absent = Option.getOrUndefined(
+        Schema.decodeUnknownOption(Parameters)({
+          description: args.description,
+          prompt: args.prompt,
+          subagent_type: args.subagent_type,
+        }),
+      )
+      const enabled = absent === undefined ? false : absent.reuse === undefined ? true : absent.reuse
+      expect(enabled).toBe(true)
+      const disabled = Option.getOrUndefined(
+        Schema.decodeUnknownOption(Parameters)({
+          description: args.description,
+          prompt: args.prompt,
+          subagent_type: args.subagent_type,
+          reuse: false,
+        }),
+      )
+      const reuse = disabled === undefined ? true : disabled.reuse
+      expect(reuse).toBe(false)
+    }),
+  )
+
+  it.instance("reuse:false forces a fresh session despite a recent same-agent child", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const first = yield* def.execute({ ...args, force: true }, ctxWith(chat, assistant, stubOps(), []))
+      const second = yield* def.execute(
+        { ...args, force: true, reuse: false },
+        ctxWith(chat, assistant, stubOps(), []),
+      )
+      expect(second.metadata.sessionId).toBeDefined()
+      expect(second.metadata.sessionId).not.toBe(first.metadata.sessionId)
+      expect(second.output).not.toContain("Reusing")
+      expect(yield* sessions.children(chat.id)).toHaveLength(2)
+    }),
+  )
+
+  it.instance("description documents reuse:false", () =>
+    Effect.gen(function* () {
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      expect(def.description).toContain("reuse:false")
+      expect(def.description).toContain("Reuse semantics")
     }),
   )
 })

@@ -147,6 +147,10 @@ export const Parameters = Schema.Struct({
     description:
       "Set true to deliberately re-run a task whose description+prompt already completed successfully in this session",
   }),
+  reuse: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Reuse the newest same-agent child session within the reuse TTL instead of creating a fresh one. Defaults to true; pass false to force a fresh spawn",
+  }),
 })
 
 function renderOutput(input: {
@@ -325,7 +329,7 @@ export const TaskTool = Tool.define(
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
-      const reused = params.task_id
+      const reused = params.task_id || params.reuse === false
         ? undefined
         : yield* Effect.gen(function* () {
             const kids = yield* sessions.children(ctx.sessionID)
@@ -388,6 +392,10 @@ export const TaskTool = Tool.define(
             ),
           ],
         }))
+
+      const reuseNotice = reused
+        ? `Reusing subagent session ${nextSession.id} — re-running inside it; pass reuse:false for a fresh spawn.`
+        : undefined
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
         Effect.provideService(Database.Service, database),
@@ -584,7 +592,7 @@ export const TaskTool = Tool.define(
           return {
             title: params.description,
             metadata,
-            output: renderOutput({ sessionID: nextSession.id, state: "completed", text: attempt.value }),
+            output: renderOutput({ sessionID: nextSession.id, state: "completed", text: reuseNotice ? `${reuseNotice}\n${attempt.value}` : attempt.value }),
           }
         }
       }
@@ -677,7 +685,7 @@ export const TaskTool = Tool.define(
             return {
               title: params.description,
               metadata,
-              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: result?.output ?? "" }),
+              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: reuseNotice ? `${reuseNotice}\n${result?.output ?? ""}` : (result?.output ?? "") }),
             }
           }),
         (_, exit) =>
@@ -696,9 +704,11 @@ export const TaskTool = Tool.define(
     })
 
     return {
-      description: flags.experimentalBackgroundSubagents
-        ? [DESCRIPTION, BACKGROUND_DESCRIPTION].join("\n\n")
-        : DESCRIPTION,
+      description:
+        (flags.experimentalBackgroundSubagents
+          ? [DESCRIPTION, BACKGROUND_DESCRIPTION].join("\n\n")
+          : DESCRIPTION) +
+        " Reuse semantics: an identical re-fire (byte-exact subagent_type+description+prompt) of a completed task is refused unless force:true or task_id. Within the reuse TTL a re-fire adopts the newest same-agent child session and re-runs it; pass reuse:false to force a fresh spawn.",
       parameters: Parameters,
       jsonSchema: flags.experimentalBackgroundSubagents ? undefined : ToolJsonSchema.fromSchema(BaseParameters),
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>

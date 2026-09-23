@@ -105,3 +105,4 @@ Core workflow:
 
 - `busyWorkspaces` (layout.tsx) gates worktree create/remove/reset only. The create path relies on `worktree.ready`/`worktree.failed` events to clear busy — a missed event greys the whole sidebar section, so the create flow carries a 60s fallback clear and the overlay is dim-only (`opacity-50`, never `pointer-events-none`): session rows must stay clickable during worktree ops.
 - Sidebar child threads: `childSessions()` (layout/helpers.ts) renders ALL non-archived children under their parent, newest first. Do not reintroduce on-path-only rendering — it hid running subagent threads from the user entirely.
+- Sidebar shows no subagent children after restart: cause roots-only store fill (`parentID:null`/`roots:true` in session-load.ts); fix load all sessions, client-side filters (`sortedRootSessions`, `childSessions`) keep lists clean.
