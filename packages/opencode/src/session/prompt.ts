@@ -340,7 +340,7 @@ function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
 export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
-import { jevBelowFloor, jevBatch, jevTransport, jevModelFor, resolveJevModel } from "@/jev/client"
+import { jevBelowFloor, jevBatch, jevTransport, jevModelFor, resolveJevModel, resolveJevSurface } from "@/jev/client"
 import { jevKey } from "@/jev/controller"
 import { boosterPush, applyDrops } from "@/jev/gate"
 import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
@@ -2095,7 +2095,10 @@ const layer = Layer.effect(
               messages: msgs,
               promptOps,
               mcpConfig: (cfg.mcp ?? {}) as Record<string, unknown>,
-              jevEnabled: cfg.jev?.enabled === true,
+              jevEnabled: resolveJevSurface(cfg.jev, cfg.jevDefault?.model, {
+                threshold: JEV_DEFAULT_THRESHOLD,
+                timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
+              }).enabled,
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),
@@ -2205,7 +2208,11 @@ const layer = Layer.effect(
             // for `enabled`/`threshold`/`timeoutMs`; the threshold read below is
             // `cfg.jev.threshold` from opencode.json alone (else the shared
             // JEV_DEFAULT_THRESHOLD). Do not migrate this key.
-            const jevEnabled = cfg.jev?.enabled === true
+            const jev = resolveJevSurface(cfg.jev, cfg.jevDefault?.model, {
+              threshold: JEV_DEFAULT_THRESHOLD,
+              timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
+            })
+            const jevEnabled = jev.enabled
             // Hoisted ABOVE the JEV fold (and above the freezeHead call site) so
             // the routing telemetry can tell a first-turn freeze from a later
             // verdict the session-frozen head swallows. 12-space scope: a
@@ -2226,10 +2233,7 @@ const layer = Layer.effect(
                 // Provider-aware: the model spec's prefix selects the transport,
                 // so the key must come from the same provider namespace. Absent
                 // spec defaults to the SystemOne (typesafe) path.
-                const { spec: jevSpec, fallback: jevFallback } = resolveJevModel(
-                  jevModelFor(cfg.jev?.model, cfg.jevDefault?.model),
-                  jevKey,
-                )
+                const { spec: jevSpec, fallback: jevFallback } = resolveJevModel(jevModelFor(jev.model), jevKey)
                 const jevTransportResolved = jevTransport(jevSpec)
                 // Key from the SAME provider namespace as the transport: the
                 // typesafe and openrouter decision endpoints take different
@@ -2251,12 +2255,18 @@ const layer = Layer.effect(
                 if (resolvedJevKey && jevTransportResolved) {
                   // One default for every reader: config wins, else the shared
                   // constant (never a second literal that can drift).
-                  const threshold = typeof cfg.jev?.threshold === "number" ? cfg.jev.threshold : JEV_DEFAULT_THRESHOLD
-                  const timeoutMs = typeof cfg.jev?.timeoutMs === "number" ? cfg.jev.timeoutMs : JEV_DEFAULT_TIMEOUT_MS
+                  const threshold = jev.threshold
+                  const timeoutMs = jev.timeoutMs
                   jevTurn.threshold = threshold
                   jevTurn.spec = jevSpec
-                  const govBatchOn = cfg.governor?.enabled === true
-                  const boostBatchOn = cfg.brainBooster?.enabled === true
+                  const govBatchOn = resolveJevSurface(cfg.governor, cfg.jevDefault?.model, {
+                    threshold: JEV_DEFAULT_THRESHOLD,
+                    timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
+                  }).enabled
+                  const boostBatchOn = resolveJevSurface(cfg.brainBooster, cfg.jevDefault?.model, {
+                    threshold: JEV_DEFAULT_THRESHOLD,
+                    timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
+                  }).enabled
                   const batchTools = jevEnabled ? names : []
                   // The governor scores the NON-binding context blocks that were
                   // assembled above; positional ids map back to `govBlocks` for
@@ -2420,10 +2430,11 @@ const layer = Layer.effect(
             // content per turn, breaking the cached prefix. This is the one
             // canonical enablement source; the plugin-side governor path is
             // retired (disabled-by-default).
-            const govCfg = cfg.governor ?? {}
-            const govEnabled = govCfg.enabled === true
-            const govKey =
-              govEnabled === true ? jevKey(governorProvider(govCfg.model, cfg.jevDefault?.model)) : undefined
+            const gov = resolveJevSurface(cfg.governor, cfg.jevDefault?.model, {
+              threshold: JEV_DEFAULT_THRESHOLD,
+              timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
+            })
+            const govKey = gov.enabled ? jevKey(governorProvider(gov.model)) : undefined
             const govTaskHash = governorTaskHash(jevPromptText(lastUserMsg?.parts ?? []))
             // Block composition identity: indexes are positional into a per-turn
             // rebuilt array, so a changed composition would drop the wrong
@@ -2512,7 +2523,7 @@ const layer = Layer.effect(
                 after: gatedBlocks.length,
                 changed: govChanged,
                 sticky: govStickySize,
-                threshold: govCfg.threshold ?? JEV_DEFAULT_THRESHOLD,
+                threshold: gov.threshold,
               })
             }
             // Brain booster: computed ONCE at the turn boundary and reused
@@ -2520,9 +2531,11 @@ const layer = Layer.effect(
             // block — never as a part of the last user message, which is the
             // cache-pin breakpoint (ProviderTransform.applyCaching). Fail-open
             // emits nothing.
-            const boostCfg = cfg.brainBooster ?? {}
-            const boostKey =
-              boostCfg.enabled === true ? jevKey(governorProvider(boostCfg.model, cfg.jevDefault?.model)) : undefined
+            const boost = resolveJevSurface(cfg.brainBooster, cfg.jevDefault?.model, {
+              threshold: JEV_DEFAULT_THRESHOLD,
+              timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
+            })
+            const boostKey = boost.enabled ? jevKey(governorProvider(boost.model)) : undefined
             const boostPrevTurn = jevBoostTurn.get(sessionID)
             let advisory: string | undefined
             if (boostKey) {

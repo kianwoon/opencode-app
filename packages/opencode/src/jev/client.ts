@@ -43,6 +43,34 @@ export const JEV_DEFAULT_THRESHOLD = 0.7
 export const JEV_DEFAULT_CONFIDENCE_FLOOR = 0.3
 /** Cheap-prefilter cut for the numeric `noul` score (jev.md §3). */
 export const JEV_DEFAULT_NOUL_THRESHOLD = 0.7
+
+/**
+ * One Jev feature surface as written in `opencode.json` — `jev`, `governor` and
+ * `brainBooster` all share this shape. Resolved through a single precedence
+ * point so the enable-gate, model, threshold and timeout defaults cannot drift
+ * between call sites.
+ */
+export type JevSurface = { enabled?: boolean; model?: string; threshold?: number; timeoutMs?: number }
+
+/**
+ * Single precedence point for every Jev feature surface (jev / governor /
+ * brainBooster): explicit-enable only; model: surface > shared default;
+ * threshold/timeoutMs: surface > fallback. Empty-string model falls through
+ * (absent, not a value). Pure.
+ */
+export function resolveJevSurface(
+  surface: JevSurface | undefined,
+  sharedModel: string | undefined,
+  fallback: { threshold: number; timeoutMs: number },
+) {
+  return {
+    enabled: surface?.enabled === true,
+    model: surface?.model || sharedModel || undefined,
+    threshold: typeof surface?.threshold === "number" ? surface.threshold : fallback.threshold,
+    timeoutMs: typeof surface?.timeoutMs === "number" ? surface.timeoutMs : fallback.timeoutMs,
+  }
+}
+
 /** One-line tool description budget used for the routing criteria labels. */
 const TOOL_DESCRIPTION_MAX = 160
 

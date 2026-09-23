@@ -14,6 +14,7 @@ import {
   jevTransport,
   jevModelFor,
   resolveJevModel,
+  resolveJevSurface,
 } from "@/jev/client"
 
 // Live `cua-driver list-tools` names, namespaced by the MCP `server_tool` key.
@@ -294,6 +295,57 @@ describe("jevModelFor — feature model ⇒ shared default ⇒ built-in", () => 
     expect(jevModelFor("", "openrouter/bar")).toBe("openrouter/bar")
     expect(jevModelFor("   ", "typesafe/bar")).toBe("typesafe/bar")
     expect(jevModelFor("", "")).toBe(JEV_DEFAULT_MODEL)
+  })
+})
+
+describe("resolveJevSurface — one precedence point for jev / governor / brainBooster", () => {
+  const fallback = { threshold: 0.7, timeoutMs: 3000 }
+
+  test("enabled is true only for a literal true", () => {
+    // An absent block means OFF (documented design); only a literal true enables.
+    expect(resolveJevSurface({ enabled: true }, undefined, fallback).enabled).toBe(true)
+    expect(resolveJevSurface({ enabled: false }, undefined, fallback).enabled).toBe(false)
+    expect(resolveJevSurface({}, undefined, fallback).enabled).toBe(false)
+  })
+
+  test("an absent surface is disabled", () => {
+    expect(resolveJevSurface(undefined, undefined, fallback).enabled).toBe(false)
+  })
+
+  test("model: the surface model wins over the shared default", () => {
+    expect(resolveJevSurface({ model: "openrouter/foo" }, "typesafe/bar", fallback).model).toBe("openrouter/foo")
+  })
+
+  test("model: the shared default applies when the surface model is absent", () => {
+    expect(resolveJevSurface({}, "typesafe/bar", fallback).model).toBe("typesafe/bar")
+  })
+
+  test("model: an empty-string surface model falls through to the shared default", () => {
+    // Empty string is absent, not a value.
+    expect(resolveJevSurface({ model: "" }, "typesafe/bar", fallback).model).toBe("typesafe/bar")
+  })
+
+  test("model: both absent stay undefined so jevModelFor supplies the built-in", () => {
+    expect(resolveJevSurface({}, undefined, fallback).model).toBeUndefined()
+  })
+
+  test("threshold: a number wins, a non-number falls through", () => {
+    expect(resolveJevSurface({ threshold: 0.2 }, undefined, fallback).threshold).toBe(0.2)
+    expect(resolveJevSurface({ threshold: undefined }, undefined, fallback).threshold).toBe(0.7)
+  })
+
+  test("timeoutMs: a number wins, a non-number falls through", () => {
+    expect(resolveJevSurface({ timeoutMs: 50 }, undefined, fallback).timeoutMs).toBe(50)
+    expect(resolveJevSurface({ timeoutMs: undefined }, undefined, fallback).timeoutMs).toBe(3000)
+  })
+
+  test("an absent surface resolves to the fallback defaults, disabled", () => {
+    expect(resolveJevSurface(undefined, undefined, fallback)).toEqual({
+      enabled: false,
+      model: undefined,
+      threshold: 0.7,
+      timeoutMs: 3000,
+    })
   })
 })
 
