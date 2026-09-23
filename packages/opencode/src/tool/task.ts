@@ -69,6 +69,13 @@ export const IDENTICAL_TASK_WINDOW_MS = 60_000
 export const HAND_REUSE_TTL_MS = 20 * 60 * 1000
 export const HAND_REUSE_MAX_TOKENS = 150_000
 
+// Sessions currently adopted by an in-flight run. A session can only be handed
+// to ONE run at a time: two parallel same-agent tasks that both pass the
+// liveness/TTL guards would otherwise adopt the same child and interleave two
+// prompts in one session. Claimed on adoption, released when the run settles
+// (ensuring fires on success, interrupt and defect alike, so a claim can't leak).
+const adoptedInFlight = new Set<string>()
+
 /** Terminal refusal for a repeated identical task. Shared so the wording stays in one place. */
 function identicalTaskRefusal(input: { count: number; subagentType: string; description: string; last: string }) {
   const seconds = Math.round(IDENTICAL_TASK_WINDOW_MS / 1000)
@@ -333,29 +340,33 @@ export const TaskTool = Tool.define(
         ? undefined
         : yield* Effect.gen(function* () {
             const kids = yield* sessions.children(ctx.sessionID)
-            const [newest] = kids
+            const candidates = kids
               .filter((kid) => kid.agent === next.name)
               .sort((a, b) => b.time.updated - a.time.updated)
-            if (!newest) return undefined
-            const childMsgs = yield* sessions.messages({ sessionID: newest.id }).pipe(Effect.orDie)
-            let liveCtx = 0
-            for (let i = childMsgs.length - 1; i >= 0; i--) {
-              const m = childMsgs[i]
-              if (!m || m.info.role !== "assistant") continue
-              liveCtx = (m.info.tokens?.cache?.read ?? 0) + (m.info.tokens?.input ?? 0)
-              break
+            for (const candidate of candidates) {
+              if (adoptedInFlight.has(candidate.id)) continue
+              const childMsgs = yield* sessions.messages({ sessionID: candidate.id }).pipe(Effect.orDie)
+              let liveCtx = 0
+              for (let i = childMsgs.length - 1; i >= 0; i--) {
+                const m = childMsgs[i]
+                if (!m || m.info.role !== "assistant") continue
+                liveCtx = (m.info.tokens?.cache?.read ?? 0) + (m.info.tokens?.input ?? 0)
+                break
+              }
+              if (liveCtx > HAND_REUSE_MAX_TOKENS) continue
+              const ageMs = Date.now() - candidate.time.updated
+              if (ageMs > HAND_REUSE_TTL_MS) continue
+              const job = yield* background.get(candidate.id)
+              if (job?.status === "running") continue
+              adoptedInFlight.add(candidate.id)
+              yield* Effect.logInfo("Reusing subagent session", {
+                agent: next.name,
+                sessionID: candidate.id,
+                ageMinutes: Math.round((ageMs / 60000) * 10) / 10,
+              })
+              return candidate
             }
-            if (liveCtx > HAND_REUSE_MAX_TOKENS) return undefined
-            const ageMs = Date.now() - newest.time.updated
-            if (ageMs > HAND_REUSE_TTL_MS) return undefined
-            const job = yield* background.get(newest.id)
-            if (job?.status === "running") return undefined
-            yield* Effect.logInfo("Reusing subagent session", {
-              agent: next.name,
-              sessionID: newest.id,
-              ageMinutes: Math.round((ageMs / 60000) * 10) / 10,
-            })
-            return newest
+            return undefined
           })
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
@@ -392,6 +403,12 @@ export const TaskTool = Tool.define(
             ),
           ],
         }))
+
+      if (reused)
+        yield* sessions.setTitle({
+          sessionID: nextSession.id,
+          title: params.description + ` (@${next.name} subagent)`,
+        })
 
       const reuseNotice = reused
         ? `Reusing subagent session ${nextSession.id} — re-running inside it; pass reuse:false for a fresh spawn.`
@@ -626,7 +643,14 @@ export const TaskTool = Tool.define(
           }),
           notify(nextSession.id),
         ]),
-        run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
+        run: runTask().pipe(
+          Effect.onInterrupt(() => ops.cancel(nextSession.id)),
+          Effect.ensuring(
+            Effect.sync(() => {
+              adoptedInFlight.delete(nextSession.id)
+            }),
+          ),
+        ),
       })
 
       function backgroundResult() {
