@@ -4,6 +4,6 @@ Gotcha: `bun test context-gate` (from packages/opencode) reads the REAL ~/.confi
 
 Ruling: the 5 failures are pre-existing environmental (isolated failing test touches none of the batch's rewritten sites; identical result with/without fixture). Release gates for the 2026-09-23 batch: typecheck 0, bun test jev 80/0, roundtrip 3/3, node probe 0.
 
-Queued fix (needs source seam): export a test-only await (mirroring __resetFlightsForTest) that triggers loadConfig and resolves once configLoaded===true; hook suite awaits it before asserting; plus OPENCODE_CONFIG_DIR fixture with gate ON for hermetic runs.
+Fixed (2026-09-24): __awaitConfigForTest exported from context-gate.ts (configLoadPromise captured from the async read; resolves when configLoaded=true); the hook suite awaits it at module top before any transform. Hermetic run still requires the fixture env — the flags come from CONFIG_PATHS(): TMP_GLOBAL=$(mktemp -d) && printf '{"scopingEnabled":true,"summarizeEnabled":false}' > "$TMP_GLOBAL/context-gate.json" && echo '{"$schema":"https://opencode.ai/config.json"}' > "$TMP_GLOBAL/opencode.json" && OPENCODE_CONFIG_DIR="$TMP_GLOBAL" bun test context-gate (from packages/opencode) → 40/0. Without the env, the suite is race-free but still reflects the real config (35/5 while the user's flags are OFF).
 
 Acceptance gate for the seam fix: OPENCODE_CONFIG_DIR=<fixture> bun test context-gate → 40/0 from packages/opencode, with roundtrip 3/3 and node probe 0 unchanged.
