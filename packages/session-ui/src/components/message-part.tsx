@@ -1999,15 +1999,27 @@ ToolRegistry.register({
       return value
     })
     const running = createMemo(() => props.status === "pending" || props.status === "running")
+    const [queued, setQueued] = createSignal(false)
 
     const href = createMemo(() => sessionLink(childSessionId(), data.sessionHref))
     const clickable = createMemo(() => !!(childSessionId() && (data.navigateToSession || href())))
 
     const open = () => {
       const id = childSessionId()
-      if (!id) return
+      if (!id) {
+        if (running()) setQueued(true)
+        return
+      }
       data.navigateToSession?.(id)
     }
+    // Queued nav covers the streaming window before the child session id exists.
+    createEffect(() => {
+      if (!queued()) return
+      const id = childSessionId()
+      if (!id) return
+      setQueued(false)
+      data.navigateToSession?.(id)
+    })
 
     const navigate = (event: MouseEvent) => {
       if (!data.navigateToSession) return

@@ -1,0 +1,7 @@
+# Task tool card is a dead click while the subagent call is still streaming — the child session id does not exist yet
+
+Gotcha: clicking a running `task` tool card (subagent thread link) did nothing when clicked during the model's tool-call STREAM. `childSessionId()` (packages/session-ui/src/components/message-part.tsx, task ToolRegistry render) reads `part.state.metadata.sessionId`, but the server sets that metadata only at tool EXECUTE start (packages/opencode/src/tool/task.ts — right after the child session row is created, before the run). The store-scan fallback (`taskSession()`, filters `session.parentID === current session`) also cannot see the child before it is created. Result: from part-creation to execute-start (seconds for large task prompts), the card shows a spinner but click/keyboard silently no-op. All transport links are healthy (v1 `message.part.updated` → whole-part replace preserves metadata; child sessions DO enter the session store via `session.created`), so the gap is purely "id doesn't exist yet", not a sync bug.
+
+Fix: queue the click — `open()` sets a `queued` signal when there is no id AND the part is running; a `createEffect` navigates via `data.navigateToSession` as soon as `childSessionId()` resolves (message-part.tsx:2002-2022).
+
+Acceptance gate: click a freshly started task card during streaming → navigation lands within ~1-2s of the child session being created; `bun typecheck` from packages/session-ui exits 0; `bun test src --only-failures` from packages/session-ui green.
