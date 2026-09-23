@@ -99,13 +99,15 @@ let configCache: GateConfig | undefined
 // assuming "gates on" before the real config lands rewrites system[0] bytes and
 // breaks the content-derived cache prefix on a session's early turns.
 let configLoaded = false
+// Resolves once the on-disk read lands (test seam: __awaitConfigForTest).
+let configLoadPromise: Promise<void> | undefined
 
 function loadConfig(): GateConfig {
   if (configCache) return configCache
   configCache = { ...DEFAULTS }
   // Build the complete new config, then swap the reference atomically —
   // concurrent readers must never observe a half-applied config.
-  void (async () => {
+  configLoadPromise = (async () => {
     try {
       const next = { ...DEFAULTS }
       for (const p of CONFIG_PATHS()) {
@@ -639,6 +641,12 @@ let activeFlights = 0
 export function __resetFlightsForTest(): void {
   activeFlights = 0
   inflight.clear()
+}
+
+/** Test seam: resolves once the real config has landed (configLoaded true). */
+export function __awaitConfigForTest(): Promise<void> {
+  loadConfig()
+  return configLoadPromise ?? Promise.resolve()
 }
 
 /** Drop the injected provenance trailer so an already-summarized section hashes stably. */

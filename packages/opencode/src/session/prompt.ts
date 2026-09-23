@@ -2556,9 +2556,11 @@ const layer = Layer.effect(
             // Per-turn tool preference rides the TAIL like the booster advisory: the emitted
             // tool list is frozen after the first turn, so guidance (not removal) is the
             // honest per-turn channel.
+            // Filtered to real tool names: the batch fold can emit garbage entries (observed live: "invalid") that must never reach the advisory text.
+            const keepReal = jevTurn.keep ? [...jevTurn.keep].filter((n) => jevTurn.names.has(n)) : []
             const routingAdvisory =
-              jevEnabled && jevTurn.keep && jevTurn.keep.size > 0
-                ? `${BOOSTER_ADVISORY_PREFIX}For this step, prefer these tools: ${[...jevTurn.keep].slice(0, 8).join(", ")}${jevTurn.keep.size > 8 ? ", and others" : ""}.`
+              jevEnabled && keepReal.length > 0
+                ? `${BOOSTER_ADVISORY_PREFIX}For this step, prefer these tools: ${keepReal.slice(0, 8).join(", ")}${keepReal.length > 8 ? ", and others" : ""}.`
                 : undefined
             const environmentDate = yield* sys.environmentDate()
             const system = freezeSystem(sessionID, [

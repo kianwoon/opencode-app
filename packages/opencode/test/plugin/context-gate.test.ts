@@ -16,6 +16,7 @@ import {
   fallbackPins,
   scopeSnapshots,
   __resetFlightsForTest,
+  __awaitConfigForTest,
   type GateConfig,
   type Section,
 } from "../../../../.opencode/plugin-lib/context-gate"
@@ -23,6 +24,10 @@ import {
 const hooks = (await (ContextGatePlugin as (input: unknown) => Promise<Hooks>)({
   project: { id: "test" },
 })) as Hooks
+
+// The gate short-circuits on !configLoaded until the async config read lands;
+// the withholding assertions need the real config in place before any transform.
+await __awaitConfigForTest()
 
 const CONFIG: GateConfig = {
   maxSystemTokens: 24_000,
