@@ -72,7 +72,7 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
       type: "text",
       text: [
         "<system-reminder>",
-        "The current todo list for this session is below. Keep it current: mark items completed as soon as they are done, set the active item in_progress, and clear or extend the list when the plan changes. Use the todowrite tool to update it.",
+        "The current todo list for this session is below. Update it at phase boundaries only: when a phase completes, mark its items completed in one update and keep the active phase's first item in_progress. Never update per step. Use the todowrite tool to update it.",
         "<todo-list>",
         list,
         "</todo-list>",

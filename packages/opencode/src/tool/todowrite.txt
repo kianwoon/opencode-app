@@ -22,7 +22,7 @@ Skip when:
 - `cancelled` - no longer needed
 
 ## Rules
-- Update status in real time; don't batch completions
+- Update at phase boundaries only: draft the plan once at phase start, then batch completions when a phase finishes — never per step, never per tool call
 - Mark `completed` only after the required work is actually done, including any required verification. Never based on intent.
 - Keep exactly one `in_progress` while work remains
 - If blocked or partial, keep it `in_progress` and add a follow-up todo describing the blocker
