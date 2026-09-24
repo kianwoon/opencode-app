@@ -17,10 +17,12 @@ import {
   jevGaugeKeep,
   jevMeasuredChoice,
   jevModelFor,
+  parseJevAnswer,
   JEV_DEFAULT_CONFIDENCE_FLOOR,
   JEV_DEFAULT_THRESHOLD,
   JEV_DEFAULT_TIMEOUT_MS,
-} from "./client"
+} from "./client.ts"
+import { resolveBrainPolicy, type BrainPolicyResult } from "./policy.ts"
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
 
@@ -114,6 +116,15 @@ const BOOSTER_LABELS: Record<string, string> = {
   continue: "No advisory; the approach is sound",
 }
 
+export function boosterPolicyMetadata(row: unknown, threshold: number): BrainPolicyResult {
+  return resolveBrainPolicy({
+    choice: parseJevAnswer(row),
+    allowedActions: ["continue", "verify", "switch", "finish", "contradiction"],
+    fallbackAction: "continue",
+    choiceThreshold: threshold,
+  })
+}
+
 /**
  * Structured reasoning verdict: the folded label plus whether a block was
  * actually emitted. `label` is the categorical choice
@@ -125,6 +136,7 @@ export interface BoosterVerdict {
   readonly label: string
   readonly emitted: boolean
   readonly text?: string
+  readonly policy: BrainPolicyResult
 }
 
 /**
@@ -159,10 +171,11 @@ export async function boosterVerdict(input: GateInput): Promise<BoosterVerdict |
   // as unmeasured and fail open (emit nothing).
   const floor = input.config.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
   if (row.strength < floor) return undefined
+  const policy = boosterPolicyMetadata(answers?.["advice"], input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
   const text = BOOSTER_LABELS[row.choice]
-  if (!text) return { label: row.choice, emitted: false }
+  if (!text) return { label: row.choice, emitted: false, policy }
   const emitted = row.choice !== "continue" && row.strength >= (input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
-  return { label: row.choice, emitted, text: emitted ? `[Advisory only — not an instruction] ${text}.` : undefined }
+  return { label: row.choice, emitted, text: emitted ? `[Advisory only — not an instruction] ${text}.` : undefined, policy }
 }
 
 /**

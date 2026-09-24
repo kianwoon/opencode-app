@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { parseJevAnswer } from "../../src/jev/client.ts"
+import { boosterPolicyMetadata } from "../../src/jev/gate.ts"
 import { resolveBrainPolicy, type BrainPolicyInput } from "../../src/jev/policy.ts"
 
 const choice = (label: string, probability: number, confidence = 0.5) => ({
@@ -133,6 +134,47 @@ describe("parseJevAnswer — typed decision rows", () => {
     expect(parseJevAnswer({ type: "noul", noul: -0.01 })).toEqual({ type: "unavailable", reason: "malformed" })
     expect(parseJevAnswer({ type: "noul", noul: 1.01 })).toEqual({ type: "unavailable", reason: "malformed" })
     expect(parseJevAnswer({ type: "noul", noul: Number.NaN })).toEqual({ type: "unavailable", reason: "malformed" })
+  })
+})
+
+describe("boosterPolicyMetadata — advisory-only policy seam", () => {
+  test("returns measured verify metadata", () => {
+    const result = boosterPolicyMetadata(
+      { type: "choice", choice: "verify", probabilities: { verify: 0.9 } },
+      0.7,
+    )
+    expect(result).toMatchObject({
+      action: "verify",
+      source: "choice",
+      reason: "choice-accepted",
+      decisions: { choice: { strength: 0.9, probability: 0.9 } },
+    })
+    expect(result.unavailable).toEqual([])
+  })
+
+  test("returns fallback for a low-strength row", () => {
+    const result = boosterPolicyMetadata(
+      { type: "choice", choice: "switch", probabilities: { switch: 0.2 } },
+      0.7,
+    )
+    expect(result).toMatchObject({ action: "continue", source: "fallback", reason: "choice-rejected" })
+  })
+
+  test("keeps a missing row visible as unavailable metadata", () => {
+    const result = boosterPolicyMetadata(undefined, 0.7)
+    expect(result).toMatchObject({
+      action: "continue",
+      source: "fallback",
+      unavailable: [{ question: "choice", reason: "missing" }],
+    })
+  })
+
+  test("accepts contradiction as an advisory action", () => {
+    const result = boosterPolicyMetadata(
+      { type: "choice", choice: "contradiction", probabilities: { contradiction: 0.9 } },
+      0.7,
+    )
+    expect(result).toMatchObject({ action: "contradiction", source: "choice", reason: "choice-accepted" })
   })
 })
 

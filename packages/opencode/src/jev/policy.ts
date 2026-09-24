@@ -8,7 +8,7 @@ import {
   type JevUnavailableReason,
 } from "./client.ts"
 
-export type BrainPolicyAction = "continue" | "verify" | "switch" | "finish" | "escalate"
+export type BrainPolicyAction = "continue" | "verify" | "switch" | "finish" | "contradiction" | "escalate"
 export type BrainPolicySource = "choice" | "noul" | "fallback"
 export type BrainPolicyReason = "choice-accepted" | "noul-rejected" | "choice-rejected" | "choice-not-allowed" | "choice-unavailable"
 
@@ -46,7 +46,12 @@ const finiteOr = (value: number | undefined, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback
 
 const isBrainPolicyAction = (value: string): value is BrainPolicyAction =>
-  value === "continue" || value === "verify" || value === "switch" || value === "finish" || value === "escalate"
+  value === "continue" ||
+  value === "verify" ||
+  value === "switch" ||
+  value === "finish" ||
+  value === "contradiction" ||
+  value === "escalate"
 
 const parsedDecisions = (
   choice: BrainPolicyInput["choice"],

@@ -36,6 +36,7 @@ describe("boosterPush — change-detect on the folded label", () => {
   test("first-ever emission (no memo) pushes", async () => {
     globalThis.fetch = answers({ type: "choice", choice: "verify", probabilities: { verify: 0.9 } })
     const verdict = await boosterVerdict({ key: "k", state: "s", config: { enabled: true } })
+    expect(verdict?.policy).toMatchObject({ action: "verify", source: "choice", reason: "choice-accepted" })
     const push = boosterPush(undefined, verdict)
     expect(push.changed).toBe(true)
     expect(push.advisory).toContain("verification")
