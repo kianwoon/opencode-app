@@ -10,6 +10,7 @@ import { parseDesktopNativeBundle, type DesktopNativeBundle } from "@opencode-ai
 import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { setForceFocus } from "./debug"
+import { vacuumDatabase } from "./database-vacuum"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import {
@@ -147,19 +148,7 @@ export function registerIpcHandlers(deps: Deps) {
   // so the file only grows; VACUUM reclaims that dead space. Non-destructive.
   ipcMain.handle("vacuum-database", async () => {
     const dbPath = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "opencode", "opencode.db")
-    const before = await stat(dbPath).then(
-      (s) => s.size,
-      () => 0,
-    )
-    if (before === 0) return { before: 0, after: 0 }
-    await new Promise<void>((resolve, reject) => {
-      execFile("sqlite3", [dbPath, "VACUUM;"], (err) => (err ? reject(err) : resolve()))
-    })
-    const after = await stat(dbPath).then(
-      (s) => s.size,
-      () => 0,
-    )
-    return { before, after }
+    return vacuumDatabase(dbPath)
   })
   ipcMain.handle("draft-get", (_event, key: string) => drafts.get(key))
   ipcMain.handle("draft-set", (_event, key: string, value: string) => drafts.set(key, value))
