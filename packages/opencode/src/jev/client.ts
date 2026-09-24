@@ -187,6 +187,7 @@ export function resolveJevModel(
  */
 export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
   "task",
+  "session_rename",
   "StructuredOutput",
   "invalid",
   // Core execution/tool-discovery tools. The head is session-frozen, so a

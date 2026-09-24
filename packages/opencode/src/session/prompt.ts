@@ -271,7 +271,8 @@ const writeStableHead = (db: Database.Interface["db"], sessionID: SessionID, sys
     .values({ session_id: sessionID, system, tools, time_created: Date.now() })
     .onConflictDoNothing()
 
-function freezeHead<T extends Record<string, unknown>>(
+/** @internal Exported for testing */
+export function freezeHead<T extends Record<string, unknown>>(
   sessionID: SessionID,
   current: T,
   persisted: { system: string[]; tools: string[] } | undefined,
@@ -279,7 +280,11 @@ function freezeHead<T extends Record<string, unknown>>(
   const frozen = jevHeadTools.get(sessionID)
   if (frozen) return frozen as T
   const names = persisted
-    ? Object.keys(current).filter((name) => persisted.tools.includes(name))
+    ? [
+        ...new Set(
+          Object.keys(current).filter((name) => persisted.tools.includes(name) || JEV_EXEMPT_TOOLS.has(name)),
+        ),
+      ]
     : Object.keys(current)
   const keep = names.length > 0 ? names : Object.keys(current)
   // Insertion order IS the emitted order, so sort by name once here: the same
@@ -343,7 +348,7 @@ export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGa
 import { jevBelowFloor, jevBatch, jevTransport, jevModelFor, resolveJevModel, resolveJevSurface } from "@/jev/client"
 import { jevKey } from "@/jev/controller"
 import { boosterPush, applyDrops } from "@/jev/gate"
-import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS } from "@/jev/client"
+import { JEV_DEFAULT_THRESHOLD, JEV_DEFAULT_TIMEOUT_MS, JEV_EXEMPT_TOOLS } from "@/jev/client"
 
 function jevPromptText(parts: readonly unknown[]): string {
   return parts

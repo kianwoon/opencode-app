@@ -202,7 +202,10 @@ export interface BoosterPush {
  * sub-threshold / `continue` label still counts as `changed` for telemetry yet
  * pushes no block.
  */
-export function boosterPush(prev: string | undefined, verdict: BoosterVerdict | undefined): BoosterPush {
+export function boosterPush(
+  prev: string | undefined,
+  verdict: Pick<BoosterVerdict, "label" | "emitted" | "text"> | undefined,
+): BoosterPush {
   if (!verdict) return { changed: false }
   const changed = prev !== verdict.label
   return { changed, advisory: changed && verdict.emitted ? verdict.text : undefined }

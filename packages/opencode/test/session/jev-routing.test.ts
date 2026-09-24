@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { jevBelowFloor, jevFoldTools, jevKeepTools, jevVerdict } from "@/session/prompt"
+import { SessionID } from "@/session/schema"
+import { freezeHead, jevBelowFloor, jevFoldTools, jevKeepTools, jevVerdict } from "@/session/prompt"
 
 // Shapes below are verbatim captures from the live decisions endpoint
 // (answers keyed q1..qN, choice + probabilities + confidence per row).
@@ -40,6 +41,16 @@ describe("jevKeepTools", () => {
       ["websearch"],
     )
     expect(keep?.has("websearch")).toBe(false)
+  })
+
+  test("keeps session_rename on a confident skip", () => {
+    const keep = round(
+      {
+        session_rename: { type: "choice", choice: "skip", probabilities: { skip: 0.99, use: 0.01 }, confidence: 0.99 },
+      },
+      ["session_rename"],
+    )
+    expect(keep?.has("session_rename")).toBe(true)
   })
 
   test("never routes away task, StructuredOutput, or invalid", () => {
@@ -121,6 +132,15 @@ describe("jevKeepTools", () => {
   test("fails open when the payload carries no answers", () => {
     expect(jevKeepTools({}, ["read"], 0.7)).toBeUndefined()
     expect(jevKeepTools(null, ["read"], 0.7)).toBeUndefined()
+  })
+
+  test("preserves exempt tools missing from a legacy persisted head", () => {
+    const head = freezeHead(
+      SessionID.make("ses_jev-legacy-head"),
+      { read: {}, session_rename: {} },
+      { system: [], tools: ["read", "removed_tool"] },
+    )
+    expect(Object.keys(head).toSorted()).toEqual(["read", "session_rename"])
   })
 })
 

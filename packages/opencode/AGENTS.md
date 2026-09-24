@@ -443,3 +443,7 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
 ## Learnings
 
 **Session token rollup ≠ live context — never cap on it (2026-09-22).** `session.tokens` rollups (`tokens_input`/`tokens_cache_read`) SUM tokens ACROSS turns; `cache_read` alone grows ~20k/turn, so the rollup blows any sane cap after ~5-8 turns. First casualty: the task-tool hand-reuse cap (`HAND_REUSE_MAX_TOKENS` in `src/tool/task.ts`) gated on the rollup and denied every real resume while the session's live context was ~28k (rollup 405k). Fix: cap on the NEWEST assistant message's `cache.read + input` (the live prompt size). Acceptance gate: `bun test test/tool/task-reuse.test.ts` from packages/opencode — over-cap case seeds last-message tokens, no-message case resumable.
+
+## Session rename and frozen JEV heads
+- A root/main session can have `session_rename` registered and allowed yet absent from the model tool list when the first JEV head was persisted without it. `freezeHead` is first-call-wins and its persisted-name intersection must re-add current JEV-exempt tools; `session_rename` belongs in `JEV_EXEMPT_TOOLS`.
+- Acceptance: `bun test test/session/jev-routing.test.ts test/tool/session-rename.test.ts` and `bun typecheck` pass from `packages/opencode`; after a desktop restart, the live head/head-hash output contains `session_rename`.
