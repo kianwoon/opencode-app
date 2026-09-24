@@ -18,6 +18,7 @@ import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { SessionRenameTool } from "./session-rename"
+import { JevAcceptTool } from "./jev-accept"
 import { JevDecideTool } from "./jev-decide"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -119,6 +120,7 @@ const layer = Layer.effect(
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const sessionrename = yield* SessionRenameTool
+    const jevaccept = yield* JevAcceptTool
     const jevdecide = yield* JevDecideTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
@@ -227,6 +229,7 @@ const layer = Layer.effect(
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
           session_rename: Tool.init(sessionrename),
+          jev_accept: Tool.init(jevaccept),
           jev_decide: Tool.init(jevdecide),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
