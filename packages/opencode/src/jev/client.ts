@@ -249,6 +249,162 @@ export interface JevChoice {
   readonly strength: number
 }
 
+/** Why a typed answer row cannot be used by a policy. */
+export type JevUnavailableReason = "missing" | "malformed" | "unmeasured"
+
+/** A measured categorical answer. `strength` is probabilities[choice]. */
+export interface JevChoiceDecision {
+  readonly type: "choice"
+  readonly choice: string
+  /** Alias for the selected probability; retained for typed policy consumers. */
+  readonly strength: number
+  readonly probability: number
+  readonly probabilities: Readonly<Record<string, number>>
+  /** Confidence is metadata about the label, never the routing gate. */
+  readonly confidence?: number
+}
+
+/** A score answer. Scores remain advisory to policy consumers. */
+export interface JevScoreDecision {
+  readonly type: "score"
+  readonly score: number
+  readonly normalizedScore: number
+  readonly legend: Readonly<Record<string, string | number>>
+  readonly probabilities?: Readonly<Record<string, number>>
+  readonly confidence?: number
+}
+
+/** A numeric prefilter answer in the closed interval [0, 1]. */
+export interface JevNoulDecision {
+  readonly type: "noul"
+  readonly noul: number
+}
+
+/** An explicit unusable-row result; the parser never returns undefined. */
+export interface JevUnavailableDecision {
+  readonly type: "unavailable"
+  readonly reason: JevUnavailableReason
+}
+
+export type JevParsedDecision = JevChoiceDecision | JevScoreDecision | JevNoulDecision | JevUnavailableDecision
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const unavailable = (reason: JevUnavailableReason): JevUnavailableDecision => ({ type: "unavailable", reason })
+
+const finiteNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
+
+const finiteProbabilities = (value: unknown): Readonly<Record<string, number>> => {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(Object.entries(value).flatMap(([key, entry]) => {
+    const number = finiteNumber(entry)
+    return number === undefined ? [] : [[key, number]]
+  }))
+}
+
+const usableLegend = (value: unknown): { legend: Readonly<Record<string, string | number>>; maximum: number } | undefined => {
+  if (!isRecord(value)) return undefined
+  const entries = Object.entries(value).flatMap(([key, entry]) => {
+    const numericKey = key.trim().length === 0 ? Number.NaN : Number(key)
+    if (!Number.isFinite(numericKey) || (typeof entry !== "string" && typeof entry !== "number")) return []
+    return [[key, entry] as const]
+  })
+  if (entries.length === 0) return undefined
+  const maximum = Math.max(...entries.map(([key]) => Number(key)))
+  if (!Number.isFinite(maximum) || maximum <= 0) return undefined
+  return { legend: Object.fromEntries(entries), maximum }
+}
+
+const hasOwn = (value: Record<string, unknown>, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key)
+
+const hasLegacyChoice = (value: Record<string, unknown>): boolean =>
+  ["choice", "answer", "value", "label", "decision"].some((key) => hasOwn(value, key))
+
+const mismatchedShape = (value: Record<string, unknown>, type: "choice" | "score" | "noul"): boolean => {
+  if (type === "choice") return hasOwn(value, "score") || hasOwn(value, "noul")
+  if (type === "score") return hasLegacyChoice(value) || hasOwn(value, "noul")
+  return hasLegacyChoice(value) || hasOwn(value, "score")
+}
+
+const parseChoiceRow = (value: Record<string, unknown>, choice: unknown): JevParsedDecision => {
+  if (typeof choice !== "string" || choice.trim().length === 0) return unavailable("malformed")
+  const rawProbabilities = value["probabilities"]
+  if (!isRecord(rawProbabilities) || !hasOwn(rawProbabilities, choice)) return unavailable("unmeasured")
+  const selected = finiteNumber(rawProbabilities[choice])
+  if (selected === undefined) return unavailable("malformed")
+  const confidence = finiteNumber(value["confidence"])
+  return {
+    type: "choice",
+    choice,
+    strength: selected,
+    probability: selected,
+    probabilities: finiteProbabilities(rawProbabilities),
+    ...(confidence === undefined ? {} : { confidence }),
+  }
+}
+
+const parseScoreRow = (value: Record<string, unknown>): JevParsedDecision => {
+  if (!hasOwn(value, "score")) return unavailable("malformed")
+  const score = finiteNumber(value["score"])
+  if (score === undefined) return unavailable("malformed")
+  const legend = usableLegend(value["legend"])
+  if (!legend) return unavailable("unmeasured")
+  if (score < 0 || score > legend.maximum) return unavailable("malformed")
+  const rawProbabilities = value["probabilities"]
+  const probabilities = finiteProbabilities(rawProbabilities)
+  const confidence = finiteNumber(value["confidence"])
+  return {
+    type: "score",
+    score,
+    normalizedScore: score / legend.maximum,
+    legend: legend.legend,
+    ...(rawProbabilities !== undefined && Object.keys(probabilities).length > 0 ? { probabilities } : {}),
+    ...(confidence === undefined ? {} : { confidence }),
+  }
+}
+
+const parseNoulRow = (value: Record<string, unknown>): JevParsedDecision => {
+  if (!hasOwn(value, "noul")) return unavailable("malformed")
+  const noul = finiteNumber(value["noul"])
+  if (noul === undefined || noul < 0 || noul > 1) return unavailable("malformed")
+  return { type: "noul", noul }
+}
+
+/**
+ * Parse one raw answer row into a bounded, explicit decision result.
+ * Type-free legacy rows are inferred by their established answer fields; an
+ * explicit unknown or mismatched type is never guessed.
+ */
+export function parseJevAnswer(value: unknown): JevParsedDecision {
+  if (value === undefined || value === null) return unavailable("missing")
+  if (!isRecord(value)) return unavailable("malformed")
+
+  if (hasOwn(value, "type")) {
+    const type = value["type"]
+    if (type === "choice") {
+      return mismatchedShape(value, type) ? unavailable("malformed") : parseChoiceRow(value, value["choice"])
+    }
+    if (type === "score") {
+      return mismatchedShape(value, type) ? unavailable("malformed") : parseScoreRow(value)
+    }
+    if (type === "noul") {
+      return mismatchedShape(value, type) ? unavailable("malformed") : parseNoulRow(value)
+    }
+    return unavailable("malformed")
+  }
+
+  const legacyChoice = value["choice"] ?? value["answer"] ?? value["value"] ?? value["label"] ?? value["decision"]
+  if (legacyChoice !== undefined) return parseChoiceRow(value, legacyChoice)
+  if (finiteNumber(value["score"]) !== undefined) return parseScoreRow(value)
+  if (hasOwn(value, "noul")) return parseNoulRow(value)
+  return unavailable("malformed")
+}
+
+/** Alias for callers that use the row/decision terminology. */
+export const parseJevDecision = parseJevAnswer
+
 export function jevVerdict(value: unknown): JevVerdict | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const r = value as Record<string, unknown>

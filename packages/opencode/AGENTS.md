@@ -153,6 +153,8 @@
   never `Bun.*`. Acceptance guard: `bun test test/plugin/loader-shared.test.ts` +
   a manual sidecar smoke test (the CLI alone cannot catch this — it runs on Bun).
 
+- Typed JEV decision seam: keep parseJevAnswer compatible with legacy type-free Choice/Score/Noul rows; reject scores outside the numeric legend and retain unavailable-row metadata rather than guessing. Bun tests/typecheck do not prove external Node ESM loading: relative imports must use explicit .ts extensions. Acceptance: from packages/opencode run bun test test/jev/client.test.ts test/jev/policy.test.ts && bun typecheck, then node --experimental-strip-types --input-type=module -e "await import('<absolute>/src/jev/client.ts'); await import('<absolute>/src/jev/policy.ts')" and require exit 0.
+
 ## Workflow/DAG engine gotchas
 
 - The `workflow` tool executes inside the session loop's own tool pass. It must admit its
