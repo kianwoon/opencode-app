@@ -446,4 +446,4 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
 
 ## Session rename and frozen JEV heads
 - A root/main session can have `session_rename` registered and allowed yet absent from the model tool list when the first JEV head was persisted without it. `freezeHead` is first-call-wins and its persisted-name intersection must re-add current JEV-exempt tools; `session_rename` belongs in `JEV_EXEMPT_TOOLS`.
-- Acceptance: `bun test test/session/jev-routing.test.ts test/tool/session-rename.test.ts` and `bun typecheck` pass from `packages/opencode`; after a desktop restart, the live head/head-hash output contains `session_rename`.
+- `session_rename` is a standalone tool, not a `bash`/shell alias. A persisted legacy frozen head can hide it, so direct verification requires a fresh root/main session and a fresh Brain session. Acceptance: from `packages/opencode`, run `bun test test/session/jev-routing.test.ts test/tool/session-rename.test.ts` and `bun typecheck`; both fresh sessions must directly invoke `session_rename` without API/fallback and change the title. Restarting an old session or using an HTTP PATCH is insufficient.

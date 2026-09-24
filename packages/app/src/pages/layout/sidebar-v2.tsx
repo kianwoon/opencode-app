@@ -39,6 +39,8 @@ const SIDEBAR_PANEL_WIDTH = 264
 // Number of sessions shown in a project before the user expands. Matches the
 // child store's default session limit so the collapsed list is consistent.
 const DEFAULT_SESSION_LIMIT = 5
+// Number of most recent child sessions shown beneath the active root.
+const CHILD_SESSION_LIMIT = 3
 // Number of most recent sessions kept when the user cleans up a project.
 const SESSION_CLEANUP_KEEP = 5
 
@@ -762,7 +764,6 @@ function ProjectSection(
   const visibleSessions = createMemo(() =>
     showAll.value ? allSessions() : allSessions().slice(0, DEFAULT_SESSION_LIMIT),
   )
-  const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
   const showAllSessions = async () => {
     const [store, setStore] = childStore()
     setStore("limit", Math.max(store.limit, sessionTotal(), allSessions().length + 1))
@@ -797,6 +798,13 @@ function ProjectSection(
   // Child (subagent) sessions live in the same store as roots; v2 renders them
   // only beneath the active session, mirroring the legacy sidebar.
   const storeSessions = createMemo(() => childStore()[0].session)
+  const hasMore = createMemo(() => {
+    const rootID = activeSessionId()
+    return (
+      sessionTotal() > visibleSessions().length ||
+      (rootID !== undefined && childSessions(storeSessions(), rootID).length > CHILD_SESSION_LIMIT)
+    )
+  })
 
   return (
     <div data-component="sidebar-v2-project" class="flex min-w-0 flex-col">
@@ -893,7 +901,7 @@ function ProjectSection(
                   />
                   <Show when={session.id === activeSessionId()}>
                     <div class="flex min-w-0 flex-col gap-px pl-4">
-                      <For each={childSessions(storeSessions(), session.id)}>
+                      <For each={childSessions(storeSessions(), session.id, showAll.value ? undefined : CHILD_SESSION_LIMIT)}>
                         {(child) => (
                           <SessionRow
                             session={child}

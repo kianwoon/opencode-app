@@ -262,6 +262,38 @@ describe("layout workspace helpers", () => {
     expect(childSessions(list, "missing")).toEqual([])
   })
 
+  test("limits children to the newest sessions", () => {
+    const list = [
+      session({ id: "root", directory: "/workspace" }),
+      session({
+        id: "oldest",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 1, updated: 1, archived: undefined },
+      }),
+      session({
+        id: "newest",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 4, updated: 4, archived: undefined },
+      }),
+      session({
+        id: "older",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 2, updated: 2, archived: undefined },
+      }),
+      session({
+        id: "newer",
+        directory: "/workspace",
+        parentID: "root",
+        time: { created: 3, updated: 3, archived: undefined },
+      }),
+    ]
+
+    expect(childSessions(list, "root", 3).map((item) => item.id)).toEqual(["newest", "newer", "older"])
+  })
+
   test("formats fallback project display name", () => {
     expect(displayName({ worktree: "/tmp/app" })).toBe("app")
     expect(displayName({ worktree: "/tmp/app", name: "My App" })).toBe("My App")

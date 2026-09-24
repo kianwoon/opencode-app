@@ -33,10 +33,12 @@ export function hasProjectPermissions<T>(
   return Object.values(request ?? {}).some((list) => list?.some(include))
 }
 
-export const childSessions = (sessions: Session[] | undefined, rootID: string) =>
-  (sessions ?? [])
+export const childSessions = (sessions: Session[] | undefined, rootID: string, limit?: number) => {
+  const children = (sessions ?? [])
     .filter((session) => session.parentID === rootID && !session.time?.archived)
     .sort((a, b) => (b.time.created ?? 0) - (a.time.created ?? 0))
+  return limit === undefined ? children : children.slice(0, limit)
+}
 
 export const displayName = (project: { name?: string; worktree: string }) =>
   project.name || getFilename(project.worktree) || project.worktree
