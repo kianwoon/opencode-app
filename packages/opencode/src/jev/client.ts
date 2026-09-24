@@ -582,16 +582,46 @@ export function jevKeepTools(payload: unknown, names: string[], threshold: numbe
 }
 
 /**
+ * Bounded-retry transport for decisions POSTs (SDK parity: the typesafe client
+ * retries automatically). Decisions are stateless + idempotent, so retry ONLY
+ * transient failures — network error, timeout (AbortError), 429, 5xx — twice,
+ * 200ms then 600ms; any other status is the endpoint's real answer and returns
+ * at once. The signal is created PER ATTEMPT so every try gets the full
+ * timeout. Returns the final Response, or `undefined` once retries are
+ * exhausted — the caller's existing fail-open path is unchanged. Plain
+ * `setTimeout` only: this module must stay DOM-global-only (copyable into
+ * Node-loaded plugin-lib files).
+ */
+export async function jevFetchRetry(
+  endpoint: string,
+  timeoutMs: number,
+  init: { method: string; headers: Record<string, string>; body: string },
+): Promise<Response | undefined> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, attempt === 1 ? 200 : 600))
+    try {
+      const res = await fetch(endpoint, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+      if (res.status === 429 || res.status >= 500) continue
+      return res
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
+
+/**
  * Generic decisions call for the governor / brain booster. Sends one batch of
  * named choice questions and returns the raw `answers` record, or `undefined`
  * on any fail-open path (unknown provider prefix, HTTP rejection, transport
- * error, or a response with no answers envelope). Callers fold with `jevChoice`
+ * error, or a response with no answers envelope) — transient transport
+ * failures are retried first by `jevFetchRetry`. Callers fold with `jevChoice`
  * and MUST gate on `choice` + `probabilities[choice]`, never `confidence`.
  */
-export function jevAsk(input: JevAskInput): Promise<Record<string, unknown> | undefined> {
+export async function jevAsk(input: JevAskInput): Promise<Record<string, unknown> | undefined> {
   const transport = jevTransport(input.model)
-  if (!transport) return Promise.resolve(undefined)
-  return fetch(transport.endpoint, {
+  if (!transport) return undefined
+  const res = await jevFetchRetry(transport.endpoint, input.timeoutMs, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.key}`,
@@ -600,17 +630,14 @@ export function jevAsk(input: JevAskInput): Promise<Record<string, unknown> | un
       "X-Title": "opencode",
     },
     body: JSON.stringify({ model: transport.id, state: input.state, questions: input.questions }),
-    signal: AbortSignal.timeout(input.timeoutMs),
   })
-    .then((res) => (res.ok ? res.json() : undefined))
-    .then((payload): Record<string, unknown> | undefined => {
-      if (typeof payload !== "object" || payload === null) return undefined
-      const root = payload as Record<string, unknown>
-      if (typeof input.onUsage === "function") input.onUsage(jevUsage(root, transport.id))
-      const answers = root["answers"] ?? root["decisions"] ?? root["results"]
-      return typeof answers === "object" && answers !== null ? (answers as Record<string, unknown>) : undefined
-    })
-    .catch(() => undefined)
+  if (!res?.ok) return undefined
+  const payload = await res.json().catch((): undefined => undefined)
+  if (typeof payload !== "object" || payload === null) return undefined
+  const root = payload as Record<string, unknown>
+  if (typeof input.onUsage === "function") input.onUsage(jevUsage(root, transport.id))
+  const answers = root["answers"] ?? root["decisions"] ?? root["results"]
+  return typeof answers === "object" && answers !== null ? (answers as Record<string, unknown>) : undefined
 }
 
 /**
@@ -908,7 +935,7 @@ export function jevToolUseLabel(name: string, description?: string): string {
   return desc.length > 0 ? `Use ${name} — ${desc}` : `Use ${name} for this request`
 }
 
-export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
+export async function jevDecide(input: JevDecideInput): Promise<JevDecision> {
   const id = input.id ?? "tools"
   const transport = jevTransport(input.model)
   if (!transport) return Promise.resolve({ failure: "parse" })
@@ -923,7 +950,7 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
       criteria: { use: jevToolUseLabel(name, input.descriptions?.[name]), skip: `Do not use \`${name}\` for this request` },
     }
   }
-  return fetch(transport.endpoint, {
+  const res = await jevFetchRetry(transport.endpoint, input.timeoutMs, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.key}`,
@@ -932,19 +959,17 @@ export function jevDecide(input: JevDecideInput): Promise<JevDecision> {
       "X-Title": "opencode",
     },
     body: JSON.stringify({ model: transport.id, state, questions }),
-    signal: AbortSignal.timeout(input.timeoutMs),
   })
-    .then((res): Promise<JevDecision> => {
-      if (!res.ok) return Promise.resolve({ status: res.status, failure: "http" })
-      return res.json().then((payload): JevDecision => {
-        const folded = jevFoldTools(payload, input.names, input.threshold)
-        if (!folded) return { failure: "parse" }
-        return { keep: folded.keep, dropped: folded.dropped }
-      })
-    })
-    .then((decision) => {
-      remember(memo, decision)
-      return decision
-    })
-    .catch(() => ({ failure: "transport" }) satisfies JevDecision)
+  if (!res) return { failure: "transport" } satisfies JevDecision
+  if (!res.ok) {
+    const decision = { status: res.status, failure: "http" } satisfies JevDecision
+    remember(memo, decision)
+    return decision
+  }
+  const payload = await res.json().catch((): undefined => undefined)
+  if (payload === undefined) return { failure: "transport" } satisfies JevDecision
+  const folded = jevFoldTools(payload, input.names, input.threshold)
+  const decision: JevDecision = folded ? { keep: folded.keep, dropped: folded.dropped } : { failure: "parse" }
+  remember(memo, decision)
+  return decision
 }

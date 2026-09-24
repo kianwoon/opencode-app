@@ -28,6 +28,7 @@ import {
   JEV_DEFAULT_CONFIDENCE_FLOOR,
   JEV_DEFAULT_THRESHOLD,
   JEV_DEFAULT_TIMEOUT_MS,
+  jevFetchRetry,
   jevMeasuredChoice,
   jevTransport,
   type JevChoice,
@@ -219,7 +220,7 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
   const hit = controllerMemo.get(key)
   if (hit && hit.expires > Date.now()) return hit.decision
   try {
-    const res = await fetch(transport.endpoint, {
+    const res = await jevFetchRetry(transport.endpoint, timeoutMs, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${input.key}`,
@@ -228,8 +229,8 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
         "X-Title": "opencode",
       },
       body: JSON.stringify({ model: transport.id, state, questions }),
-      signal: AbortSignal.timeout(timeoutMs),
     })
+    if (!res) return null
     if (!res.ok) return null
     const decision = foldController(await res.json(), threshold, floor)
     if (decision) controllerRemember(key, decision)
