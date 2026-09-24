@@ -24,3 +24,13 @@ Follow `packages/ui/AGENTS.md` (## Localization) — full i18n rules live there 
 ## SelectV2 / Kobalte gotcha
 
 The Kobalte Select VIRTUAL-focus / `onFocusOutside` dismissal gotcha is documented in `packages/ui/AGENTS.md` (## SelectV2 / Kobalte focus gotcha). Read it before touching any Select usage here; do not remove the `preventDefault` guard.
+
+## Bun test seam for message-part
+
+Importing `message-part.tsx` from a Bun unit test transitively loads the Vite-only `markdown.worker.ts?worker&url` module and fails before assertions. Keep pure task-session resolution and left-click logic in `message-part-task.ts`, and test that module directly; do not mock the worker.
+
+Acceptance gate:
+
+`cd packages/session-ui && bun test src/components/message-part-task.test.ts --only-failures && bun typecheck`
+
+The focused test must report 1 passed/0 failed, typecheck must exit 0, and no worker-module load error may occur.

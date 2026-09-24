@@ -65,6 +65,7 @@ import { partDefaultOpen } from "./part-default-open"
 import { animate } from "motion"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
+import { navigateTaskSessionOnLeftClick, resolveTaskSession } from "./message-part-task"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -586,22 +587,6 @@ function urls(text: string | undefined) {
 function sessionLink(id: string | undefined, href?: (id: string) => string | undefined) {
   if (!id) return undefined
   return href?.(id)
-}
-
-function taskSession(
-  input: Record<string, any>,
-  parentID: string | undefined,
-  sessions: Session[] | undefined,
-  agents?: readonly { name: string; color?: string }[],
-) {
-  if (!parentID) return undefined
-  const description = typeof input.description === "string" ? input.description : ""
-  const agent = taskAgent(input.subagent_type, agents).name
-  return (sessions ?? [])
-    .filter((session) => session.parentID === parentID && !session.time?.archived)
-    .filter((session) => (description ? session.title.startsWith(description) : true))
-    .filter((session) => (agent ? session.title.includes(`@${agent}`) : true))
-    .sort((a, b) => (b.time.created ?? 0) - (a.time.created ?? 0))[0]?.id
 }
 
 const CONTEXT_GROUP_TOOLS = new Set(["read", "glob", "grep", "list"])
@@ -1549,8 +1534,13 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const partMetadata = () => part().state?.metadata ?? emptyMetadata
   const taskId = createMemo(() => {
     if (part().tool !== "task") return
-    const value = partMetadata().sessionId
-    if (typeof value === "string" && value) return value
+    return resolveTaskSession({
+      metadata: partMetadata(),
+      description: input().description,
+      agent: taskAgent(input().subagent_type, data.store.agent).name,
+      parentID: data.sessionID,
+      sessions: data.store.session,
+    })
   })
   const taskHref = createMemo(() => {
     if (part().tool !== "task") return
@@ -1596,12 +1586,11 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                   subtitle={taskSubtitle()}
                   href={taskHref()}
                   onSubtitleClick={(event) => {
-                    if (!data.navigateToSession) return
-                    if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+                    const navigate = data.navigateToSession
+                    if (!navigate) return
                     const id = taskId()
                     if (!id) return
-                    event.preventDefault()
-                    data.navigateToSession(id)
+                    navigateTaskSessionOnLeftClick(event, () => navigate(id))
                   }}
                 />
               )
@@ -1980,12 +1969,16 @@ ToolRegistry.register({
   render(props) {
     const data = useData()
     const i18n = useI18n()
-    const childSessionId = createMemo(() => {
-      const value = props.metadata.sessionId
-      if (typeof value === "string" && value) return value
-      return taskSession(props.input, data.sessionID, data.store.session, data.store.agent)
-    })
     const agent = createMemo(() => taskAgent(props.input.subagent_type, data.store.agent))
+    const childSessionId = createMemo(() =>
+      resolveTaskSession({
+        metadata: props.metadata,
+        description: props.input.description,
+        agent: agent().name,
+        parentID: data.sessionID,
+        sessions: data.store.session,
+      }),
+    )
     const title = createMemo(() => agent().name ?? i18n.t("ui.tool.agent.default"))
     const tone = createMemo(() => agent().color)
     const v2Tone = createMemo(() => agent().v2Color)
@@ -2023,9 +2016,7 @@ ToolRegistry.register({
 
     const navigate = (event: MouseEvent) => {
       if (!data.navigateToSession) return
-      if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-      event.preventDefault()
-      open()
+      navigateTaskSessionOnLeftClick(event, open)
     }
     const navigateKey = (event: KeyboardEvent) => {
       if (!clickable() || href()) return
