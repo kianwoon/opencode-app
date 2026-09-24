@@ -20,6 +20,7 @@ import { SkillTool } from "./skill"
 import { SessionRenameTool } from "./session-rename"
 import { JevAcceptTool } from "./jev-accept"
 import { JevDecideTool } from "./jev-decide"
+import { JevRankTool } from "./jev-rank"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -122,6 +123,7 @@ const layer = Layer.effect(
     const sessionrename = yield* SessionRenameTool
     const jevaccept = yield* JevAcceptTool
     const jevdecide = yield* JevDecideTool
+    const jevrank = yield* JevRankTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -231,6 +233,7 @@ const layer = Layer.effect(
           session_rename: Tool.init(sessionrename),
           jev_accept: Tool.init(jevaccept),
           jev_decide: Tool.init(jevdecide),
+          jev_rank: Tool.init(jevrank),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
