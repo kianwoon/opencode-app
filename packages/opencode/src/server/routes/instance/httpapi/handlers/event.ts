@@ -9,6 +9,11 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
 
+// Sliding = drop-oldest under overload. A client that falls far enough behind
+// to overflow this loses the oldest events, but it refetches state on reconnect,
+// so bounded memory beats an unbounded backlog it can never drain.
+export const EVENT_QUEUE_CAPACITY = 1024
+
 function eventData(data: unknown): Sse.Event {
   return {
     _tag: "Event",
@@ -28,7 +33,7 @@ function eventResponse(events: EventV2.Interface) {
     const workspaceID = yield* InstanceState.workspaceID
     // Listener registration is eager, so events published after this point cannot
     // be lost while the HTTP body fiber is starting or emitting server.connected.
-    const queue = yield* Queue.unbounded<EventV2.Payload>()
+    const queue = yield* Queue.sliding<EventV2.Payload>(EVENT_QUEUE_CAPACITY)
     const unsubscribe = yield* events.listen((event) => Effect.sync(() => Queue.offerUnsafe(queue, event)))
     yield* Effect.addFinalizer(() => unsubscribe)
     const stream = Stream.fromQueue(queue).pipe(

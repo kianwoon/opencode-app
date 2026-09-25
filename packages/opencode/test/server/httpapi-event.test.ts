@@ -1,5 +1,6 @@
 import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer, Queue, Schema, Stream } from "effect"
+import { EVENT_QUEUE_CAPACITY } from "../../src/server/routes/instance/httpapi/handlers/event"
 import { EventPaths } from "../../src/server/routes/instance/httpapi/groups/event"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
@@ -90,5 +91,44 @@ describe("event HttpApi", () => {
         expect(yield* readEvent(reader)).toMatchObject({ type: "session.created" })
       }),
     { git: true, config: { formatter: false, lsp: false } },
+  )
+})
+
+// The relay queue is built per connected SSE client, so a client that stops
+// reading must not grow the server's heap without limit. Exercises the real
+// Effect Queue.sliding strategy the handler builds, not a stand-in.
+describe("event relay queue", () => {
+  it.live(
+    "accepts offers past capacity without blocking the producer",
+    () =>
+      Effect.gen(function* () {
+        const queue = yield* Queue.sliding<number>(EVENT_QUEUE_CAPACITY)
+        const offers = Array.from({ length: EVENT_QUEUE_CAPACITY * 2 }, (_, index) => index)
+        const settled = yield* Effect.forEach(offers, (value) => Queue.offer(queue, value)).pipe(
+          Effect.timeoutOrElse({
+            duration: "5 seconds",
+            orElse: () => Effect.fail(new Error("offering past capacity blocked the producer")),
+          }),
+        )
+        expect(settled.length).toBe(offers.length)
+        expect(yield* Queue.size(queue)).toBe(EVENT_QUEUE_CAPACITY)
+      }),
+  )
+
+  it.effect(
+    "keeps the newest events and drops the oldest on overflow",
+    () =>
+      Effect.gen(function* () {
+        const queue = yield* Queue.sliding<number>(EVENT_QUEUE_CAPACITY)
+        const overflow = 8
+        const total = EVENT_QUEUE_CAPACITY + overflow
+        yield* Effect.forEach(Array.from({ length: total }, (_, index) => index), (value) =>
+          Queue.offer(queue, value),
+        )
+        const retained = yield* Queue.takeAll(queue)
+        expect(retained.length).toBe(EVENT_QUEUE_CAPACITY)
+        expect(retained[0]).toBe(overflow)
+        expect(retained[retained.length - 1]).toBe(total - 1)
+      }),
   )
 })
