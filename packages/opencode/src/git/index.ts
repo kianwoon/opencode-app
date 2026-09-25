@@ -1,6 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppProcess } from "@opencode-ai/core/process"
 import { resolveBinary } from "@opencode-ai/core/git"
+import { memo } from "@opencode-ai/core/memo"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 
@@ -31,19 +32,7 @@ const fail = (err: unknown) =>
 
 const GIT_MEMO_TTL_MS = 1500
 
-// status/diff are re-requested per snapshot event, so an identical burst of requests
-// otherwise spawns the same git command once per event; the TTL bounds staleness.
-export const memo = <A>(ttlMs: number, now: () => number = Date.now) => {
-  const cache = new Map<string, { value: A; at: number }>()
-  return (key: string, fetch: () => Effect.Effect<A>) =>
-    Effect.gen(function* () {
-      const hit = cache.get(key)
-      if (hit && now() - hit.at < ttlMs) return hit.value
-      const value = yield* fetch()
-      cache.set(key, { value, at: now() })
-      return value
-    })
-}
+export { memo }
 
 export type Kind = "added" | "deleted" | "modified"
 

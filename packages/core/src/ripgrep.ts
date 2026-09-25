@@ -5,6 +5,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { Entry, Match } from "@opencode-ai/schema/filesystem"
 import { makeGlobalNode } from "./effect/app-node"
 import { AppProcess, collectStream, waitForAbort } from "./process"
+import { memo } from "./memo"
 import { NonNegativeInt, PositiveInt, RelativePath } from "./schema"
 import { RipgrepBinary } from "./ripgrep/binary"
 
@@ -18,6 +19,8 @@ import { RipgrepBinary } from "./ripgrep/binary"
 const ERROR_BYTES = 8 * 1024
 const MAX_RECORD_BYTES = 64 * 1024
 const MAX_SUBMATCHES = 100
+
+const SEARCH_MEMO_TTL_MS = 2000
 
 const RawMatch = Schema.Struct({
   type: Schema.Literal("match"),
@@ -95,6 +98,16 @@ const layer = Layer.effect(
     const process = yield* AppProcess.Service
     const binary = yield* RipgrepBinary.Service
 
+    // No invalidation signal exists yet (the coalesced watcher is experimental
+    // and off by default), so the TTL bounds staleness; an identical
+    // parallel-subagent burst collapses to one spawn. `signal: undefined` is
+    // dropped by JSON.stringify, so an aborted and a live call share one key —
+    // the memo only stores a successful fetch, so an aborted call is never
+    // cached and the next live call re-spawns.
+    const globMemo = memo<readonly Entry[], Error>(SEARCH_MEMO_TTL_MS)
+    const grepMemo = memo<readonly Match[], Error | InvalidPatternError>(SEARCH_MEMO_TTL_MS)
+    const searchKey = (input: { readonly signal?: AbortSignal }) => JSON.stringify({ ...input, signal: undefined })
+
     const run = <A>(input: {
       readonly cwd: string
       readonly args: string[]
@@ -153,36 +166,38 @@ const layer = Layer.effect(
 
     return Service.of({
       glob: (input) =>
-        run<string>({
-          cwd: input.cwd,
-          limit: input.limit,
-          signal: input.signal,
-          args: [
-            "--no-config",
-            "--files",
-            ...(input.hidden ? ["--hidden"] : []),
-            ...(input.follow ? ["--follow"] : []),
-            `--glob=${input.pattern}`,
-            "--glob=!**/.git/**",
-            ".",
-          ],
-          parse: (line) =>
-            Effect.succeed(
-              line
-                .replace(/^(?:\.[\\/])+/u, "")
-                .replace(/^[\\/]+/u, "")
-                .replaceAll("\\", "/"),
+        globMemo(searchKey(input), () =>
+          run<string>({
+            cwd: input.cwd,
+            limit: input.limit,
+            signal: input.signal,
+            args: [
+              "--no-config",
+              "--files",
+              ...(input.hidden ? ["--hidden"] : []),
+              ...(input.follow ? ["--follow"] : []),
+              `--glob=${input.pattern}`,
+              "--glob=!**/.git/**",
+              ".",
+            ],
+            parse: (line) =>
+              Effect.succeed(
+                line
+                  .replace(/^(?:\.[\\/])+/u, "")
+                  .replace(/^[\\/]+/u, "")
+                  .replaceAll("\\", "/"),
+              ),
+          }).pipe(
+            Effect.map((result) =>
+              result.items.map((relative) =>
+                Entry.make({
+                  path: RelativePath.make(relative),
+                  type: "file",
+                }),
+              ),
             ),
-        }).pipe(
-          Effect.map((result) =>
-            result.items.map((relative) =>
-              Entry.make({
-                path: RelativePath.make(relative),
-                type: "file",
-              }),
-            ),
+            Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
           ),
-          Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
         ),
       find: (input) =>
         run<Entry>({
@@ -216,65 +231,67 @@ const layer = Layer.effect(
           Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
         ),
       grep: (input) =>
-        run<RawMatchData>({
-          ...input,
-          args: [
-            "--no-config",
-            "--json",
-            "--hidden",
-            "--no-messages",
-            ...(input.include ? [`--glob=${input.include}`] : []),
-            "--glob=!**/.git/**",
-            "--",
-            input.pattern,
-            input.file ?? ".",
-          ],
-          parse: (line) =>
-            (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
-              ? Effect.fail(failure(`Ripgrep JSON record exceeded ${MAX_RECORD_BYTES} bytes`))
-              : Effect.try({
-                  try: () => JSON.parse(line) as unknown,
-                  catch: (cause) => failure("Invalid ripgrep JSON output", cause),
-                })
-            ).pipe(
-              Effect.flatMap((json) => {
-                if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
-                  return Effect.succeed(undefined)
-                return Schema.decodeUnknownEffect(RawMatch)(json).pipe(
-                  Effect.map((match) => ({
-                    ...match.data,
-                    path: { text: match.data.path.text.replace(/^\.[\\/]/, "") },
-                    submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
+        grepMemo(searchKey(input), () =>
+          run<RawMatchData>({
+            ...input,
+            args: [
+              "--no-config",
+              "--json",
+              "--hidden",
+              "--no-messages",
+              ...(input.include ? [`--glob=${input.include}`] : []),
+              "--glob=!**/.git/**",
+              "--",
+              input.pattern,
+              input.file ?? ".",
+            ],
+            parse: (line) =>
+              (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
+                ? Effect.fail(failure(`Ripgrep JSON record exceeded ${MAX_RECORD_BYTES} bytes`))
+                : Effect.try({
+                    try: () => JSON.parse(line) as unknown,
+                    catch: (cause) => failure("Invalid ripgrep JSON output", cause),
+                  })
+              ).pipe(
+                Effect.flatMap((json) => {
+                  if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
+                    return Effect.succeed(undefined)
+                  return Schema.decodeUnknownEffect(RawMatch)(json).pipe(
+                    Effect.map((match) => ({
+                      ...match.data,
+                      path: { text: match.data.path.text.replace(/^\.[\\/]/, "") },
+                      submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
+                    })),
+                    Effect.mapError((cause) => failure("Invalid ripgrep match output", cause)),
+                  )
+                }),
+              ),
+          }).pipe(
+            Effect.map((result) =>
+              result.items.map((match) => {
+                const relative = match.path.text
+                  .replace(/^(?:\.[\\/])+/u, "")
+                  .replace(/^[\\/]+/u, "")
+                  .replaceAll("\\", "/")
+                return Match.make({
+                  entry: Entry.make({
+                    path: RelativePath.make(relative),
+                    type: "file",
+                  }),
+                  line: match.line_number,
+                  offset: match.absolute_offset,
+                  text:
+                    match.lines.text.length > 2_000
+                      ? match.lines.text.slice(0, 2_000).replace(/[\uD800-\uDBFF]$/, "") + "..."
+                      : match.lines.text,
+                  submatches: match.submatches.map((submatch) => ({
+                    text: submatch.match.text,
+                    start: submatch.start,
+                    end: submatch.end,
                   })),
-                  Effect.mapError((cause) => failure("Invalid ripgrep match output", cause)),
-                )
+                })
               }),
             ),
-        }).pipe(
-          Effect.map((result) =>
-            result.items.map((match) => {
-              const relative = match.path.text
-                .replace(/^(?:\.[\\/])+/u, "")
-                .replace(/^[\\/]+/u, "")
-                .replaceAll("\\", "/")
-              return Match.make({
-                entry: Entry.make({
-                  path: RelativePath.make(relative),
-                  type: "file",
-                }),
-                line: match.line_number,
-                offset: match.absolute_offset,
-                text:
-                  match.lines.text.length > 2_000
-                    ? match.lines.text.slice(0, 2_000).replace(/[\uD800-\uDBFF]$/, "") + "..."
-                    : match.lines.text,
-                submatches: match.submatches.map((submatch) => ({
-                  text: submatch.match.text,
-                  start: submatch.start,
-                  end: submatch.end,
-                })),
-              })
-            }),
           ),
         ),
     })
