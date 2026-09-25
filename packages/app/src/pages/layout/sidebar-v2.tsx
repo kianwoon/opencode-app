@@ -798,6 +798,18 @@ function ProjectSection(
   // Child (subagent) sessions live in the same store as roots; v2 renders them
   // only beneath the active session, mirroring the legacy sidebar.
   const storeSessions = createMemo(() => childStore()[0].session)
+  // Subagent sessions report their own status, so a parent can look idle while
+  // background children keep working. Count busy children so the root row can
+  // surface that work even when the child rows are collapsed.
+  const runningChildCounts = createMemo(() => {
+    const store = childStore()[0]
+    return store.session.reduce((counts, session) => {
+      if (!session.parentID) return counts
+      if (store.session_status[session.id]?.type !== "busy") return counts
+      counts.set(session.parentID, (counts.get(session.parentID) ?? 0) + 1)
+      return counts
+    }, new Map<string, number>())
+  })
   const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
 
   return (
@@ -891,6 +903,7 @@ function ProjectSection(
                     session={session}
                     project={props.project}
                     server={serverKey()!}
+                    runningChildren={runningChildCounts().get(session.id) ?? 0}
                     onOpen={(event) => props.onOpenSession(session, { background: isBackgroundOpen(event) })}
                   />
                   <Show when={session.id === activeSessionId()}>
@@ -901,6 +914,7 @@ function ProjectSection(
                             session={child}
                             project={props.project}
                             server={serverKey()!}
+                            runningChildren={runningChildCounts().get(child.id) ?? 0}
                             onOpen={(event) => props.onOpenSession(child, { background: isBackgroundOpen(event) })}
                           />
                         )}
@@ -996,6 +1010,7 @@ function SessionRow(props: {
   session: Session
   project: LocalProject
   server: ServerConnection.Key
+  runningChildren: number
   onOpen: (event: MouseEvent) => void
 }) {
   const layout = useLayout()
@@ -1058,6 +1073,12 @@ function SessionRow(props: {
         />
       </span>
       <span class="min-w-0 flex-1 truncate">{title()}</span>
+      <Show when={props.runningChildren > 0}>
+        <span class="flex shrink-0 items-center gap-1 text-11-regular tabular-nums text-v2-text-text-muted">
+          <span class="size-1.5 rounded-full bg-[var(--v2-red-600)] animate-status-blink" />
+          {props.runningChildren}
+        </span>
+      </Show>
     </button>
   )
 }
