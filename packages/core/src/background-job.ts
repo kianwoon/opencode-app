@@ -2,6 +2,7 @@ export * as BackgroundJob from "./background-job"
 
 import { Cause, Clock, Context, Deferred, Effect, Exit, Layer, Scope, Semaphore, SynchronizedRef } from "effect"
 import { Identifier } from "./id/id"
+import { governor } from "./governor"
 import { makeGlobalNode } from "./effect/app-node"
 
 export type Status = "running" | "completed" | "error" | "cancelled"
@@ -132,6 +133,10 @@ export const make = Effect.gen(function* () {
     scope: yield* Scope.Scope,
   }
   const bgPermit = Semaphore.makeUnsafe(resolveBgConcurrency()).withPermit
+  // The governor gate sits OUTSIDE the permit: a fiber slowed by event-loop lag
+  // must not hold a permit while it waits, or back-pressure would starve jobs
+  // that are already past the gate.
+  const bgGate = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.andThen(governor.admit(), effect)
 
   const settle = Effect.fn("BackgroundJob.settle")(function* (
     id: string,
@@ -188,6 +193,7 @@ export const make = Effect.gen(function* () {
     run: Effect.Effect<string, unknown>,
   ) {
     return yield* run.pipe(
+      bgGate,
       bgPermit,
       Effect.matchCauseEffect({
         onSuccess: (output) => settle(id, token, sequence, Exit.succeed(output)),

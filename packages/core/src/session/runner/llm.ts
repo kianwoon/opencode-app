@@ -13,6 +13,7 @@ import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
+import { governor } from "../../governor"
 import { Location } from "../../location"
 import { ModelV2 } from "../../model"
 import { PermissionV2 } from "../../permission"
@@ -349,6 +350,11 @@ const layer = Layer.effect(
       // settlement + publication of one call, so stream consumption stays
       // responsive while at most `resolveToolConcurrency()` settlements run.
       const toolPermit = Semaphore.makeUnsafe(resolveToolConcurrency()).withPermit
+      // The governor gate sits OUTSIDE the permit: a fiber slowed by event-loop
+      // lag must not hold a permit while it waits, or back-pressure would starve
+      // settlements that are already inside the gate.
+      const toolGate = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        Effect.andThen(governor.admit(), effect)
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
         agent: agent.id,
@@ -383,13 +389,15 @@ const layer = Layer.effect(
             const assistantMessageID = yield* publisher.assistantMessageID(event.id)
             yield* Effect.uninterruptibleMask((restore) =>
               restore(
-                toolPermit(
-                  toolMaterialization.settle({
-                    sessionID: session.id,
-                    agent: agent.id,
-                    assistantMessageID,
-                    call: event,
-                  }),
+                toolGate(
+                  toolPermit(
+                    toolMaterialization.settle({
+                      sessionID: session.id,
+                      agent: agent.id,
+                      assistantMessageID,
+                      call: event,
+                    }),
+                  ),
                 ),
               ).pipe(
                 Effect.flatMap((settlement) =>
