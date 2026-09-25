@@ -21,7 +21,35 @@ declare const OPENCODE_LIBC: string | undefined
 
 const SUBSCRIBE_TIMEOUT_MS = 10_000
 
+export const WATCHER_COALESCE_MS = 100
+
 export const Event = FileSystemWatcher.Event
+
+// A single native callback reports one entry per file, so a burst (bun install,
+// git checkout) used to fan out one publish per file with no bound. The map
+// keeps the last update per path; the caller owns the settle timer and drains
+// once the window is due, so a flush publishes once per unique path.
+export const coalescer = <A extends { path: string }>(windowMs: number, now: () => number = Date.now) => {
+  const pending = new Map<string, A>()
+  let dueAt: number | undefined
+  return {
+    push(update: A) {
+      if (dueAt === undefined) dueAt = now() + windowMs
+      pending.set(update.path, update)
+    },
+    due() {
+      if (dueAt === undefined) return false
+      return now() >= dueAt
+    },
+    take() {
+      if (pending.size === 0) return []
+      const batch = Array.from(pending.values())
+      pending.clear()
+      dueAt = undefined
+      return batch
+    },
+  }
+}
 
 const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
   try {
@@ -83,12 +111,26 @@ const layer = Layer.effect(
       Effect.promise(() => Promise.allSettled(subscriptions.map((subscription) => subscription.unsubscribe()))),
     )
 
+    const coalesce = coalescer<ParcelWatcher.Event>(WATCHER_COALESCE_MS)
+    let settle: ReturnType<typeof setTimeout> | undefined
+    const flush = () => {
+      settle = undefined
+      const batch = coalesce.take()
+      if (batch.length === 0) return
+      runFork(
+        Effect.forEach(batch, (update) => {
+          if (update.type === "create") return events.publish(Event.Updated, { file: update.path, event: "add" })
+          if (update.type === "update") return events.publish(Event.Updated, { file: update.path, event: "change" })
+          return events.publish(Event.Updated, { file: update.path, event: "unlink" })
+        }),
+      )
+    }
+    yield* Effect.addFinalizer(() => Effect.sync(() => clearTimeout(settle)))
+
     const callback: ParcelWatcher.SubscribeCallback = (_error, updates) => {
-      for (const update of updates) {
-        if (update.type === "create") runFork(events.publish(Event.Updated, { file: update.path, event: "add" }))
-        if (update.type === "update") runFork(events.publish(Event.Updated, { file: update.path, event: "change" }))
-        if (update.type === "delete") runFork(events.publish(Event.Updated, { file: update.path, event: "unlink" }))
-      }
+      updates.forEach((update) => coalesce.push(update))
+      if (settle) return
+      settle = setTimeout(flush, WATCHER_COALESCE_MS)
     }
 
     const subscribe = (directory: string, ignore: string[]) => {

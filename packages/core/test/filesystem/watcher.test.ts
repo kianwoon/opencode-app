@@ -1,5 +1,5 @@
 import { $ } from "bun"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { ConfigProvider, Deferred, Duration, Effect, Fiber, Layer, Option, Stream } from "effect"
@@ -262,5 +262,45 @@ describeWatcher("Watcher", () => {
         },
       ),
     )
+  })
+})
+
+describe("coalescer", () => {
+  type Update = { path: string; type: string }
+
+  test("publishes only the last update for a path repeated inside the window", () => {
+    let clock = 0
+    const coalesce = Watcher.coalescer<Update>(Watcher.WATCHER_COALESCE_MS, () => clock)
+    coalesce.push({ path: "a.txt", type: "create" })
+    clock = 50
+    coalesce.push({ path: "a.txt", type: "update" })
+    expect(coalesce.due()).toBe(false)
+    clock = 100
+    expect(coalesce.due()).toBe(true)
+    const batch = coalesce.take()
+    expect(batch.length).toBe(1)
+    expect(batch[0]).toEqual({ path: "a.txt", type: "update" })
+  })
+
+  test("publishes one entry per distinct path in a single flush", () => {
+    let clock = 0
+    const coalesce = Watcher.coalescer<Update>(Watcher.WATCHER_COALESCE_MS, () => clock)
+    const files = ["a.txt", "b.txt", "c.txt"]
+    files.forEach((file) => coalesce.push({ path: file, type: "create" }))
+    expect(coalesce.due()).toBe(false)
+    clock = 100
+    expect(coalesce.take().length).toBe(3)
+  })
+
+  test("opens a new window for an update arriving after a flush", () => {
+    let clock = 0
+    const coalesce = Watcher.coalescer<Update>(Watcher.WATCHER_COALESCE_MS, () => clock)
+    coalesce.push({ path: "a.txt", type: "create" })
+    clock = 100
+    expect(coalesce.take().length).toBe(1)
+    coalesce.push({ path: "b.txt", type: "create" })
+    expect(coalesce.due()).toBe(false)
+    clock = 200
+    expect(coalesce.take()).toEqual([{ path: "b.txt", type: "create" }])
   })
 })
