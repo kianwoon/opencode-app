@@ -20,6 +20,7 @@ import { SkillTool } from "./skill"
 import { SessionRenameTool } from "./session-rename"
 import { JevAcceptTool } from "./jev-accept"
 import { JevDecideTool } from "./jev-decide"
+import { JevLabelTool } from "./jev-label"
 import { JevRankTool } from "./jev-rank"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -123,6 +124,7 @@ const layer = Layer.effect(
     const sessionrename = yield* SessionRenameTool
     const jevaccept = yield* JevAcceptTool
     const jevdecide = yield* JevDecideTool
+    const jevlabel = yield* JevLabelTool
     const jevrank = yield* JevRankTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
@@ -233,6 +235,7 @@ const layer = Layer.effect(
           session_rename: Tool.init(sessionrename),
           jev_accept: Tool.init(jevaccept),
           jev_decide: Tool.init(jevdecide),
+          jev_label: Tool.init(jevlabel),
           jev_rank: Tool.init(jevrank),
           patch: Tool.init(patchtool),
           question: Tool.init(question),

@@ -29,6 +29,7 @@ const BRAIN_PERMISSION_STRICT = () => ({
   todowrite: "allow",
   session_rename: "allow",
   jev_accept: "allow",
+  jev_label: "allow",
   jev_rank: "allow",
   skill: "allow",
   question: "allow",
