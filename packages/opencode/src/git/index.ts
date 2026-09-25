@@ -29,6 +29,22 @@ const fail = (err: unknown) =>
     truncated: false,
   }) satisfies Result
 
+const GIT_MEMO_TTL_MS = 1500
+
+// status/diff are re-requested per snapshot event, so an identical burst of requests
+// otherwise spawns the same git command once per event; the TTL bounds staleness.
+export const memo = <A>(ttlMs: number, now: () => number = Date.now) => {
+  const cache = new Map<string, { value: A; at: number }>()
+  return (key: string, fetch: () => Effect.Effect<A>) =>
+    Effect.gen(function* () {
+      const hit = cache.get(key)
+      if (hit && now() - hit.at < ttlMs) return hit.value
+      const value = yield* fetch()
+      cache.set(key, { value, at: now() })
+      return value
+    })
+}
+
 export type Kind = "added" | "deleted" | "modified"
 
 export type Base = {
@@ -214,7 +230,7 @@ const layer = Layer.effect(
       return result.text()
     })
 
-    const status = Effect.fn("Git.status")(function* (cwd: string) {
+    const statusFetch = Effect.fnUntraced(function* (cwd: string) {
       return nuls(
         yield* text(["status", "--porcelain=v1", "--untracked-files=all", "--no-renames", "-z", "--", "."], {
           cwd,
@@ -227,7 +243,10 @@ const layer = Layer.effect(
       })
     })
 
-    const diff = Effect.fn("Git.diff")(function* (cwd: string, ref: string) {
+    const statusMemo = memo<Item[]>(GIT_MEMO_TTL_MS)
+    const status = Effect.fn("Git.status")((cwd: string) => statusMemo(cwd, () => statusFetch(cwd)))
+
+    const diffFetch = Effect.fnUntraced(function* (cwd: string, ref: string) {
       const list = nuls(
         yield* text(["diff", "--no-ext-diff", "--no-renames", "--name-status", "-z", ref, "--", "."], { cwd }),
       )
@@ -238,6 +257,9 @@ const layer = Layer.effect(
         return [{ file, code, status: kind(code) } satisfies Item]
       })
     })
+
+    const diffMemo = memo<Item[]>(GIT_MEMO_TTL_MS)
+    const diff = Effect.fn("Git.diff")((cwd: string, ref: string) => diffMemo(`${cwd}\u0000${ref}`, () => diffFetch(cwd, ref)))
 
     const stats = Effect.fn("Git.stats")(function* (cwd: string, ref: string) {
       return nuls(
