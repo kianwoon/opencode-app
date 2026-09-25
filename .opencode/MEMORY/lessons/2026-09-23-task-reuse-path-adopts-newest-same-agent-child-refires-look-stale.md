@@ -7,3 +7,5 @@ LATCH INTERACTION: the identical-completed-task latch (task.ts:265-281) matches 
 CORRECT PATTERNS: unique description per firing → guaranteed fresh spawn; `task_id` → deliberate resume; `force:true` → override the latch; a re-fire inside the TTL will REUSE, not spawn — do not read reuse as a hang.
 
 ACCEPTANCE GATE: for a re-fire, the children query shows NO new session row (reuse) OR an ERROR part carrying the Terminal text (latch); the adopted session's new parts prove re-execution; UI staleness during a big-context resume is expected, not a bug.
+
+**Mitigation (2026-09-25, 2nd occurrence)**: after a stale-looking refire return, re-fire on a FRESH task (no task_id) with a fully self-contained handoff — the distinct session id avoids the adoption race; verify with a glob for the target files before assuming anything ran.
