@@ -19,6 +19,12 @@ export interface TemporalFeatures {
   readonly prompt_count: number
 }
 
+export interface RecencyFeatures {
+  readonly trailing_idle_hours: number
+  readonly recent_prompts: number
+  readonly recent_repetition_score: number
+}
+
 export function extractTemporalFeatures(
   sessionStart: number,
   sessionEnd: number,
@@ -36,6 +42,23 @@ export function extractTemporalFeatures(
     max_idle_hours: maxIdleMs / MS_PER_HOUR,
     idle_ratio: wallMs > 0 ? maxIdleMs / wallMs : 0,
     prompt_count: prompts.length,
+  }
+}
+
+export function extractRecencyFeatures(
+  sessionEnd: number,
+  prompts: readonly PromptRow[],
+  windowMinutes = 60,
+): RecencyFeatures {
+  if (prompts.length === 0)
+    return { trailing_idle_hours: 0, recent_prompts: 0, recent_repetition_score: 0 }
+  const lastPrompt = prompts[prompts.length - 1]!
+  const windowStart = sessionEnd - windowMinutes * 60_000
+  const recent = prompts.filter((prompt) => prompt.time >= windowStart && prompt.time <= sessionEnd)
+  return {
+    trailing_idle_hours: Math.max(sessionEnd - lastPrompt.time, 0) / MS_PER_HOUR,
+    recent_prompts: recent.length,
+    recent_repetition_score: computeRepetitionScore(recent.map((prompt) => prompt.text)),
   }
 }
 

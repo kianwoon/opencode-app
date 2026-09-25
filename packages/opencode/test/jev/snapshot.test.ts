@@ -87,6 +87,9 @@ describe("buildSessionSnapshot", () => {
     expect(snapshot["max_idle_hours"]).toBeCloseTo(1)
     expect(snapshot["idle_ratio"]).toBeCloseTo(0.5)
     expect(snapshot["prompt_count"]).toBe(4)
+    expect(snapshot["trailing_idle_hours"]).toBe(0)
+    expect(snapshot["recent_prompts"]).toBe(2)
+    expect(snapshot["recent_repetition_score"]).toBeGreaterThanOrEqual(0.5)
   })
 
   test("returns null for an unknown session", async () => {
@@ -113,7 +116,7 @@ describe("buildSessionSnapshot", () => {
     expect(snapshot["output_input_ratio"]).toBeCloseTo(0.1)
   })
 
-  test("emits all twelve enriched snapshot keys", async () => {
+  test("emits all fifteen enriched snapshot keys", async () => {
     const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
     expect(Object.keys(snapshot).sort()).toEqual(
@@ -128,6 +131,9 @@ describe("buildSessionSnapshot", () => {
         "active_span_hours",
         "max_idle_hours",
         "idle_ratio",
+        "trailing_idle_hours",
+        "recent_prompts",
+        "recent_repetition_score",
         "repetition_score",
         "todo_churn",
       ].sort(),

@@ -5,6 +5,7 @@
 import {
   computeRepetitionScore,
   computeTodoChurn,
+  extractRecencyFeatures,
   extractTemporalFeatures,
   type PromptRow,
 } from "./features.ts"
@@ -98,6 +99,8 @@ export async function buildSessionSnapshot(dbPath: string, sessionID: string): P
     ) as Record<string, number>
     const title = session.title.slice(0, 80)
     const temporal = extractTemporalFeatures(session.time_created, session.time_updated, prompts)
+    const recency = extractRecencyFeatures(session.time_updated, prompts, 60)
+    // Recency keys separate user-absence gaps from mid-work stalls.
     const snapshot = JSON.stringify({
       title,
       duration_hours: (session.time_updated - session.time_created) / MS_PER_HOUR,
@@ -114,6 +117,9 @@ export async function buildSessionSnapshot(dbPath: string, sessionID: string): P
       active_span_hours: temporal.active_span_hours,
       max_idle_hours: temporal.max_idle_hours,
       idle_ratio: temporal.idle_ratio,
+      trailing_idle_hours: recency.trailing_idle_hours,
+      recent_prompts: recency.recent_prompts,
+      recent_repetition_score: recency.recent_repetition_score,
       repetition_score: computeRepetitionScore(prompts.map((prompt) => prompt.text)),
       todo_churn: computeTodoChurn(toolCounts, prompts.length),
     })
