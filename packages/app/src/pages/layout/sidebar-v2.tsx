@@ -798,13 +798,7 @@ function ProjectSection(
   // Child (subagent) sessions live in the same store as roots; v2 renders them
   // only beneath the active session, mirroring the legacy sidebar.
   const storeSessions = createMemo(() => childStore()[0].session)
-  const hasMore = createMemo(() => {
-    const rootID = activeSessionId()
-    return (
-      sessionTotal() > visibleSessions().length ||
-      (rootID !== undefined && childSessions(storeSessions(), rootID).length > CHILD_SESSION_LIMIT)
-    )
-  })
+  const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
 
   return (
     <div data-component="sidebar-v2-project" class="flex min-w-0 flex-col">
@@ -901,7 +895,7 @@ function ProjectSection(
                   />
                   <Show when={session.id === activeSessionId()}>
                     <div class="flex min-w-0 flex-col gap-px pl-4">
-                      <For each={childSessions(storeSessions(), session.id, showAll.value ? undefined : CHILD_SESSION_LIMIT)}>
+                      <For each={childSessions(storeSessions(), session.id, CHILD_SESSION_LIMIT)}>
                         {(child) => (
                           <SessionRow
                             session={child}
