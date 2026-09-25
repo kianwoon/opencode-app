@@ -2,14 +2,14 @@
 // ids and counts — NEVER a secret value. This is the single place the broker
 // writes to stderr, so a reviewer can confirm no value ever reaches it.
 
-import { appendFileSync, mkdirSync } from "node:fs"
+import { appendFileSync, chmodSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
 /** Structured, value-free audit record. `keys` are variable names, not values. */
 export type AuditEvent =
   | { action: "startup"; allowlisted: number; injected: number; missing: readonly string[]; malformed: readonly string[] }
-  | { action: "inject"; key: string; pid: number; sessionID?: string; callID?: string }
+  | { action: "inject"; keys: readonly string[]; pid: number; sessionID?: string; callID?: string }
   | { action: "redact"; key: string; tool: string; sessionID: string; callID: string }
   | { action: "block"; tool: string; filePath: string; sessionID: string; callID: string }
 
@@ -23,6 +23,9 @@ function auditFile(): string {
   return process.env.OPENCODE_SECRET_BROKER_AUDIT_FILE ?? path.join(tmpdir(), "opencode", "secret-broker-audit.log")
 }
 
+/** Rotate once the log passes this size, keeping exactly one previous file. */
+const MAX_AUDIT_BYTES = 5 * 1024 * 1024
+
 /** Emits one `[secret-broker] <action> <metadata>` line. The payload is
  *  constructed by the caller from names/ids only — never a secret value. */
 export function audit(event: AuditEvent): void {
@@ -31,6 +34,13 @@ export function audit(event: AuditEvent): void {
     const file = auditFile()
     mkdirSync(path.dirname(file), { recursive: true })
     appendFileSync(file, `${JSON.stringify({ ts: new Date().toISOString(), ...event })}\n`, { mode: 0o600 })
+    // `mode` applies only at creation, so a pre-existing world-readable log
+    // would otherwise keep its old permissions.
+    chmodSync(file, 0o600)
+    if (statSync(file).size > MAX_AUDIT_BYTES) {
+      rmSync(`${file}.1`, { force: true })
+      renameSync(file, `${file}.1`)
+    }
   } catch {
     // Audit is best-effort: stderr already carries the value-free record.
   }

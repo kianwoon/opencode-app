@@ -15,23 +15,24 @@ OpenCode loads the `./server` export of the package.
 
 ## Built-in broker / double-run
 
-The host ships an identical broker **enabled by default**. If you install this
-standalone package while the built-in is still active, both run (duplicate
-injection and redaction — wasteful, not a leak). Disable the built-in:
+The host ships a built-in broker **enabled by default**. Wiring this package into
+`plugin[]` is detected by specifier — the published name `opencode-secret-broker`,
+or a path containing a `secret-broker` or `opencode-secret-broker` segment — and
+the built-in then yields, so exactly one broker ever runs. The host logs a
+one-line `console.warn` when it yields.
 
-```sh
-export OPENCODE_DISABLE_SECRET_BROKER=1
-```
-
-The plugin prints a one-line `console.warn` at startup when it detects the
-built-in flag is unset.
+`OPENCODE_DISABLE_SECRET_BROKER=1` turns the built-in off when this package is NOT
+wired. Do not set it alongside this package: the flag also gates off the
+Execution Guard, the layer that strips injected keys from install, build, and
+test commands.
 
 ## Configuration
 
 - `.env` — real secret values (never read by the model; denied to tools).
 - `.env.example` — the allowlist contract. Only keys declared here are injected.
 - Set `minLength` via plugin options; default 8. Values shorter than the floor
-  are matched by word boundary only.
+  are matched only inside a `KEY=value` assignment, never as a bare substring —
+  a short value would otherwise collide with ordinary identifiers and file paths.
 
 ## Agent usage contract
 

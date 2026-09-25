@@ -17,20 +17,20 @@ const FILE_TOOLS = new Set(["read", "edit", "write"])
 // must be inspected instead.
 const COMMAND_TOOLS = new Set(["bash"])
 
-// Code/script execution tools whose payload does NOT live under `command`, so
-// the bash scanner above never saw it (spec §11.2, §16). MCP tools are keyed
-// `<server>_<tool>` with the server name sanitized but `-` preserved
-// (mcp/catalog.ts), and the built-in code-mode tool id is `execute`. This is
-// the live shell-exec bypass: `context-mode_execute` ran arbitrary code that
-// read `.env` while `check` returned undefined.
-const CODE_EXEC_TOOLS = new Set(["execute", "context-mode_execute", "context-mode_batch_execute"])
+// Tools whose args carry SHELL command strings. The code-exec path is scanned for
+// every tool (an MCP tool id cannot be enumerated), but a string containing
+// whitespace is only read as a shell line for one of THESE tools — otherwise an
+// ordinary `task` prompt like "read config from .env" would be parsed as a
+// command and denied.
+const SHELL_PAYLOAD_TOOLS = new Set(["execute", "context-mode_execute", "context-mode_batch_execute"])
 
 // Verbs/interpreters that can lift a file's bytes into stdout/argv. A command
 // is denied only when it names BOTH a protected file AND one of these (or
 // redirects FROM a file), so ordinary commands that merely mention `.env` in
-// prose still pass. Language interpreters are included because
-// `python -c 'print(open(".env").read())'` reads the file without any shell
-// verb; `tar`/`zip`/`unzip` repackage it.
+// prose still pass. Archive commands that target the whole tree are also
+// denied even when they do not name a protected file. Language interpreters are
+// included because `python -c 'print(open(".env").read())'` reads the file
+// without any shell verb; `tar`/`zip`/`unzip` repackage it.
 const EXFIL_VERBS = new Set([
   "cat",
   "tac",
@@ -91,8 +91,14 @@ const EXFIL_VERBS = new Set([
   "php",
 ])
 
+// Archive tools that copy a whole tree in ONE step. `tar czf out.tgz .` names
+// no protected file, so the verb+target rule below cannot see it — yet the
+// archive captures `.env` whole. Denied whenever the operand is the tree root
+// (`.`, `..`, `*`, or a bare directory) rather than a named file.
+const ARCHIVE_VERBS = new Set(["tar", "zip", "7z", "7za", "rar", "jar", "cpio", "gzip"])
+
 // Code-API identifiers that, together with a protected-file reference inside a
-// CODE_EXEC_TOOLS payload, mark an exfiltration attempt: file-read helpers and
+// code-exec payload, mark an exfiltration attempt: file-read helpers and
 // network/spawn sinks (the incident: read `.env`, loop its keys, `curl` them to
 // an external host). Matched as whole case-folded identifier tokens so prose
 // like `"set API_KEY in .env"` is not disqualified. `EXFIL_VERBS` already covers
@@ -226,16 +232,25 @@ const WRAPPERS = new Set(["sudo", "doas", "env", "command", "exec", "nohup", "ti
 function segmentDenial(segment: string): Denial | undefined {
   const tokens = segment.split(/\s+/).filter((token) => token.length > 0)
   const target = tokens.find((token) => isProtected(unquote(token)) || isProtectedPath(token.replace(TOKEN_NOISE, "")))
-  if (target === undefined) return undefined
   // The reading verb is in COMMAND position (first non-wrapper token); a word
   // like `read` passed as an echo argument must not disqualify the command.
   // Redirects (`< .env`, `> .env`) are denied on their own.
   const command = tokens
     .map((token) => token.replace(TOKEN_NOISE, "").toLowerCase())
     .find((token) => !WRAPPERS.has(token))
+  if (command !== undefined && ARCHIVE_VERBS.has(command) && tokens.some(isTreeOperand))
+    return { tool: "bash", filePath: target ?? "." }
+  if (target === undefined) return undefined
   return (command !== undefined && EXFIL_VERBS.has(command)) || tokens.some((token) => REDIRECT.test(token))
     ? { tool: "bash", filePath: target }
     : undefined
+}
+
+/** True for a shell operand that means "the whole tree": `.`, `..`, `*`, a
+ *  trailing-slash directory, or a bare `~`/`$HOME` expansion. */
+function isTreeOperand(token: string): boolean {
+  const cleaned = token.replace(TOKEN_NOISE, "")
+  return cleaned === "." || cleaned === ".." || cleaned === "*" || cleaned === "~" || cleaned.endsWith("/")
 }
 
 /** Inspects a shell command string for obvious secret-file exfiltration. Denies
@@ -335,11 +350,17 @@ function codeDenial(tool: string, source: string): Denial | undefined {
 /** Scans every string leaf of a code-exec tool's args. Shell-shaped leaves
  *  (`context-mode_batch_execute` commands) go through the command scanner;
  *  code leaves (`context-mode_execute` / `execute`) through the source scanner.
- *  Fail-closed on a match, allow otherwise. */
+ *  Fail-closed on a match, allow otherwise.
+  *  MCP tools are keyed `<server>_<tool>` with the server name sanitized but `-` preserved, so the id is not enumerable — every tool's args are scanned instead. A spaced leaf is skipped unless the tool is a known shell-payload carrier, so prose is never parsed as a command. */
 function checkExecArgs(tool: string, args: unknown): Denial | undefined {
   const strings: string[] = []
   collectStrings(args, strings)
+  const commandCarrier = SHELL_PAYLOAD_TOOLS.has(tool)
   for (const source of strings) {
+    // A leaf with internal whitespace is PROSE — a task brief, a tool
+    // description — not an executable payload. Only a known command-carrying
+    // tool has its spaced strings read as shell.
+    if (!commandCarrier && /\s/.test(source.trim())) continue
     const viaCommand = checkCommand({ command: source })
     if (viaCommand) return { tool, filePath: viaCommand.filePath }
     const viaCode = codeDenial(tool, source)
@@ -351,7 +372,6 @@ function checkExecArgs(tool: string, args: unknown): Denial | undefined {
 /** Returns a Denial when the tool call must be blocked, otherwise undefined. */
 export function check(tool: string, args: unknown): Denial | undefined {
   if (COMMAND_TOOLS.has(tool)) return checkCommand(args)
-  if (CODE_EXEC_TOOLS.has(tool)) return checkExecArgs(tool, args)
   if (FILE_TOOLS.has(tool)) {
     // Accept both `filePath` (current read/edit/write schemas) and `path` so a
     // future schema rename cannot silently disable protection.
@@ -373,8 +393,11 @@ export function check(tool: string, args: unknown): Denial | undefined {
     if (resolved !== literal && (isProtected(resolved) || literalProtected)) return { tool, filePath }
     return undefined
   }
-  // Every other tool: sweep string args for a protected basename.
-  return sweepArgs(tool, args)
+  // Every other tool: an MCP code tool's id is not enumerable, so code/exec
+  // payloads are scanned before the plain basename sweep. FILE_TOOLS are
+  // excluded above — their args may carry a `command`-shaped string that is
+  // never executed.
+  return checkExecArgs(tool, args) ?? sweepArgs(tool, args)
 }
 
 /** Message intentionally omits any file contents. `keyNames` are the secret

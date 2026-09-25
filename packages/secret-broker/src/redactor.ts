@@ -33,11 +33,6 @@ export type Entry = {
   readonly value: string
 }
 
-type Variant = {
-  readonly value: string
-  readonly key: string
-}
-
 /** Base64 output below this length is disproportionately likely to collide
  *  with ordinary text, so we skip it (documented precision tradeoff above). */
 const MIN_BASE64_LENGTH = 12
@@ -144,7 +139,7 @@ function redactShort(
     const groups = args[args.length - 1] as Record<string, string | undefined>
     const index = matcher.entries.findIndex((_, i) => groups[`val${i}`] !== undefined)
     const entry = matcher.entries[index]
-    if (entry === undefined) return String(args[0])
+    if (entry === undefined) return STREAM_WITHHELD
     const replacement = `${SCHEME}/${entry.key}`
     report?.(entry.key)
     return `${groups[`pre${index}`] ?? ""}${replacement}${groups[`post${index}`] ?? ""}`
@@ -152,7 +147,7 @@ function redactShort(
 }
 
 export class Redactor {
-  private entries: Variant[]
+  private long?: { pattern: RegExp; entries: readonly { key: string; value: string }[] }
   private short?: { pattern: RegExp; entries: readonly Entry[] }
   private keys: number
   private readonly retain: number
@@ -189,9 +184,19 @@ export class Redactor {
       }
     }
     this.keys = keys.size
-    this.entries = [...byValue.entries()]
+    const long = [...byValue.entries()]
       .map(([value, key]) => ({ value, key }))
       .sort((a, b) => b.value.length - a.value.length)
+    this.long =
+      long.length === 0
+        ? undefined
+        : {
+            pattern: new RegExp(
+              long.map((entry, index) => `(?<val${index}>${escapeRegExp(entry.value)})`).join("|"),
+              "g",
+            ),
+            entries: long,
+          }
     this.short = shortPattern(shorts)
     // Retain one fewer char than the longest variant so a secret straddling a
     // chunk boundary is still whole when its final char arrives. Short values
@@ -215,12 +220,14 @@ export class Redactor {
   }
 
   redact(input: string, report?: RedactReport): string {
-    let out = input
-    for (const entry of this.entries) {
-      if (!out.includes(entry.value)) continue
-      out = out.split(entry.value).join(this.replacement(entry.key))
+    const out = this.long === undefined ? input : input.replace(this.long.pattern, (...args: unknown[]) => {
+      const groups = args[args.length - 1] as Record<string, string | undefined>
+      const index = this.long!.entries.findIndex((_, i) => groups[`val${i}`] !== undefined)
+      const entry = this.long!.entries[index]
+      if (entry === undefined) return STREAM_WITHHELD
       report?.(entry.key)
-    }
+      return this.replacement(entry.key)
+    })
     return this.short === undefined ? out : redactShort(out, this.short, report)
   }
 
@@ -251,29 +258,20 @@ export class Redactor {
   /** Like {@link redactDeep} but MUTATES strings in place and preserves object
    *  identity/prototypes — used on model messages, whose parts may be class
    *  instances or error objects that must not be re-hydrated as plain objects. */
-  redactInPlace<T>(value: T, preserveToolCallArgs = false): T {
+  redactInPlace<T>(value: T): T {
     if (typeof value === "string") return this.redact(value) as unknown as T
     if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) value[i] = this.redactInPlace(value[i], preserveToolCallArgs)
+      for (let i = 0; i < value.length; i++) value[i] = this.redactInPlace(value[i])
+      return value
+    }
+    if (value instanceof Error) {
+      value.message = this.redact(value.message)
+      if (typeof value.stack === "string") value.stack = this.redact(value.stack)
       return value
     }
     if (value !== null && typeof value === "object") {
       const record = value as Record<string, unknown>
-      // Tool-call ARGUMENTS are agent-authored and already carry resolved
-      // `secret://…` handles; re-redacting them rewrites the handle text and
-      // poisons later bash commands (a handle fails command classification and
-      // forces a permission ask). Preserve `input` ONLY on the message-transform
-      // path, which is the only caller that sets this flag — output redaction
-      // (`redactDeep`/`tool.execute.after`) keeps redacting everything.
-      const argsHolder =
-        preserveToolCallArgs &&
-        (record.type === "tool" ||
-          (record.input !== undefined &&
-            (record.status === "pending" || record.status === "running" || record.status === "completed" || record.status === "error")))
-      for (const key of Object.keys(record)) {
-        if (argsHolder && key === "input") continue
-        record[key] = this.redactInPlace(record[key], preserveToolCallArgs)
-      }
+      for (const key of Object.keys(record)) record[key] = this.redactInPlace(record[key])
       return value
     }
     return value

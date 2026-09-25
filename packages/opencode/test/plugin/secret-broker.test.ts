@@ -15,7 +15,7 @@ import {
   secretBrokerPlugin,
 } from "../../src/plugin/secret-broker/index"
 import { Plugin } from "../../src/plugin"
-import { isStandaloneSecretBrokerSpec, shouldLoadBuiltinSecretBroker } from "../../src/plugin/index"
+import { isStandaloneSecretBrokerSpec, shouldLoadBuiltinSecretBroker, shouldLoadExecutionGuard } from "../../src/plugin/index"
 import { Cause, Effect, Exit } from "effect"
 
 const dirs: string[] = []
@@ -933,6 +933,41 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
   })
 })
 
+describe("redaction leak regressions", () => {
+  test("redactInPlace redacts a live Error's message and stack", () => {
+    const redactor = new Redactor([{ key: "API_KEY", value: "sk-live-SUPERSECRETVALUE" }])
+    const error = new Error("request failed with sk-live-SUPERSECRETVALUE")
+    const result = redactor.redactInPlace(error) as Error
+    expect(result).toBe(error)
+    expect(error.message).not.toContain("sk-live-SUPERSECRETVALUE")
+    expect(error.stack ?? "").not.toContain("sk-live-SUPERSECRETVALUE")
+  })
+
+  test("redactInPlace redacts tool-call arguments (no input exemption)", () => {
+    const redactor = new Redactor([{ key: "API_KEY", value: "sk-live-SUPERSECRETVALUE" }])
+    const part = { type: "tool", status: "completed", input: { command: "curl -H 'sk-live-SUPERSECRETVALUE'" } }
+    redactor.redactInPlace(part)
+    expect(JSON.stringify(part)).not.toContain("sk-live-SUPERSECRETVALUE")
+  })
+
+  test("redact does not rewrite a placeholder it just inserted", () => {
+    const redactor = new Redactor([
+      { key: "API_KEY", value: "project" },
+      { key: "OTHER", value: "sk-live-SUPERSECRETVALUE" },
+    ])
+    const out = redactor.redact("token=sk-live-SUPERSECRETVALUE")
+    expect(out).not.toContain("sk-live-SUPERSECRETVALUE")
+    expect(out).toBe("token=secret://project/OTHER")
+  })
+
+  test("redact still reports the redacted key name", () => {
+    const redactor = new Redactor([{ key: "API_KEY", value: "sk-live-SUPERSECRETVALUE" }])
+    const seen: string[] = []
+    redactor.redact("value is sk-live-SUPERSECRETVALUE here", (key) => seen.push(key))
+    expect(seen).toEqual(["API_KEY"])
+  })
+})
+
 describe("single-broker guarantee (built-in vs standalone)", () => {
   test("matches the published npm name", () => {
     expect(isStandaloneSecretBrokerSpec("opencode-secret-broker")).toBe(true)
@@ -945,6 +980,25 @@ describe("single-broker guarantee (built-in vs standalone)", () => {
   test("ignores unrelated plugins", () => {
     expect(isStandaloneSecretBrokerSpec("opencode-gitlab-auth")).toBe(false)
     expect(isStandaloneSecretBrokerSpec("./plugins/redact.ts")).toBe(false)
+  })
+
+  test("ignores a non-broker path that merely contains the substring", () => {
+    expect(isStandaloneSecretBrokerSpec("file:///home/user/notes/secret-broker-cheatsheet.js")).toBe(false)
+    expect(isStandaloneSecretBrokerSpec("file:///home/user/my-secret-broker-utils/dist/server.js")).toBe(false)
+    expect(isStandaloneSecretBrokerSpec("file:///home/user/secretbroker/plugin.js")).toBe(false)
+  })
+
+  test("ignores an npm name that merely contains the substring", () => {
+    expect(isStandaloneSecretBrokerSpec("opencode-secret-broker-helper")).toBe(false)
+    expect(isStandaloneSecretBrokerSpec("@acme/secret-broker")).toBe(false)
+  })
+
+  test("matches a versioned npm spec", () => {
+    expect(isStandaloneSecretBrokerSpec("opencode-secret-broker@0.1.0")).toBe(true)
+  })
+
+  test("matches an opencode-secret-broker directory segment", () => {
+    expect(isStandaloneSecretBrokerSpec("file:///repo/packages/opencode-secret-broker/dist/server.js")).toBe(true)
   })
 
   test("built-in yields when config wires the standalone broker", () => {
@@ -1034,5 +1088,58 @@ describe("agent usability contract (denial guidance + secret:// URIs)", () => {
     expect(broker.redact("uses secret://whatever here")).toBe("uses secret://whatever here")
     expect(warnings.join("\n")).toContain("FOO")
     expect(warnings.join("\n")).not.toContain("longenoughvalue")
+  })
+})
+
+describe("env-loader regressions", () => {
+  test("does not print a secret:// handle value to the log", () => {
+    const lines: string[] = []
+    const original = console.warn
+    console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "))
+    try {
+      parse('API_KEY=secret://vault/prod?token=sk-live-HANDLETOKEN\n')
+    } finally {
+      console.warn = original
+    }
+    expect(lines.join("\n")).not.toContain("sk-live-HANDLETOKEN")
+    expect(lines.join("\n")).toContain("API_KEY")
+  })
+
+  test("keeps an escaped quote inside a multi-line value", () => {
+    const parsed = parse('CERT="line1\nsay \\"hi\\"\nline3"\nOTHER=plain\n')
+    expect(parsed.values.get("CERT")).toBe('line1\nsay "hi"\nline3')
+    expect(parsed.values.get("OTHER")).toBe("plain")
+  })
+
+  test("still terminates a multi-line value on a real closing quote", () => {
+    const parsed = parse('CERT="line1\nline2"\nNEXT=plain\n')
+    expect(parsed.values.get("CERT")).toBe("line1\nline2")
+    expect(parsed.values.get("NEXT")).toBe("plain")
+  })
+})
+
+describe("execution guard co-gating", () => {
+  test("stays loaded when a standalone broker injects and the built-in is disabled", () => {
+    expect(
+      shouldLoadExecutionGuard({ disableExecutionGuard: false, disableSecretBroker: true, standaloneSecretBroker: true }),
+    ).toBe(true)
+  })
+
+  test("stays loaded when the built-in broker is active", () => {
+    expect(
+      shouldLoadExecutionGuard({ disableExecutionGuard: false, disableSecretBroker: false, standaloneSecretBroker: false }),
+    ).toBe(true)
+  })
+
+  test("unloads when no broker can inject", () => {
+    expect(
+      shouldLoadExecutionGuard({ disableExecutionGuard: false, disableSecretBroker: true, standaloneSecretBroker: false }),
+    ).toBe(false)
+  })
+
+  test("honours its own opt-out even with a broker active", () => {
+    expect(
+      shouldLoadExecutionGuard({ disableExecutionGuard: true, disableSecretBroker: false, standaloneSecretBroker: true }),
+    ).toBe(false)
   })
 })

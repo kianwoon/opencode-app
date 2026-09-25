@@ -697,7 +697,16 @@ const layer = Layer.effect(
               args: taskArgs,
               text: failure.message,
             }).pipe(
-              Effect.tap((text) => Effect.sync(() => void (failure.message = text))),
+              Effect.tap((text) =>
+                Effect.sync(() => {
+                  // `Error.stack` is captured at construction and still carries
+                  // the ORIGINAL message; rewriting only `.message` leaves the
+                  // secret in every log line that prints this error below.
+                  if (typeof failure.stack === "string" && failure.stack.includes(failure.message))
+                    failure.stack = failure.stack.replace(failure.message, text)
+                  failure.message = text
+                }),
+              ),
               Effect.flatMap(() =>
                 Effect.logError("subagent task execution failed", {
                   error: failure,

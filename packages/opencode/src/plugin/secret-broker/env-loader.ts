@@ -39,6 +39,17 @@ function isOpenDoubleQuote(raw: string): boolean {
   return backslashes % 2 === 1
 }
 
+/** True when `line` carries a double quote that is not backslash-escaped — the
+ *  terminator of a multi-line value. An escaped quote is value content, so a
+ *  naive substring test truncates the value at the wrong place. */
+function hasClosingQuote(line: string): boolean {
+  const at = line.lastIndexOf('"')
+  if (at === -1) return false
+  let backslashes = 0
+  for (let i = at - 1; i >= 0 && line[i] === "\\"; i--) backslashes++
+  return backslashes % 2 === 0
+}
+
 function unquote(raw: string): string {
   const trimmed = raw.trim()
   if (trimmed.length >= 2) {
@@ -77,11 +88,11 @@ export function parse(source: string): Parsed {
     const [, key, raw] = match
     if (key === undefined || raw === undefined) continue
     // `secret://` scheme is unimplemented (no resolver), so the URI is neither
-    // injected nor redacted — it is simply not a secret. Warn once, key name and
-    // URI only (a URI is not secret material), then omit the key entirely.
+    // injected nor redacted — it is simply not a secret. Warn once with the key
+    // NAME only: a handle can embed a token, so the value never reaches a log.
     const value = isOpenDoubleQuote(raw) ? undefined : unquote(raw)
     if (value !== undefined && SECRET_URI.test(value)) {
-      console.warn(`[secret-broker] ${key} uses unresolved secret:// URI "${value}"; skipped (no resolver implemented)`)
+      console.warn(`[secret-broker] ${key} uses an unresolved secret:// URI; skipped (no resolver implemented)`)
       continue
     }
     if (isOpenDoubleQuote(raw)) {
@@ -93,7 +104,7 @@ export function parse(source: string): Parsed {
         const next = lines[index] ?? ""
         index++
         parts.push(next)
-        if (next.includes('"')) break
+        if (hasClosingQuote(next)) break
       }
       values.set(key, unquote(parts.join("\n")))
       continue

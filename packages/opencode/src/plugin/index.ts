@@ -30,7 +30,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
-import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import { isPathPluginSpec, parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { pluginSpecifier } from "@/config/plugin"
 import type { Origin as ConfigPluginOrigin } from "@/config/plugin"
 import { registerAdapter } from "@/control-plane/adapters"
@@ -71,10 +71,19 @@ export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel
 // A user may wire the standalone `opencode-secret-broker` package (npm name or
 // file:// path) into `plugin[]` in addition to the built-in. Both expose the same
 // hooks (shell.env injection, tool.execute redaction, messages.transform), so
-// running both double-injects and double-redacts. Match either the published
-// package name or any path segment containing `secret-broker`.
+// running both double-injects and double-redacts.
+//
+// A false positive here is FAIL-OPEN, not merely wasteful: a non-broker plugin
+// whose spec contains "secret-broker" as a substring makes
+// `shouldLoadBuiltinSecretBroker` drop the built-in, leaving the session with NO
+// broker at all. So match the published package name exactly, and for path specs
+// require a whole path SEGMENT to be the broker package/directory name. A broker
+// vendored under an unrelated name deliberately falls back to a double-run —
+// wasteful, but safe.
 export function isStandaloneSecretBrokerSpec(spec: string): boolean {
-  return /secret-broker/i.test(spec)
+  if (!isPathPluginSpec(spec)) return parsePluginSpecifier(spec).pkg === "opencode-secret-broker"
+  const raw = spec.startsWith("file://") ? decodeURIComponent(spec.slice("file://".length).split("?")[0]!) : spec
+  return raw.split(/[/\\]/).some((segment) => segment === "secret-broker" || segment === "opencode-secret-broker")
 }
 
 function hasStandaloneSecretBroker(origins: readonly ConfigPluginOrigin[]): boolean {
@@ -89,6 +98,20 @@ export function shouldLoadBuiltinSecretBroker(input: {
 }): boolean {
   if (input.disableSecretBroker) return false
   return !hasStandaloneSecretBroker(input.pluginOrigins)
+}
+
+// The Execution Guard strips broker-injected keys for zero-secret command
+// classes, so it must load whenever a broker CAN inject. Gating it on
+// `disableSecretBroker` alone disarmed it in exactly the case where a broker is
+// still live: the opt-out flag set AND the standalone package wired into
+// plugin[]. Mirrors the single-broker decision above.
+export function shouldLoadExecutionGuard(input: {
+  disableExecutionGuard: boolean
+  disableSecretBroker: boolean
+  standaloneSecretBroker: boolean
+}): boolean {
+  if (input.disableExecutionGuard) return false
+  return input.standaloneSecretBroker || !input.disableSecretBroker
 }
 
 let warnedStandaloneSecretBroker = false
@@ -130,15 +153,22 @@ export function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker
   ]
 }
 
-// Execution Guard MUST register after every secret broker, including a standalone
-// broker wired via plugin[] (loaded after built-ins). Its `shell.env` deletes the
-// broker's injected keys for zero-secret command classes (install/build/test), so
-// registering it earlier would see an empty output.env and strip nothing. Ordering
-// between its before-hook and the broker's before-hook is irrelevant: both deny
-// independently and a throw still aborts execution. Co-gated with the broker (no
-// broker keys to strip without it) and opt-out via OPENCODE_DISABLE_EXECUTION_GUARD.
-export function tailInternalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
-  return flags.disableSecretBroker || flags.disableExecutionGuard ? [] : [ExecutionGuardPlugin]
+// Execution Guard registers AFTER every secret broker, including a standalone
+// broker wired via plugin[] (external plugins load after built-ins). Its
+// `shell.env` deletes the broker's injected keys for zero-secret command classes
+// (install/build/test), so registering it earlier would see an empty output.env
+// and strip nothing. Ordering between its before-hook and the broker's
+// before-hook is irrelevant: both deny independently and a throw still aborts
+// execution. Gated by `shouldLoadExecutionGuard`, NOT by the broker flag alone —
+// a standalone broker can inject even when the built-in is disabled.
+export function tailInternalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker: boolean): PluginInstance[] {
+  return shouldLoadExecutionGuard({
+    disableExecutionGuard: flags.disableExecutionGuard,
+    disableSecretBroker: flags.disableSecretBroker,
+    standaloneSecretBroker,
+  })
+    ? [ExecutionGuardPlugin]
+    : []
 }
 
 function isServerPlugin(value: unknown): value is PluginInstance {
@@ -300,7 +330,7 @@ const layer = Layer.effect(
 
         // Execution Guard registers after external plugins (standalone broker) so its
         // shell.env sees broker-injected env; see tailInternalPlugins.
-        for (const plugin of flags.disableDefaultPlugins ? [] : tailInternalPlugins(flags)) {
+        for (const plugin of flags.disableDefaultPlugins ? [] : tailInternalPlugins(flags, standaloneSecretBroker)) {
           const init = yield* Effect.tryPromise({
             try: () => plugin(input),
             catch: errorMessage,

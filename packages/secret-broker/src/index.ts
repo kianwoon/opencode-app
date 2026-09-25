@@ -130,6 +130,9 @@ export class SecretBroker {
     if (envMtime === this.envMtime && exampleMtime === this.exampleMtime) return
 
     const parsed = await parseFile(this.envPath)
+    // Keep the last-good redactor and the last-good mtime: advancing either on a
+    // read failure would leave the session unredacted with no audit trace.
+    if (parsed.failed) return
     await this.allowlist.refresh(this.examplePath, this.baseline)
     const derived = derive(this.allowlist, parsed.values, this.minLength)
     this.redactor = derived.redactor
@@ -199,8 +202,8 @@ export class SecretBroker {
 
   /** Redacts strings in place, preserving object identity/prototypes. Used on
    *  model messages, whose parts/errors must not be re-hydrated as plain objects. */
-  redactInPlace<T>(value: T, preserveToolCallArgs = false): T {
-    return this.redactor.redactInPlace(value, preserveToolCallArgs)
+  redactInPlace<T>(value: T): T {
+    return this.redactor.redactInPlace(value)
   }
 }
 
@@ -220,13 +223,18 @@ function derive(allowlist: Allowlist, declared: ReadonlyMap<string, string>, min
   return { redactor: new Redactor(redactable, minLength), injected: new Map(Object.entries(env)), missing }
 }
 
-async function parseFile(file: string): Promise<{ values: ReadonlyMap<string, string>; malformed: readonly string[] }> {
+async function parseFile(file: string): Promise<{ values: ReadonlyMap<string, string>; malformed: readonly string[]; failed: boolean }> {
   // node:fs/promises (not Bun's file API) so this works in the desktop app's
-  // Node sidecar, where the global `Bun` is undefined.
-  const text = await readFile(file, "utf8").catch(() => undefined)
-  if (text === undefined) return { values: new Map<string, string>(), malformed: [] }
-  const parsed = parse(text)
-  return { values: parsed.values, malformed: parsed.malformed }
+  // Node sidecar, where the global `Bun` is undefined. A non-ENOENT failure is
+  // reported, never swallowed as "empty": installing an empty redactor would
+  // silently disable redaction for the rest of the session.
+  const result = await readFile(file, "utf8").then(
+    (text) => ({ text, failed: false as const }),
+    (error: unknown) => ({ text: undefined, failed: (error as NodeJS.ErrnoException).code !== "ENOENT" }),
+  )
+  if (result.text === undefined) return { values: new Map<string, string>(), malformed: [], failed: result.failed }
+  const parsed = parse(result.text)
+  return { values: parsed.values, malformed: parsed.malformed, failed: false }
 }
 
 async function mtime(file: string): Promise<number | undefined> {
@@ -294,6 +302,10 @@ export const redactOnFailure = (input: {
       if (output === original) return Effect.failCause(cause)
       if (error instanceof Error) {
         error.message = output
+        // `Error.stack` is captured at construction and still carries the
+        // ORIGINAL message, so anything that logs this error prints the secret.
+        if (typeof error.stack === "string" && error.stack.includes(original))
+          error.stack = error.stack.replace(original, output)
         return Effect.failCause(cause)
       }
       return Effect.fail(output)
@@ -341,10 +353,11 @@ export async function secretBrokerPlugin(
       // §25: refresh from disk immediately before the process launches.
       await broker.reload()
       broker.applyTo(output.env)
-      // Metadata-only audit: names + ids, never values.
-      for (const key of Object.keys(broker.shellEnv())) {
-        audit({ action: "inject", key, pid: process.pid, sessionID: hookInput.sessionID, callID: hookInput.callID })
-      }
+      // Metadata-only audit: names + ids, never values. ONE line per spawn — a
+      // per-key line grew the only durable trace without bound.
+      const keys = broker.injectedNames()
+      if (keys.length > 0)
+        audit({ action: "inject", keys, pid: process.pid, sessionID: hookInput.sessionID, callID: hookInput.callID })
     },
 
     "tool.execute.before": async (hookInput, output) => {
@@ -391,7 +404,7 @@ export async function secretBrokerPlugin(
       for (let index = 0; index < output.messages.length; index++) {
         const message = output.messages[index]
         try {
-          broker.redactInPlace(message, true)
+          broker.redactInPlace(message)
         } catch {
           // The in-place pass may have redacted some fields before a throwing
           // accessor aborted it, leaving a PARTIAL result. Discard the whole
