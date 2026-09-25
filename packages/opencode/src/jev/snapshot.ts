@@ -2,13 +2,12 @@
  * Auto-snapshot builder — lets jev_label run from a bare sessionID; the
  * snapshot is the exact enriched shape that passed the 2026-09-25 A/B live gate.
  */
-import { Database } from "bun:sqlite"
 import {
   computeRepetitionScore,
   computeTodoChurn,
   extractTemporalFeatures,
   type PromptRow,
-} from "./features"
+} from "./features.ts"
 
 interface SessionRow {
   readonly title: string
@@ -26,6 +25,14 @@ interface ToolCountRow {
   readonly count: number
 }
 
+type SessionIDBindings = readonly string[]
+
+interface DatabaseAccessor {
+  readonly all: (sql: string, bindings: SessionIDBindings) => unknown[]
+  readonly get: (sql: string, bindings: SessionIDBindings) => unknown
+  readonly close: () => void
+}
+
 const MS_PER_HOUR = 3_600_000
 
 export interface SessionSnapshotBuild {
@@ -34,41 +41,58 @@ export interface SessionSnapshotBuild {
   readonly snapshot: string
 }
 
-export function buildSessionSnapshot(dbPath: string, sessionID: string): SessionSnapshotBuild | null {
-  const database = new Database(dbPath, { readonly: true })
+async function openDatabase(dbPath: string): Promise<DatabaseAccessor> {
+  if (typeof Bun !== "undefined") {
+    const { Database } = await import("bun:sqlite")
+    const database = new Database(dbPath, { readonly: true })
+    return {
+      all: (sql, bindings) => database.query(sql).all(...bindings),
+      get: (sql, bindings) => database.query(sql).get(...bindings),
+      close: () => database.close(),
+    }
+  }
+
+  const { DatabaseSync } = await import("node:sqlite")
+  const database = new DatabaseSync(dbPath, { readOnly: true })
+  return {
+    all: (sql, bindings) => database.prepare(sql).all(...bindings),
+    get: (sql, bindings) => database.prepare(sql).get(...bindings),
+    close: () => database.close(),
+  }
+}
+
+export async function buildSessionSnapshot(dbPath: string, sessionID: string): Promise<SessionSnapshotBuild | null> {
+  const database = await openDatabase(dbPath)
   try {
-    const session = database
-      .query(
-        `SELECT title, time_created, time_updated, cost, tokens_input, tokens_output,
-                tokens_cache_read, tokens_cache_write
-           FROM session
-          WHERE id = ?
-          LIMIT 1`,
-      )
-      .get(sessionID) as SessionRow | undefined
+    const session = database.get(
+      `SELECT title, time_created, time_updated, cost, tokens_input, tokens_output,
+              tokens_cache_read, tokens_cache_write
+         FROM session
+        WHERE id = ?
+        LIMIT 1`,
+      [sessionID],
+    ) as SessionRow | undefined
     if (!session) return null
 
-    const prompts = database
-      .query(
-        `SELECT m.time_created AS time,
-                COALESCE(GROUP_CONCAT(CASE WHEN json_extract(p.data, '$.type') = 'text'
-                                            THEN json_extract(p.data, '$.text') END, ' '), '') AS text
-           FROM message m
-           LEFT JOIN part p ON p.message_id = m.id
-          WHERE m.session_id = ? AND json_extract(m.data, '$.role') = 'user'
-          GROUP BY m.id, m.time_created
-          ORDER BY m.time_created`,
-      )
-      .all(sessionID) as PromptRow[]
-    const toolRows = database
-      .query(
-        `SELECT json_extract(data, '$.tool') AS tool, count(*) AS count
-           FROM part
-          WHERE session_id = ? AND json_extract(data, '$.type') = 'tool'
-            AND json_extract(data, '$.tool') IS NOT NULL
-          GROUP BY json_extract(data, '$.tool')`,
-      )
-      .all(sessionID) as ToolCountRow[]
+    const prompts = database.all(
+      `SELECT m.time_created AS time,
+              COALESCE(GROUP_CONCAT(CASE WHEN json_extract(p.data, '$.type') = 'text'
+                                          THEN json_extract(p.data, '$.text') END, ' '), '') AS text
+         FROM message m
+         LEFT JOIN part p ON p.message_id = m.id
+        WHERE m.session_id = ? AND json_extract(m.data, '$.role') = 'user'
+        GROUP BY m.id, m.time_created
+        ORDER BY m.time_created`,
+      [sessionID],
+    ) as PromptRow[]
+    const toolRows = database.all(
+      `SELECT json_extract(data, '$.tool') AS tool, count(*) AS count
+         FROM part
+        WHERE session_id = ? AND json_extract(data, '$.type') = 'tool'
+          AND json_extract(data, '$.tool') IS NOT NULL
+        GROUP BY json_extract(data, '$.tool')`,
+      [sessionID],
+    ) as ToolCountRow[]
     const toolCounts = Object.fromEntries(
       toolRows.filter((row) => row.tool !== null).map((row) => [row.tool!, row.count]),
     ) as Record<string, number>

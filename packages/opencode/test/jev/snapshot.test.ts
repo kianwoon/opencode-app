@@ -77,8 +77,8 @@ afterAll(() => {
 })
 
 describe("buildSessionSnapshot", () => {
-  test("returns enriched temporal features and session identity", () => {
-    const built = buildSessionSnapshot(dbPath, "ses_fix")
+  test("returns enriched temporal features and session identity", async () => {
+    const built = await buildSessionSnapshot(dbPath, "ses_fix")
     expect(built).not.toBeNull()
     expect(built?.sessionID).toBe("ses_fix")
     expect(built?.title).toBe("Fixture")
@@ -89,32 +89,32 @@ describe("buildSessionSnapshot", () => {
     expect(snapshot["prompt_count"]).toBe(4)
   })
 
-  test("returns null for an unknown session", () => {
-    expect(buildSessionSnapshot(dbPath, "missing")).toBeNull()
+  test("returns null for an unknown session", async () => {
+    expect(await buildSessionSnapshot(dbPath, "missing")).toBeNull()
   })
 
-  test("includes near-identical prompt repetition", () => {
-    const built = buildSessionSnapshot(dbPath, "ses_fix")
+  test("includes near-identical prompt repetition", async () => {
+    const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
     expect(snapshot["repetition_score"]).toBeGreaterThanOrEqual(0.5)
   })
 
-  test("includes todo churn", () => {
-    const built = buildSessionSnapshot(dbPath, "ses_fix")
+  test("includes todo churn", async () => {
+    const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
     expect(snapshot["todo_churn"]).toBe(0.5)
   })
 
-  test("preserves token aggregates, cost, and output-input ratio", () => {
-    const built = buildSessionSnapshot(dbPath, "ses_fix")
+  test("preserves token aggregates, cost, and output-input ratio", async () => {
+    const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
     expect(snapshot["tokens"]).toEqual({ input: 1000, output: 100, cache_read: 2000, cache_write: 0 })
     expect(snapshot["cost"]).toBe(0.5)
     expect(snapshot["output_input_ratio"]).toBeCloseTo(0.1)
   })
 
-  test("emits all twelve enriched snapshot keys", () => {
-    const built = buildSessionSnapshot(dbPath, "ses_fix")
+  test("emits all twelve enriched snapshot keys", async () => {
+    const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
     expect(Object.keys(snapshot).sort()).toEqual(
       [

@@ -65,12 +65,9 @@ export const JevLabelTool = Tool.define<typeof Parameters, Metadata, never>(
           const built =
             params.sessionID === undefined
               ? undefined
-              : yield* Effect.try({
-                  try: () => {
-                    const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-                    return buildSessionSnapshot(dbPath, params.sessionID!)
-                  },
-                  catch: () => new Error("session snapshot unavailable"),
+              : yield* Effect.promise(async () => {
+                  const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
+                  return await buildSessionSnapshot(dbPath, params.sessionID!)
                 }).pipe(Effect.catch(() => Effect.succeed(undefined)))
           if (params.sessionID !== undefined && !built) return { ...formatUnavailable(), metadata: {} }
           const snapshot = built?.snapshot ?? params.snapshot
