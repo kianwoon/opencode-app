@@ -199,7 +199,8 @@ const main = Effect.gen(function* () {
   app.commandLine.appendSwitch("js-flags", existingJsFlags ? `${existingJsFlags} --expose-gc` : "--expose-gc")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
-  if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
+  // TEMP badge-probe (remove after diagnosis): force CDP in packaged builds too
+  app.commandLine.appendSwitch("remote-debugging-port", "9222")
 
   if (!app.requestSingleInstanceLock()) {
     app.quit()
