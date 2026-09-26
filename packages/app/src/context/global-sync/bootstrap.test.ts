@@ -53,6 +53,7 @@ function directoryState() {
     path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
     session: [],
     sessionTotal: 0,
+    sessionVersion: 0,
     session_status: {},
     session_status_at: {},
     session_working(id: string) {

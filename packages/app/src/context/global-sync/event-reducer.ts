@@ -141,6 +141,7 @@ export function applyDirectoryEvent(input: {
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
       if (!info.parentID) input.setStore("sessionTotal", (value) => value + 1)
+      input.setStore("sessionVersion", (value) => value + 1)
       break
     }
     case "session.updated": {
@@ -156,6 +157,7 @@ export function applyDirectoryEvent(input: {
           }),
         )
         cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
+        input.setStore("sessionVersion", (value) => value + 1)
         if (info.parentID) break
         input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
         break
@@ -169,6 +171,7 @@ export function applyDirectoryEvent(input: {
       const trimmed = trimSessions(next, { limit, permission: input.permission ?? input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
+      input.setStore("sessionVersion", (value) => value + 1)
       break
     }
     case "session.deleted": {
@@ -270,6 +273,7 @@ export function applyDirectoryEvent(input: {
       const props = event.properties as { sessionID: string; status: SessionStatus }
       input.setStore("session_status", props.sessionID, reconcile(props.status))
       input.setStore("session_status_at", props.sessionID, Date.now())
+      input.setStore("sessionVersion", (value) => value + 1)
       break
     }
     case "message.updated": {

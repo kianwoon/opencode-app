@@ -44,6 +44,10 @@ export type State = {
   path: Path
   session: Session[]
   sessionTotal: number
+  // Coarse mutation counter bumped with a plain functional set. Keyed reconcile
+  // signals nothing to array readers, so consumers that must re-read session
+  // state on every session event subscribe to this instead.
+  sessionVersion: number
   session_status: {
     [sessionID: string]: SessionStatus
   }

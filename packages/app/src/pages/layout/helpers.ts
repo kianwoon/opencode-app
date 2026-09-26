@@ -1,5 +1,5 @@
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
-import { type Session } from "@opencode-ai/sdk/v2/client"
+import { type Session, type SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
 import type { ServerConnection } from "@/context/server"
 import type { HomeProjectSelection } from "@/context/layout"
@@ -38,6 +38,26 @@ export const childSessions = (sessions: Session[] | undefined, rootID: string, l
     .filter((session) => session.parentID === rootID && !session.time?.archived)
     .sort((a, b) => (b.time.created ?? 0) - (a.time.created ?? 0))
   return limit === undefined ? children : children.slice(0, limit)
+}
+
+export const busyChildrenByParent = (store: {
+  session?: Session[]
+  session_status: Record<string, SessionStatus | undefined>
+  sessionVersion?: number
+}) => {
+  // Keyed reconcile never signals array readers (proven by
+  // badge-reactivity.test.ts), so subscribe to the reducer's coarse
+  // mutation counter: it re-runs the memo on every session event, and
+  // the direct reads below then observe fresh data.
+  void store.sessionVersion
+  const snapshot = [...(store.session ?? [])]
+  const status = store.session_status
+  return snapshot.reduce((counts, session) => {
+    if (!session.parentID) return counts
+    if (status[session.id]?.type !== "busy") return counts
+    counts.set(session.parentID, (counts.get(session.parentID) ?? 0) + 1)
+    return counts
+  }, new Map<string, number>())
 }
 
 export const displayName = (project: { name?: string; worktree: string }) =>
