@@ -118,6 +118,37 @@ describe("governor", () => {
     }),
   )
 
+  // A sampler stopped by the kill switch must be restartable: fire() on the disabled
+  // path has to release the handle, or every later start() no-ops and the level stays
+  // frozen forever (a stressed admit() then waits indefinitely).
+  it.effect("restarts the sampler after a disabled fire releases the handle", () =>
+    Effect.gen(function* () {
+      let enabled = true
+      let scheduled = 0
+      const handles: Array<() => void> = []
+      const governor = createGovernor({
+        schedule: (callback) => {
+          scheduled += 1
+          handles.push(callback)
+          // A real non-undefined handle, or start() would reschedule even while broken.
+          return handles
+        },
+        cancel: () => {},
+        enabled: () => enabled,
+      })
+      governor.start()
+      expect(scheduled).toBe(1)
+      // Disable, then let the already-scheduled callback run: it must NOT reschedule.
+      enabled = false
+      handles[0]()
+      expect(scheduled).toBe(1)
+      // The restart proof: re-enabling and starting schedules a fresh callback.
+      enabled = true
+      governor.start()
+      expect(scheduled).toBe(2)
+    }),
+  )
+
   test("resolves the governor kill switch", () => {
     expect(resolveGovernorEnabled("0")).toBe(false)
     expect(resolveGovernorEnabled("off")).toBe(false)

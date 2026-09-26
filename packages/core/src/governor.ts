@@ -80,7 +80,12 @@ export const createGovernor = (options: GovernorOptions = {}): Governor => {
     const dueAt = now() + tickMs
     const fire = () => {
       tick()
-      if (!enabled()) return
+      if (!enabled()) {
+        // A stopped sampler must stay restartable: leaving the handle set makes
+        // every later start() a no-op and freezes the level forever.
+        state = { ...state, handle: undefined }
+        return
+      }
       state = { ...state, dueAt: now() + tickMs, handle: schedule(fire, tickMs) }
     }
     state = { ...state, dueAt, handle: schedule(fire, tickMs) }
@@ -97,6 +102,7 @@ export const createGovernor = (options: GovernorOptions = {}): Governor => {
       if (!enabled()) return
       start()
       if (state.level === "stressed") {
+        // Presumes a live sampler to clear `stressed`, which the restart fix guarantees.
         while (state.level === "stressed") yield* Effect.sleep(GOVERNOR_STRESSED_POLL_MS)
         return
       }
