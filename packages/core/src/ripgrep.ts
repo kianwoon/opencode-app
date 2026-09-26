@@ -98,12 +98,12 @@ const layer = Layer.effect(
     const process = yield* AppProcess.Service
     const binary = yield* RipgrepBinary.Service
 
-    // No invalidation signal exists yet (the coalesced watcher is experimental
-    // and off by default), so the TTL bounds staleness; an identical
-    // parallel-subagent burst collapses to one spawn. `signal: undefined` is
-    // dropped by JSON.stringify, so an aborted and a live call share one key —
-    // the memo only stores a successful fetch, so an aborted call is never
-    // cached and the next live call re-spawns.
+    // The watcher invalidates the index on file changes, and the TTL bounds staleness
+    // for anything it misses. Same-key CONCURRENT callers share a single spawn (the
+    // memo is single-flight); a sequential re-request inside the TTL replays the cached
+    // value. `signal: undefined` is dropped by JSON.stringify, so an aborted and a live
+    // call share one key — the memo only stores a successful fetch, so an aborted call
+    // is never cached and the next live call re-spawns.
     const globMemo = memo<readonly Entry[], Error>(SEARCH_MEMO_TTL_MS)
     const grepMemo = memo<readonly Match[], Error | InvalidPatternError>(SEARCH_MEMO_TTL_MS)
     const searchKey = (input: { readonly signal?: AbortSignal }) => JSON.stringify({ ...input, signal: undefined })
