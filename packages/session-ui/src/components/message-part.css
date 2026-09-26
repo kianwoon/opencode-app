@@ -27,11 +27,13 @@
   [data-slot="user-message-attachments"] {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    /* Attachments follow Message alignment (Settings → Appearance). */
+    justify-content: var(--message-align-items, flex-end);
     gap: 8px;
     width: fit-content;
     max-width: min(82%, 64ch);
-    margin-inline-start: auto;
+    margin-inline-start: var(--message-align-start, auto);
+    margin-inline-end: var(--message-align-end, 0);
   }
 
   [data-slot="user-message-attachment"] {
