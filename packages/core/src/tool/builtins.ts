@@ -12,6 +12,7 @@ import { ReadTool } from "./read"
 import { RepoMapTool } from "./repomap"
 import { ScheduleTaskTool } from "./schedule-task"
 import { SkillTool } from "./skill"
+import { SymbolsTool } from "./symbols"
 import { TodoWriteTool } from "./todowrite"
 import { WebFetchTool } from "./webfetch"
 import { WebSearchTool } from "./websearch"
@@ -44,6 +45,7 @@ export const node = makeLocationNode({
     RepoMapTool.node,
     ScheduleTaskTool.node,
     SkillTool.node,
+    SymbolsTool.node,
     TodoWriteTool.node,
     WebFetchTool.node,
     WebSearchTool.node,
