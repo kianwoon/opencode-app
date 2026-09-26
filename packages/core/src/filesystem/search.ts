@@ -6,6 +6,7 @@ import { Context, Effect, Layer, Scope } from "effect"
 import { Fff } from "#fff"
 import fuzzysort from "fuzzysort"
 import { FileSystem } from "../filesystem"
+import { EventV2 } from "../event"
 import { FSUtil } from "../fs-util"
 import { Location } from "../location"
 import { Ripgrep } from "../ripgrep"
@@ -29,6 +30,24 @@ export const filterPaths = (paths: string[], filter: string | undefined, limit: 
   return [...matched].sort().slice(0, Math.min(limit, REPO_LIST_MAX))
 }
 
+// Dirty-mark only, pull-based: the event costs one flag reset and the next list()
+// pays one rebuild. publish() backfills payload.location from the ambient
+// Location.Service, so this matches only this Location's watcher. Non-vcs
+// locations keep TTL-only staleness because the watcher only watches vcs ones.
+const dirtyOnWatcherEvents = <S extends { builtAt: number }>(state: S) =>
+  Effect.gen(function* () {
+    const events = yield* EventV2.Service
+    const location = yield* Location.Service
+    const unsubscribe = yield* events.listen((event) =>
+      Effect.sync(() => {
+        if (event.type !== "file.watcher.updated") return
+        if (event.location?.directory !== location.directory) return
+        state.builtAt = 0
+      }),
+    )
+    yield* Effect.addFinalizer(() => unsubscribe)
+  })
+
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/FileSystem/Search") {}
 
 export const ripgrepLayer = Layer.effect(
@@ -43,6 +62,10 @@ export const ripgrepLayer = Layer.effect(
       directories: [] as string[],
       builtAt: 0,
     }
+    // Dirty-mark only, pull-based: the event costs one flag reset here and the next
+    // list() pays one rebuild. Non-vcs locations keep TTL-only staleness because the
+    // watcher only watches vcs ones.
+    yield* dirtyOnWatcherEvents(state)
     // Populate into fresh arrays and swap at the end, so a concurrent reader never
     // observes a half-filled index.
     const populate = Effect.gen(function* () {
@@ -181,6 +204,7 @@ export const fffLayer = Layer.effect(
       files: [] as string[],
       builtAt: 0,
     }
+    yield* dirtyOnWatcherEvents(state)
     // fff has no "walk everything" primitive, so an empty file query is its listing
     // equivalent. REPO_LIST_MAX bounds the page because filterPaths caps there anyway.
     const populate = Effect.sync(() => {
@@ -292,4 +316,8 @@ const layer = Layer.unwrap(Effect.sync(() => (Flag.OPENCODE_DISABLE_FFF || !Fff.
 
 export const locationLayer = layer
 
-export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node, Location.node, Ripgrep.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer,
+  deps: [FSUtil.node, Location.node, Ripgrep.node, EventV2.node],
+})

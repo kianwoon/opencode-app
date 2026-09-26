@@ -35,8 +35,11 @@ export const Flag = {
   OPENCODE_DISABLE_V1_EVENT_LOG: truthy("OPENCODE_DISABLE_V1_EVENT_LOG"),
 
   // Experimental
+  // The watcher ships default-on. OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER is
+  // unchanged and is checked first by the watcher, so the kill switch still wins;
+  // the WSL sidecar sets DISABLE=true explicitly.
   OPENCODE_EXPERIMENTAL_FILEWATCHER: Config.boolean("OPENCODE_EXPERIMENTAL_FILEWATCHER").pipe(
-    Config.withDefault(false),
+    Config.withDefault(true),
   ),
   OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: Config.boolean("OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER").pipe(
     Config.withDefault(false),
