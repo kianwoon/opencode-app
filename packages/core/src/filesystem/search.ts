@@ -16,6 +16,17 @@ export interface Interface {
   readonly find: (input: FileSystem.FindInput) => Effect.Effect<FileSystem.Entry[]>
   readonly glob: (input: FileSystem.GlobInput) => Effect.Effect<readonly FileSystem.Entry[]>
   readonly grep: (input: FileSystem.GrepInput) => Effect.Effect<readonly FileSystem.Match[]>
+  readonly list: (input: { filter?: string; limit: number }) => Effect.Effect<{ paths: string[]; total: number }>
+  readonly refresh: () => Effect.Effect<void>
+}
+
+const REPO_LIST_TTL_MS = 30_000
+export const REPO_LIST_MAX = 10_000
+
+export const filterPaths = (paths: string[], filter: string | undefined, limit: number) => {
+  const needle = filter?.toLowerCase()
+  const matched = needle ? paths.filter((entry) => entry.toLowerCase().includes(needle)) : paths
+  return [...matched].sort().slice(0, Math.min(limit, REPO_LIST_MAX))
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/FileSystem/Search") {}
@@ -30,22 +41,31 @@ export const ripgrepLayer = Layer.effect(
     const state = {
       files: [] as string[],
       directories: [] as string[],
+      builtAt: 0,
     }
-    const directories = new Set<string>()
-    yield* ripgrep
-      .find({
-        cwd: location.directory,
-        pattern: "*",
-        limit: location.vcs ? Number.MAX_SAFE_INTEGER : 100_000,
-        onEntry: (entry) =>
-          Effect.sync(() => {
-            state.files.push(entry.path)
-            const parts = entry.path.split("/")
-            parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
-            state.directories = Array.from(directories)
-          }),
-      })
-      .pipe(Effect.orDie, Effect.asVoid, Effect.forkIn(scope))
+    // Populate into fresh arrays and swap at the end, so a concurrent reader never
+    // observes a half-filled index.
+    const populate = Effect.gen(function* () {
+      const files: string[] = []
+      const directories = new Set<string>()
+      yield* ripgrep
+        .find({
+          cwd: location.directory,
+          pattern: "*",
+          limit: location.vcs ? Number.MAX_SAFE_INTEGER : 100_000,
+          onEntry: (entry) =>
+            Effect.sync(() => {
+              files.push(entry.path)
+              const parts = entry.path.split("/")
+              parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
+            }),
+        })
+        .pipe(Effect.orDie, Effect.asVoid)
+      state.files = files
+      state.directories = Array.from(directories)
+      state.builtAt = Date.now()
+    })
+    yield* populate.pipe(Effect.forkIn(scope))
     return Service.of({
       glob: (input) =>
         Effect.gen(function* () {
@@ -115,6 +135,17 @@ export const ripgrepLayer = Layer.effect(
             })
           })
         }),
+      list: (input) =>
+        Effect.gen(function* () {
+          if (state.builtAt === 0 || Date.now() - state.builtAt > REPO_LIST_TTL_MS) yield* populate
+          return { paths: filterPaths(state.files, input.filter, input.limit), total: state.files.length }
+        }),
+      // Phase-2 watcher hook: the file watcher calls this so the next list() rebuilds
+      // instead of serving the index captured before the change.
+      refresh: () =>
+        Effect.sync(() => {
+          state.builtAt = 0
+        }),
     })
   }),
 )
@@ -141,9 +172,23 @@ export const fffLayer = Layer.effect(
         find: () => Effect.succeed([]),
         glob: () => Effect.succeed([]),
         grep: () => Effect.succeed([]),
+        list: () => Effect.succeed({ paths: [], total: 0 }),
+        refresh: () => Effect.succeed(undefined),
       })
     }
     yield* Effect.addFinalizer(() => Effect.sync(() => result.value.destroy()).pipe(Effect.ignore))
+    const state = {
+      files: [] as string[],
+      builtAt: 0,
+    }
+    // fff has no "walk everything" primitive, so an empty file query is its listing
+    // equivalent. REPO_LIST_MAX bounds the page because filterPaths caps there anyway.
+    const populate = Effect.sync(() => {
+      const found = result.value.fileSearch("", { pageIndex: 0, pageSize: REPO_LIST_MAX })
+      if (!found.ok) throw found.error
+      state.files = found.value.items.map((item) => item.relativePath.replaceAll("\\", "/"))
+      state.builtAt = Date.now()
+    })
     return Service.of({
       glob: (input) =>
         Effect.sync(() => {
@@ -227,6 +272,17 @@ export const fffLayer = Layer.effect(
                 type: item.type,
               })
             })
+        }),
+      list: (input) =>
+        Effect.gen(function* () {
+          if (state.builtAt === 0 || Date.now() - state.builtAt > REPO_LIST_TTL_MS) yield* populate
+          return { paths: filterPaths(state.files, input.filter, input.limit), total: state.files.length }
+        }),
+      // Phase-2 watcher hook: the file watcher calls this so the next list() rebuilds
+      // instead of serving the index captured before the change.
+      refresh: () =>
+        Effect.sync(() => {
+          state.builtAt = 0
         }),
     })
   }),
