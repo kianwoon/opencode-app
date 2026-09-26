@@ -34,7 +34,7 @@ export const filterPaths = (paths: string[], filter: string | undefined, limit: 
 // pays one rebuild. publish() backfills payload.location from the ambient
 // Location.Service, so this matches only this Location's watcher. Non-vcs
 // locations keep TTL-only staleness because the watcher only watches vcs ones.
-const dirtyOnWatcherEvents = <S extends { builtAt: number }>(state: S) =>
+const dirtyOnWatcherEvents = <S extends { builtAt: number; invalidations: number }>(state: S) =>
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const location = yield* Location.Service
@@ -43,6 +43,7 @@ const dirtyOnWatcherEvents = <S extends { builtAt: number }>(state: S) =>
         if (event.type !== "file.watcher.updated") return
         if (event.location?.directory !== location.directory) return
         state.builtAt = 0
+        state.invalidations++
       }),
     )
     yield* Effect.addFinalizer(() => unsubscribe)
@@ -61,6 +62,7 @@ export const ripgrepLayer = Layer.effect(
       files: [] as string[],
       directories: [] as string[],
       builtAt: 0,
+      invalidations: 0,
     }
     // Dirty-mark only, pull-based: the event costs one flag reset here and the next
     // list() pays one rebuild. Non-vcs locations keep TTL-only staleness because the
@@ -69,6 +71,9 @@ export const ripgrepLayer = Layer.effect(
     // Populate into fresh arrays and swap at the end, so a concurrent reader never
     // observes a half-filled index.
     const populate = Effect.gen(function* () {
+      // An event arriving mid-build must NOT be marked fresh by this build, or the
+      // snapshot stays stale for a full TTL: compare the generation, not just the flag.
+      const gen = state.invalidations
       const files: string[] = []
       const directories = new Set<string>()
       yield* ripgrep
@@ -86,7 +91,7 @@ export const ripgrepLayer = Layer.effect(
         .pipe(Effect.orDie, Effect.asVoid)
       state.files = files
       state.directories = Array.from(directories)
-      state.builtAt = Date.now()
+      state.builtAt = state.invalidations === gen ? Date.now() : 0
     })
     yield* populate.pipe(Effect.forkIn(scope))
     return Service.of({
@@ -203,15 +208,18 @@ export const fffLayer = Layer.effect(
     const state = {
       files: [] as string[],
       builtAt: 0,
+      invalidations: 0,
     }
     yield* dirtyOnWatcherEvents(state)
     // fff has no "walk everything" primitive, so an empty file query is its listing
     // equivalent. REPO_LIST_MAX bounds the page because filterPaths caps there anyway.
     const populate = Effect.sync(() => {
+      // Same invariant as ripgrepLayer: an event mid-build must not be stamped fresh.
+      const gen = state.invalidations
       const found = result.value.fileSearch("", { pageIndex: 0, pageSize: REPO_LIST_MAX })
       if (!found.ok) throw found.error
       state.files = found.value.items.map((item) => item.relativePath.replaceAll("\\", "/"))
-      state.builtAt = Date.now()
+      state.builtAt = state.invalidations === gen ? Date.now() : 0
     })
     return Service.of({
       glob: (input) =>

@@ -218,7 +218,9 @@ const layer = Layer.effect(
                 dirty.delete(relative)
                 return
               }
-              dirty.add(relative)
+              // populate filters on SOURCE_EXTENSIONS; the drain must not diverge, or a
+              // .md/.json change gets re-parsed with the wrong grammar.
+              if (SOURCE_EXTENSIONS.some((ext) => relative.endsWith(ext))) dirty.add(relative)
             }),
           ),
         ),

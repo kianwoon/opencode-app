@@ -26,23 +26,30 @@ export const Input = Schema.Struct({
   }),
 })
 
-export const Output = Schema.Array(
-  Schema.Struct({
-    path: Schema.String,
-    line: Schema.Number,
-    kind: Schema.String,
-    name: Schema.String,
+export const Output = Schema.Struct({
+  symbols: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      line: Schema.Number,
+      kind: Schema.String,
+      name: Schema.String,
+    }),
+  ),
+  building: Schema.Boolean.annotate({
+    description: "True while the initial index build is still running; results may be incomplete.",
   }),
-)
+})
 type ModelOutput = typeof Output.Encoded
 
 /** Format symbol hits into the concise line-oriented output models expect. */
 export const toModelOutput = (output: ModelOutput) => {
   const lines =
-    output.length === 0
+    output.symbols.length === 0
       ? ["No symbols found"]
-      : output.map((item) => `${item.path}:${item.line} ${item.kind} ${item.name}`)
-  return lines.join("\n")
+      : output.symbols.map((item) => `${item.path}:${item.line} ${item.kind} ${item.name}`)
+  // Never let a partial index read as a complete one.
+  const suffix = output.building ? ["(index still building; results may be incomplete)"] : []
+  return [...lines, ...suffix].join("\n")
 }
 
 /** Declaration lookup leaf backed by a lazily-built tree-sitter index. */
@@ -63,9 +70,10 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [
             {
               type: "text",
-              text: toModelOutput(
-                output.map((item) => ({ ...item, path: path.resolve(location.directory, item.path) })),
-              ),
+              text: toModelOutput({
+                ...output,
+                symbols: output.symbols.map((item) => ({ ...item, path: path.resolve(location.directory, item.path) })),
+              }),
             },
           ],
           execute: (input, context) =>
@@ -93,7 +101,9 @@ const layer = Layer.effectDiscard(
               const hits = prefix
                 ? found.symbols.filter((hit) => hit.path === prefix || hit.path.startsWith(prefix + "/"))
                 : found.symbols
-              return hits.map((hit) => ({ path: hit.path, line: hit.line, kind: hit.kind, name: hit.name }))
+              // Surface the service's own building flag: a partial index must not read
+              // as a complete one once the hits are filtered and truncated.
+              return { symbols: hits, building: found.building }
             }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to look up symbols for ${input.name}` }))),
         }),
       })

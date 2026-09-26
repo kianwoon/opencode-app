@@ -155,4 +155,34 @@ describeSymbols("Symbols incremental index", () => {
       }),
     ),
   )
+
+  // populate filters on SOURCE_EXTENSIONS, so the drain must apply the same filter:
+  // a .md change re-parsed with the JS grammar would land a junk entry in the index.
+  itSymbols.live("ignores a watcher event for a non-source path", () =>
+    withGit((directory) =>
+      Effect.gen(function* () {
+        const symbols = yield* Symbols.Service
+        const fs = yield* FSUtil.Service
+        const anchor = path.join(directory, "anchor.ts")
+        yield* fs.writeFileString(anchor, "function anchor() {}\n")
+        expect((yield* eventuallyLine(symbols, "anchor", 1))?.line).toBe(1)
+
+        const doc = path.join(directory, "notes.md")
+        yield* nextUpdate(
+          (event) => event.event === "add" && event.file === doc,
+          fs.writeFileString(doc, "function markdownFn() {}\n"),
+        )
+
+        // A real .ts change re-dirties the index; draining it proves a drain ran AFTER
+        // the .md event landed, so the absence below is the filter, not a timing miss.
+        yield* nextUpdate(
+          (event) => event.event === "change" && event.file === anchor,
+          fs.writeFileString(anchor, "// pad\nfunction anchor() {}\n"),
+        )
+        expect((yield* eventuallyLine(symbols, "anchor", 2))?.line).toBe(2)
+
+        expect(yield* indexHit(symbols, "markdownFn")).toBeUndefined()
+      }),
+    ),
+  )
 })
