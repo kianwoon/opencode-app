@@ -96,6 +96,18 @@ function nextUpdate<E>(check: (event: WatcherEvent) => boolean, trigger: Effect.
   )
 }
 
+// The search service's dirty-mark is a SEPARATE consumer of the same watcher
+// PubSub, so our own nextUpdate does not prove it already processed the event.
+const eventuallyListed = (search: FileSystemSearch.Interface, expected: string) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const listed = yield* search.list({ limit: 1_000 })
+      if (listed.paths.includes(expected)) return listed
+      yield* Effect.sleep("50 millis")
+    }
+    return yield* search.list({ limit: 1_000 })
+  })
+
 const ENABLED = { OPENCODE_EXPERIMENTAL_FILEWATCHER: "true", OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "false" }
 const DISABLED = { OPENCODE_EXPERIMENTAL_FILEWATCHER: "true", OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "true" }
 
@@ -141,7 +153,7 @@ describeSearch("FileSystemSearch live invalidation", () => {
         const file = path.join(directory, "watcher-new.txt")
         yield* nextUpdate((event) => event.event === "add" && event.file === file, fs.writeFileString(file, "hi"))
 
-        const after = yield* search.list({ limit: 1_000 })
+        const after = yield* eventuallyListed(search, "watcher-new.txt")
         expect(after.paths).toContain("watcher-new.txt")
       }),
     ),
