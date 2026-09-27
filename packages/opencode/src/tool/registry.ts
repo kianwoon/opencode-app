@@ -18,6 +18,7 @@ import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { SessionRenameTool } from "./session-rename"
+import { CuaBatchTool } from "./cua-batch"
 import { JevAcceptTool } from "./jev-accept"
 import { JevDecideTool } from "./jev-decide"
 import { JevLabelTool } from "./jev-label"
@@ -126,6 +127,7 @@ const layer = Layer.effect(
     const jevdecide = yield* JevDecideTool
     const jevlabel = yield* JevLabelTool
     const jevrank = yield* JevRankTool
+    const cuabatch = yield* CuaBatchTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -237,6 +239,7 @@ const layer = Layer.effect(
           jev_decide: Tool.init(jevdecide),
           jev_label: Tool.init(jevlabel),
           jev_rank: Tool.init(jevrank),
+          cua_batch: Tool.init(cuabatch),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -264,6 +267,7 @@ const layer = Layer.effect(
             tool.session_rename,
             tool.jev_decide,
             tool.patch,
+            tool.cua_batch,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),

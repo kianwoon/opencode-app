@@ -220,6 +220,10 @@ export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
   "cua-driver_scroll",
   "cua-driver_drag",
   "cua-driver_set_value",
+  // Built-in batch actuator: one call runs a whole typed action script against
+  // the driver. Dropping it once strips batching for the entire turn — the
+  // same single-shot rationale as the per-action actuators above.
+  "cua_batch",
   // Session lifecycle — `start_session` is the ONLY revive path when a fresh
   // hand inherits a transport session that already ended ("session has ended"
   // rejects every action). Routing it away leaves the hand with no recovery at
