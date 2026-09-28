@@ -77,7 +77,10 @@ const layer = Layer.effect(
             permission: request.permission,
             pattern,
             matched: rule,
-            ruleset: ruleset.filter((candidate) => Wildcard.match(request.permission, candidate.permission)),
+            ruleset: ruleset.filter(
+              (candidate) =>
+                Wildcard.match(request.permission, candidate.permission) && Wildcard.match(pattern, candidate.pattern),
+            ),
           })
         }
         if (rule.action === "allow") continue

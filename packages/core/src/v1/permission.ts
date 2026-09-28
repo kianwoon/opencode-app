@@ -25,7 +25,7 @@ export class DeniedError extends Schema.TaggedErrorClass<DeniedError>()("Permiss
   ruleset: Schema.Any,
 }) {
   override get message() {
-    return `The user has specified a rule which prevents you from using this specific tool call. Permission "${this.permission}" with pattern "${this.pattern}" was denied by rule ${JSON.stringify(this.matched)} (the LAST matching rule wins). All rules whose permission matches "${this.permission}", in evaluation order: ${JSON.stringify(this.ruleset)}`
+    return `The user has specified a rule which prevents you from using this specific tool call. Permission "${this.permission}" with pattern "${this.pattern}" was denied by rule ${JSON.stringify(this.matched)} (the LAST matching rule wins). Rules that match this command (permission and pattern), in evaluation order: ${JSON.stringify(this.ruleset)}`
   }
 }
 

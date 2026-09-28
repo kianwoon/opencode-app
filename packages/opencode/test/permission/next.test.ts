@@ -612,12 +612,15 @@ it.instance(
           ruleset: [
             { permission: "*", pattern: "*", action: "allow" },
             { permission: "bash", pattern: "*", action: "deny" },
+            { permission: "bash", pattern: "git status *", action: "allow" },
           ],
         }),
       )
       expect(err).toBeInstanceOf(PermissionV1.DeniedError)
       if (err instanceof PermissionV1.DeniedError) {
         expect(err.matched).toEqual({ permission: "bash", pattern: "*", action: "deny" })
+        expect(err.ruleset).toHaveLength(2)
+        expect(err.ruleset).not.toContainEqual({ permission: "bash", pattern: "git status *", action: "allow" })
       }
     }),
   { git: true },
