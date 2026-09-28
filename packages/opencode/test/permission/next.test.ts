@@ -553,6 +553,58 @@ test("disabled - specific allow overrides wildcard deny", () => {
   expect(result.has("read")).toBe(true)
 })
 
+test("resolveEffective - drops a rule fully overridden by a later rule", () => {
+  const effective = Permission.resolveEffective([
+    { permission: "bash", pattern: "*", action: "allow" },
+    { permission: "bash", pattern: "*", action: "deny" },
+  ])
+  expect(effective).toEqual([{ permission: "bash", pattern: "*", action: "deny" }])
+})
+
+test("resolveEffective - drops an exact duplicate", () => {
+  const effective = Permission.resolveEffective([
+    { permission: "bash", pattern: "*", action: "allow" },
+    { permission: "bash", pattern: "*", action: "allow" },
+  ])
+  expect(effective).toHaveLength(1)
+})
+
+test("resolveEffective - exposes a silently-dead protection", () => {
+  const effective = Permission.resolveEffective([
+    { permission: "read", pattern: "*.env", action: "ask" },
+    { permission: "read", pattern: "*", action: "allow" },
+  ])
+  expect(effective).toEqual([{ permission: "read", pattern: "*", action: "allow" }])
+})
+
+test("resolveEffective - keeps non-subsumed specific allow beside earlier broad deny", () => {
+  const effective = Permission.resolveEffective([
+    { permission: "bash", pattern: "*", action: "deny" },
+    { permission: "bash", pattern: "echo *", action: "allow" },
+  ])
+  expect(effective).toEqual([
+    { permission: "bash", pattern: "*", action: "deny" },
+    { permission: "bash", pattern: "echo *", action: "allow" },
+  ])
+})
+
+test("resolveEffective - semantics identical to the original list", () => {
+  const original: PermissionV1.Ruleset = [
+    { permission: "bash", pattern: "git *", action: "allow" },
+    { permission: "bash", pattern: "*", action: "deny" },
+  ]
+  const effective = Permission.resolveEffective(original)
+  expect(effective).toEqual([{ permission: "bash", pattern: "*", action: "deny" }])
+  for (const [permission, pattern] of [
+    ["bash", "git status"],
+    ["bash", "ls"],
+  ]) {
+    expect(Permission.evaluate(permission, pattern, effective).action).toBe(
+      Permission.evaluate(permission, pattern, original).action,
+    )
+  }
+})
+
 // ask tests
 
 it.instance(

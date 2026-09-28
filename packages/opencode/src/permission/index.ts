@@ -222,6 +222,18 @@ export function merge(...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule[] 
   return rulesets.flat()
 }
 
+export function resolveEffective(ruleset: PermissionV1.Ruleset): PermissionV1.Rule[] {
+  const flat = ruleset.flat()
+  // A rule is dead when a LATER rule matches everything it matches: findLast
+  // can then never select it, for any permission/pattern input.
+  return flat.filter(
+    (rule, i) =>
+      !flat
+        .slice(i + 1)
+        .some((later) => Wildcard.match(rule.permission, later.permission) && Wildcard.match(rule.pattern, later.pattern)),
+  )
+}
+
 export function disabled(tools: string[], ruleset: PermissionV1.Ruleset): Set<string> {
   const edits = ["edit", "write", "apply_patch"]
   const reads = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]

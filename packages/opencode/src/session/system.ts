@@ -52,15 +52,18 @@ export function provider(model: Provider.Model) {
 }
 
 export function fmtPermissions(ruleset: PermissionV1.Ruleset): string | undefined {
-  if (ruleset.length === 0) return undefined
-  // Order is semantic: the evaluator resolves with findLast, so the manifest
-  // must preserve merge order verbatim — the LAST matching rule wins.
+  // Resolve first: dead and duplicate layers are eliminated so the manifest
+  // stays ONE resolved truth, not the raw multi-layer pile.
+  const effective = Permission.resolveEffective(ruleset)
+  if (effective.length === 0) return undefined
+  // Where entries still overlap, the evaluator's findLast makes the LAST
+  // matching rule win — order of the remaining rules is still semantic.
   const MAX = 60
   return [
     "Effective tool permissions — generated from config; the single source of truth for what you may do.",
-    "The LAST matching rule wins; list order is semantic.",
-    ...ruleset.slice(0, MAX).map((rule) => `- ${rule.permission} "${rule.pattern}": ${rule.action}`),
-    ...(ruleset.length > MAX ? [`... ${ruleset.length - MAX} more rules omitted`] : []),
+    "Dead and duplicate layers are resolved away; where entries still overlap, the LAST matching rule wins.",
+    ...effective.slice(0, MAX).map((rule) => `- ${rule.permission} "${rule.pattern}": ${rule.action}`),
+    ...(effective.length > MAX ? [`... ${effective.length - MAX} more rules omitted`] : []),
   ].join("\n")
 }
 
