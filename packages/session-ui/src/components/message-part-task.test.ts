@@ -96,4 +96,31 @@ describe("task session navigation", () => {
     })
     expect(sessionID).toBe("ses_exact")
   })
+
+  test("resolves a task_id handoff from the tool input before the fuzzy fallback", () => {
+    const sessions: TaskSession[] = [
+      { id: "ses_resumed", parentID: "ses_parent", title: "Fix DeniedError (@implementer subagent)", time: { created: 30 } },
+    ]
+    const sessionID = resolveTaskSession({
+      metadata: {},
+      taskId: "ses_handoff",
+      description: "Commit resolveEffective then prod rebuild",
+      agent: "Implementer",
+      parentID: "ses_parent",
+      sessions,
+    })
+    expect(sessionID).toBe("ses_handoff")
+  })
+
+  test("metadata sessionId wins over a task_id handoff id", () => {
+    const sessionID = resolveTaskSession({
+      metadata: { sessionId: "ses_exact" },
+      taskId: "ses_handoff",
+      description: "Commit resolveEffective",
+      agent: "Implementer",
+      parentID: "ses_parent",
+      sessions: [],
+    })
+    expect(sessionID).toBe("ses_exact")
+  })
 })

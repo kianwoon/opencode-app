@@ -1536,6 +1536,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
     if (part().tool !== "task") return
     return resolveTaskSession({
       metadata: partMetadata(),
+      taskId: input().task_id,
       description: input().description,
       agent: taskAgent(input().subagent_type, data.store.agent).name,
       parentID: data.sessionID,
@@ -1973,6 +1974,7 @@ ToolRegistry.register({
     const childSessionId = createMemo(() =>
       resolveTaskSession({
         metadata: props.metadata,
+        taskId: props.input.task_id,
         description: props.input.description,
         agent: agent().name,
         parentID: data.sessionID,

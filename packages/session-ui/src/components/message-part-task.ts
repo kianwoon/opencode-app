@@ -10,6 +10,7 @@ export type TaskSession = {
 
 export function resolveTaskSession(input: {
   metadata: Record<string, unknown> | undefined
+  taskId?: unknown
   description: unknown
   agent: string | undefined
   parentID: string | undefined
@@ -17,6 +18,11 @@ export function resolveTaskSession(input: {
 }) {
   const value = input.metadata?.sessionId
   if (typeof value === "string" && value) return value
+  // A task_id handoff names its target session in the tool INPUT, which is
+  // written when the part is created — state.metadata.sessionId only lands at
+  // completion, so without this the running card has no target to navigate to.
+  const handoff = input.taskId
+  if (typeof handoff === "string" && handoff) return handoff
   if (!input.parentID) return undefined
   // Core titles child sessions "<description> (@agent subagent)" with the raw
   // lowercase agent name, while the UI resolves display names capitalized —
