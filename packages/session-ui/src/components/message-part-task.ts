@@ -18,11 +18,15 @@ export function resolveTaskSession(input: {
   const value = input.metadata?.sessionId
   if (typeof value === "string" && value) return value
   if (!input.parentID) return undefined
-  const description = typeof input.description === "string" ? input.description : ""
+  // Core titles child sessions "<description> (@agent subagent)" with the raw
+  // lowercase agent name, while the UI resolves display names capitalized —
+  // compare case-insensitively or the fallback never matches.
+  const description = typeof input.description === "string" ? input.description.toLowerCase() : ""
+  const tag = input.agent ? `@${input.agent.toLowerCase()}` : ""
   return (input.sessions ?? [])
     .filter((session) => session.parentID === input.parentID && !session.time?.archived)
-    .filter((session) => (description ? session.title.startsWith(description) : true))
-    .filter((session) => (input.agent ? session.title.includes(`@${input.agent}`) : true))
+    .filter((session) => (description ? session.title.toLowerCase().startsWith(description) : true))
+    .filter((session) => (tag ? session.title.toLowerCase().includes(tag) : true))
     .sort((a, b) => (b.time.created ?? 0) - (a.time.created ?? 0))[0]?.id
 }
 

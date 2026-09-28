@@ -53,4 +53,47 @@ describe("task session navigation", () => {
     expect(navigated).toEqual(["ses_child"])
     expect(event.defaultPrevented).toBe(true)
   })
+
+  test("matches child titles case-insensitively when the resolved agent name casing differs", () => {
+    const sessions: TaskSession[] = [
+      { id: "ses_child", parentID: "ses_parent", title: "Fix nav (@implementer subagent)", time: { created: 10 } },
+    ]
+    const sessionID = resolveTaskSession({
+      metadata: {},
+      description: "Fix nav",
+      agent: "Implementer",
+      parentID: "ses_parent",
+      sessions,
+    })
+    expect(sessionID).toBe("ses_child")
+  })
+
+  test("prefers the newest sibling when several children share the description prefix", () => {
+    const sessions: TaskSession[] = [
+      { id: "ses_old", parentID: "ses_parent", title: "Fix bug (@implementer subagent)", time: { created: 10 } },
+      { id: "ses_new", parentID: "ses_parent", title: "Fix bug (@implementer subagent)", time: { created: 20 } },
+    ]
+    const sessionID = resolveTaskSession({
+      metadata: {},
+      description: "Fix bug",
+      agent: "Implementer",
+      parentID: "ses_parent",
+      sessions,
+    })
+    expect(sessionID).toBe("ses_new")
+  })
+
+  test("stored metadata sessionId wins over the fuzzy fallback", () => {
+    const sessions: TaskSession[] = [
+      { id: "ses_fuzzy", parentID: "ses_parent", title: "Fix bug (@implementer subagent)", time: { created: 30 } },
+    ]
+    const sessionID = resolveTaskSession({
+      metadata: { sessionId: "ses_exact" },
+      description: "Fix bug",
+      agent: "Implementer",
+      parentID: "ses_parent",
+      sessions,
+    })
+    expect(sessionID).toBe("ses_exact")
+  })
 })
