@@ -1,11 +1,11 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { eq } from "drizzle-orm"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -20,6 +20,7 @@ import { SessionStatus } from "@/session/status"
 import {
   HAND_REUSE_MAX_TOKENS,
   HAND_REUSE_TTL_MS,
+  Parameters,
   TaskTool,
   type TaskPromptOps,
 } from "../../src/tool/task"
@@ -293,4 +294,32 @@ describe("tool.task auto-resume", () => {
       expect(result.metadata.sessionId).toBe(kids[0]?.id)
     }),
   )
+})
+
+describe("task reuse parameter", () => {
+  const decode = (value: unknown) => Schema.decodeUnknownSync(Parameters.fields.reuse)(value)
+
+  test("decodes the boolean false", () => {
+    expect(decode(false)).toBe(false)
+  })
+
+  // the union declares the string literal as its output type, so decode preserves it; the coercion onto the
+  // fresh-spawn branch happens at the src/tool/task.ts:386 read site, not here
+  test('decodes the JSON string "false" without a SchemaError', () => {
+    expect(() => decode("false")).not.toThrow()
+    expect(decode("false")).toBe("false")
+  })
+
+  test("decodes the boolean true", () => {
+    expect(decode(true)).toBe(true)
+  })
+
+  test("accepts an absent reuse", () => {
+    expect(decode(undefined)).toBeUndefined()
+  })
+
+  test("no guidance string renders a bare reuse:false pair", async () => {
+    expect(await Bun.file(new URL("../../src/tool/task.ts", import.meta.url)).text()).not.toContain("reuse:false")
+    expect(await Bun.file(new URL("../../src/tool/task.txt", import.meta.url)).text()).not.toContain("reuse:false")
+  })
 })

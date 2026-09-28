@@ -313,16 +313,34 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "description": "A short (3-5 words) description of the task",
       "type": "string",
     },
+    "force": {
+      "description": "Set true to deliberately re-run a task whose description+prompt already completed successfully in this session",
+      "type": "boolean",
+    },
     "prompt": {
       "description": "The task for the agent to perform",
       "type": "string",
+    },
+    "reuse": {
+      "anyOf": [
+        {
+          "type": "boolean",
+        },
+        {
+          "enum": [
+            "false",
+          ],
+          "type": "string",
+        },
+      ],
+      "description": "Reuse the newest same-agent child session within the reuse TTL instead of creating a fresh one. Defaults to true; pass false to force a fresh spawn",
     },
     "subagent_type": {
       "description": "The type of specialized agent to use for this task",
       "type": "string",
     },
     "task_id": {
-      "description": "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
+      "description": "An existing task_id in the same project that is a descendant of the current session. It cannot target another session or project; omit it to create a new task.",
       "type": "string",
     },
   },

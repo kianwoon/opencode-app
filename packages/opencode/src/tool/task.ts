@@ -154,7 +154,8 @@ export const Parameters = Schema.Struct({
     description:
       "Set true to deliberately re-run a task whose description+prompt already completed successfully in this session",
   }),
-  reuse: Schema.optional(Schema.Boolean).annotate({
+  // A model emitted the JSON string "false" and Schema.Boolean rejected it, killing the whole task call; the union keeps that call alive.
+  reuse: Schema.optional(Schema.Union([Schema.Boolean, Schema.Literals(["false"])])).annotate({
     description:
       "Reuse the newest same-agent child session within the reuse TTL instead of creating a fresh one. Defaults to true; pass false to force a fresh spawn",
   }),
@@ -383,7 +384,7 @@ export const TaskTool = Tool.define(
       }
 
       const session = taskSession
-      const reused = params.task_id !== undefined || params.reuse === false
+      const reused = params.task_id !== undefined || params.reuse === false || params.reuse === "false"
         ? undefined
         : yield* Effect.gen(function* () {
             const kids = yield* sessions.children(ctx.sessionID)
@@ -458,7 +459,7 @@ export const TaskTool = Tool.define(
         })
 
       const reuseNotice = reused
-        ? `Reusing subagent session ${nextSession.id} — re-running inside it; pass reuse:false for a fresh spawn.`
+        ? `Reusing subagent session ${nextSession.id} — re-running inside it; pass reuse as the boolean false for a fresh spawn.`
         : undefined
 
       const releaseAdopted = Effect.sync(() => {
@@ -800,7 +801,7 @@ export const TaskTool = Tool.define(
         (flags.experimentalBackgroundSubagents
           ? [DESCRIPTION, BACKGROUND_DESCRIPTION].join("\n\n")
           : DESCRIPTION) +
-        " Reuse semantics: an identical re-fire (byte-exact subagent_type+description+prompt) of a completed task is refused unless force:true or task_id. Within the reuse TTL a re-fire adopts the newest same-agent child session and re-runs it; pass reuse:false to force a fresh spawn.",
+        " Reuse semantics: an identical re-fire (byte-exact subagent_type+description+prompt) of a completed task is refused unless force:true or task_id. Within the reuse TTL a re-fire adopts the newest same-agent child session and re-runs it; pass reuse as the boolean false for a fresh spawn.",
       parameters: Parameters,
       jsonSchema: flags.experimentalBackgroundSubagents ? undefined : ToolJsonSchema.fromSchema(BaseParameters),
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
