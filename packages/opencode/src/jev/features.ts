@@ -28,21 +28,21 @@ export interface RecencyFeatures {
 export function extractTemporalFeatures(
   sessionStart: number,
   sessionEnd: number,
-  prompts: readonly PromptRow[],
+  times: readonly number[],
 ): TemporalFeatures {
   // A non-numeric sqlite `time` would poison every gap below with NaN.
-  const times = prompts.map((prompt) => prompt.time).filter((time) => Number.isFinite(time))
-  if (times.length === 0)
+  const finite = times.filter((time) => Number.isFinite(time))
+  if (finite.length === 0)
     return { wall_hours: 0, active_span_hours: 0, max_idle_hours: 0, idle_ratio: 0, prompt_count: 0 }
-  const gaps = times.slice(1).map((time, index) => time - times[index]!)
+  const gaps = finite.slice(1).map((time, index) => time - finite[index]!)
   const wallMs = Math.max(sessionEnd - sessionStart, 0)
   const maxIdleMs = gaps.length === 0 ? 0 : Math.max(...gaps)
   return {
     wall_hours: wallMs / MS_PER_HOUR,
-    active_span_hours: (times[times.length - 1]! - times[0]!) / MS_PER_HOUR,
+    active_span_hours: (finite[finite.length - 1]! - finite[0]!) / MS_PER_HOUR,
     max_idle_hours: maxIdleMs / MS_PER_HOUR,
     idle_ratio: wallMs > 0 ? maxIdleMs / wallMs : 0,
-    prompt_count: prompts.length,
+    prompt_count: times.length,
   }
 }
 

@@ -30,6 +30,10 @@ interface CountRow {
   readonly n: number
 }
 
+interface TimeRow {
+  readonly time: number
+}
+
 type SqlBindings = readonly (string | number)[]
 
 interface DatabaseAccessor {
@@ -102,6 +106,20 @@ export async function buildSessionSnapshot(dbPath: string, sessionID: string): P
       ) as PromptRow[]
       prompts.reverse()
 
+      // Unbounded on purpose: a narrow integer column with no text, no join and
+      // no GROUP_CONCAT cannot reproduce the blowup the 200-row window exists to
+      // prevent, and the span/idle features must describe the WHOLE session.
+      // Do NOT add a LIMIT here — that reintroduces the windowed-metric bug.
+      const times = (
+        database.all(
+          `SELECT m.time_created AS time
+             FROM message m
+            WHERE m.session_id = ? AND json_extract(m.data, '$.role') = 'user'
+            ORDER BY m.time_created`,
+          [sessionID],
+        ) as TimeRow[]
+      ).map((row) => row.time)
+
       // Exact session-wide user-message count, independent of the window above.
       const totalRow = database.get(
         `SELECT count(*) AS n
@@ -123,7 +141,7 @@ export async function buildSessionSnapshot(dbPath: string, sessionID: string): P
         toolRows.filter((row) => row.tool !== null).map((row) => [row.tool!, row.count]),
       ) as Record<string, number>
       const title = session.title.slice(0, 80)
-      const temporal = extractTemporalFeatures(session.time_created, session.time_updated, prompts)
+      const temporal = extractTemporalFeatures(session.time_created, session.time_updated, times)
       const recency = extractRecencyFeatures(session.time_updated, prompts, 60)
       // Recency keys separate user-absence gaps from mid-work stalls.
       const snapshot = JSON.stringify({

@@ -16,7 +16,7 @@ const prompts: PromptRow[] = [
 
 describe("extractTemporalFeatures", () => {
   test("decomposes wall time, active span, and idle gaps", () => {
-    const features = extractTemporalFeatures(0, 7_200_000, prompts)
+    const features = extractTemporalFeatures(0, 7_200_000, prompts.map((prompt) => prompt.time))
     expect(features.wall_hours).toBeCloseTo(2)
     expect(features.active_span_hours).toBeCloseTo(2)
     expect(features.max_idle_hours).toBeCloseTo(1)
@@ -32,7 +32,7 @@ describe("extractTemporalFeatures", () => {
       idle_ratio: 0,
       prompt_count: 0,
     })
-    const invalid = extractTemporalFeatures(100, 100, [{ time: 200, text: "late" }])
+    const invalid = extractTemporalFeatures(100, 100, [200])
     expect(invalid.wall_hours).toBe(0)
     expect(invalid.idle_ratio).toBe(0)
   })
@@ -114,7 +114,7 @@ describe("non-finite prompt times", () => {
       { time: Number.NaN, text: "broken" },
       { time: 7_200_000, text: "last" },
     ]
-    const temporal = extractTemporalFeatures(0, 7_200_000, rows)
+    const temporal = extractTemporalFeatures(0, 7_200_000, rows.map((row) => row.time))
     expect(Object.values(temporal).some((value) => Number.isNaN(value))).toBe(false)
     const recency = extractRecencyFeatures(7_200_000, rows, 60)
     expect(Object.values(recency).some((value) => Number.isNaN(value))).toBe(false)

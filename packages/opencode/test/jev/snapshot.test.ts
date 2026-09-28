@@ -156,6 +156,47 @@ describe("buildSessionSnapshot", () => {
     }
   })
 
+  test("span and idle features read every user message, not the window", async () => {
+    // The 200-row window drops index 0, so the 10h opening gap would vanish and
+    // max_idle would read 0.0167. These assertions are the window regression.
+    const database = new Database(dbPath)
+    database.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      "ses_span",
+      null,
+      "Span",
+      0,
+      47_940_000,
+      0.5,
+      1000,
+      100,
+      2000,
+      0,
+    ])
+    for (let index = 0; index < 201; index++) {
+      const time = index === 0 ? 0 : index === 1 ? 36_000_000 : 36_000_000 + (index - 1) * 60_000
+      database.run("INSERT INTO message VALUES (?, ?, ?, ?)", [
+        `msg_span_${index + 1}`,
+        "ses_span",
+        time,
+        JSON.stringify({ role: "user" }),
+      ])
+    }
+    database.close()
+    try {
+      const built = await buildSessionSnapshot(dbPath, "ses_span")
+      const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
+      expect(snapshot["max_idle_hours"]).toBeCloseTo(10, 6)
+      expect(snapshot["active_span_hours"]).toBeCloseTo(47_940_000 / 3_600_000, 6)
+      expect(snapshot["idle_ratio"]).toBeCloseTo(36_000_000 / 47_940_000, 6)
+    } finally {
+      const cleanup = new Database(dbPath)
+      cleanup.run("DELETE FROM part WHERE session_id = ?", ["ses_span"])
+      cleanup.run("DELETE FROM message WHERE session_id = ?", ["ses_span"])
+      cleanup.run("DELETE FROM session WHERE id = ?", ["ses_span"])
+      cleanup.close()
+    }
+  })
+
   test("preserves token aggregates, cost, and output-input ratio", async () => {
     const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
