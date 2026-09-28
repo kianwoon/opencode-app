@@ -5,10 +5,12 @@
 // deploy` classifies as an install and receives zero project secrets.
 //
 // Splitting is a lightweight SYNCHRONOUS scan (not tree-sitter) so
-// classification stays pure and callable from the plugin hook. It can only
-// OVER-split (treat a quoted separator as a boundary); because every segment is
-// classified independently and the strictest (lowest rank) wins, over-splitting
-// never relaxes the winning class — the result is fail-safe.
+// classification stays pure and callable from the plugin hook. It tracks quote
+// state: a separator inside quotes is LITERAL argument text and never splits,
+// so a regex alternation like `grep -E "a|b"` stays ONE command. Over-splitting
+// a benign command is NOT fail-safe — tool/shell.ts turns a `package_install`
+// class into a `package_install` PERMISSION ask, so a spurious fragment denies
+// the whole call in a `*: deny` session.
 //
 // FAIL-CLOSED: a segment that cannot be tokenized or understood — empty input,
 // garbage, or a shell wrapper whose inner command is opaque — yields
@@ -111,12 +113,42 @@ function stripParens(segment: string): string {
   return trimmed
 }
 
-/** Splits a shell command into segments on unquoted-looking separators. */
+/** Splits a shell command into segments on separators found OUTSIDE quotes.
+ *  A separator inside quotes is literal argument text, so a regex
+ *  alternation (`grep -E "a|b"`) stays ONE segment. A lone `&`
+ *  (background) is not a separator; only the `&&` PAIR is. */
 export function segments(command: string): string[] {
-  return command
-    .split(/\|\||&&|[;|\n]/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
+  const parts: string[] = []
+  let current = ""
+  let quote: string | undefined
+  for (let i = 0; i < command.length; i++) {
+    const char = command.charAt(i)
+    if (quote) {
+      current += char
+      if (char === quote) quote = undefined
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      current += char
+      continue
+    }
+    const next = command.charAt(i + 1)
+    if (char === "&" && next === "&") {
+      parts.push(current)
+      current = ""
+      i++
+      continue
+    }
+    if (char === ";" || char === "|" || char === "\n") {
+      parts.push(current)
+      current = ""
+      continue
+    }
+    current += char
+  }
+  parts.push(current)
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0)
 }
 
 function tokenize(segment: string): string[] {
