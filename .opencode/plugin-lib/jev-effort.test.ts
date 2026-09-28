@@ -10,6 +10,7 @@ import {
   MEMO_MAX,
   __testRemember,
 } from "./jev-effort.ts"
+import { jevTransport as coreJevTransport } from "../../packages/opencode/src/jev/client.ts"
 
 describe("jevTransport", () => {
   test("typesafe/jev-1.13 -> SystemOne + wire id jev-latest", () => {
@@ -121,5 +122,33 @@ describe("memo key is (text, spec) — spec change invalidates", () => {
     // Oldest evicted, newest retained, never exceeding the cap.
     expect(memoResult("text-0", "typesafe/jev-1.13")).toBeUndefined()
     expect(memoResult(`text-${MEMO_MAX + 24}`, "typesafe/jev-1.13")).toEqual({ tier: "low", strength: 0.5 })
+  })
+})
+
+describe("core/plugin transport drift", () => {
+  const specs = [
+    "typesafe/jev-1.13",
+    "typesafe/jev-1.13.0",
+    "typesafe/jev-latest",
+    "typesafe/jev-nonsense",
+    "typesafe/unknown-thing",
+    "openrouter/anthropic/claude-3.5",
+    "openrouter/foo",
+  ]
+
+  // An alias added to the core table but not the plugin mirror is a silent
+  // HTTP 400 in production, so both halves must agree on wire id and endpoint.
+  test("core and plugin resolve every spec to the same wire id and endpoint", () => {
+    for (const spec of specs) {
+      expect(coreJevTransport(spec)?.id).toBe(jevTransport(spec)?.id)
+      expect(coreJevTransport(spec)?.endpoint).toBe(jevTransport(spec)?.endpoint)
+    }
+  })
+
+  test("only the core client owns the empty-spec default", () => {
+    // Deliberate asymmetry: the core client carries a default, the
+    // zero-dependency plugin mirror does not and fails open instead.
+    expect(coreJevTransport("")?.id).toBe("jev-latest")
+    expect(jevTransport("")).toBeUndefined()
   })
 })

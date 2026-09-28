@@ -274,4 +274,13 @@ describe("resolveBrainPolicy — Noul prefilter then measured Choice gate", () =
     expect(result.action).toBe("finish")
     expect(result.decisions.score?.normalizedScore).toBeCloseTo(0.05)
   })
+
+  test("an out-of-range probability falls back instead of gating", () => {
+    // Untrusted wire data: 3 and -1 are not probabilities, so neither may
+    // clear the threshold and route on the choice.
+    const over = resolveBrainPolicy(policy({ choice: parseJevAnswer(choice("verify", 3)) }))
+    expect(over).toMatchObject({ action: "continue", source: "fallback" })
+    const under = resolveBrainPolicy(policy({ choice: parseJevAnswer(choice("verify", -1)) }))
+    expect(under).toMatchObject({ action: "continue", source: "fallback" })
+  })
 })

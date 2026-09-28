@@ -30,6 +30,21 @@ describe("boosterAdvisory — require a MEASURED probabilities[choice]", () => {
     globalThis.fetch = answers({ type: "choice", choice: "switch", probabilities: { switch: 0.2 } })
     expect(await boosterAdvisory({ key: "k", state: "s", config: { enabled: true } })).toBeUndefined()
   })
+
+  test("a NaN threshold or confidenceFloor behaves exactly like the default", async () => {
+    // `??` does not catch NaN, so a NaN config value would make every
+    // comparison false and silently mute the booster. It must fall back.
+    const row = { type: "choice", choice: "verify", probabilities: { verify: 0.9, continue: 0.1 } }
+    globalThis.fetch = answers(row)
+    const withDefaults = await boosterVerdict({ key: "k", state: "s", config: { enabled: true } })
+    globalThis.fetch = answers(row)
+    const withNaN = await boosterVerdict({
+      key: "k",
+      state: "s",
+      config: { enabled: true, threshold: Number.NaN, confidenceFloor: Number.NaN },
+    })
+    expect(withNaN).toEqual(withDefaults)
+  })
 })
 
 describe("boosterPush — change-detect on the folded label", () => {

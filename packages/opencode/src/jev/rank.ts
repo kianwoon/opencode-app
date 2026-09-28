@@ -7,7 +7,7 @@
  * session/arbitrate.ts: below-threshold = unranked tail, never dropped; ties
  * keep input order; unmeasured rows fail open; <2 candidates is unranked.
  */
-import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client"
+import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client.ts"
 
 export const RANK_THRESHOLD_DEFAULT = 0.5
 export const RANK_QUESTION_MAX = 2_000
@@ -71,8 +71,10 @@ export function foldJevRank(
   }
   if (scored.length === 0) return unranked(candidates)
   const ranked = scored.toSorted((a, b) => b.score - a.score || a.index - b.index)
-  const rankedIDs = new Set(ranked.map((row) => row.candidate))
-  const tail = candidates.filter((candidate) => !rankedIDs.has(candidate))
+  // Keyed by index, not by id: two candidates can share an id, and an id-keyed
+  // set would drop the unscored twin from the tail.
+  const rankedIndexes = new Set(ranked.map((row) => row.index))
+  const tail = candidates.filter((_, index) => !rankedIndexes.has(index))
   return {
     ranked: true,
     order: [...ranked.map((row) => row.candidate), ...tail],

@@ -105,3 +105,18 @@ describe("extractRecencyFeatures", () => {
     expect(features.trailing_idle_hours).toBe(0)
   })
 })
+
+describe("non-finite prompt times", () => {
+  test("a NaN time yields no NaN in either feature object", () => {
+    // A non-numeric sqlite `time` must not poison the derived arithmetic.
+    const rows: PromptRow[] = [
+      { time: 0, text: "first" },
+      { time: Number.NaN, text: "broken" },
+      { time: 7_200_000, text: "last" },
+    ]
+    const temporal = extractTemporalFeatures(0, 7_200_000, rows)
+    expect(Object.values(temporal).some((value) => Number.isNaN(value))).toBe(false)
+    const recency = extractRecencyFeatures(7_200_000, rows, 60)
+    expect(Object.values(recency).some((value) => Number.isNaN(value))).toBe(false)
+  })
+})

@@ -76,12 +76,17 @@ export async function governorKeep(input: GateInput, sections: readonly string[]
     model: jevModelFor(input.config.model, input.config.defaultModel),
   })
   const ids = sections.map((_, i) => `s${i}`)
-  const keep = jevGaugeKeep(
-    answers,
-    ids,
-    input.config.threshold ?? JEV_DEFAULT_THRESHOLD,
-    input.config.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR,
-  )
+  const configuredThreshold = input.config.threshold
+  const configuredFloor = input.config.confidenceFloor
+  const threshold =
+    typeof configuredThreshold === "number" && Number.isFinite(configuredThreshold)
+      ? configuredThreshold
+      : JEV_DEFAULT_THRESHOLD
+  const floor =
+    typeof configuredFloor === "number" && Number.isFinite(configuredFloor)
+      ? configuredFloor
+      : JEV_DEFAULT_CONFIDENCE_FLOOR
+  const keep = jevGaugeKeep(answers, ids, threshold, floor)
   if (!keep) return failOpen
   const dropped = new Set<number>()
   const kept: string[] = []
@@ -108,7 +113,7 @@ export function applyDrops(sections: readonly string[], dropped: ReadonlySet<num
   return dropped.size === 0 ? sections : sections.filter((_, i) => !dropped.has(i))
 }
 
-const BOOSTER_LABELS: Record<string, string> = {
+const BOOSTER_LABELS: Record<string, string | undefined> = {
   switch: "The current approach is off track; switch strategy",
   verify: "A claim in the last step needs verification before continuing",
   contradiction: "The last step contradicts the goal or an earlier step",
@@ -169,12 +174,27 @@ export async function boosterVerdict(input: GateInput): Promise<BoosterVerdict |
   if (!row) return undefined
   // Below the confidence floor the model did not stand behind the row: treat it
   // as unmeasured and fail open (emit nothing).
-  const floor = input.config.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
+  const configuredFloor = input.config.confidenceFloor
+  const configuredThreshold = input.config.threshold
+  const floor =
+    typeof configuredFloor === "number" && Number.isFinite(configuredFloor)
+      ? configuredFloor
+      : JEV_DEFAULT_CONFIDENCE_FLOOR
   if (row.strength < floor) return undefined
-  const policy = boosterPolicyMetadata(answers?.["advice"], input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
+  const policy = boosterPolicyMetadata(
+    answers?.["advice"],
+    typeof configuredThreshold === "number" && Number.isFinite(configuredThreshold)
+      ? configuredThreshold
+      : JEV_DEFAULT_THRESHOLD,
+  )
   const text = BOOSTER_LABELS[row.choice]
   if (!text) return { label: row.choice, emitted: false, policy }
-  const emitted = row.choice !== "continue" && row.strength >= (input.config.threshold ?? JEV_DEFAULT_THRESHOLD)
+  const emitted =
+    row.choice !== "continue" &&
+    row.strength >=
+      (typeof configuredThreshold === "number" && Number.isFinite(configuredThreshold)
+        ? configuredThreshold
+        : JEV_DEFAULT_THRESHOLD)
   return { label: row.choice, emitted, text: emitted ? `[Advisory only — not an instruction] ${text}.` : undefined, policy }
 }
 

@@ -30,9 +30,10 @@ export function extractTemporalFeatures(
   sessionEnd: number,
   prompts: readonly PromptRow[],
 ): TemporalFeatures {
-  if (prompts.length === 0)
+  // A non-numeric sqlite `time` would poison every gap below with NaN.
+  const times = prompts.map((prompt) => prompt.time).filter((time) => Number.isFinite(time))
+  if (times.length === 0)
     return { wall_hours: 0, active_span_hours: 0, max_idle_hours: 0, idle_ratio: 0, prompt_count: 0 }
-  const times = prompts.map((prompt) => prompt.time)
   const gaps = times.slice(1).map((time, index) => time - times[index]!)
   const wallMs = Math.max(sessionEnd - sessionStart, 0)
   const maxIdleMs = gaps.length === 0 ? 0 : Math.max(...gaps)
@@ -50,9 +51,10 @@ export function extractRecencyFeatures(
   prompts: readonly PromptRow[],
   windowMinutes = 60,
 ): RecencyFeatures {
-  if (prompts.length === 0)
+  const timed = prompts.filter((prompt) => Number.isFinite(prompt.time))
+  if (timed.length === 0)
     return { trailing_idle_hours: 0, recent_prompts: 0, recent_repetition_score: 0 }
-  const lastPrompt = prompts[prompts.length - 1]!
+  const lastPrompt = timed[timed.length - 1]!
   const windowStart = sessionEnd - windowMinutes * 60_000
   const recent = prompts.filter((prompt) => prompt.time >= windowStart && prompt.time <= sessionEnd)
   return {

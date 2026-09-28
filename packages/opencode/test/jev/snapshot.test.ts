@@ -108,6 +108,54 @@ describe("buildSessionSnapshot", () => {
     expect(snapshot["todo_churn"]).toBe(0.5)
   })
 
+  test("counts prompts session-wide, not through the 200-message window", async () => {
+    // Regression: prompt_count and the todo_churn denominator must be exact
+    // session-wide totals. The prompts array is a capped recent window.
+    const database = new Database(dbPath)
+    database.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      "ses_big",
+      null,
+      "Big",
+      0,
+      7_200_000,
+      0.5,
+      1000,
+      100,
+      2000,
+      0,
+    ])
+    for (let index = 0; index < 201; index++)
+      database.run("INSERT INTO message VALUES (?, ?, ?, ?)", [
+        `msg_big_${index + 1}`,
+        "ses_big",
+        (index + 1) * 1_000,
+        JSON.stringify({ role: "user" }),
+      ])
+    for (let index = 0; index < 2; index++)
+      database.run("INSERT INTO part VALUES (?, ?, ?, ?, ?)", [
+        `part_big_tool_${index + 1}`,
+        "msg_big_1",
+        "ses_big",
+        index + 1,
+        JSON.stringify({ type: "tool", tool: "todowrite" }),
+      ])
+    database.close()
+    try {
+      const built = await buildSessionSnapshot(dbPath, "ses_big")
+      const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
+      expect(snapshot["prompt_count"]).toBe(201)
+      // Precision 6 is mandatory: at the default 2, 2/201 and the buggy 2/200
+      // both round to 0.01 and the assertion would pass against the bug.
+      expect(snapshot["todo_churn"]).toBeCloseTo(2 / 201, 6)
+    } finally {
+      const cleanup = new Database(dbPath)
+      cleanup.run("DELETE FROM part WHERE session_id = ?", ["ses_big"])
+      cleanup.run("DELETE FROM message WHERE session_id = ?", ["ses_big"])
+      cleanup.run("DELETE FROM session WHERE id = ?", ["ses_big"])
+      cleanup.close()
+    }
+  })
+
   test("preserves token aggregates, cost, and output-input ratio", async () => {
     const built = await buildSessionSnapshot(dbPath, "ses_fix")
     const snapshot = JSON.parse(built?.snapshot ?? "{}") as Record<string, unknown>
@@ -138,5 +186,10 @@ describe("buildSessionSnapshot", () => {
         "todo_churn",
       ].sort(),
     )
+  })
+
+  test("a missing database resolves null instead of throwing", async () => {
+    // The open is contained: a caller cannot tell a broken DB from an absent one.
+    expect(await buildSessionSnapshot(join(directory, "absent.db"), "ses_fix")).toBeNull()
   })
 })

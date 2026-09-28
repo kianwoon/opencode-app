@@ -3,7 +3,7 @@
  * a gate. The measured noul is a numeric prefilter; the constrained choice and
  * its probability are the verdict. Unmeasured labels fail open unlabeled.
  */
-import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client"
+import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client.ts"
 
 export const LABEL_OPTIONS = ["thrive", "stall", "bloat", "drift"] as const
 export const LABEL_THRESHOLD_DEFAULT = 0.7

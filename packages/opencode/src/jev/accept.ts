@@ -14,7 +14,7 @@ import {
   jevMeasuredChoice,
   jevTransport,
   type JevTransport,
-} from "./client"
+} from "./client.ts"
 
 const GATE_MAX = 2_000
 const RESULT_MAX = 6_000
@@ -73,7 +73,9 @@ const noulOf = (value: unknown): number | undefined => {
 export function foldJevAccept(answers: Record<string, unknown>, threshold: number): JevAcceptDecision {
   const noul = noulOf(answers["gate_ok"])
   const row = jevMeasuredChoice(answers["verdict"])
-  if (noul !== undefined && noul < threshold) {
+  // noul 0 means "not at all satisfied" — it must never read as a pass, even
+  // when a caller passes threshold 0 and `noul < threshold` is false.
+  if (noul !== undefined && (noul === 0 || noul < threshold)) {
     return { accept: false, measured: true, noul, choice: row?.choice, strength: row?.strength }
   }
   if (row) {

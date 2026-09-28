@@ -47,6 +47,14 @@ describe("foldJevRank", () => {
     expect(d.ranked).toBe(false)
     expect(d.order).toEqual(["a", "b"])
   })
+
+  test("duplicate candidate ids keep both entries; the unscored twin survives the tail", () => {
+    const d = foldJevRank({ "cand:0": scoreRow(3, 4), "cand:1": scoreRow(1, 4) }, ["a", "a"], 0.5)
+    expect(d.ranked).toBe(true)
+    expect(d.order.length).toBe(2)
+    expect(d.order).toEqual(["a", "a"])
+    expect(d.ranks.length).toBe(1)
+  })
 })
 
 describe("jevRank transport", () => {

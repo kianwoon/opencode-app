@@ -447,3 +447,17 @@ Plain async code should pass explicit context or stay inside an Effect fiber; do
 ## Session rename and frozen JEV heads
 - A root/main session can have `session_rename` registered and allowed yet absent from the model tool list when the first JEV head was persisted without it. `freezeHead` is first-call-wins and its persisted-name intersection must re-add current JEV-exempt tools; `session_rename` belongs in `JEV_EXEMPT_TOOLS`.
 - `session_rename` is a standalone tool, not a `bash`/shell alias. A persisted legacy frozen head can hide it, so direct verification requires a fresh root/main session and a fresh Brain session. Acceptance: from `packages/opencode`, run `bun test test/session/jev-routing.test.ts test/tool/session-rename.test.ts` and `bun typecheck`; both fresh sessions must directly invoke `session_rename` without API/fallback and change the title. Restarting an old session or using an HTTP PATCH is insufficient.
+
+## `src/jev/` runs as SOURCE under Node — every relative import needs `.ts`
+
+- The desktop app externalizes `src/jev/*` (that is how `bun:sqlite` reached the asar in
+  the 2026-09-25 boot outage, fixed in `aead4a3e8e`). Node native ESM requires explicit
+  extensions; an extensionless sibling import throws `ERR_MODULE_NOT_FOUND` at
+  `finalizeResolution`, so the module is fatal under Node while `bun build` and `bun test`
+  both pass. Fixed 2026-09-28: `controller.ts`, `accept.ts`, `label.ts`, `rank.ts` all
+  imported `"./client"` extensionlessly; `snapshot.ts` already used `"./features.ts"`.
+- `bun typecheck` and `bun test` are NOT evidence. Acceptance gate, from `packages/opencode`:
+  `node --experimental-strip-types --input-type=module -e "await import('<abs>/src/jev/<name>.ts'); console.log('LOADED <name>')"`
+  must print LOADED for all nine modules. Unrelated `packages/core` files fail this same
+  probe at baseline (Bun-bundled, extension-tolerant) — that baseline is NOT a licence for
+  `src/jev`.

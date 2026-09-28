@@ -43,6 +43,12 @@ describe("foldJevAccept", () => {
     expect(d.accept).toBe(false)
     expect(d.measured).toBe(false)
   })
+
+  test("threshold 0 with noul exactly 0 rejects (noul 0 is never a pass)", () => {
+    const d = foldJevAccept({ gate_ok: { noul: 0 }, verdict: acceptRow(0.9) }, 0)
+    expect(d.accept).toBe(false)
+    expect(d.measured).toBe(true)
+  })
 })
 
 describe("jevAccept transport", () => {

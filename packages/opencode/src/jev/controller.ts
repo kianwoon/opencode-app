@@ -32,7 +32,7 @@ import {
   jevMeasuredChoice,
   jevTransport,
   type JevChoice,
-} from "./client"
+} from "./client.ts"
 
 export const STATE_MAX = 4_000
 export const LABEL_MAX = 80

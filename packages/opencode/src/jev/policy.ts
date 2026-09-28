@@ -108,7 +108,12 @@ export function resolveBrainPolicy(input: BrainPolicyInput): BrainPolicyResult {
 
   if (input.choice?.type === "choice") {
     const choice = input.choice
-    if (!isBrainPolicyAction(choice.choice) || !Number.isFinite(choice.probability)) {
+    if (
+      !isBrainPolicyAction(choice.choice) ||
+      !Number.isFinite(choice.probability) ||
+      choice.probability < 0 ||
+      choice.probability > 1
+    ) {
       return fallback("fallback", "choice-unavailable")
     }
     if (!allowed.has(choice.choice)) return fallback("fallback", "choice-not-allowed")
@@ -118,8 +123,3 @@ export function resolveBrainPolicy(input: BrainPolicyInput): BrainPolicyResult {
 
   return fallback("fallback", "choice-unavailable")
 }
-
-export const resolveJevPolicy = resolveBrainPolicy
-
-export type BrainPolicyResolverInput = BrainPolicyInput
-export type BrainPolicyResolverResult = BrainPolicyResult
