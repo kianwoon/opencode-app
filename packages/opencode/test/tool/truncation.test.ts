@@ -34,7 +34,7 @@ describe("Truncate", () => {
         const result = yield* svc.output(content)
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("truncated...")
+        expect(result.content).toContain("[truncated ")
         if (result.truncated) expect(result.outputPath).toBeDefined()
       }),
     )
@@ -57,7 +57,7 @@ describe("Truncate", () => {
         const result = yield* svc.output(lines, { maxLines: 10 })
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("...90 lines truncated...")
+        expect(result.content).toContain("(90 lines omitted)")
       }),
     )
 
@@ -68,7 +68,7 @@ describe("Truncate", () => {
         const result = yield* svc.output(content, { maxBytes: 100 })
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("truncated...")
+        expect(result.content).toContain("[truncated ")
       }),
     )
 
@@ -132,7 +132,7 @@ describe("Truncate", () => {
           const content = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
           const result = yield* (yield* Truncate.Service).output(content)
           expect(result.truncated).toBe(true)
-          expect(result.content).toContain("...90 lines truncated...")
+          expect(result.content).toContain("(90 lines omitted)")
         }),
       )
 
@@ -143,7 +143,7 @@ describe("Truncate", () => {
           const content = "a".repeat(1000)
           const result = yield* (yield* Truncate.Service).output(content)
           expect(result.truncated).toBe(true)
-          expect(result.content).toContain("bytes truncated...")
+          expect(result.content).toContain("[truncated ")
         }),
       )
 
@@ -168,7 +168,7 @@ describe("Truncate", () => {
         const result = yield* svc.output(content)
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("bytes truncated...")
+        expect(result.content).toContain("[truncated ")
         expect(Buffer.byteLength(content, "utf-8")).toBeGreaterThan(Truncate.MAX_BYTES)
       }),
     )
