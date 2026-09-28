@@ -35,6 +35,12 @@
  * text continuation is another — so -2-only extraction read the continuation, found
  * no completed tool part, and emitted "" over real evidence.
  *
+ * v7.3: the O section harvests ERROR-state tool parts too — a ToolStateError carries
+ * `error`, never `output`, so a completed-only O was BLIND to a permission denial and a
+ * false "fix is live" answer scored 0.66. Each error part contributes a bounded
+ * `[FAIL <tool>: <error>]` entry, the grading question names that convention, and a
+ * questionable premise is now a TWO-TIER advisory: strong ≤ 0.3, soft ≤ 0.45.
+ *
  * v6.1 CONTRACT:
  *   1. ONE POST per transform carries the WHOLE batch (jev.md §1): the mode `choice`
  *      and the `noul` grade are two question IDS in one record, not two sequential
@@ -97,6 +103,8 @@ export const ANSWER_EXCERPT_CHARS = 4000
 export const OPTION_EXCERPT_CHARS = 400
 /** O section cap; input cost trivial at $0.042/M. */
 export const OBSERVED_OUTPUT_EXCERPT_CHARS = 2500
+/** Per-FAIL-entry cap on the error text; the entry is a marker, not a transcript. */
+export const OBSERVED_ERROR_EXCERPT_CHARS = 140
 /** Shorter answers are acknowledgements, not claims worth grading. */
 export const MIN_GATE_CHARS = 240
 /**
@@ -106,10 +114,25 @@ export const MIN_GATE_CHARS = 240
 export const MODE_GATE = 0.7
 
 /**
- * Advise only on a clearly-QUESTIONABLE premise (measured noul ≤ this). A weak signal
- * stays telemetry-only: a mid-range noul is the flat verdict this gate exists to reject.
+ * The STRONG premise band: a clearly-QUESTIONABLE premise (measured noul ≤ this) is
+ * called out as such. The soft band below carries a milder phrasing of the same caution.
  */
 export const PREMISE_ADVISE_MAX = 0.3
+/**
+ * The SOFT premise band (v7.3): a noul above PREMISE_ADVISE_MAX and at or below this
+ * still gets the one-line caution, because a barely-questionable premise is exactly
+ * where a wrong build compounds. Above it, telemetry only.
+ */
+export const PREMISE_SOFT_MAX = 0.45
+
+/**
+ * The premise tier for a measured noul, or undefined when nothing should be said.
+ * Two bands, one job: a question the grader rates ≤ 0.3 is called questionable, one
+ * rated in (0.3, 0.45] gets the same caution more quietly, and a higher read is a flat
+ * verdict this gate exists to reject. An unmeasured noul is never a tier.
+ */
+export const premiseTier = (noul: number | null): "strong" | "soft" | undefined =>
+  noul === null ? undefined : noul <= PREMISE_ADVISE_MAX ? "strong" : noul <= PREMISE_SOFT_MAX ? "soft" : undefined
 
 export type ResponseGateConfig = {
   enabled: boolean
@@ -164,19 +187,23 @@ const textOf = (message: WireMessage | undefined): string => {
 
 /**
  * The OBSERVED OUTPUT (O) for one message: every COMPLETED tool part's real output,
- * labelled by tool name so a claim can be traced to the call that produced it. Only
- * `state.status === "completed"` carries a string `state.output` in the real ToolState,
- * so pending/running/error parts contribute nothing. A message with no qualifying part
- * yields "" — the grading question then omits O and keeps its v6 sounds-grounded meaning.
+ * labelled by tool name so a claim can be traced to the call that produced it, plus
+ * (v7.3) every ERROR tool part as a bounded `[FAIL <tool>: <error>]` entry — a
+ * ToolStateError carries `error`, never `output`, so a completed-only O was BLIND to a
+ * permission denial and a false "fix is live" answer scored 0.66. pending/running parts
+ * contribute nothing. A message with no qualifying part yields "" — the grading question
+ * then omits O and keeps its v6 sounds-grounded meaning.
  */
 export const extractObservedOutputs = (message: WireMessage | undefined): string => {
   if (!Array.isArray(message?.parts)) return ""
   const blocks = message.parts.flatMap((part) => {
-    const p = part as { type?: unknown; tool?: unknown; state?: { status?: unknown; output?: unknown } }
-    const output = p?.state?.status === "completed" ? p.state.output : undefined
-    return p?.type === "tool" && typeof p.tool === "string" && typeof output === "string" && output.length > 0
-      ? [`[tool ${p.tool}]\n${output}`]
-      : []
+    const p = part as { type?: unknown; tool?: unknown; state?: { status?: unknown; output?: unknown; error?: unknown } }
+    if (p?.type !== "tool" || typeof p.tool !== "string") return []
+    const error = p.state?.status === "error" ? p.state.error : undefined
+    if (typeof error === "string" && error.length > 0)
+      return [`[FAIL ${p.tool}: ${excerpt(error.replace(/\s+/g, " ").trim(), OBSERVED_ERROR_EXCERPT_CHARS)}]`]
+    const output = p.state?.status === "completed" ? p.state.output : undefined
+    return typeof output === "string" && output.length > 0 ? [`[tool ${p.tool}]\n${output}`] : []
   })
   return blocks.length > 0 ? excerpt(blocks.join("\n\n"), OBSERVED_OUTPUT_EXCERPT_CHARS) : ""
 }
@@ -291,7 +318,7 @@ export const buildBatchQuestions = (request: string | null, exchange: Exchange |
     : {
         grounding: {
           type: "noul" as const,
-          instructions: `REQUEST (Q): "${excerpt(exchange.question, QUESTION_EXCERPT_CHARS)}"\nANSWER (A): "${excerpt(exchange.answer, ANSWER_EXCERPT_CHARS)}"${exchange.observed.length > 0 ? `\nOBSERVED OUTPUT (O): "${excerpt(exchange.observed, OBSERVED_OUTPUT_EXCERPT_CHARS)}"` : ""}\nHow well does A answer Q? 0 = unfounded or off-topic, 1 = fully grounded and directly answering.`,
+          instructions: `REQUEST (Q): "${excerpt(exchange.question, QUESTION_EXCERPT_CHARS)}"\nANSWER (A): "${excerpt(exchange.answer, ANSWER_EXCERPT_CHARS)}"${exchange.observed.length > 0 ? `\nOBSERVED OUTPUT (O): "${excerpt(exchange.observed, OBSERVED_OUTPUT_EXCERPT_CHARS)}"` : ""}\nIf O contains entries marked [FAIL, an answer that does not acknowledge those failures scores low.\nHow well does A answer Q? 0 = unfounded or off-topic, 1 = fully grounded and directly answering.`,
         },
       }),
 })
@@ -442,14 +469,17 @@ export const JevResponseGatePlugin = async (): Promise<Hooks> => ({
         appendAdvisory(output.messages, modeAdvisory(batch.mode.choice, strong, batch.mode.confidence))
       }
       // (1b) INPUT, premise side. Telemetry is unconditional on a MEASURED noul; the
-      // advisory is gated at PREMISE_ADVISE_MAX so a mid-range read stays a record and
-      // only a clearly-false premise reaches the model.
+      // advisory is two-tiered so a barely-questionable premise (0.3, 0.45] still gets
+      // the caution, while a mid read above 0.45 stays a record and never reaches the model.
       if (batch.premise !== null) {
-        log("jev.premise-readout", { sessionID, noul: batch.premise, advised: batch.premise <= PREMISE_ADVISE_MAX })
-        if (batch.premise <= PREMISE_ADVISE_MAX) {
+        const tier = premiseTier(batch.premise)
+        log("jev.premise-readout", { sessionID, noul: batch.premise, advised: tier !== undefined, ...(tier ? { tier } : {}) })
+        if (tier !== undefined) {
           appendAdvisory(
             output.messages,
-            `[system-1 read] premise questionable (noul=${batch.premise.toFixed(2)}) — verify the premise before building on it.`,
+            tier === "strong"
+              ? `[system-1 read] premise questionable (noul=${batch.premise.toFixed(2)}) — verify the premise before building on it.`
+              : `[system-1 read] premise questionable — verify the premise before building on it.`,
           )
         }
       }

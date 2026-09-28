@@ -6,8 +6,10 @@ import {
   MIN_GATE_CHARS,
   MODE_GATE,
   MODE_OPTIONS,
+  OBSERVED_ERROR_EXCERPT_CHARS,
   OBSERVED_OUTPUT_EXCERPT_CHARS,
   PREMISE_ADVISE_MAX,
+  PREMISE_SOFT_MAX,
   QUESTION_EXCERPT_CHARS,
   advisableProbability,
   buildBatchQuestions,
@@ -18,6 +20,7 @@ import {
   newRequestTail,
   parseBatchAnswers,
   pickExchange,
+  premiseTier,
   resolveResponseGateConfig,
 } from "./jev-response-gate.ts"
 
@@ -39,6 +42,11 @@ const toolPart = (tool: string, status: string, output: string) => ({
   state: { status, input: {}, output, title: tool, metadata: {}, time: { start: 1, end: 2 } },
 })
 const completedTool = (tool: string, output: string) => toolPart(tool, "completed", output)
+/** Real ToolPart shape (schema session.ts): a ToolStateError carries `error`, never `output`. */
+const errorTool = (tool: string, error: string) => ({
+  ...toolPart(tool, "error", ""),
+  state: { status: "error", error, input: {}, title: tool, metadata: {}, time: { start: 1, end: 2 } },
+})
 
 describe("pickExchange", () => {
   test("a clean exchange yields the question and the answer", () => {
@@ -110,7 +118,7 @@ describe("extractObservedOutputs", () => {
     expect(extractObservedOutputs(message)).toBe("[tool read]\nfile contents here")
   })
 
-  test("only COMPLETED states carry output — running, pending and error are skipped", () => {
+  test("only COMPLETED states carry output — running, pending, and an error part with no error text are skipped", () => {
     for (const status of ["running", "pending", "error"]) {
       expect(extractObservedOutputs({ parts: [toolPart("read", status, "SHOULD NOT APPEAR")] })).toBe("")
     }
@@ -138,6 +146,29 @@ describe("extractObservedOutputs", () => {
     expect(cut).toBe(`[tool read]\n${"x".repeat(2500 - "[tool read]\n".length)}`)
     expect(cut.length).toBe(2500)
   })
+
+  test("v7.3 an ERROR tool part is harvested as a [FAIL <tool>: <error>] entry", () => {
+    expect(extractObservedOutputs({ parts: [errorTool("bash", "permission denied")] })).toBe("[FAIL bash: permission denied]")
+  })
+
+  test("the FAIL error text collapses newlines and multi-space, and truncates at 140 chars", () => {
+    expect(OBSERVED_ERROR_EXCERPT_CHARS).toBe(140)
+    expect(extractObservedOutputs({ parts: [errorTool("task", "line one\n\n  line   two\t")] })).toBe("[FAIL task: line one line two]")
+    const long = extractObservedOutputs({ parts: [errorTool("task", "z".repeat(500))] })
+    expect(long).toBe(`[FAIL task: ${"z".repeat(140)}]`)
+    expect(long.length).toBe("[FAIL task: ".length + 140 + "]".length)
+  })
+
+  test("completed and error parts interleave in part order", () => {
+    const message = { parts: [errorTool("task", "permission denied"), completedTool("read", "alpha"), errorTool("bash", "not found"), completedTool("grep", "gamma")] }
+    expect(extractObservedOutputs(message)).toBe("[FAIL task: permission denied]\n\n[tool read]\nalpha\n\n[FAIL bash: not found]\n\n[tool grep]\ngamma")
+  })
+
+  test("the 2500 cap still holds with FAIL entries present", () => {
+    const cut = extractObservedOutputs({ parts: [errorTool("task", "permission denied"), completedTool("read", "x".repeat(5000))] })
+    expect(cut.length).toBe(2500)
+    expect(cut.startsWith("[FAIL task: permission denied]\n\n[tool read]\nxxx")).toBe(true)
+  })
 })
 
 describe("extractTurnObservedOutputs", () => {
@@ -163,10 +194,25 @@ describe("extractTurnObservedOutputs", () => {
     expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("[tool read]\nfile contents here")
   })
 
-  test("error-state tool parts on a sibling contribute nothing", () => {
+  test("a non-ToolStateError error part (no error text) on a sibling contributes nothing", () => {
     const messages = [user(Q), { info: { role: "assistant" }, parts: [toolPart("task", "error", "SHOULD NOT APPEAR")] }, assistant(A), user("next")]
     expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("")
     expect(pickExchange(messages)?.observed).toBe("")
+  })
+
+  test("v7.3 a real ToolStateError on a sibling is harvested as a [FAIL] entry", () => {
+    const messages = [user(Q), { info: { role: "assistant" }, parts: [errorTool("bash", "permission denied")] }, assistant(A), user("next")]
+    expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("[FAIL bash: permission denied]")
+    expect(pickExchange(messages)?.observed).toBe("[FAIL bash: permission denied]")
+  })
+
+  test("v7.3 a turn-level error part truncates and collapses the same way a message-level one does", () => {
+    const noisy = `  first line\n\nsecond   line\t${"z".repeat(400)}`
+    const messages = [user(Q), { info: { role: "assistant" }, parts: [errorTool("task", noisy)] }, assistant(A), user("next")]
+    const observed = extractTurnObservedOutputs(messages, messages.length - 2)
+    expect(observed.startsWith("[FAIL task: first line second line ")).toBe(true)
+    expect(observed).not.toContain("\n")
+    expect(observed.length).toBe("[FAIL task: ".length + 140 + "]".length)
   })
 
   test("the scan STOPS at the user boundary — an earlier turn's tool part is not collected", () => {
@@ -376,6 +422,12 @@ describe("buildBatchQuestions", () => {
     expect(withO.grounding?.instructions).toContain(excerpt(long, OBSERVED_OUTPUT_EXCERPT_CHARS))
     expect(withO.grounding?.instructions).not.toContain("y".repeat(2501))
   })
+
+  test("v7.3 the question makes the grader answer for a [FAIL] entry in O", () => {
+    const instructions = buildBatchQuestions(REQUEST, { question: Q, answer: A, observed: "[FAIL bash: permission denied]" }).grounding?.instructions ?? ""
+    expect(instructions).toContain("If O contains entries marked [FAIL, an answer that does not acknowledge those failures scores low.")
+    expect(instructions.indexOf("OBSERVED OUTPUT (O):")).toBeLessThan(instructions.indexOf("If O contains entries marked [FAIL"))
+  })
 })
 
 describe("advisableProbability", () => {
@@ -403,11 +455,12 @@ describe("advisableProbability", () => {
 })
 
 describe("premise advisory gate", () => {
-  // Mirrors the handler decision: measured and at or below PREMISE_ADVISE_MAX advises.
-  const advises = (noul: number | null) => noul !== null && noul <= PREMISE_ADVISE_MAX
+  // Mirrors the handler decision: measured and at or below PREMISE_ADVISE_MAX advises STRONGLY.
+  const advises = (noul: number | null) => premiseTier(noul) !== undefined
 
-  test("the gate is 0.3 — advise only on a clearly-questionable premise", () => {
+  test("the strong gate is 0.3 and the soft ceiling 0.45", () => {
     expect(PREMISE_ADVISE_MAX).toBe(0.3)
+    expect(PREMISE_SOFT_MAX).toBe(0.45)
   })
 
   test("exactly at the gate advises (the boundary is inclusive)", () => {
@@ -416,7 +469,7 @@ describe("premise advisory gate", () => {
   })
 
   test("0.31 is telemetry only — a mid-range read is the flat verdict this rejects", () => {
-    expect(advises(0.31)).toBe(false)
+    expect(advises(0.46)).toBe(false)
     expect(advises(0.5)).toBe(false)
     expect(advises(1)).toBe(false)
   })
@@ -428,6 +481,18 @@ describe("premise advisory gate", () => {
 
   test("the gate is a separate threshold from MODE_GATE — a weak mode pick never advises", () => {
     expect(PREMISE_ADVISE_MAX).toBeLessThan(MODE_GATE)
+    expect(PREMISE_SOFT_MAX).toBeLessThan(MODE_GATE)
+  })
+
+  test("v7.3 the tier mapping: 0.29 and below strong, 0.39 soft, 0.46 and above none", () => {
+    expect(premiseTier(0.29)).toBe("strong")
+    expect(premiseTier(0.3)).toBe("strong")
+    expect(premiseTier(0.31)).toBe("soft")
+    expect(premiseTier(0.39)).toBe("soft")
+    expect(premiseTier(0.45)).toBe("soft")
+    expect(premiseTier(0.46)).toBeUndefined()
+    expect(premiseTier(1)).toBeUndefined()
+    expect(premiseTier(null)).toBeUndefined()
   })
 })
 
