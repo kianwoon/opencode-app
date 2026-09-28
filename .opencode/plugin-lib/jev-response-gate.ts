@@ -29,6 +29,12 @@
  * `noul` emits no `criteria` (jev.md §2) — a third id beside `choice` in one record is
  * legal (§1/§3).
  *
+ * v7.2: the O section aggregates completed tool outputs across the WHOLE turn's
+ * assistant cluster, not just the graded answer message. A turn that dispatches a
+ * hand writes its completed tool part on a SIBLING assistant message, and the final
+ * text continuation is another — so -2-only extraction read the continuation, found
+ * no completed tool part, and emitted "" over real evidence.
+ *
  * v6.1 CONTRACT:
  *   1. ONE POST per transform carries the WHOLE batch (jev.md §1): the mode `choice`
  *      and the `noul` grade are two question IDS in one record, not two sequential
@@ -177,6 +183,24 @@ export const extractObservedOutputs = (message: WireMessage | undefined): string
 
 const isUser = (message: WireMessage | undefined): boolean => message?.info?.role === "user"
 
+/**
+ * The O section for one TURN, not one message (v7.2). A turn that dispatches a hand
+ * writes its completed tool part on a SIBLING assistant message and the final text
+ * continuation is another, so reading only the answer message saw no completed part
+ * and emitted "" over real evidence. The scan walks back to the user boundary — that
+ * message ends the turn — and every non-empty per-message O block joins in order.
+ */
+export const extractTurnObservedOutputs = (messages: unknown, answerIndex: number): string => {
+  if (!Array.isArray(messages)) return ""
+  const uptoAnswer = (messages as WireMessage[]).slice(0, answerIndex + 1)
+  const start = uptoAnswer.findLastIndex((message) => isUser(message as WireMessage)) + 1
+  const blocks = uptoAnswer.slice(start).flatMap((message) => {
+    const observed = extractObservedOutputs(message)
+    return observed.length > 0 ? [observed] : []
+  })
+  return blocks.length > 0 ? excerpt(blocks.join("\n\n"), OBSERVED_OUTPUT_EXCERPT_CHARS) : ""
+}
+
 export type Exchange = { question: string; answer: string; observed: string }
 
 /**
@@ -191,7 +215,7 @@ export const pickExchange = (messages: unknown): Exchange | null => {
   const answer = textOf(wire.at(-2))
   if (answer.length < MIN_GATE_CHARS) return null
   const question = textOf(wire.slice(0, -2).findLast(isUser))
-  return question.length > 0 ? { question, answer, observed: extractObservedOutputs(wire.at(-2)) } : null
+  return question.length > 0 ? { question, answer, observed: extractTurnObservedOutputs(wire, wire.length - 2) } : null
 }
 
 /** Below this the tail is a chat line ("ok thanks"), not a request worth directing. */

@@ -13,6 +13,7 @@ import {
   buildBatchQuestions,
   excerpt,
   extractObservedOutputs,
+  extractTurnObservedOutputs,
   modeAdvisory,
   newRequestTail,
   parseBatchAnswers,
@@ -136,6 +137,60 @@ describe("extractObservedOutputs", () => {
     const cut = extractObservedOutputs({ parts: [completedTool("read", long)] })
     expect(cut).toBe(`[tool read]\n${"x".repeat(2500 - "[tool read]\n".length)}`)
     expect(cut.length).toBe(2500)
+  })
+})
+
+describe("extractTurnObservedOutputs", () => {
+  /** The real persisted shape of a dispatched hand's tool part (msg_0e72baa800033). */
+  const taskDispatch = {
+    id: "prt_task",
+    sessionID: "ses_test",
+    messageID: "msg_0e72baa800033",
+    type: "tool",
+    callID: "call_task",
+    tool: "task",
+    state: { status: "completed", output: "hand report text", input: {}, title: "t", metadata: {}, time: { start: 1, end: 2 } },
+  }
+
+  test("v7.2 the completed tool output on a SIBLING assistant message is collected", () => {
+    const messages = [user(Q), { info: { role: "assistant" }, parts: [taskDispatch] }, assistant(A), user("next")]
+    expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("[tool task]\nhand report text")
+    expect(pickExchange(messages)?.observed).toBe("[tool task]\nhand report text")
+  })
+
+  test("a single assistant message is unchanged", () => {
+    const messages = [user(Q), { info: { role: "assistant" }, parts: [{ type: "text", text: A }, completedTool("read", "file contents here")] }, user("next")]
+    expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("[tool read]\nfile contents here")
+  })
+
+  test("error-state tool parts on a sibling contribute nothing", () => {
+    const messages = [user(Q), { info: { role: "assistant" }, parts: [toolPart("task", "error", "SHOULD NOT APPEAR")] }, assistant(A), user("next")]
+    expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("")
+    expect(pickExchange(messages)?.observed).toBe("")
+  })
+
+  test("the scan STOPS at the user boundary — an earlier turn's tool part is not collected", () => {
+    const messages = [
+      user("old question"),
+      { info: { role: "assistant" }, parts: [completedTool("read", "STALE TURN OUTPUT")] },
+      user(Q),
+      assistant(A),
+      user("next"),
+    ]
+    expect(extractTurnObservedOutputs(messages, messages.length - 2)).toBe("")
+  })
+
+  test("the aggregate across the cluster is head-capped to exactly 2500 chars", () => {
+    const long = "x".repeat(5000)
+    const messages = [user(Q), { info: { role: "assistant" }, parts: [completedTool("read", long)] }, { info: { role: "assistant" }, parts: [completedTool("bash", long)] }, user("next")]
+    const aggregate = extractTurnObservedOutputs(messages, messages.length - 2)
+    expect(aggregate.length).toBe(2500)
+    expect(aggregate.startsWith("[tool read]\nxxx")).toBe(true)
+  })
+
+  test("a non-array tail yields an empty string", () => {
+    expect(extractTurnObservedOutputs(undefined, 1)).toBe("")
+    expect(extractTurnObservedOutputs([], 1)).toBe("")
   })
 })
 
