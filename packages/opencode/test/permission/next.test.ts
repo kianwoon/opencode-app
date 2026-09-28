@@ -587,6 +587,38 @@ it.instance(
         }),
       )
       expect(err).toBeInstanceOf(PermissionV1.DeniedError)
+      if (err instanceof PermissionV1.DeniedError) {
+        expect(err.permission).toBe("bash")
+        expect(err.pattern).toBe("rm -rf /")
+        expect(err.matched).toEqual({ permission: "bash", pattern: "*", action: "deny" })
+        expect(err.message).toContain("LAST matching rule")
+        expect(err.message).toContain('"action":"deny"')
+      }
+    }),
+  { git: true },
+)
+
+it.instance(
+  "ask - DeniedError names the winning rule when allow and deny both match",
+  () =>
+    Effect.gen(function* () {
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_test"),
+          permission: "bash",
+          patterns: ["ls"],
+          metadata: {},
+          always: [],
+          ruleset: [
+            { permission: "*", pattern: "*", action: "allow" },
+            { permission: "bash", pattern: "*", action: "deny" },
+          ],
+        }),
+      )
+      expect(err).toBeInstanceOf(PermissionV1.DeniedError)
+      if (err instanceof PermissionV1.DeniedError) {
+        expect(err.matched).toEqual({ permission: "bash", pattern: "*", action: "deny" })
+      }
     }),
   { git: true },
 )

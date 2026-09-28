@@ -74,7 +74,10 @@ const layer = Layer.effect(
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny") {
           return yield* new PermissionV1.DeniedError({
-            ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+            permission: request.permission,
+            pattern,
+            matched: rule,
+            ruleset: ruleset.filter((candidate) => Wildcard.match(request.permission, candidate.permission)),
           })
         }
         if (rule.action === "allow") continue

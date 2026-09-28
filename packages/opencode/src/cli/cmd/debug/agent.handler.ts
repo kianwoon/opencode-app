@@ -184,7 +184,12 @@ const createToolContext = Effect.fn("Cli.debug.agent.createToolContext")(functio
         for (const pattern of req.patterns) {
           const rule = Permission.evaluate(req.permission, pattern, ruleset)
           if (rule.action === "deny") {
-            throw new PermissionV1.DeniedError({ ruleset })
+            throw new PermissionV1.DeniedError({
+              permission: req.permission,
+              pattern,
+              matched: rule,
+              ruleset,
+            })
           }
         }
       })

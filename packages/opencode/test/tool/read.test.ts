@@ -293,7 +293,12 @@ describe("tool.read env file permissions", () => {
                           asked = true
                         }
                         if (rule.action === "deny") {
-                          throw new PermissionV1.DeniedError({ ruleset: info.permission })
+                          throw new PermissionV1.DeniedError({
+                            permission: req.permission,
+                            pattern,
+                            matched: rule,
+                            ruleset: info.permission,
+                          })
                         }
                       }
                     }),
