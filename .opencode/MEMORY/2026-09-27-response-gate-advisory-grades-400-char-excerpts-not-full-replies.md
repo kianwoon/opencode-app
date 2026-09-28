@@ -1,0 +1,11 @@
+---
+# response-gate advisory grades a 400-char EXCERPT — low scores on long replies are truncation artifacts, and the writer is plugin-lib, not jev-reasoning.ts
+
+**Symptom (2026-09-27):** nearly every main-agent reply and subagent return carried `[jev response-gate 0.22-0.54: low confidence in grounding or task-fit — verify before relying on this]`, including fully tool-anchored factual reports. The first investigation assumed the writer was `~/.config/opencode/plugins/jev-reasoning.ts` — both greps returned zero matches and cost a wasted handoff round.
+
+**Root cause:** the writer is `.opencode/plugin-lib/jev-response-gate.ts` (hook `experimental.text.complete`, result REPLACES the persisted text, rides the conversation TAIL). It sends ONE jev `noul` question — "How well is this answer grounded and on-task? 0 = unfounded/off-task, 1 = fully grounded" — over `excerpt(text)`, truncated to `EXCERPT_CHARS = 400` (`:32`, `:92`, `:94-99`). The grader model never sees tool-result anchors in a long report; it scores the opening fragment. `decideGate` (`:78-83`) annotates when `score < annotateBelow` (inclusive `>=` passes), default `annotateBelow: 0.7`, `enabled: true` (`:45-48`), overridable by `~/.config/opencode/response-gate.json` which is RE-READ on every hook call (hot, no restart). Fail-open: `score:null` (3s timeout, missing key, non-numeric), text under `MIN_GATE_CHARS = 240`, or already marked (`MARKER_PREFIX "[jev"`) → untouched. `jev-reasoning.ts` renders a DIFFERENT advisory (`JEV_REASONING_JUDGMENT`, `:330-341`) — wrong-file assumption is the trap.
+
+**Fix:** treat repeated low scores on long evidence-rich replies as truncation artifacts, not grounding failures. Knobs: `{"enabled": false}` or `{"annotateBelow": 0.3}` in `~/.config/opencode/response-gate.json` (hot); raise `EXCERPT_CHARS` in the plugin (plugin edit → node probe gate + app restart).
+
+**Acceptance gate:** response-gate debugging starts with `grep -rn "jev.response-gate" ~/.config/opencode/plugins/ <repo>/.opencode/plugin-lib/ <repo>/packages/opencode/src` to identify the writer BEFORE assuming jev-reasoning.ts; score semantics are quoted from `decideGate`/`buildQuestions`, never inferred; a low score on a long report is cross-checked against the 400-char excerpt before being called a grounding failure.
+---
