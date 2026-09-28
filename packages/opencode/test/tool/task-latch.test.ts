@@ -212,10 +212,12 @@ describe("tool.task success latch", () => {
   it.instance("task_id resume bypasses the latch", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
+      const sessions = yield* Session.Service
+      const resumed = yield* sessions.create({ parentID: chat.id, title: "resumed" })
       const tool = yield* TaskTool
       const def = yield* tool.init()
       const result = yield* def.execute(
-        { ...args, task_id: "ses_latch_resume" },
+        { ...args, task_id: resumed.id },
         ctxWith(chat, assistant, stubOps(), [completedPart(chat.id, assistant.id)]),
       )
 
@@ -292,11 +294,11 @@ describe("tool.task reuse", () => {
     }),
   )
 
-  it.instance("description documents reuse:false", () =>
+  it.instance("description documents reuse as a boolean, not a JSON token pair", () =>
     Effect.gen(function* () {
       const tool = yield* TaskTool
       const def = yield* tool.init()
-      expect(def.description).toContain("reuse:false")
+      expect(def.description).toContain("pass reuse as the boolean false")
       expect(def.description).toContain("Reuse semantics")
     }),
   )

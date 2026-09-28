@@ -45,6 +45,13 @@ const testHome = path.join(dir, "home")
 await fs.mkdir(testHome, { recursive: true })
 process.env["OPENCODE_TEST_HOME"] = testHome
 
+// Point the config dir at an empty, hermetic directory so the developer's real
+// ~/.config/opencode (agents, providers, permissions) can never leak into a test.
+const testConfigDir = path.join(dir, "config-global")
+await fs.mkdir(testConfigDir, { recursive: true })
+await fs.writeFile(path.join(testConfigDir, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2))
+process.env["OPENCODE_CONFIG_DIR"] = testConfigDir
+
 // Set test managed config directory to isolate tests from system managed settings
 const testManagedConfigDir = path.join(dir, "managed")
 process.env["OPENCODE_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir

@@ -312,12 +312,18 @@ it.instance("falls back to generic username when system user info is unavailable
 
 it.effect("creates global jsonc config with schema when no global configs exist", () =>
   withGlobalConfig({}, ({ dir }) =>
-    Effect.gen(function* () {
-      yield* Config.use.get().pipe(provideInstanceEffect(dir))
+    // preload.ts points OPENCODE_CONFIG_DIR at an empty dir so real user config cannot leak, and
+    // config.ts:269 skips the global-config seed whenever that flag is set — clear it here to exercise the seed branch.
+    withProcessEnv(
+      "OPENCODE_CONFIG_DIR",
+      undefined,
+      Effect.gen(function* () {
+        yield* Config.use.get().pipe(provideInstanceEffect(dir))
 
-      const content = yield* FSUtil.use.readFileString(path.join(dir, "opencode.jsonc"))
-      expect(content).toContain('"$schema": "https://opencode.ai/config.json"')
-    }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+        const content = yield* FSUtil.use.readFileString(path.join(dir, "opencode.jsonc"))
+        expect(content).toContain('"$schema": "https://opencode.ai/config.json"')
+      }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+    ),
   ),
 )
 
