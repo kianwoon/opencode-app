@@ -51,11 +51,25 @@ export function provider(model: Provider.Model) {
   return [PROMPT_DEFAULT]
 }
 
+export function fmtPermissions(ruleset: PermissionV1.Ruleset): string | undefined {
+  if (ruleset.length === 0) return undefined
+  // Order is semantic: the evaluator resolves with findLast, so the manifest
+  // must preserve merge order verbatim — the LAST matching rule wins.
+  const MAX = 60
+  return [
+    "Effective tool permissions — generated from config; the single source of truth for what you may do.",
+    "The LAST matching rule wins; list order is semantic.",
+    ...ruleset.slice(0, MAX).map((rule) => `- ${rule.permission} "${rule.pattern}": ${rule.action}`),
+    ...(ruleset.length > MAX ? [`... ${ruleset.length - MAX} more rules omitted`] : []),
+  ].join("\n")
+}
+
 export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly environmentDate: () => Effect.Effect<string>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
+  readonly permissions: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
   readonly workflow: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly rules: (paths: string[]) => Effect.Effect<string | undefined>
 }
@@ -150,6 +164,10 @@ const layer = Layer.effect(
           ]),
           "</mcp_instructions>",
         ].join("\n")
+      }),
+
+      permissions: Effect.fn("SystemPrompt.permissions")(function* (agent: Agent.Info, permission?: PermissionV1.Ruleset) {
+        return fmtPermissions(Permission.merge(agent.permission, permission ?? []))
       }),
 
       workflow: Effect.fn("SystemPrompt.workflow")(function* (agent: Agent.Info) {

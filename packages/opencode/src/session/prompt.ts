@@ -2173,7 +2173,7 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, workflowGuidance, rulePaths, modelMsgs] =
+            const [skills, env, instructions, mcpInstructions, workflowGuidance, permissionsManifest, rulePaths, modelMsgs] =
               yield* Effect.all([
                 sys.skills(agent),
                 sys.environment(model),
@@ -2186,6 +2186,7 @@ const layer = Layer.effect(
                 ),
                 sys.mcp(agent, session.permission),
                 sys.workflow(agent),
+                sys.permissions(agent, session.permission),
                 instruction.systemPaths().pipe(
                   // Set order is FS-discovery order; rules anchor rides the wire, so sort.
                   Effect.map((paths) => Array.from(paths).toSorted()),
@@ -2594,6 +2595,9 @@ const layer = Layer.effect(
             const environmentDate = yield* sys.environmentDate()
             const system = freezeSystem(sessionID, [
               ...gatedBlocks,
+              // Binding context, never a governor drop-candidate: config-derived
+              // only, so byte-stable across turns and safe in the frozen head.
+              ...(permissionsManifest ? [permissionsManifest] : []),
               // The frozen advisory must NOT ride the system prefix: `system[0]`
               // is the cached head (`messages[0]`), so any advisory text there
               // makes the head turn-variable and kills prefix-cache reads. It is
