@@ -1995,7 +1995,11 @@ ToolRegistry.register({
     const [queued, setQueued] = createSignal(false)
 
     const href = createMemo(() => sessionLink(childSessionId(), data.sessionHref))
-    const clickable = createMemo(() => !!(childSessionId() && (data.navigateToSession || href())))
+    // task_id handoffs carry no resolvable session until completion (metadata
+    // lands late; the title fallback cannot match a retitled resumed session)
+    // — keep a running card interactive so a click queues navigation and fires
+    // the moment the session link lands.
+    const clickable = createMemo(() => !!((childSessionId() || running()) && (data.navigateToSession || href())))
 
     const open = () => {
       const id = childSessionId()
