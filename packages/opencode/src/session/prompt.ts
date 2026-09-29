@@ -48,7 +48,7 @@ import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Cause, Duration, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
@@ -57,8 +57,8 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
-import { eq } from "drizzle-orm"
-import { SessionStableHeadTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { and, asc, eq, isNull, lte, max } from "drizzle-orm"
+import { FollowupTable, SessionStableHeadTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { node as SessionTodoNode, Service as TodoService } from "./todo"
 import { SessionTools } from "./tools"
@@ -79,6 +79,9 @@ const DEFAULT_MAX_STEPS = 1000
 // DEFAULT_MAX_STEPS wall guards against. Cap subagents at 100 unless their
 // explicit `steps` config is lower; the primary agent keeps the full budget.
 const SUBAGENT_MAX_STEPS = 100
+// V1 followup delivery: a followup becomes due one delay window after the turn
+// that admitted it, so redelivery never re-enters the same turn.
+const FOLLOWUP_DELIVER_DELAY_MS = 30_000
 // Re-entry cap: `runLoop` is re-entered fresh (step=0) whenever a finished run
 // is re-driven — e.g. a subagent↔parent wake ping-pong. Each fresh entry
 // silently restarts the loop, so a pathological wake cycle burns tokens with
@@ -427,6 +430,49 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const { db } = database
     const todos = yield* TodoService
+
+    // V1 followup delivery: promote every followup whose window has passed, in
+    // admission order, and report the next window so the loop can wake itself.
+    const promoteDue = Effect.fn("SessionPrompt.promoteDue")(function* (sessionID: SessionID, now: number) {
+      const due = yield* db
+        .select()
+        .from(FollowupTable)
+        .where(
+          and(
+            eq(FollowupTable.session_id, sessionID),
+            isNull(FollowupTable.promoted_seq),
+            lte(FollowupTable.deliver_at, now),
+          ),
+        )
+        .orderBy(asc(FollowupTable.admitted_seq))
+        .all()
+        .pipe(Effect.orDie)
+      if (due.length === 0) return []
+      yield* db
+        .update(FollowupTable)
+        .set({ promoted_seq: now })
+        .where(
+          and(
+            eq(FollowupTable.session_id, sessionID),
+            isNull(FollowupTable.promoted_seq),
+            lte(FollowupTable.deliver_at, now),
+          ),
+        )
+        .pipe(Effect.orDie)
+      return due.map((row) => row.payload)
+    })
+
+    const nextDueAt = Effect.fn("SessionPrompt.nextDueAt")(function* (sessionID: SessionID) {
+      const row = yield* db
+        .select({ deliver_at: FollowupTable.deliver_at })
+        .from(FollowupTable)
+        .where(and(eq(FollowupTable.session_id, sessionID), isNull(FollowupTable.promoted_seq)))
+        .orderBy(asc(FollowupTable.deliver_at))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      return row?.deliver_at
+    })
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -1758,6 +1804,31 @@ const layer = Layer.effect(
       yield* sessions.updateMessage(info)
       for (const part of parts) yield* sessions.updatePart(part)
 
+      // V1 followup delivery: admit a durable row for this turn's text so the
+      // loop can redeliver it later without re-deriving it from history.
+      const text = parts
+        .filter((part): part is SessionV1.TextPart => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+      if (text) {
+        const next = yield* db
+          .select({ max: max(FollowupTable.admitted_seq) })
+          .from(FollowupTable)
+          .where(eq(FollowupTable.session_id, input.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        yield* db
+          .insert(FollowupTable)
+          .values({
+            id: MessageID.ascending(),
+            session_id: input.sessionID,
+            admitted_seq: (next?.max ?? 0) + 1,
+            deliver_at: Date.now() + FOLLOWUP_DELIVER_DELAY_MS,
+            payload: { messageID: info.id, text },
+          })
+          .pipe(Effect.orDie)
+      }
+
       return { info, parts }
     }, Effect.scoped)
 
@@ -1955,6 +2026,27 @@ const layer = Layer.effect(
                   reason: verdict.reason,
                 })
               }
+            }
+
+            // V1 followup delivery: at the exit edge a due followup re-enters
+            // the loop once (one turn allowance reset) instead of waking a
+            // second runner; a still-pending one arms a self-wake instead.
+            const promoted = yield* promoteDue(sessionID, Date.now())
+            if (promoted.length > 0) {
+              yield* Effect.logInfo("loop continuing for followup", {
+                "session.id": sessionID,
+                count: promoted.length,
+              })
+              step = 0
+              continue
+            }
+            const due = yield* nextDueAt(sessionID)
+            if (due !== undefined) {
+              yield* Effect.sleep(Duration.millis(Math.max(0, due - Date.now()))).pipe(
+                Effect.andThen(runLoop(sessionID, "wake")),
+                Effect.ignore,
+                Effect.forkIn(scope),
+              )
             }
             break
           }

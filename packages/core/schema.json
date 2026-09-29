@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "66b3b2c9-83d4-4856-b2a8-e262e639cb92",
+  "id": "01ff5ff5-a1da-4336-976b-c43d7b0111b4",
   "prevIds": [
-    "9f1146b4-8242-4178-9e56-84e59f96620d"
+    "66b3b2c9-83d4-4856-b2a8-e262e639cb92"
   ],
   "ddl": [
     {
@@ -52,6 +52,10 @@
     },
     {
       "name": "project",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_followup",
       "entityType": "tables"
     },
     {
@@ -877,6 +881,76 @@
       "name": "commands",
       "entityType": "columns",
       "table": "project"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "session_followup"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_followup"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "admitted_seq",
+      "entityType": "columns",
+      "table": "session_followup"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "deliver_at",
+      "entityType": "columns",
+      "table": "session_followup"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "promoted_seq",
+      "entityType": "columns",
+      "table": "session_followup"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload",
+      "entityType": "columns",
+      "table": "session_followup"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "session_followup"
     },
     {
       "type": "text",
@@ -1924,6 +1998,21 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_session_followup_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_followup"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_message_session_id_session_id_fk",
       "entityType": "fks",
       "table": "message"
@@ -2188,6 +2277,15 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "session_followup_pk",
+      "table": "session_followup",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "message_pk",
       "table": "message",
       "entityType": "pks"
@@ -2334,6 +2432,28 @@
       "name": "permission_project_action_resource_idx",
       "entityType": "indexes",
       "table": "permission"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "promoted_seq",
+          "isExpression": false
+        },
+        {
+          "value": "deliver_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_followup_session_promoted_deliver_idx",
+      "entityType": "indexes",
+      "table": "session_followup"
     },
     {
       "columns": [

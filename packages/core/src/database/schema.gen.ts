@@ -138,6 +138,18 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_followup\` (
+          \`id\` text PRIMARY KEY,
+          \`session_id\` text NOT NULL,
+          \`admitted_seq\` integer NOT NULL,
+          \`deliver_at\` integer NOT NULL,
+          \`promoted_seq\` integer,
+          \`payload\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
+          CONSTRAINT \`fk_session_followup_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`message\` (
           \`id\` text PRIMARY KEY,
           \`session_id\` text NOT NULL,
@@ -292,6 +304,9 @@ export default {
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
       yield* tx.run(
         `CREATE UNIQUE INDEX \`permission_project_action_resource_idx\` ON \`permission\` (\`project_id\`,\`action\`,\`resource\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`session_followup_session_promoted_deliver_idx\` ON \`session_followup\` (\`session_id\`,\`promoted_seq\`,\`deliver_at\`);`,
       )
       yield* tx.run(
         `CREATE INDEX \`message_session_time_created_id_idx\` ON \`message\` (\`session_id\`,\`time_created\`,\`id\`);`,

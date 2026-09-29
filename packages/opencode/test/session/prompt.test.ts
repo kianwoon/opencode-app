@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { eq } from "drizzle-orm"
+import { asc, eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { describe, expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
@@ -26,7 +26,7 @@ import { Image } from "../../src/image/image"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { SessionMessageTable } from "@opencode-ai/core/session/sql"
+import { FollowupTable, SessionMessageTable } from "@opencode-ai/core/session/sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -845,6 +845,69 @@ it.instance("static loop returns assistant text through local provider", () =>
     expect(yield* llm.hits).toHaveLength(1)
     expect(yield* llm.pending).toBe(0)
   }),
+)
+
+it.instance(
+  "due followup promotes at the loop exit edge while a pending one stays unpromoted",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const { db } = yield* Database.Service
+      const session = yield* sessions.create({
+        title: "Followup delivery",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      // Two turns admit two followup rows; the second is forced due, the first
+      // stays in the future so the exit edge must skip it.
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "first turn" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "second turn" }],
+      })
+
+      const read = () =>
+        db
+          .select()
+          .from(FollowupTable)
+          .where(eq(FollowupTable.session_id, session.id))
+          .orderBy(asc(FollowupTable.admitted_seq))
+          .all()
+          .pipe(Effect.orDie)
+
+      const admitted = yield* read()
+      expect(admitted).toHaveLength(2)
+      expect(admitted.map((row) => row.promoted_seq)).toEqual([null, null])
+      // Admission order is monotonic so promotion order is deterministic.
+      expect(admitted[1].admitted_seq).toBeGreaterThan(admitted[0].admitted_seq)
+
+      yield* db
+        .update(FollowupTable)
+        .set({ deliver_at: Date.now() - 1000 })
+        .where(eq(FollowupTable.id, admitted[1].id))
+        .pipe(Effect.orDie)
+
+      yield* llm.text("done")
+
+      const result = yield* prompt.loop({ sessionID: session.id })
+      expect(result.info.role).toBe("assistant")
+
+      const after = yield* read()
+      // The due row is promoted; the not-yet-due row keeps promoted_seq null.
+      expect(after[0].promoted_seq).toBeNull()
+      expect(after[1].promoted_seq).not.toBeNull()
+      expect(after[1].promoted_seq).toBeGreaterThan(0)
+    }),
+  20_000,
 )
 
 it.instance("static loop consumes queued replies across turns", () =>

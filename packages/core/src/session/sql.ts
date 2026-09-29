@@ -166,6 +166,31 @@ export const SessionInputTable = sqliteTable(
   ],
 )
 
+export const FollowupTable = sqliteTable(
+  "session_followup",
+  {
+    id: text().primaryKey(),
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    admitted_seq: integer().notNull(),
+    deliver_at: integer().notNull(),
+    promoted_seq: integer(),
+    payload: text({ mode: "json" }).notNull().$type<{ messageID: string; text: string }>(),
+    time_created: integer()
+      .notNull()
+      .$default(() => Date.now()),
+  },
+  (table) => [
+    index("session_followup_session_promoted_deliver_idx").on(
+      table.session_id,
+      table.promoted_seq,
+      table.deliver_at,
+    ),
+  ],
+)
+
 export const SessionContextEpochTable = sqliteTable("session_context_epoch", {
   session_id: text()
     .$type<SessionSchema.ID>()
