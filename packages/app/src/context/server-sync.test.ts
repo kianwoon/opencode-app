@@ -87,10 +87,14 @@ describe("active session query", () => {
     const session = createServerSession({} as OpencodeClient)
     session.set("session_status", "ses_retry", { type: "retry", attempt: 2, message: "retrying", next: 10 })
 
-    seedActiveSessionStatuses(session, {
-      ses_running: { type: "running" },
-      ses_retry: { type: "running" },
-    })
+    seedActiveSessionStatuses(
+      session,
+      {
+        ses_running: { type: "running" },
+        ses_retry: { type: "running" },
+      },
+      {},
+    )
 
     expect(session.data.session_status.ses_running).toEqual({ type: "busy" })
     expect(session.data.session_status.ses_retry).toEqual({
@@ -99,6 +103,46 @@ describe("active session query", () => {
       message: "retrying",
       next: 10,
     })
+  })
+
+  test("clears a busy status the server no longer reports", () => {
+    const session = createServerSession({} as OpencodeClient)
+    const busy = { type: "busy" as const }
+    session.set("session_status", "ses_dead", busy)
+
+    seedActiveSessionStatuses(session, {}, { ses_dead: busy })
+
+    expect(session.data.session_status.ses_dead).toEqual({ type: "idle" })
+  })
+
+  test("keeps a status rewritten while the snapshot was in flight", () => {
+    const session = createServerSession({} as OpencodeClient)
+    const busy = { type: "busy" as const }
+    session.set("session_status", "ses_live", busy)
+
+    seedActiveSessionStatuses(session, {}, { ses_live: { type: "retry", attempt: 1, message: "m", next: 1 } })
+
+    expect(session.data.session_status.ses_live).toEqual({ type: "busy" })
+  })
+
+  test("clears a stale retry status that the server no longer reports", () => {
+    const session = createServerSession({} as OpencodeClient)
+    const retry = { type: "retry" as const, attempt: 1, message: "m", next: 1 }
+    session.set("session_status", "ses_retry_gone", retry)
+
+    seedActiveSessionStatuses(session, {}, { ses_retry_gone: retry })
+
+    expect(session.data.session_status.ses_retry_gone).toEqual({ type: "idle" })
+  })
+
+  test("keeps a richer local status while the server still reports it as running", () => {
+    const session = createServerSession({} as OpencodeClient)
+    const retry = { type: "retry" as const, attempt: 3, message: "m", next: 2 }
+    session.set("session_status", "ses_retry_kept", retry)
+
+    seedActiveSessionStatuses(session, { ses_retry_kept: { type: "running" } }, { ses_retry_kept: retry })
+
+    expect(session.data.session_status.ses_retry_kept).toEqual({ type: "retry", attempt: 3, message: "m", next: 2 })
   })
 })
 

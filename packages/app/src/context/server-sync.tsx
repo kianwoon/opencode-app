@@ -168,11 +168,24 @@ export const loadActiveSessionsQuery = (
 export function seedActiveSessionStatuses(
   session: Pick<ServerSession, "data" | "set">,
   active: SessionActiveOutput | Record<string, SessionStatus>,
+  before: Record<string, SessionStatus | undefined>,
 ) {
   for (const sessionID of Object.keys(active)) {
-    if (session.data.session_status[sessionID] !== undefined) continue
+    const current = session.data.session_status[sessionID]
+    // Preserve richer local states (retry/pending) the snapshot cannot express.
+    if (current !== undefined && current.type !== "busy") continue
     const status = active[sessionID]
     session.set("session_status", sessionID, status?.type === "running" ? { type: "busy" } : status)
+  }
+  // `GET /session/status` is SERVER-scoped (serverSDK.client.session.status()), so an id missing from
+  // the snapshot is idle — no directory check needed here, unlike global-sync/bootstrap.ts:406.
+  for (const [sessionID, previous] of Object.entries(before)) {
+    if (!previous || previous.type === "idle") continue
+    if (active[sessionID]) continue
+    // Rewritten while the fetch was in flight (e.g. optimistic busy from submit.ts): do not clobber.
+    if (session.data.session_status[sessionID] !== previous) continue
+    // reconcile, not a plain set: a store set MERGES, which would keep a stale retry's extra keys.
+    session.set("session_status", sessionID, reconcile({ type: "idle" }))
   }
 }
 
@@ -242,8 +255,9 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     loadActiveSessionsQuery(serverSDK.scope, {
       active: async () => {
         if ((await serverSDK.protocol) === "v1") {
+          const before = { ...session.data.session_status }
           const statuses = (await serverSDK.client.session.status()).data ?? {}
-          seedActiveSessionStatuses(session, statuses)
+          seedActiveSessionStatuses(session, statuses, before)
           for (const sessionID of Object.keys(statuses)) {
             void session.resolve(sessionID).catch(() => undefined)
           }
@@ -253,8 +267,9 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
             ),
           )
         }
+        const before = { ...session.data.session_status }
         const active = await serverSDK.api.session.active()
-        seedActiveSessionStatuses(session, active)
+        seedActiveSessionStatuses(session, active, before)
         for (const sessionID of Object.keys(active)) {
           void session.resolve(sessionID).catch(() => undefined)
         }
@@ -262,6 +277,16 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       },
     }),
   )
+  const STATUS_VERIFY_MS = 20_000
+  onMount(() => {
+    const timer = setInterval(() => {
+      // Events can be missed (stream drop, sleep/wake); while anything claims to be
+      // busy, ask the server instead of trusting the last event forever.
+      if (!Object.values(session.data.session_status).some((status) => (status?.type ?? "idle") !== "idle")) return
+      void activeSessionsQuery.refetch()
+    }, STATUS_VERIFY_MS)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const [globalStore, setGlobalStore] = createStore<GlobalStore>({
     get ready() {
