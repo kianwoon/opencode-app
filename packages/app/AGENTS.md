@@ -32,6 +32,8 @@
 - Backend (from `packages/opencode`): `bun run ./src/index.ts serve --port 4096`
 - App (from `packages/app`): `bun dev -- --port 4444`
 - Open `http://localhost:4444` to verify UI changes (it targets the backend at `http://localhost:4096`).
+- Single-file tests need the package's flags: `bun test --conditions=solid --preload ./happydom.ts <path>` from `packages/app` (see `test:unit` in `packages/app/package.json`). A bare `bun test <file>` dies with `SyntaxError: Export named 'use' not found in module '.../solid-js/web/dist/server.js'` — 0 pass, 1 error — which reads as a broken suite but is only a wrong invocation.
+- Parallel sessions share this working tree, so baseline-check a suspicious failure with `git log -1 -S '<literal>' -- <file>` (date the BEHAVIOR against the EXPECTATION) rather than `git stash`, which can disturb another session's uncommitted work.
 
 ## SDK client shape gotcha
 
@@ -106,3 +108,9 @@ Core workflow:
 - `busyWorkspaces` (layout.tsx) gates worktree create/remove/reset only. The create path relies on `worktree.ready`/`worktree.failed` events to clear busy — a missed event greys the whole sidebar section, so the create flow carries a 60s fallback clear and the overlay is dim-only (`opacity-50`, never `pointer-events-none`): session rows must stay clickable during worktree ops.
 - Sidebar child threads: `childSessions()` (layout/helpers.ts) renders ALL non-archived children under their parent, newest first. Do not reintroduce on-path-only rendering — it hid running subagent threads from the user entirely.
 - Sidebar shows no subagent children after restart: cause roots-only store fill (`parentID:null`/`roots:true` in session-load.ts); fix load all sessions, client-side filters (`sortedRootSessions`, `childSessions`) keep lists clean.
+
+## Session status gotchas
+
+- The sidebar's running dot reads `useSessionTabAvatarState` → `server-session.ts` `session_working`, which is `(session_status[id]?.type ?? "idle") !== "idle"` with NO expiry. `global-sync/child-store.ts` holds a SECOND, same-named `session_working` with a 10-minute `STALE_BUSY_MS` guard and NO production caller — do not try to fix the dot by editing that one. `session_working` also drives the composer's working state, so never add an expiry to it: a false "not running" is worse than a stuck dot.
+- `session_status` is event-driven, so one missed `session.status` idle event (stream drop, sleep/wake) used to strand a row as running until an app restart. Reconciliation lives in `server-sync.tsx` `seedActiveSessionStatuses` (bidirectional: clears local non-idle statuses the server snapshot no longer reports, guarded by a reference-equality check so an optimistic busy written mid-fetch is not clobbered) plus a 20s refetch that only runs while some status is non-idle. Never re-add a "skip if the id is already present" guard there — that guard was the bug.
+- Live check for "is anything actually running": `curl -s -u "$OPENCODE_SERVER_USERNAME:$OPENCODE_SERVER_PASSWORD" -H 'content-type: application/json' http://127.0.0.1:<sidecar-port>/session/status` returns only NON-idle sessions, so `{}` means every session is idle. Find the port with `lsof -nP -iTCP -sTCP:LISTEN | grep -i electron | grep 127.0.0.1`.
