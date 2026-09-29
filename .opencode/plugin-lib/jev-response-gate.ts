@@ -385,9 +385,18 @@ export async function askModeAndGrounding(request: string | null, exchange: Exch
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
-    if (!res.ok) return NO_ROWS
-    return parseBatchAnswers(await res.json())
-  } catch {
+    if (!res.ok) {
+      log("jev.batch-failopen", { reason: "http", status: res.status })
+      return NO_ROWS
+    }
+    try {
+      return parseBatchAnswers(await res.json())
+    } catch (err) {
+      log("jev.batch-failopen", { reason: "parse", error: err instanceof Error ? err.message : "unknown" })
+      return NO_ROWS
+    }
+  } catch (err) {
+    log("jev.batch-failopen", { reason: "throw", error: err instanceof Error ? err.message : "unknown" })
     return NO_ROWS
   }
 }

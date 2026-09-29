@@ -39,7 +39,7 @@
 - Session ID reuse adopts session; prompt ID reuse = exact retry only if session+prompt+delivery match.
 - `SessionExecution` process-global, Session-ID based; placement via `SessionStore`+`LocationServiceMap` only at drain start; interruption = active local chain, idle = no-op.
 - `SessionRunner`/models/tools/permissions/filesystem are Location-scoped; omitted workspace = implicit-local.
-- One `llm.stream()` per provider turn; reload projected history; no legacy `SessionPrompt.loop`.
+- One `llm.stream()` per provider turn; reload projected history. The V2 loop is `packages/core/src/session/runner/llm.ts`; the V1 loop `packages/opencode/src/session/prompt.ts` still exists, is what the desktop exercises (see Prod build target), and hosts the workflow DAG plus V1 followup delivery.
 - Drains process-local; `SessionRunCoordinator` joins same-session resumes, coalesces wakes, concurrent different sessions; no durable drain identity; post-crash retry needs explicit design.
 - Delivery: `steer` (default, promote at next safe boundary) vs `queue` (pending until idle, promote one at a time); any promotion resets agent turn allowance (batch steers = once).
 - EventV2 replay owner ≠ execution owner; System Context algebra/registry in `packages/core/src/system-context`; History selection + Epoch persistence Session-owned.

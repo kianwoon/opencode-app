@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "01ff5ff5-a1da-4336-976b-c43d7b0111b4",
+  "id": "71a2a301-6251-4926-9613-98d4b7e14f65",
   "prevIds": [
-    "66b3b2c9-83d4-4856-b2a8-e262e639cb92"
+    "01ff5ff5-a1da-4336-976b-c43d7b0111b4"
   ],
   "ddl": [
     {
@@ -88,6 +88,10 @@
     },
     {
       "name": "todo",
+      "entityType": "tables"
+    },
+    {
+      "name": "workflow_attempt",
       "entityType": "tables"
     },
     {
@@ -1658,6 +1662,36 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "part_id",
+      "entityType": "columns",
+      "table": "workflow_attempt"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "workflow_attempt"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "workflow_attempt"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "session_id",
       "entityType": "columns",
       "table": "session_share"
@@ -2342,6 +2376,15 @@
       "nameExplicit": false,
       "name": "session_pk",
       "table": "session",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "part_id"
+      ],
+      "nameExplicit": false,
+      "name": "workflow_attempt_pk",
+      "table": "workflow_attempt",
       "entityType": "pks"
     },
     {

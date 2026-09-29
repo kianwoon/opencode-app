@@ -43,7 +43,11 @@ const JEV_TYPESAFE_MODELS: Readonly<Record<string, string>> = {
   "jev-1.13.0": "jev-1.13.0",
 }
 
-const typesafeWireId = (id: string): string => JEV_TYPESAFE_MODELS[id] ?? "jev-latest"
+const typesafeWireId = (id: string): string => {
+  const wire = JEV_TYPESAFE_MODELS[id]
+  if (wire === undefined) console.warn(`jev-effort: unknown typesafe model id "${id}" -> jev-latest`)
+  return wire ?? "jev-latest"
+}
 
 /** Env var per provider namespace, tried after the matching auth.json entry. */
 const JEV_KEY_ENV: Readonly<Record<string, string>> = { typesafe: "TYPESAFE_API_KEY", openrouter: "OPENROUTER_API_KEY" }

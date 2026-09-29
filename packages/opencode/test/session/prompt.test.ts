@@ -26,7 +26,7 @@ import { Image } from "../../src/image/image"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { FollowupTable, SessionMessageTable } from "@opencode-ai/core/session/sql"
+import { FollowupTable, SessionMessageTable, WorkflowAttemptTable } from "@opencode-ai/core/session/sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -3047,33 +3047,32 @@ it.instance(
 )
 
 describe("workflow re-dispatch cap", () => {
-  test("counts attempts per workflow part, caps at MAX_STEP_ATTEMPTS_PER_WORKFLOW, and stays bounded", async () => {
-    const { MAX_STEP_ATTEMPTS_PER_WORKFLOW, WORKFLOW_ATTEMPTS_PRUNE_MIN, bumpWorkflowAttempts } = await import(
-      "../../src/session/prompt"
-    )
+  it.instance("counter is durable across process state and keyed per workflow part", () =>
+    Effect.gen(function* () {
+      const bumpWorkflowAttempts = SessionPrompt.bumpWorkflowAttempts
+      const { db } = yield* Database.Service
+      const part = (suffix: string) => `prt_${suffix}_${Math.random().toString(36).slice(2)}`
 
-    // A fresh part is allowed at attempt 1..N and refused past N.
-    const part = `prt_${Math.random().toString(36).slice(2)}`
-    for (let i = 1; i <= MAX_STEP_ATTEMPTS_PER_WORKFLOW; i++) {
-      expect(bumpWorkflowAttempts(part)).toBe(i)
-    }
-    expect(bumpWorkflowAttempts(part)).toBe(MAX_STEP_ATTEMPTS_PER_WORKFLOW + 1)
+      // Durability: the counter lives in the DB, so a row seeded by an earlier
+      // process is honored on a cold bump. A process-local Map would return 1
+      // here and re-admit a workflow that had already been refused.
+      const seeded = part("seeded")
+      yield* db
+        .insert(WorkflowAttemptTable)
+        .values({ part_id: seeded, attempts: 2, time_updated: Date.now() })
+        .pipe(Effect.orDie)
+      expect(yield* bumpWorkflowAttempts(seeded)).toBe(3)
+      expect(yield* bumpWorkflowAttempts(seeded)).toBeGreaterThan(MAX_STEP_ATTEMPTS_PER_WORKFLOW)
 
-    // Counters are per part, not global: another workflow starts fresh.
-    const other = `prt_${Math.random().toString(36).slice(2)}`
-    expect(bumpWorkflowAttempts(other)).toBe(1)
+      // A missing row starts at 1 — absent is 0, not undefined.
+      expect(yield* bumpWorkflowAttempts(part("missing"))).toBe(1)
 
-    // Regression guard: the map is bounded. Saturating it evicts cold entries
-    // (their count restarts — a workflow untouched for that long is free to
-    // try again), but NEVER the entry being bumped: a hot workflow keeps
-    // accumulating past the cap instead of being silently reset to 1.
-    for (let i = 0; i < WORKFLOW_ATTEMPTS_PRUNE_MIN + 50; i++) bumpWorkflowAttempts(`prt_fill_${i}`)
-    const hot = `prt_hot_${Math.random().toString(36).slice(2)}`
-    expect(bumpWorkflowAttempts(hot)).toBe(1)
-    expect(bumpWorkflowAttempts(hot)).toBe(2)
-    expect(bumpWorkflowAttempts(hot)).toBe(3)
-    expect(bumpWorkflowAttempts(hot)).toBeGreaterThan(MAX_STEP_ATTEMPTS_PER_WORKFLOW)
-  })
+      // Two sequential bumps on an absent row accumulate 1 then 2.
+      const twice = part("twice")
+      expect(yield* bumpWorkflowAttempts(twice)).toBe(1)
+      expect(yield* bumpWorkflowAttempts(twice)).toBe(2)
+    }),
+  )
 })
 
 describe("drain wall ceiling", () => {

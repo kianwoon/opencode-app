@@ -23,6 +23,7 @@ import {
   premiseTier,
   resolveResponseGateConfig,
 } from "./jev-response-gate.ts"
+import { jevMeasuredChoice } from "../../packages/opencode/src/jev/client.ts"
 
 const Q = "Why did the compaction fire twice? Check the config and the overflow thresholds."
 const A = "The answer cites the overflow threshold and the config flag. ".repeat(8)
@@ -584,5 +585,75 @@ describe("CHOICE_STATE", () => {
 
   test("the approach-ranking bias that under-picked enumerate-first is gone", () => {
     expect(CHOICE_STATE).not.toContain("prefer grounded")
+  })
+})
+
+describe("fold parity with the core jevMeasuredChoice", () => {
+  const known = new Set(Object.values(MODE_OPTIONS))
+  const row = (choice: unknown, strength?: unknown) => ({
+    answers: {
+      approach:
+        strength === undefined
+          ? { choice }
+          : { choice, probabilities: { [String(choice)]: strength }, confidence: 0.5 },
+    },
+  })
+
+  test("the plugin's mode gate admits exactly the rows the core fold admits", () => {
+    const payloads = [
+      row(MODE_OPTIONS.direct, 0.9),
+      row(MODE_OPTIONS["enumerate-first"], MODE_GATE),
+      row(MODE_OPTIONS["investigate-first"], 0.69),
+      row(MODE_OPTIONS.direct, 0.4),
+      row("not-a-mode", 0.99),
+      row(MODE_OPTIONS.direct),
+      row(MODE_OPTIONS.direct, "high"),
+      row(MODE_OPTIONS.direct, Number.NaN),
+      row(undefined, 0.99),
+      {},
+    ]
+    for (const payload of payloads) {
+      const core = jevMeasuredChoice((payload as { answers?: { approach?: unknown } }).answers?.approach)
+      const mode = parseBatchAnswers(payload).mode
+      const coreAdmits = core !== undefined && core.strength >= MODE_GATE && known.has(core.choice)
+      const pluginAdmits = mode !== null && advisableProbability(mode.probability) !== null
+      // Any disagreement between the two folds fails here. The plugin fold is
+      // the STRICTER one — a choice outside MODE_OPTIONS yields no mode row at
+      // all — so the contract is: same admits, and the SAME gated strength
+      // wherever the plugin does carry a row.
+      expect([pluginAdmits, mode === null ? null : advisableProbability(mode.probability)]).toEqual([
+        coreAdmits,
+        coreAdmits && core ? advisableProbability(core.strength) : null,
+      ])
+    }
+  })
+
+  test("the plugin fold reads the same measured strength the core fold reads", () => {
+    const payload = row(MODE_OPTIONS.direct, 0.75)
+    expect(parseBatchAnswers(payload).mode).toEqual({ choice: "direct", probability: 0.75, confidence: 0.5 })
+    expect(jevMeasuredChoice(payload.answers.approach)?.strength).toBe(0.75)
+  })
+})
+
+describe("FAIL contract", () => {
+  test("the grounding instructions name the [FAIL clause when observed output carries one", () => {
+    const questions = buildBatchQuestions(REQUEST, {
+      question: Q,
+      answer: A,
+      observed: "[FAIL bash: permission denied]\n\n[tool read]\nfile contents here",
+    })
+    expect(questions.grounding?.instructions).toContain("[FAIL")
+  })
+
+  test("a payload whose observed output holds a [FAIL entry still parses without throwing", () => {
+    const questions = buildBatchQuestions(REQUEST, {
+      question: Q,
+      answer: A,
+      observed: "[FAIL task: permission denied]\n\n[tool read]\nalpha",
+    })
+    const payload = { answers: { approach: { choice: MODE_OPTIONS.direct, probabilities: { [MODE_OPTIONS.direct]: 0.8 } } } }
+    expect(() => parseBatchAnswers(payload)).not.toThrow()
+    expect(parseBatchAnswers(payload).mode?.probability).toBe(0.8)
+    expect(questions.grounding?.instructions).toContain("[FAIL task: permission denied]")
   })
 })

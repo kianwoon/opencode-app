@@ -99,7 +99,9 @@ const JEV_TYPESAFE_MODELS: Readonly<Record<string, string>> = {
 
 /** Canonical wire id for a typesafe spec; unknown ids degrade to `jev-latest`. */
 function typesafeWireId(id: string): string {
-  return JEV_TYPESAFE_MODELS[id] ?? "jev-latest"
+  const wire = JEV_TYPESAFE_MODELS[id]
+  if (wire === undefined) console.warn(`jev: unknown typesafe model id "${id}" -> jev-latest`)
+  return wire ?? "jev-latest"
 }
 
 export interface JevTransport {

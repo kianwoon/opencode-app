@@ -201,6 +201,16 @@ export const SessionContextEpochTable = sqliteTable("session_context_epoch", {
   baseline_seq: integer().notNull(),
 })
 
+// Durable per-workflow re-dispatch counter. Keyed by workflow PART id (the
+// durable identity), so a process restart cannot reset the cap. Deliberately
+// has no foreign key: a workflow part id is not a session row, and the part
+// table's own lifetime is not what bounds this counter.
+export const WorkflowAttemptTable = sqliteTable("workflow_attempt", {
+  part_id: text().primaryKey(),
+  attempts: integer().notNull(),
+  time_updated: integer().notNull(),
+})
+
 export const SessionStableHeadTable = sqliteTable("session_stable_head", {
   session_id: text()
     .$type<SessionSchema.ID>()

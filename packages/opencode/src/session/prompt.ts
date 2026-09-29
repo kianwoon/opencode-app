@@ -58,7 +58,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { and, asc, eq, isNull, lte, max } from "drizzle-orm"
-import { FollowupTable, SessionStableHeadTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { FollowupTable, SessionStableHeadTable, SessionTable, WorkflowAttemptTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { node as SessionTodoNode, Service as TodoService } from "./todo"
 import { SessionTools } from "./tools"
@@ -110,35 +110,30 @@ const REENTRY_PRUNE_MIN = 128
 // `finish: null`. Past this many attempts the step hard-fails, the summary is
 // written, and the workflow part is marked terminal so it is never re-collected.
 export const MAX_STEP_ATTEMPTS_PER_WORKFLOW = 3
-const workflowAttempts = new Map<string, number>()
-// Bounded like `reentries`, but keyed by part id and therefore with no expiry
-// clock: sweep the least-recently-bumped entries once the map grows past the
-// cap, so a long-lived server that admits many workflows cannot leak memory.
-// A part id is unique per admission, so an evicted entry can only mean a
-// workflow that has not been re-collected in a very long time — it restarts
-// its count instead of being permanently refused.
-export const WORKFLOW_ATTEMPTS_PRUNE_MIN = 512
 
 /**
- * Increment the re-dispatch counter for a workflow part, pruning the map when
- * it grows. Re-insertion on every bump keeps Map insertion order as recency
- * order, so eviction drops the coldest entries first.
+ * Increment the durable re-dispatch counter for a workflow part and return the
+ * new value. Persisted rather than process-local: the cap is the only guard
+ * against a poison workflow re-dispatch loop, and an in-memory counter resets to
+ * zero on restart, re-admitting a workflow that had already been refused.
  * @internal Exported for testing
  */
-export function bumpWorkflowAttempts(id: string) {
-  const attempts = (workflowAttempts.get(id) ?? 0) + 1
-  workflowAttempts.delete(id)
-  workflowAttempts.set(id, attempts)
-  if (workflowAttempts.size > WORKFLOW_ATTEMPTS_PRUNE_MIN) {
-    for (const key of workflowAttempts.keys()) {
-      if (workflowAttempts.size <= WORKFLOW_ATTEMPTS_PRUNE_MIN) break
-      // Never evict the entry being bumped: it is the one under test.
-      if (key === id) continue
-      workflowAttempts.delete(key)
-    }
-  }
+export const bumpWorkflowAttempts = Effect.fn("bumpWorkflowAttempts")(function* (id: string) {
+  const database = yield* Database.Service
+  const row = yield* database.db
+    .select({ attempts: WorkflowAttemptTable.attempts })
+    .from(WorkflowAttemptTable)
+    .where(eq(WorkflowAttemptTable.part_id, id))
+    .get()
+    .pipe(Effect.orDie)
+  const attempts = (row?.attempts ?? 0) + 1
+  yield* database.db
+    .insert(WorkflowAttemptTable)
+    .values({ part_id: id, attempts, time_updated: Date.now() })
+    .onConflictDoUpdate({ target: WorkflowAttemptTable.part_id, set: { attempts, time_updated: Date.now() } })
+    .pipe(Effect.orDie)
   return attempts
-}
+})
 // Wall-clock backstop for a single drain: a drain that makes no
 // user-visible progress for 45 minutes is failed, not slow. The ceiling is
 // checked between steps (never mid-stream) so healthy long single steps are
@@ -972,7 +967,9 @@ const layer = Layer.effect(
       // every step, write the summary, and settle terminally so the part is
       // consumed. `record()` on the bounded path keeps the invariant that a
       // step is never left neither completed nor failed.
-      const attempts = bumpWorkflowAttempts(task.id)
+      const attempts = yield* bumpWorkflowAttempts(task.id).pipe(
+        Effect.provideService(Database.Service, database),
+      )
       if (attempts > MAX_STEP_ATTEMPTS_PER_WORKFLOW) {
         const terminalError = new NamedError.Unknown({
           message:

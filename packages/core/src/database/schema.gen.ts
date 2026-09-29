@@ -261,6 +261,13 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`workflow_attempt\` (
+          \`part_id\` text PRIMARY KEY,
+          \`attempts\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`session_share\` (
           \`session_id\` text PRIMARY KEY,
           \`id\` text NOT NULL,
