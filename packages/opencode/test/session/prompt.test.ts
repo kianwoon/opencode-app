@@ -1488,7 +1488,13 @@ it.instance(
 
       yield* prompt.cancel(chat.id)
       const exit = yield* Fiber.await(fiber)
-      expect(Exit.isSuccess(exit)).toBe(true)
+      // A propagated cancel surfaces as a FAILED loop, not a success: the task
+      // tool fails with "Task cancelled" once the child session reports the
+      // cancelled status (src/tool/task.ts). That failure IS the propagation
+      // signal this case exists to assert — asserting Exit.isSuccess here
+      // predates that literal (added 2026-06-04, 3003867c25) and is stale.
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect((Cause.squash(exit.cause) as Error).message).toBe("Task cancelled")
 
       expect((yield* status.get(chat.id)).type).toBe("idle")
       expect((yield* status.get(childID)).type).toBe("idle")
@@ -2809,8 +2815,21 @@ it.instance(
       // No double-wrapping: the <task ...> envelope from the task tool is
       // stripped before injection.
       expect(body).not.toContain("<task_result>")
-      // And the injected payload is bounded, not the full 60k.
-      expect(body.length).toBeLessThan(60_000)
+      // The bound belongs to the INJECTED payload, not to the whole request body:
+      // UPSTREAM_RESULT_MAX_CHARS (src/session/prompt.ts) clips the 25k upstream
+      // result to its per-upstream cap and marks the cut, so the injected block is
+      // strictly shorter than the raw result it came from. A whole-body bound is
+      // not a workflow invariant and is not asserted here: the same body also
+      // carries the build step's own 25k output in history plus the system prompt,
+      // which alone crossed 60k when 3b4c5c00d9 began injecting the
+      // effective-permissions manifest (2026-09-28), long after this case was born.
+      const injected = body.slice(
+        body.indexOf("<upstream-result>"),
+        body.lastIndexOf("</upstream-result>"),
+      )
+      expect(injected.length).toBeGreaterThan(0)
+      expect(injected).toContain("...[truncated]...")
+      expect(injected.length).toBeLessThan(huge.length)
 
       // Step task parts carry workflow step metadata for UI/telemetry.
       const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
