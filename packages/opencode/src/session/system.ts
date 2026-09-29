@@ -60,10 +60,12 @@ export function fmtPermissions(ruleset: PermissionV1.Ruleset): string | undefine
   // matching rule win — order of the remaining rules is still semantic.
   const MAX = 60
   return [
-    "Effective tool permissions — generated from config; the single source of truth for what you may do.",
+    "Effective tool permissions — generated from config; the config-derived lower bound, not a ceiling: runtime session approvals (approved) may additionally allow. See Permission.evaluate (ruleset + approved) for the verdict on any call.",
     "Dead and duplicate layers are resolved away; where entries still overlap, the LAST matching rule wins.",
     ...effective.slice(0, MAX).map((rule) => `- ${rule.permission} "${rule.pattern}": ${rule.action}`),
-    ...(effective.length > MAX ? [`... ${effective.length - MAX} more rules omitted`] : []),
+    // Name WHAT is dropped: the head is kept, so the most-recently-declared tail
+    // (where findLast-based overrides live) is what goes missing.
+    ...(effective.length > MAX ? [`... ${effective.length - MAX} more rules omitted (most-recent tail dropped)`] : []),
   ].join("\n")
 }
 

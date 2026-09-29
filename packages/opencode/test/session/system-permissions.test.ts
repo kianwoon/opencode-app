@@ -13,7 +13,7 @@ test("fmtPermissions renders the effective ruleset in evaluation order", () => {
   ])
   expect(manifest).toBe(
     [
-      "Effective tool permissions — generated from config; the single source of truth for what you may do.",
+      "Effective tool permissions — generated from config; the config-derived lower bound, not a ceiling: runtime session approvals (approved) may additionally allow. See Permission.evaluate (ruleset + approved) for the verdict on any call.",
       "Dead and duplicate layers are resolved away; where entries still overlap, the LAST matching rule wins.",
       `- bash "*": deny`,
       `- bash "echo *": allow`,
@@ -30,7 +30,7 @@ test("fmtPermissions caps the rule list and reports the remainder", () => {
   }))
   const lines: string[] = fmtPermissions(ruleset)?.split("\n") ?? []
   expect(lines.filter((line) => line.startsWith("- ")).length).toBe(60)
-  expect(lines.at(-1)).toBe("... 10 more rules omitted")
+  expect(lines.at(-1)).toBe("... 10 more rules omitted (most-recent tail dropped)")
 })
 
 test("fmtPermissions keeps both allows when the later rule is narrower", () => {

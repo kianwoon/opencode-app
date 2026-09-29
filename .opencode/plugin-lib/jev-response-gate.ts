@@ -427,7 +427,7 @@ const appendAdvisory = (messages: unknown, text: string): string => {
 
 const dataRoot = () => process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`
 
-function log(event: string, fields: Record<string, unknown>) {
+function log(event: string, fields: Record<string, unknown>): void {
   const line = JSON.stringify({ ts: Date.now(), event, ...fields }) + "\n"
   void (async () => {
     try {
@@ -446,6 +446,8 @@ export const JevResponseGatePlugin = async (): Promise<Hooks> => ({
   // from the tail message. One batched call, two readouts with two different jobs: the
   // mode row acts on the answer being produced, the noul row is measurement only.
   "experimental.chat.messages.transform": async (input, output) => {
+    // Advisory-only hook: a throw here would surface as a model error, so swallow.
+    try {
     const sessionID = (output.messages.at(-1) as { info?: { sessionID?: string } } | undefined)?.info?.sessionID
     if (!sessionID) return
     const cfg = resolveResponseGateConfig(readConfig())
@@ -488,6 +490,9 @@ export const JevResponseGatePlugin = async (): Promise<Hooks> => ({
     // advisory: a score on a final answer cannot change that answer.
     if (exchange !== null && batch.score !== null) {
       log("jev.response-gate", { sessionID, score: batch.score, advised: false, observedChars: exchange.observed.length })
+    }
+    } catch {
+      return
     }
   },
 })
