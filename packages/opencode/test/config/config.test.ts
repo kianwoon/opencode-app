@@ -405,6 +405,46 @@ it.effect("updates global config and omits empty shell key in jsonc", () =>
   ),
 )
 
+// Regression: updateGlobal rewrites the whole file, so a patch touching an
+// unrelated key must not drop keys that arrived from an external edit.
+it.effect("preserves external agent permission keys when updating an unrelated global key", () =>
+  withGlobalConfig(
+    {
+      config: {
+        username: "original",
+        agent: { brain: { permission: { bash: { "sqlite3 -readonly *": "allow" } } } },
+      },
+    },
+    ({ dir }) =>
+      Effect.gen(function* () {
+        // Simulate the external hand edit: the file on disk gains a key that no
+        // cached snapshot in this process has ever seen.
+        yield* writeConfigEffect(
+          dir,
+          {
+            $schema: "https://opencode.ai/config.json",
+            username: "original",
+            agent: { brain: { permission: { bash: { "sqlite3 -readonly *": "allow", "jq *": "allow" } } } },
+          },
+          "opencode.json",
+        )
+
+        // The Desktop Settings UI sends the FULL config it last read, not a
+        // sparse patch — that snapshot predates the external edit above.
+        yield* Config.use.updateGlobal({
+          username: "updated",
+          agent: { brain: { permission: { bash: { "sqlite3 -readonly *": "allow" } } } } as never,
+        })
+
+        const written = yield* FSUtil.use.readJson(path.join(dir, "opencode.json"))
+        expect(written).toMatchObject({
+          username: "updated",
+          agent: { brain: { permission: { bash: { "sqlite3 -readonly *": "allow", "jq *": "allow" } } } },
+        })
+      }),
+  ),
+)
+
 it.effect("logs global update diagnostics once without exposing values", () =>
   withGlobalConfig(
     {
