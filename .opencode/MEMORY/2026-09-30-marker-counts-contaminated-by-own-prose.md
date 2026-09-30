@@ -1,0 +1,7 @@
+# Marker-string counts in the session DB are contaminated by your own prose (2026-09-30)
+
+- **Symptom**: `select count(*) from part where data like '%JEV_REASONING_JUDGMENT%'` returned **151**, read as "151 leaked advisory parts". Filtering on the writer's own discriminator (`data like '%synthetic%true%'`) returned **11** — the other 140 were the agent's OWN messages quoting the marker while investigating it (plus one earlier grep's permission-eval echo).
+- **Cause**: `part.data` stores model/agent text verbatim, so any analysis that NAMES a marker writes it into the same table it is counting. Same class as the documented whole-file `grep -c` contamination for `opencode.log` (root AGENTS.md, 2026-09-27 refinements), but the store here is the session DB rather than a log.
+- **Method**: before asserting a count, (1) select on a field the WRITER sets (here `synthetic:true`; elsewhere `json_type(...)` or the tool name), never the bare marker; (2) group by session and report first/last timestamps against the writer's mtime; (3) phrase as "N writer-marked parts", never "N occurrences".
+- **Acceptance gate**: the reported count is reproducible from a query that excludes your own message ids or filters a writer-set field, and first/last timestamps are stated.
+- **Evidence**: raw `like` 151 -> synthetic-marked 11 (7 in the investigating session, 2 on 09-29, 1 + 1 on 09-27/09-28). Concluding from 151 would have been a false "systemic leak" claim.
