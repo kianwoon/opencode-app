@@ -8,6 +8,7 @@ import {
 } from "./deep-links"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import {
+  busyChildrenByParent,
   childSessions,
   closeHomeProject,
   compareSessionTime,
@@ -311,6 +312,37 @@ describe("layout workspace helpers", () => {
     ]
 
     expect(childSessions(list, "root", 3).map((item) => item.id)).toEqual(["newest", "newer", "older"])
+  })
+
+  test("counts busy and retrying children, never idle or root sessions", () => {
+    const list = [
+      session({ id: "root", directory: "/workspace" }),
+      session({ id: "busy", directory: "/workspace", parentID: "root" }),
+      session({ id: "retrying", directory: "/workspace", parentID: "root" }),
+      session({ id: "idle", directory: "/workspace", parentID: "root" }),
+      session({ id: "other", directory: "/workspace", parentID: "elsewhere" }),
+    ]
+
+    expect(
+      busyChildrenByParent({
+        session: list,
+        session_status: {
+          busy: { type: "busy" },
+          retrying: { type: "retry", attempt: 1, message: "rate limited", next: 2 },
+          idle: { type: "idle" },
+          other: { type: "busy" },
+        },
+      }),
+    ).toEqual(
+      new Map([
+        ["root", 2],
+        ["elsewhere", 1],
+      ]),
+    )
+  })
+
+  test("treats a child with no reported status as idle", () => {
+    expect(busyChildrenByParent({ session: [session({ id: "kid", directory: "/workspace", parentID: "root" })], session_status: {} })).toEqual(new Map())
   })
 
   test("formats fallback project display name", () => {

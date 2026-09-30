@@ -75,7 +75,9 @@ export const busyChildrenByParent = (store: {
   const status = store.session_status
   return snapshot.reduce((counts, session) => {
     if (!session.parentID) return counts
-    if (status[session.id]?.type !== "busy") return counts
+    // Matches session_working (server-session.ts): any non-idle status is work,
+    // so retrying children light the tree the same way busy ones do.
+    if ((status[session.id]?.type ?? "idle") === "idle") return counts
     counts.set(session.parentID, (counts.get(session.parentID) ?? 0) + 1)
     return counts
   }, new Map<string, number>())

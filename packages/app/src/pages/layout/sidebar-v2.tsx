@@ -824,23 +824,6 @@ function ProjectSection(
     return (store.session ?? []).some((session) => store.session_working(session.id))
   })
   const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
-  // TEMP badge-probe (remove after diagnosis)
-  createEffect(() => {
-    const store = childStore()[0]
-    const w = window as unknown as { __badgeProbe?: Record<string, unknown>[] }
-    const log = (w.__badgeProbe ??= [])
-    log.push({
-      at: Date.now(),
-      worktree: props.project.worktree,
-      sessionVersion: store.sessionVersion,
-      sessions: store.session.length,
-      busy: Object.entries(store.session_status)
-        .filter(([, status]) => status?.type === "busy")
-        .map(([id]) => id),
-      counts: [...busyChildrenByParent(store)],
-    })
-    if (log.length > 100) log.splice(0, log.length - 100)
-  })
 
   return (
     <div data-component="sidebar-v2-project" class="flex min-w-0 flex-col">
