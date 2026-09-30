@@ -29,6 +29,7 @@ import {
   displayNamesFor,
   getProjectAvatarSource,
   restorableSessions,
+  sessionWorking,
   sortedRootSessions,
 } from "./helpers"
 import { useSessionTabAvatarState } from "./project-avatar-state"
@@ -824,9 +825,13 @@ function ProjectSection(
   // rendered only under the active session). Server-scoped, so it stays live for
   // a project the user has switched away from.
   const projectBusy = createMemo(() => {
-    const busy = busySessionDirectories(sessionWork())
+    const data = sessionWork()
+    const busy = busySessionDirectories(data)
     if (busy.has(pathKey(props.project.worktree))) return true
-    return (props.project.sandboxes ?? []).some((sandbox) => busy.has(pathKey(sandbox)))
+    if ((props.project.sandboxes ?? []).some((sandbox) => busy.has(pathKey(sandbox)))) return true
+    // The child rows we render prove these ids are live even when `data.info` has
+    // not retained them, which is the common case for a background subagent.
+    return (childStore()[0].session ?? []).some((session) => sessionWorking(data, session.id))
   })
   const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
 
@@ -1121,33 +1126,35 @@ function SessionStatusIcon(props: {
   active: boolean
   unread: boolean
 }) {
-  // Unsent message takes precedence: show an edit icon so the user knows the
-  // composer has text that hasn't been sent.
+  // Running wins over the unsent draft marker: the session holding a half-typed
+  // message is exactly the one the user is watching, so it must still show that
+  // work is in flight. Unsent used to wrap this branch and hid the red dot on the
+  // active session whenever a draft existed.
   return (
     <Show
-      when={!props.unsent}
+      when={!props.running}
       fallback={
-        <span
-          class="flex size-4 items-center justify-center"
-          classList={{
-            "text-v2-icon-icon-muted": !props.active,
-            "text-v2-icon-icon-base": props.active,
-          }}
-        >
-          <IconV2 name="edit" size="small" />
+        // Running session: bright red blinking dot. Uses the fixed v2 red-600
+        // token (theme-independent) so it stays vivid in both light and dark
+        // mode instead of the theme's danger background (dark red / light pink).
+        // The status-blink animation (fast opacity 0.15 -> 1) makes the dot
+        // visibly blink so the user notices the session is running.
+        <span class="flex size-4 items-center justify-center">
+          <span class="size-3 rounded-full bg-[var(--v2-red-600)] animate-status-blink" />
         </span>
       }
     >
       <Show
-        when={!props.running}
+        when={!props.unsent}
         fallback={
-          // Running session: bright red blinking dot. Uses the fixed v2 red-600
-          // token (theme-independent) so it stays vivid in both light and dark
-          // mode instead of the theme's danger background (dark red / light pink).
-          // The status-blink animation (fast opacity 0.15 -> 1) makes the dot
-          // visibly blink so the user notices the session is running.
-          <span class="flex size-4 items-center justify-center">
-            <span class="size-3 rounded-full bg-[var(--v2-red-600)] animate-status-blink" />
+          <span
+            class="flex size-4 items-center justify-center"
+            classList={{
+              "text-v2-icon-icon-muted": !props.active,
+              "text-v2-icon-icon-base": props.active,
+            }}
+          >
+            <IconV2 name="edit" size="small" />
           </span>
         }
       >

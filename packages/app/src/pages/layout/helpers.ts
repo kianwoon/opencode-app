@@ -72,14 +72,14 @@ type SessionWorkData = {
 
 // Matches session_working (server-session.ts): any non-idle status is work, so
 // retrying children light the tree the same way busy ones do.
-const working = (data: SessionWorkData, sessionID: string) =>
+export const sessionWorking = (data: SessionWorkData, sessionID: string) =>
   (data.session_status[sessionID]?.type ?? "idle") !== "idle"
 
 export const busyChildrenByParent = (data: SessionWorkData) => {
   const counts = new Map<string, number>()
   for (const session of Object.values(data.info)) {
     if (!session?.parentID) continue
-    if (!working(data, session.id)) continue
+    if (!sessionWorking(data, session.id)) continue
     counts.set(session.parentID, (counts.get(session.parentID) ?? 0) + 1)
   }
   return counts
@@ -90,7 +90,7 @@ export const busyChildrenByParent = (data: SessionWorkData) => {
 export const busySessionDirectories = (data: SessionWorkData) =>
   new Set(
     Object.values(data.info)
-      .filter((session): session is Session => !!session && working(data, session.id))
+      .filter((session): session is Session => !!session && sessionWorking(data, session.id))
       .map((session) => pathKey(session.directory)),
   )
 
