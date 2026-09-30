@@ -910,6 +910,62 @@ it.instance(
   20_000,
 )
 
+it.instance(
+  "v1 self-wake after a due followup returns the session to idle",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const status = yield* SessionStatus.Service
+      const sessions = yield* Session.Service
+      const { db } = yield* Database.Service
+      const chat = yield* sessions.create({
+        title: "Self wake idle",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "first turn" }],
+      })
+
+      // A row that is NOT yet due at the exit edge, so the loop must arm the
+      // self-wake instead of promoting in place. Without the runner the wake's
+      // exit never publishes idle and the busy entry leaks forever.
+      const seeded = yield* MessageV2.filterCompactedEffect(chat.id)
+      const source = seeded.findLast((item) => item.info.role === "user")
+      if (!source) throw new Error("no user message to seed the followup from")
+      yield* db
+        .insert(FollowupTable)
+        .values({
+          id: MessageID.ascending(),
+          session_id: chat.id,
+          admitted_seq: 99,
+          deliver_at: Date.now() + 1000,
+          payload: { messageID: source.info.id, text: "wake" },
+        })
+        .pipe(Effect.orDie)
+
+      yield* llm.text("done")
+      yield* llm.text("after wake")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const current = yield* status.get(chat.id)
+          return current.type === "idle" ? true : undefined
+        }),
+        "timed out waiting for the self-wake to return the session to idle",
+        "10 seconds",
+      )
+    }),
+  20_000,
+)
+
 it.instance("static loop consumes queued replies across turns", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

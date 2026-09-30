@@ -2056,7 +2056,12 @@ const layer = Layer.effect(
             const due = yield* nextDueAt(sessionID)
             if (due !== undefined) {
               yield* Effect.sleep(Duration.millis(Math.max(0, due - Date.now()))).pipe(
-                Effect.andThen(runLoop(sessionID, "wake")),
+                // The wake MUST go through the runner: a raw runLoop sets busy at the
+                // loop top but nothing publishes idle on its exit (finishRun wraps only
+                // ensureRunning fibers), so the busy status leaks until restart.
+                Effect.andThen(
+                  state.ensureRunning(sessionID, findLastAssistant(sessionID), runLoop(sessionID, "wake")),
+                ),
                 Effect.ignore,
                 Effect.forkIn(scope),
               )
