@@ -201,6 +201,18 @@ const getWorkspaceID = (sessionID: SessionIDType) =>
       .pipe(Effect.orDie)
   })
 
+const readArchivedColumn = (sessionID: SessionIDType) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    const row = yield* db
+      .select({ time_archived: SessionTable.time_archived })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    return row?.time_archived ?? null
+  })
+
 const clearSessionPath = (sessionID: SessionIDType) =>
   Effect.gen(function* () {
     const { db } = yield* Database.Service
@@ -840,6 +852,37 @@ describe("session HttpApi", () => {
         })
         expect(response.status).toBe(200)
         expect((yield* json<Session.Info>(response)).time.archived).toBe(-1)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "clears the archived timestamp when unarchiving",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const session = yield* createSession({ title: "unarchive" })
+        const update = pathFor(SessionPaths.update, { sessionID: session.id })
+
+        const archived = yield* requestJson<Session.Info>(update, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: 1234 } }),
+        })
+        expect(archived.time.archived).toBe(1234)
+        expect(yield* readArchivedColumn(session.id)).toBe(1234)
+
+        // An explicit null must clear the column, not be dropped as undefined
+        // (drizzle skips undefined, which silently kept a stale archive stamp).
+        const restored = yield* requestJson<Session.Info>(update, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: null } }),
+        })
+        expect(restored.id).toBe(session.id)
+        expect(restored.time.archived).toBeUndefined()
+        expect(yield* readArchivedColumn(session.id)).toBeNull()
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

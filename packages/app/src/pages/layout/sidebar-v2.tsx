@@ -403,7 +403,9 @@ export function NewSidebar() {
               })
               .catch(() => undefined)
           }
-          await serverCtx.sync.project.loadSessions(project.worktree)
+          // force: the restored sessions are absent from the cached non-archived
+          // list, so the default cached short-circuit would never show them.
+          await serverCtx.sync.project.loadSessions(project.worktree, { force: true })
         }}
         titleKey="sidebar.project.unarchiveSessions.title"
         confirmKey="sidebar.project.unarchiveSessions.confirm"

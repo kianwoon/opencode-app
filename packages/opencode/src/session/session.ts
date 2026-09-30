@@ -428,7 +428,7 @@ export interface Interface {
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
-  readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
+  readonly setArchived: (input: { sessionID: SessionID; time: number | null }) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
   readonly setAgentModel: (input: {
     sessionID: SessionID
@@ -478,7 +478,8 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 export const use = serviceUse(Service)
 
 export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" | "permission"> & {
-  time?: Partial<Info["time"]>
+  // `archived: null` is an explicit clear; `undefined` leaves the stored value alone.
+  time?: Omit<Partial<Info["time"]>, "archived"> & { archived?: Info["time"]["archived"] | null }
   share?: Partial<NonNullable<Info["share"]>> | null
   summary?: Info["summary"] | null
   revert?: Info["revert"] | null
@@ -756,10 +757,15 @@ const layer: Layer.Layer<
     const patch = (sessionID: SessionID, info: Patch) =>
       Effect.gen(function* () {
         const current = yield* get(sessionID)
+        const time = info.time ? { ...current.time, ...info.time } : current.time
+        // An explicit null clear is an ABSENT archived time in Info; the projector
+        // turns that absence back into SQL NULL, while an untouched undefined
+        // leaves the stored column alone.
+        if (info.time?.archived === null) delete (time as { archived?: number }).archived
         const next = {
           ...current,
           ...info,
-          time: info.time ? { ...current.time, ...info.time } : current.time,
+          time,
           share: info.share === null ? undefined : info.share ? { ...current.share, ...info.share } : current.share,
           summary: info.summary === null ? undefined : (info.summary ?? current.summary),
           revert: info.revert === null ? undefined : (info.revert ?? current.revert),
@@ -776,7 +782,7 @@ const layer: Layer.Layer<
       yield* patch(input.sessionID, { title: input.title }).pipe(Effect.orDie)
     })
 
-    const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
+    const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time: number | null }) {
       yield* patch(input.sessionID, { time: { archived: input.time } }).pipe(Effect.orDie)
     })
 

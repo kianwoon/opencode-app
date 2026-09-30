@@ -70,7 +70,11 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
-    time_archived: info.time.archived,
+    // The Updated event carries the FULL session info, so an absent archived
+    // time means "not archived" and must be written as SQL NULL. Passing
+    // undefined instead would make drizzle skip the column and silently keep a
+    // stale archive stamp (the unarchive bug).
+    time_archived: info.time.archived ?? null,
   }
 }
 

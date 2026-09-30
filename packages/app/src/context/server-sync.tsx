@@ -438,7 +438,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     },
   })
 
-  async function loadSessions(directory: string, options?: { limit?: number }) {
+  // `force` skips the sessionMeta short-circuit so a server-side mutation the
+  // client cannot derive from the cached list (e.g. unarchive) is reflected in
+  // the sidebar without a restart. Unrelated loads keep the cached fast path.
+  async function loadSessions(directory: string, options?: { limit?: number; force?: boolean }) {
     const key = directoryKey(directory)
     const pending = sessionLoads.get(key)
     if (pending) {
@@ -450,7 +453,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     const [store, setStore] = children.child(directory, { bootstrap: false })
     const meta = sessionMeta.get(key)
     const retainedLimit = Math.max(store.limit, options?.limit ?? 0, meta?.limit ?? 0)
-    if (meta && meta.limit >= retainedLimit) {
+    if (!options?.force && meta && meta.limit >= retainedLimit) {
       const next = trimSessions(store.session, {
         limit: retainedLimit,
         permission: session.data.permission,
