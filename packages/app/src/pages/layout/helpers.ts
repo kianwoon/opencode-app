@@ -40,6 +40,27 @@ export const childSessions = (sessions: Session[] | undefined, rootID: string, l
   return limit === undefined ? children : children.slice(0, limit)
 }
 
+// Sessions eligible for "Unarchive": archived roots only, never the session the
+// user currently has open. Guards against PATCHing a live session when the list
+// response is stale or the server dropped the archived filter.
+export const restorableSessions = (
+  sessions: Session[] | undefined,
+  directory: string,
+  activeSessionID?: string,
+  keep?: number,
+) => {
+  const restorable = (sessions ?? [])
+    .filter(
+      (session) =>
+        pathKey(session.directory) === pathKey(directory) &&
+        !session.parentID &&
+        session.time?.archived != null &&
+        session.id !== activeSessionID,
+    )
+    .sort(compareSessionTime)
+  return keep === undefined ? restorable : restorable.slice(0, keep)
+}
+
 export const busyChildrenByParent = (store: {
   session?: Session[]
   session_status: Record<string, SessionStatus | undefined>

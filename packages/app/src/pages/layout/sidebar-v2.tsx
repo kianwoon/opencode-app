@@ -27,6 +27,7 @@ import {
   displayName,
   displayNamesFor,
   getProjectAvatarSource,
+  restorableSessions,
   sortedRootSessions,
 } from "./helpers"
 import { useSessionTabAvatarState } from "./project-avatar-state"
@@ -67,22 +68,19 @@ async function listProjectSessions(serverCtx: ServerCtx, directory: string) {
 }
 
 // Fetches archived root sessions for a project directory, most recently
-// updated first. Mirrors listProjectSessions so unarchive targets the same
-// ordering the sidebar uses.
+// updated first. Must use the experimental list: every non-experimental list
+// hardcodes isNull(time_archived) server-side, so session.list silently returns
+// the newest LIVE sessions and unarchive would PATCH sessions in use. The
+// vendored api client predates that endpoint, so go through the v1 SDK client,
+// which does expose it (same path server-compat.ts uses for search).
 async function listArchivedProjectSessions(serverCtx: ServerCtx, directory: string) {
-  // The server returns archived sessions only when archived:true is passed
-  // (the list filters isNull(time_archived) otherwise). The vendored api
-  // client types predate that param, so the call is cast at the boundary.
-  const result = await serverCtx.sdk.api.session.list({
+  const result = await serverCtx.sdk.client.experimental.session.list({
     directory,
-    parentID: null,
-    order: "desc",
+    roots: true,
+    archived: true,
     limit: 10000,
-    ...({ archived: true } as { archived: boolean }),
-  } as never)
-  return (result.data ?? []).sort(
-    (a, b) => (b.time?.updated ?? b.time?.created ?? 0) - (a.time?.updated ?? a.time?.created ?? 0),
-  )
+  })
+  return result.data ?? []
 }
 
 function isBackgroundOpen(event: MouseEvent) {
@@ -158,6 +156,12 @@ export function NewSidebar() {
   const command = useCommand()
   const dialog = useDialog()
   const [projectExpanded, setProjectExpanded] = createStore({} as Record<string, boolean>)
+  // The session the user currently has open. Unarchive must never PATCH it, so
+  // the restore list excludes it even if the server still reports it archived.
+  const activeSessionId = createMemo(() => {
+    const route = layout.route()
+    return route.type === "session" ? route.sessionId : undefined
+  })
   let dialogRun = 0
   let dialogDead = false
   onCleanup(() => {
@@ -379,12 +383,14 @@ export function NewSidebar() {
         project={project}
         staleCountAccessor={async () => {
           const sessions = await listArchivedProjectSessions(serverCtx, project.worktree)
-          return Math.min(sessions.length, SESSION_CLEANUP_KEEP)
+          return restorableSessions(sessions, project.worktree, activeSessionId()).length
         }}
         onConfirm={async () => {
           if (dialogDead || dialogRun !== run) return
           const sessions = await listArchivedProjectSessions(serverCtx, project.worktree)
-          const restore = sessions.slice(0, SESSION_CLEANUP_KEEP)
+          // Guard on time.archived even though the server filters it: a stale or
+          // mis-filtered response must never PATCH a live/streaming session.
+          const restore = restorableSessions(sessions, project.worktree, activeSessionId(), SESSION_CLEANUP_KEEP)
           for (const session of restore) {
             await sdk.client.session
               .update({
@@ -809,6 +815,14 @@ function ProjectSection(
   // background children keep working. Count busy children so the root row can
   // surface that work even when the child rows are collapsed.
   const runningChildCounts = createMemo(() => busyChildrenByParent(childStore()[0]))
+  // A project is busy when any session in its directory is working: the roots
+  // we render, plus subagents whose rows are hidden (collapsed project, or a
+  // child rendered only under the active session).
+  const projectBusy = createMemo(() => {
+    const store = childStore()[0]
+    if ([...runningChildCounts().values()].some((count) => count > 0)) return true
+    return (store.session ?? []).some((session) => store.session_working(session.id))
+  })
   const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
   // TEMP badge-probe (remove after diagnosis)
   createEffect(() => {
@@ -849,12 +863,22 @@ function ProjectSection(
               style={{ transform: props.expanded ? "rotate(0deg)" : "rotate(-90deg)" }}
             />
           </span>
-          <ProjectAvatar
-            fallback={props.name}
-            src={getProjectAvatarSource(props.project.id, props.project.icon)}
-            variant={getProjectAvatarVariant(props.project.icon?.color)}
-            unread={unseen() > 0}
-          />
+          <span class="relative flex size-4 shrink-0 items-center justify-center">
+            <ProjectAvatar
+              fallback={props.name}
+              src={getProjectAvatarSource(props.project.id, props.project.icon)}
+              variant={getProjectAvatarVariant(props.project.icon?.color)}
+              unread={unseen() > 0}
+            />
+            {/* Mirrors the project-avatar unread dot, offset left so the two never overlap. */}
+            <Show when={projectBusy()}>
+              <span
+                data-slot="project-avatar-busy-dot"
+                aria-hidden="true"
+                class="pointer-events-none absolute -top-0.5 -left-0.5 size-1.5 rounded-full bg-[var(--v2-red-600)] animate-status-blink"
+              />
+            </Show>
+          </span>
           <span class="min-w-0 flex-1 truncate text-v2-text-text-base [font-weight:530]">{props.name}</span>
         </button>
         <div class="hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 group-hover/project:opacity-100">
@@ -1038,7 +1062,10 @@ function SessionRow(props: {
     () => props.session.id,
   )
   // Running sessions are reported by the server's session_working status.
-  const running = avatar.loading
+  // A busy subagent makes the parent busy for the user even when the parent's
+  // own status is idle, and the child row is hidden unless its parent is the
+  // active session, so the main status icon has to absorb that signal.
+  const running = createMemo(() => avatar.loading() || props.runningChildren > 0)
   const pending = avatar.pending
   // Unsent message: read the session tab's prompt memory. The prompt session is
   // created lazily when the tab is opened, so this only reflects tabs that have

@@ -20,6 +20,7 @@ import {
   homeProjectDirectories,
   homeSessionServerStatus,
   latestRootSession,
+  restorableSessions,
   sortedRootSessions,
   toggleHomeProjectSelection,
   uniqueDisplayNames,
@@ -260,6 +261,24 @@ describe("layout workspace helpers", () => {
 
     expect(childSessions(list, "root").map((item) => item.id)).toEqual(["new", "old"])
     expect(childSessions(list, "missing")).toEqual([])
+  })
+
+  test("restores only archived roots, never live or open sessions", () => {
+    const list = [
+      // Live roots are what the unarchived list wrongly returned; they must never restore.
+      session({ id: "live", directory: "/workspace", time: { created: 9, updated: 9 } }),
+      session({ id: "open", directory: "/workspace", time: { created: 8, updated: 8, archived: 8 } }),
+      session({ id: "child", directory: "/workspace", parentID: "root", time: { created: 7, updated: 7, archived: 7 } }),
+      session({ id: "elsewhere", directory: "/other", time: { created: 6, updated: 6, archived: 6 } }),
+      session({ id: "oldest", directory: "/workspace", time: { created: 1, updated: 1, archived: 1 } }),
+      session({ id: "newest", directory: "/workspace", time: { created: 5, updated: 5, archived: 5 } }),
+    ]
+
+    expect(restorableSessions(list, "/workspace").map((item) => item.id)).toEqual(["open", "newest", "oldest"])
+    expect(restorableSessions(list, "/workspace", "open").map((item) => item.id)).toEqual(["newest", "oldest"])
+    expect(restorableSessions(list, "/workspace", undefined, 1).map((item) => item.id)).toEqual(["open"])
+    expect(restorableSessions([], "/workspace")).toEqual([])
+    expect(restorableSessions(undefined, "/workspace")).toEqual([])
   })
 
   test("limits children to the newest sessions", () => {
