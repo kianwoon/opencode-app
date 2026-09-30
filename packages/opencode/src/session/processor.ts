@@ -695,6 +695,16 @@ const layer = Layer.effect(
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,
             )
+
+            // Tool calls can outlive the provider stream: the turn must stay busy
+            // until they finish, or the session reports idle mid-tool. Wait here,
+            // in the interruptible body - cancel interrupts this wait and the
+            // bounded 250ms abort in cleanup() still marks unfinished parts.
+            yield* Effect.forEach(
+              Object.values(ctx.toolcalls),
+              (call) => Deferred.await(call.done).pipe(Effect.ignore),
+              { concurrency: "unbounded" },
+            )
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {

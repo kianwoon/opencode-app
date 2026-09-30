@@ -2064,6 +2064,70 @@ unixNoLLMServer(
 )
 
 unix(
+  "v1 turn stays busy until an orphaned tool call finishes after the stream ends",
+  () =>
+    Effect.gen(function* () {
+      const { dir, llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const status = yield* SessionStatus.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Busy until tool done",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "run bash" }],
+      })
+
+      // Tool call AND stop finish on the same stream: the loop breaks while the
+      // tool is still executing, so only processor.ts can keep the turn busy.
+      yield* llm.push(reply().tool("bash", { command: 'sleep 2; printf tool-done', workdir: path.resolve(dir) }).stop())
+
+      const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+
+      const running = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+          const assistant = msgs.findLast((item) => item.info.role === "assistant")
+          const tool = assistant ? toolPart(assistant.parts) : undefined
+          return tool?.state.status === "running" ? true : undefined
+        }),
+        "timed out waiting for bash tool to start running",
+        "10 seconds",
+      )
+      expect(running).toBe(true)
+
+      // Past cleanup()'s 250ms abort bound, with the tool still executing.
+      yield* Effect.sleep("600 millis")
+      expect((yield* status.get(chat.id)).type).toBe("busy")
+
+      const midway = yield* MessageV2.filterCompactedEffect(chat.id)
+      const aborted = midway.flatMap((item) => item.parts).some(
+        (part) => part.type === "tool" && part.state.status === "error" && part.state.error === "Tool execution aborted",
+      )
+      expect(aborted).toBe(false)
+
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isSuccess(exit)).toBe(true)
+      if (!Exit.isSuccess(exit)) return
+
+      // The loop returns the LAST assistant message (the follow-up text step),
+      // which has no tool part; the completed tool lives in the earlier step's
+      // persisted message.
+      const history = yield* MessageV2.filterCompactedEffect(chat.id)
+      const persisted = history.flatMap((item) => item.parts).find((part) => part.type === "tool")
+      expect(persisted?.state.status).toBe("completed")
+      expect((yield* status.get(chat.id)).type).toBe("idle")
+    }),
+  { git: true, config: cfg },
+  30_000,
+)
+
+unix(
   "cancel finalizes interrupted bash tool output through normal truncation",
   () =>
     Effect.gen(function* () {
