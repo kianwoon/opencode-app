@@ -1,0 +1,597 @@
+{
+  "$comment": "Phase 2 conflict resolution. Ordering only; no prompt wording lives in this file. Regenerate targets with `bun run assemble.ts --write`.",
+  "phase2": {
+    "dropped": [
+      "D21",
+      "D27"
+    ],
+    "resolutions": [
+      {
+        "ruleId": "D22",
+        "policy": "todo-cadence",
+        "resolution": "D22 batching wins over anthropic 'VERY frequently' / 'do not batch up'."
+      },
+      {
+        "ruleId": "D28",
+        "policy": "brevity-cap",
+        "resolution": "single 4-line cap + explicit mode flag; default.txt duplicate at old line 87 removed."
+      },
+      {
+        "ruleId": "D29",
+        "policy": "search-scope",
+        "resolution": "one scope-based rule (Task for exploratory, direct search for needle queries)."
+      },
+      {
+        "ruleId": "D30",
+        "policy": "parallelism",
+        "resolution": "parallelize independent calls only; dependent calls sequential."
+      },
+      {
+        "ruleId": "D31",
+        "policy": "completion-reporting",
+        "resolution": "concise outcome + verification + blockers; step narration and anthropic's 10-item churn example removed."
+      }
+    ]
+  },
+  "targets": {
+    "default.txt": {
+      "adapter": "adapters/default.md",
+      "output": "../default.txt",
+      "segments": [
+        {
+          "local": "part0"
+        },
+        {
+          "core": "D02"
+        },
+        {
+          "local": "part1"
+        },
+        {
+          "core": "D06"
+        },
+        {
+          "local": "part2"
+        },
+        {
+          "core": "D07"
+        },
+        {
+          "local": "part3"
+        },
+        {
+          "core": "D28"
+        },
+        {
+          "core": "D32"
+        },
+        {
+          "local": "part4"
+        },
+        {
+          "core": "D33"
+        },
+        {
+          "local": "part5"
+        },
+        {
+          "core": "D34"
+        },
+        {
+          "core": "D31"
+        },
+        {
+          "local": "part6"
+        },
+        {
+          "core": "D09"
+        },
+        {
+          "local": "part7"
+        },
+        {
+          "core": "D35"
+        },
+        {
+          "core": "D22"
+        },
+        {
+          "core": "D23"
+        },
+        {
+          "core": "D29"
+        },
+        {
+          "core": "D30"
+        },
+        {
+          "local": "part8"
+        },
+        {
+          "core": "D24"
+        }
+      ]
+    },
+    "anthropic.txt": {
+      "adapter": "adapters/anthropic.md",
+      "output": "../anthropic.txt",
+      "segments": [
+        {
+          "core": "D36"
+        },
+        {
+          "core": "D02"
+        },
+        {
+          "local": "part0"
+        },
+        {
+          "core": "D06"
+        },
+        {
+          "local": "part1"
+        },
+        {
+          "core": "D07"
+        },
+        {
+          "local": "part2"
+        },
+        {
+          "core": "D28"
+        },
+        {
+          "local": "part3"
+        },
+        {
+          "core": "D22"
+        },
+        {
+          "local": "part4"
+        },
+        {
+          "core": "D09"
+        },
+        {
+          "local": "part5"
+        },
+        {
+          "core": "D23"
+        },
+        {
+          "core": "D29"
+        },
+        {
+          "local": "part6"
+        },
+        {
+          "core": "D30"
+        },
+        {
+          "local": "part7"
+        },
+        {
+          "core": "D31"
+        },
+        {
+          "local": "part8"
+        },
+        {
+          "core": "D24"
+        }
+      ]
+    },
+    "gpt.txt": {
+      "adapter": "adapters/gpt.md",
+      "output": "../gpt.txt",
+      "segments": [
+        {
+          "local": "part0"
+        },
+        {
+          "core": "D38"
+        },
+        {
+          "local": "part1"
+        },
+        {
+          "core": "D37"
+        }
+      ]
+    },
+    "gemini.txt": {
+      "adapter": "adapters/gemini.md",
+      "output": "../gemini.txt",
+      "segments": [
+        {
+          "local": "part0"
+        },
+        {
+          "core": "D37"
+        }
+      ]
+    },
+    "kimi.txt": {
+      "adapter": "adapters/kimi.md",
+      "output": "../kimi.txt",
+      "segments": [
+        {
+          "local": "part0"
+        }
+      ]
+    },
+    "trinity.txt": {
+      "adapter": "adapters/trinity.md",
+      "output": "../trinity.txt",
+      "segments": [
+        {
+          "local": "part0"
+        },
+        {
+          "core": "D07"
+        },
+        {
+          "local": "part1"
+        },
+        {
+          "core": "D32"
+        },
+        {
+          "local": "part2"
+        },
+        {
+          "core": "D33"
+        },
+        {
+          "local": "part3"
+        },
+        {
+          "core": "D34"
+        },
+        {
+          "local": "part4"
+        },
+        {
+          "core": "D09"
+        },
+        {
+          "local": "part5"
+        },
+        {
+          "core": "D35"
+        },
+        {
+          "core": "D37"
+        },
+        {
+          "local": "part6"
+        },
+        {
+          "core": "D23"
+        },
+        {
+          "local": "part7"
+        },
+        {
+          "core": "D24"
+        }
+      ]
+    },
+    "codex.txt": {
+      "adapter": "adapters/codex.md",
+      "output": "../codex.txt",
+      "segments": [
+        {
+          "core": "D36"
+        },
+        {
+          "local": "part0"
+        },
+        {
+          "core": "D38"
+        },
+        {
+          "local": "part1"
+        }
+      ]
+    },
+    "beast.txt": {
+      "adapter": "adapters/beast.md",
+      "output": "../beast.txt",
+      "segments": [
+        {
+          "local": "part0"
+        }
+      ]
+    },
+    "meta.txt": {
+      "adapter": "adapters/meta.md",
+      "output": "../meta.txt",
+      "segments": [
+        {
+          "local": "part0"
+        }
+      ]
+    },
+    "gpt-astra.txt": {
+      "adapter": "adapters/gpt-astra.md",
+      "output": "../gpt-astra.txt",
+      "segments": [
+        {
+          "local": "part0"
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "shared_rules": [
+      {
+        "ruleId": "D02",
+        "block": "url-policy",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D06",
+        "block": "feedback-header",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D07",
+        "block": "tone-and-style",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D28",
+        "block": "brevity-cap",
+        "lines": 2,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D09",
+        "block": "doing-tasks-intro",
+        "lines": 2,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D22",
+        "block": "todo-cadence",
+        "lines": 3,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D23",
+        "block": "tool-usage-header",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D29",
+        "block": "search-scope",
+        "lines": 2,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D30",
+        "block": "parallelism",
+        "lines": 2,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D31",
+        "block": "completion-reporting",
+        "lines": 1,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D24",
+        "block": "code-references",
+        "lines": 8,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D02",
+        "block": "url-policy",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D06",
+        "block": "feedback-header",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D07",
+        "block": "tone-and-style",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D28",
+        "block": "brevity-cap",
+        "lines": 2,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D09",
+        "block": "doing-tasks-intro",
+        "lines": 2,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D22",
+        "block": "todo-cadence",
+        "lines": 3,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D23",
+        "block": "tool-usage-header",
+        "lines": 1,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D29",
+        "block": "search-scope",
+        "lines": 2,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D30",
+        "block": "parallelism",
+        "lines": 2,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D31",
+        "block": "completion-reporting",
+        "lines": 1,
+        "origin": "phase2-new"
+      },
+      {
+        "ruleId": "D24",
+        "block": "code-references",
+        "lines": 8,
+        "origin": "phase1"
+      },
+      {
+        "ruleId": "D32",
+        "block": "shared-d32",
+        "lines": 17,
+        "origin": "phase3-extract",
+        "users": {
+          "default": 21,
+          "trinity": 17
+        }
+      },
+      {
+        "ruleId": "D33",
+        "block": "shared-d33",
+        "lines": 11,
+        "origin": "phase3-extract",
+        "users": {
+          "default": 40,
+          "trinity": 41
+        }
+      },
+      {
+        "ruleId": "D34",
+        "block": "shared-d34",
+        "lines": 7,
+        "origin": "phase3-extract",
+        "users": {
+          "default": 52,
+          "trinity": 53
+        }
+      },
+      {
+        "ruleId": "D35",
+        "block": "shared-d35",
+        "lines": 6,
+        "origin": "phase3-extract",
+        "users": {
+          "default": 74,
+          "trinity": 75
+        }
+      },
+      {
+        "ruleId": "D36",
+        "block": "shared-d36",
+        "lines": 4,
+        "origin": "phase3-extract",
+        "users": {
+          "anthropic": 1,
+          "codex": 1
+        }
+      },
+      {
+        "ruleId": "D37",
+        "block": "shared-d37",
+        "lines": 3,
+        "origin": "phase3-extract",
+        "users": {
+          "gemini": 156,
+          "gpt": 108,
+          "trinity": 81
+        }
+      },
+      {
+        "ruleId": "D38",
+        "block": "shared-d38",
+        "lines": 3,
+        "origin": "phase3-extract",
+        "users": {
+          "codex": 35,
+          "gpt": 53
+        }
+      }
+    ]
+  },
+  "phase3": {
+    "migrated": [
+      "gpt",
+      "gemini",
+      "kimi",
+      "trinity",
+      "codex",
+      "beast",
+      "meta",
+      "gpt-astra"
+    ],
+    "note": "Structural migration only: exact-duplicate ranges hoisted to core; zero wording change. Phase 2 shared POLICIES were deliberately NOT force-applied to the 8 variants - see report: gpt-astra.txt:46, beast.txt:20/76/142 and gpt.txt:6 carry runtime contracts that contradict D29/D31/D22.",
+    "dropped_stays": [
+      "D21",
+      "D27"
+    ]
+  },
+  "phase4": {
+    "status": "deferred \u2014 user-approved no-force; no prompt wording changed",
+    "principle": "Low overlap between a variant and the core is NOT a defect. Share genuine common policy only. Where a variant's wording encodes a runtime contract, transport protocol, or UI requirement, that text stays in the adapter and is NOT generalized into core. A shared policy is applied only after behavioral evals show it does not contradict that contract.",
+    "deferred": [
+      {
+        "target": "prompts/adapters/gpt-astra.md",
+        "ref": "gpt-astra.txt:46",
+        "contract": "Do not spawn subagents unless the user or applicable AGENTS.md/skill instructions explicitly ask for subagents, delegation, or parallel agent work.",
+        "conflictsWith": [
+          "D29"
+        ],
+        "decision": "KEEP the scoped no-subagent rule. D29's search-routing guidance is shared only as a CONDITIONAL on the Task tool being available and permitted for this agent; where it is not, the variant routes through its own scoped path.",
+        "action": "deferred to behavioral evals"
+      },
+      {
+        "target": "prompts/adapters/beast.md",
+        "ref": "beast.txt:20",
+        "contract": "Always tell the user what you are going to do before making a tool call with a single concise sentence.",
+        "conflictsWith": [
+          "D31"
+        ],
+        "decision": "NARROW to consequential actions only. Pre-announce before an action that changes the user's system, spends meaningful time, or is not obvious; do not pre-announce routine reads and searches. D31's no-step-by-step-narration still governs the rest.",
+        "action": "deferred to behavioral evals"
+      },
+      {
+        "target": "prompts/adapters/beast.md",
+        "ref": "beast.txt:76,142",
+        "contract": "Todo lists must be written in markdown format, wrapped in triple backticks, and the updated list is displayed to the user on each checkoff.",
+        "conflictsWith": [
+          "D22"
+        ],
+        "decision": "STANDARDIZE BEHAVIOR FIRST: D22's phase-boundary batching cadence becomes the shared behavior (this is the part worth adopting fleet-wide). PRESENTATION is retained wherever the interface requires it \u2014 the fenced markdown rendering and per-checkoff display stay adapter-local rather than moving to core.",
+        "action": "deferred to behavioral evals"
+      },
+      {
+        "target": "prompts/adapters/gpt.md, prompts/adapters/meta.md",
+        "ref": "gpt.txt:6; meta.txt:1",
+        "contract": "gpt.txt:6 pins the `multi_tool_use.parallel` tool-parallelism protocol and the commentary/final channel contract; meta.txt:1 carries the `{{MODEL_NAME}}` template placeholder.",
+        "conflictsWith": [
+          "D30"
+        ],
+        "decision": "PRESERVE BOTH IN ADAPTERS. Protocol and template placeholders are transport/identity concerns, never shared policy. D30's shared parallelism rule may reference them but must not restate or override them; a core block may not contain a protocol name or template var.",
+        "action": "deferred to behavioral evals"
+      }
+    ],
+    "invariant": "D21/D27 remain dropped. All 10 targets stay byte-identical to their pre-Phase-3 shas."
+  }
+}
