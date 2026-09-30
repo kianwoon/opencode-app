@@ -15,6 +15,8 @@ import { Effect, Exit, Option, Schema, Scope, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { PartTable } from "@opencode-ai/core/session/sql"
+import { and, eq, sql } from "drizzle-orm"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { InstanceState } from "@/effect/instance-state"
 
@@ -275,25 +277,48 @@ export const TaskTool = Tool.define(
       // 8189 identical explorer task parts this way. A prior orphaned attempt
       // of the exact same (subagent_type, description, prompt) is terminal:
       // refuse WITHOUT creating a child session or a new part, and say so, so
-      // the model stops re-delegating. Matched against the already-projected
-      // parent history (ctx.messages) — no extra query, no new dependency.
+      // the model stops re-delegating.
       //
       // Matched on identity ONLY — deliberately error-agnostic. The previous
       // version required `state.error.includes(ORPHAN_ERROR)`, so a retry loop
       // failing with any other error ("Subagent depth limit reached") sailed
       // straight past it: 5,434 identical parts in one session.
-      const identical = ctx.messages
-        .flatMap((message) => message.parts)
-        .filter(
-          (part): part is SessionV1.ToolPart & { state: SessionV1.ToolStateError } =>
-            part.type === "tool" &&
-            part.tool === id &&
-            part.state.status === "error" &&
-            part.state.input.subagent_type === params.subagent_type &&
-            part.state.input.description === params.description &&
-            part.state.input.prompt === params.prompt,
+      //
+      // Read from the PERSISTED part rows, not ctx.messages: that array is the
+      // per-step view snapshotted BEFORE the current assistant message exists
+      // (and is the object plugins mutate via
+      // experimental.chat.messages.transform), so an identical task that
+      // completed in an EARLIER message is invisible to it and the re-fire
+      // slips into the reuse path. The part rows are the durable record.
+      const identicalTaskRows = yield* database.db
+        .select({
+          callID: sql<string | null>`json_extract(${PartTable.data}, '$.callID')`,
+          status: sql<string | null>`json_extract(${PartTable.data}, '$.state.status')`,
+          subagentType: sql<string | null>`json_extract(${PartTable.data}, '$.state.input.subagent_type')`,
+          description: sql<string | null>`json_extract(${PartTable.data}, '$.state.input.description')`,
+          prompt: sql<string | null>`json_extract(${PartTable.data}, '$.state.input.prompt')`,
+          error: sql<string | null>`json_extract(${PartTable.data}, '$.state.error')`,
+          output: sql<string | null>`json_extract(${PartTable.data}, '$.state.output')`,
+          end: sql<number | null>`json_extract(${PartTable.data}, '$.state.time.end')`,
+        })
+        .from(PartTable)
+        .where(
+          and(
+            eq(PartTable.session_id, ctx.sessionID),
+            sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
+            sql`json_extract(${PartTable.data}, '$.tool') = ${id}`,
+          ),
         )
-      const duplicate = identical.find((part) => part.state.error.includes(ORPHAN_ERROR))
+        .all()
+        .pipe(Effect.orDie)
+      const isIdentical = (row: (typeof identicalTaskRows)[number]) =>
+        row.subagentType === params.subagent_type &&
+        row.description === params.description &&
+        row.prompt === params.prompt
+      const identical = identicalTaskRows.filter(
+        (row) => row.status === "error" && isIdentical(row),
+      )
+      const duplicate = identical.find((row) => (row.error ?? "").includes(ORPHAN_ERROR))
       if (duplicate) {
         return yield* Effect.fail(
           new Error(
@@ -307,34 +332,24 @@ export const TaskTool = Tool.define(
       // window so a legitimate retry hours later (after the cause is fixed)
       // is never permanently blocked.
       const now = Date.now()
-      const recent = identical.filter((part) => now - part.state.time.end < IDENTICAL_TASK_WINDOW_MS)
+      const recent = identical.filter((row) => now - (row.end ?? 0) < IDENTICAL_TASK_WINDOW_MS)
       if (recent.length >= MAX_IDENTICAL_TASK_ATTEMPTS) {
         return yield* Effect.fail(
           identicalTaskRefusal({
             count: recent.length,
             subagentType: params.subagent_type,
             description: params.description,
-            last: recent[recent.length - 1].state.error,
+            last: recent[recent.length - 1].error ?? "",
           }),
         )
       }
 
-      // Failure guards above are error-status-only and blind to green flights — a completed prod-rebuild task was silently re-fired twice; success parts are latched the same way failures are counted.
-      const done = ctx.messages
-        .flatMap((message) => message.parts)
-        .find(
-          (part): part is SessionV1.ToolPart & { state: SessionV1.ToolStateCompleted } =>
-            part.type === "tool" &&
-            part.tool === id &&
-            part.state.status === "completed" &&
-            part.state.input.subagent_type === params.subagent_type &&
-            part.state.input.description === params.description &&
-            part.state.input.prompt === params.prompt,
-        )
+      // Failure guards above are error-status-only and blind to green flights — a completed prod-rebuild task was silently re-fired twice; success parts are latched the same way failures are counted. Read from the same persisted rows, for the same reason: a completed part in an earlier message is absent from ctx.messages, so the re-fire used to slip into the reuse path.
+      const done = identicalTaskRows.find((row) => row.status === "completed" && isIdentical(row))
       if (done && params.force !== true && !params.task_id) {
         return yield* Effect.fail(
           new Error(
-            `Terminal: this exact ${params.subagent_type} task ("${params.description}") already completed successfully in this session (callID: ${done.callID}) — its result began: "${done.state.output.slice(0, 200)}". Re-run only with force:true if you deliberately intend to repeat it; task_id resumes that subagent without re-running.`,
+            `Terminal: this exact ${params.subagent_type} task ("${params.description}") already completed successfully in this session (callID: ${done.callID}) — its result began: "${(done.output ?? "").slice(0, 200)}". Re-run only with force:true if you deliberately intend to repeat it; task_id resumes that subagent without re-running.`,
           ),
         )
       }

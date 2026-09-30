@@ -187,6 +187,10 @@ describe("tool.task success latch", () => {
       const { chat, assistant } = yield* seed()
       const tool = yield* TaskTool
       const def = yield* tool.init()
+      // The latch reads the PERSISTED part rows, so the completed part must
+      // exist as a row — ctx.messages alone is the blind spot that let a
+      // re-fire slip into the reuse path.
+      yield* sessions.updatePart(completedPart(chat.id, assistant.id))
       const exit = yield* Effect.exit(def.execute(args, ctxWith(chat, assistant, stubOps(), [completedPart(chat.id, assistant.id)])))
       expect(Exit.isFailure(exit)).toBe(true)
       const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""

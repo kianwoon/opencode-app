@@ -331,6 +331,9 @@ describe("tool.task", () => {
         metadata: () => Effect.void,
         ask: () => Effect.void,
       }
+      // The guards read the DURABLE part rows; ctx.messages alone is the blind
+      // spot that let a re-fire slip into the reuse path.
+      yield* sessions.updatePart(orphaned)
 
       const exit = yield* def.execute(args, ctx).pipe(Effect.exit)
 
@@ -395,6 +398,9 @@ describe("tool.task", () => {
         metadata: () => Effect.void,
         ask: () => Effect.void,
       }
+      // The storm bound counts PERSISTED part rows; ctx.messages alone is the
+      // blind spot that let the storm through.
+      for (const part of failed) yield* sessions.updatePart(part)
 
       const exit = yield* def.execute(args, ctx).pipe(Effect.exit)
 
@@ -411,22 +417,45 @@ describe("tool.task", () => {
       expect(yield* sessions.children(chat.id)).toHaveLength(0)
 
       // One fewer failure is NOT refused — the window is exact, not a
-      // permanent ban on a repeatedly-failing description.
-      const under = yield* def.execute(args, {
+      // permanent ban on a repeatedly-failing description. Needs its OWN
+      // session: the bound counts PERSISTED rows, so the count must vary there.
+      const under = yield* seed("Under the storm bound")
+      for (const part of failed.slice(1)) {
+        yield* sessions.updatePart({ ...part, id: PartID.ascending(), sessionID: under.chat.id, messageID: under.assistant.id })
+      }
+      const underResult = yield* def.execute(args, {
         ...ctx,
-        messages: [{ info: assistant, parts: failed.slice(1) }],
+        sessionID: under.chat.id,
+        messageID: under.assistant.id,
+        messages: [{ info: under.assistant, parts: [] }],
       })
-      expect(under.output).toContain('state="completed"')
+      expect(underResult.output).toContain('state="completed"')
 
       // An identical task whose failures fell OUTSIDE the window is allowed:
       // a legit retry after the cause is fixed must not be blocked forever.
-      const stale = failed.map((part) => ({
-        ...part,
-        state: { ...part.state, time: { ...part.state.time, end: Date.now() - IDENTICAL_TASK_WINDOW_MS - 1_000 } },
-      })) satisfies SessionV1.ToolPart[]
+      // The failures hang off an EARLIER message than ctx.messageID — the
+      // per-turn parallel cap counts the current message's live parts, so
+      // persisting them there would trip that (unrelated) cap instead.
+      const after = yield* seed("Outside the storm window")
+      const prior = yield* sessions.updateMessage({
+        ...after.assistant,
+        id: MessageID.ascending(),
+        time: { created: Date.now() },
+      })
+      for (const part of failed) {
+        yield* sessions.updatePart({
+          ...part,
+          id: PartID.ascending(),
+          sessionID: after.chat.id,
+          messageID: prior.id,
+          state: { ...part.state, time: { ...part.state.time, end: Date.now() - IDENTICAL_TASK_WINDOW_MS - 1_000 } },
+        })
+      }
       const afterWindow = yield* def.execute(args, {
         ...ctx,
-        messages: [{ info: assistant, parts: stale }],
+        sessionID: after.chat.id,
+        messageID: after.assistant.id,
+        messages: [{ info: after.assistant, parts: [] }],
       })
       expect(afterWindow.output).toContain('state="completed"')
     }),
