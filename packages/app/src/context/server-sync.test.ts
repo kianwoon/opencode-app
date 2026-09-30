@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type {
   McpListInput,
   McpResourceCatalogInput,
@@ -9,7 +9,7 @@ import type {
 } from "@opencode-ai/client/promise"
 import { QueryClient } from "@tanstack/solid-query"
 import { canDisposeDirectory, pickDirectoriesToEvict } from "./global-sync/eviction"
-import { estimateRootSessionTotal, loadRootSessions } from "./global-sync/session-load"
+import { estimateRootSessionTotal, loadRootSessions, mergeFetchedSessions } from "./global-sync/session-load"
 import {
   loadActiveSessionsQuery,
   loadMcpQuery,
@@ -248,6 +248,22 @@ function sessionInfo(id: string) {
     location: { directory: "dir" },
   } as SessionInfo
 }
+
+describe("mergeFetchedSessions", () => {
+  const session = (input: { id: string; parentID?: string }) =>
+    ({ id: input.id, parentID: input.parentID, time: { created: 1, updated: 1 } }) as Session
+
+  test("keeps one copy of a child the fetched list and the store both report", () => {
+    const fetched = [session({ id: "child", parentID: "session-1" }), session({ id: "session-1" })]
+
+    const first = mergeFetchedSessions(fetched, [session({ id: "child", parentID: "session-1" })])
+    const second = mergeFetchedSessions(fetched, first.filter((s) => !!s.parentID))
+
+    expect(first.filter((s) => s.id === "child").length).toBe(1)
+    expect(first.map((s) => s.id)).toContain("session-1")
+    expect(second.filter((s) => s.id === "child").length).toBe(1)
+  })
+})
 
 describe("estimateRootSessionTotal", () => {
   test("keeps exact total for full fetches", () => {
