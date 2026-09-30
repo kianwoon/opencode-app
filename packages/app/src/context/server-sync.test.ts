@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type {
   McpListInput,
   McpResourceCatalogInput,
@@ -10,7 +10,13 @@ import type {
 import { QueryClient } from "@tanstack/solid-query"
 import { canDisposeDirectory, pickDirectoriesToEvict } from "./global-sync/eviction"
 import { estimateRootSessionTotal, loadRootSessions } from "./global-sync/session-load"
-import { loadActiveSessionsQuery, loadMcpQuery, loadMcpResourcesQuery, seedActiveSessionStatuses } from "./server-sync"
+import {
+  loadActiveSessionsQuery,
+  loadMcpQuery,
+  loadMcpResourcesQuery,
+  mergeDirectoryStatuses,
+  seedActiveSessionStatuses,
+} from "./server-sync"
 import { ServerScope } from "@/utils/server-scope"
 import { createServerSession } from "./server-session"
 import type { ServerApi } from "@/utils/server"
@@ -143,6 +149,31 @@ describe("active session query", () => {
     seedActiveSessionStatuses(session, { ses_retry_kept: { type: "running" } }, { ses_retry_kept: retry })
 
     expect(session.data.session_status.ses_retry_kept).toEqual({ type: "retry", attempt: 3, message: "m", next: 2 })
+  })
+})
+
+describe("mergeDirectoryStatuses", () => {
+  test("merges per-directory statuses fetched over the server-wide snapshot", async () => {
+    const requested: string[] = []
+    const merged = await mergeDirectoryStatuses(
+      { ses_here: { type: "busy" } },
+      ["/repo/a", "/repo/b"],
+      async (directory): Promise<Record<string, SessionStatus> | undefined> => {
+        requested.push(directory)
+        if (directory === "/repo/b") return { ses_elsewhere: { type: "busy" } }
+        return { ses_here: { type: "idle" } }
+      },
+    )
+
+    expect(merged).toEqual({ ses_here: { type: "idle" }, ses_elsewhere: { type: "busy" } })
+    expect(requested).toEqual(["/repo/a", "/repo/b"])
+  })
+
+  test("keeps the base statuses when a directory fetch yields nothing", async () => {
+    const base = { ses_here: { type: "busy" as const } }
+    const merged = await mergeDirectoryStatuses(base, ["/repo/a"], async () => undefined)
+
+    expect(merged).toEqual({ ses_here: { type: "busy" } })
   })
 })
 

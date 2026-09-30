@@ -1280,8 +1280,11 @@ export function createServerSession(
         return
       }
       case "session.status": {
-        const props = event.properties as { sessionID: string; status: SessionStatus }
-        setData("session_status", props.sessionID, reconcile(props.status))
+        // The v1 wire type is "running" (not in the generated SessionStatus union); the UI gates
+        // compare "busy" — same mapping the seed applies in server-sync.tsx.
+        const props = event.properties as { sessionID: string; status: SessionStatus | { type: "running" } }
+        const status = props.status.type === "running" ? ({ type: "busy" } as const) : props.status
+        setData("session_status", props.sessionID, reconcile(status))
         return
       }
       case "message.updated": {

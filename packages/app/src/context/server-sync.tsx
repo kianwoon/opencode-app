@@ -189,6 +189,19 @@ export function seedActiveSessionStatuses(
   }
 }
 
+export async function mergeDirectoryStatuses(
+  base: Record<string, SessionStatus>,
+  directories: string[],
+  fetchStatus: (directory: string) => Promise<Record<string, SessionStatus> | undefined>,
+) {
+  const merged = { ...base }
+  for (const directory of directories) {
+    const extra = await fetchStatus(directory)
+    if (extra) Object.assign(merged, extra)
+  }
+  return merged
+}
+
 function makeQueryOptionsApi(
   scope: ServerScope,
   serverSDK: () => OpencodeClient,
@@ -256,7 +269,20 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       active: async () => {
         if ((await serverSDK.protocol) === "v1") {
           const before = { ...session.data.session_status }
-          const statuses = (await serverSDK.client.session.status()).data ?? {}
+          const busyDirs = new Set(
+            Object.entries(before)
+              .filter(([, status]) => status && status.type !== "idle")
+              .map(([sessionID]) => session.data.info[sessionID]?.directory)
+              .filter((directory): directory is string => !!directory),
+          )
+          // GET /session/status is INSTANCE-scoped server-side; the server-wide client misses sessions
+          // running in other directories, and seedActiveSessionStatuses would wipe their live busy states
+          // every STATUS_VERIFY_MS.
+          const statuses = await mergeDirectoryStatuses(
+            (await serverSDK.client.session.status()).data ?? {},
+            [...busyDirs],
+            async (directory) => (await sdkFor(directory).session.status()).data ?? undefined,
+          )
           seedActiveSessionStatuses(session, statuses, before)
           for (const sessionID of Object.keys(statuses)) {
             void session.resolve(sessionID).catch(() => undefined)

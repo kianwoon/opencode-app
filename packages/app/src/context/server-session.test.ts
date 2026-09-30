@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { retry } from "@opencode-ai/core/util/retry"
 import type { OpenCodeEvent, SessionApi } from "@opencode-ai/client/promise"
-import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
+import type { Message, OpencodeClient, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { createServerSession } from "./server-session"
 import type { ServerApi } from "@/utils/server"
 
@@ -1592,6 +1592,18 @@ describe("server session", () => {
     expect(ctx.store.get("root")?.directory).toBe("/repo")
     expect(ctx.store.data.session_working("root")).toBe(true)
     expect(ctx.get).toEqual([])
+  })
+
+  test("stores a v1 running status event as busy", () => {
+    const ctx = setup({})
+    ctx.store.apply({ type: "session.created", properties: { sessionID: "root", info: session("root") } })
+    ctx.store.apply({
+      type: "session.status",
+      properties: { sessionID: "root", status: { type: "running" } as unknown as SessionStatus },
+    })
+
+    expect(ctx.store.data.session_status.root.type).toBe("busy")
+    expect(ctx.store.data.session_working("root")).toBe(true)
   })
 
   test("preserves pinned session content under server-wide cache pressure", () => {
