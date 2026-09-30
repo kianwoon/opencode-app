@@ -1,0 +1,8 @@
+# V1 loop repetition guard defeated by an alternating no-progress cycle (2026-09-30)
+
+- **Symptom**: a V1 session (`packages/opencode/src/session/prompt.ts`) ran 18 steps / 91 parts inside ONE turn, re-running `git status --short` 5x with identical output while narrating two alternating phrases. The repetition interceptor never escalated.
+- **Cause**: `turnFingerprint` hashed narration text + reasoning + every tool input, and the interceptor compared only CONSECUTIVE turns (`if (fingerprint === repeatKey) repeatCount++ else repeatCount = 1`). An alternating cycle whose `todowrite` args changed on every call reset the streak, so `REPETITION_WARN=3` / `REPETITION_WRAPUP=6` / `REPETITION_BREAK=10` never fired.
+- **Rule**: a repetition guard that counts only consecutive identical TURNS is defeated by an alternating cycle with cosmetic churn. Count no-progress across the RUN.
+- **Fix**: replaced `turnFingerprint` with a run-scoped stall detector. `turnAdvancesWork(seen, parts)` returns true only when the turn issued a tool call whose `(tool, stableStringify(input))` signature the run has not already seen; `todowrite`/`todoread` are excluded because their inputs change every call and would mask the stall behind cosmetic churn. `repeatCount` now counts consecutive no-progress turns, reusing the existing warn/wrapup/break escalation.
+- **Acceptance gate**: `bun test test/session/prompt-stall.test.ts` green with stall = 3 / 6 / 10 / 0 at turns 5 / 8 / 12 / 13; `bun test test/session/prompt.test.ts` green (72 pass, 1 skip); `bun typecheck` exit 0, all from `packages/opencode`.
+- **Not live yet**: source-only change. The running desktop app keeps the old loop until a committed prod rebuild.

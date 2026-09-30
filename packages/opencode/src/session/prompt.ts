@@ -324,18 +324,34 @@ function freezeSystem(
   return value
 }
 
-// Fingerprint one completed assistant turn from its persisted parts: text
-// content, every tool name+input, and the finish reason. Identical turns
-// produce identical fingerprints; reordered tool calls still match.
-function turnFingerprint(parts: SessionV1.Part[], finish?: string) {
-  const items: string[] = []
+// Key-order-independent JSON so a tool call with the same arguments always
+// produces the same signature regardless of how the model serialized them.
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`
+  if (value !== null && typeof value === "object")
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(",")}}`
+  return JSON.stringify(value) ?? "null"
+}
+
+// Stall detector: report whether this turn contributed any tool call the run
+// has not already seen. Compares against the WHOLE run, not just the previous
+// turn, so an alternating cycle still registers as no progress. Bookkeeping
+// tools are skipped because their inputs change on every call and would mask a
+// stall behind cosmetic churn.
+export function turnAdvancesWork(seen: Set<string>, parts: SessionV1.Part[]): boolean {
+  let advanced = false
   for (const part of parts) {
-    if (part.type === "text") items.push(`text:${part.text}`)
-    else if (part.type === "tool") items.push(`tool:${part.tool}:${JSON.stringify(part.state.input ?? null)}`)
-    else if (part.type === "reasoning") items.push(`reason:${part.text}`)
+    if (part.type !== "tool") continue
+    if (part.tool === "todowrite" || part.tool === "todoread") continue
+    const signature = `${part.tool}:${stableStringify(part.state.input ?? null)}`
+    if (seen.has(signature)) continue
+    seen.add(signature)
+    advanced = true
   }
-  items.push(`finish:${finish ?? ""}`)
-  return items.sort().join("\n")
+  return advanced
 }
 
 // Global Jev tool-routing: narrows the turn tool list via the Jev decision
@@ -1865,7 +1881,7 @@ const layer = Layer.effect(
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
-        let repeatKey: string | undefined
+        const seenWork = new Set<string>()
         let repeatCount = 0
         let forceWrapUp = false
         // Jev routing decision cache: a single slot keyed by the current user
@@ -2754,7 +2770,7 @@ const layer = Layer.effect(
                       {
                         role: "assistant" as const,
                         content: forceWrapUp
-                          ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have produced the same response ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
+                          ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have repeated the same tool calls ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
                           : MAX_STEPS_PROMPT,
                       },
                     ]
@@ -2820,22 +2836,18 @@ const layer = Layer.effect(
               })
             }
 
-            // Repetition interceptor: fingerprint the turn that just
-            // completed and count consecutive identical turns. A model
-            // repeating the exact same work is stuck — escalate like a human
-            // would: warn it, then take its tools away, then force-break.
-            const fingerprint = turnFingerprint(
-              yield* MessageV2.parts(handle.message.id).pipe(Effect.provideService(Database.Service, database)),
-              handle.message.finish,
+            // Stall detector: a turn that issued no tool call the run has not
+            // already seen made no progress, even if an earlier turn in the run
+            // did the same thing — an alternating cycle counts as a stall.
+            // Escalate like a human would: warn it, take its tools away, break.
+            const stallParts = yield* MessageV2.parts(handle.message.id).pipe(
+              Effect.provideService(Database.Service, database),
             )
-            if (fingerprint === repeatKey) repeatCount++
-            else {
-              repeatKey = fingerprint
-              repeatCount = 1
-            }
+            if (turnAdvancesWork(seenWork, stallParts)) repeatCount = 0
+            else repeatCount++
             if (repeatCount >= REPETITION_BREAK) {
               handle.message.error = new SessionV1.MaxStepsError({
-                message: `Agent "${agent.name}" repeated the same response ${repeatCount} times without making progress. The run was stopped automatically. Re-run with a more specific prompt, or increase the agent's "steps" config if the repetition is expected.`,
+                message: `Agent "${agent.name}" repeated the same tool calls ${repeatCount} times without making progress. The run was stopped automatically. Re-run with a more specific prompt, or increase the agent's "steps" config if the repetition is expected.`,
                 steps: step,
               }).toObject()
               yield* sessions.updateMessage(handle.message)
@@ -2863,7 +2875,7 @@ const layer = Layer.effect(
                 sessionID,
                 messageID: handle.message.id,
                 type: "text",
-                text: `You have now produced the identical response ${repeatCount} times in a row (same tool calls and arguments). You are stuck in a loop. Stop repeating: either change your approach substantially, or produce your final answer and stop calling tools.`,
+                text: `You have now repeated the same tool calls ${repeatCount} times in a row (identical tool calls). You are stuck in a loop. Stop repeating: either change your approach substantially, or produce your final answer and stop calling tools.`,
                 time: { start: Date.now() },
               }
               yield* sessions.updatePart(warnPart)
