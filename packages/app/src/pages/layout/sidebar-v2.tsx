@@ -23,6 +23,7 @@ import { useCommand } from "@/context/command"
 import { createPromptSession } from "@/context/prompt-state"
 import {
   busyChildrenByParent,
+  busySessionDirectories,
   childSessions,
   displayName,
   displayNamesFor,
@@ -813,15 +814,19 @@ function ProjectSection(
   const storeSessions = createMemo(() => childStore()[0].session)
   // Subagent sessions report their own status, so a parent can look idle while
   // background children keep working. Count busy children so the root row can
-  // surface that work even when the child rows are collapsed.
-  const runningChildCounts = createMemo(() => busyChildrenByParent(childStore()[0]))
-  // A project is busy when any session in its directory is working: the roots
-  // we render, plus subagents whose rows are hidden (collapsed project, or a
-  // child rendered only under the active session).
+  // surface that work even when the child rows are collapsed. Statuses are read
+  // from the server-scoped session store: the per-directory child store keeps its
+  // own `session_status` map that no production code writes.
+  const sessionWork = createMemo(() => sync().session.data)
+  const runningChildCounts = createMemo(() => busyChildrenByParent(sessionWork()))
+  // A project is busy when any session in its directory is working: the roots we
+  // render, plus subagents whose rows are hidden (collapsed project, or a child
+  // rendered only under the active session). Server-scoped, so it stays live for
+  // a project the user has switched away from.
   const projectBusy = createMemo(() => {
-    const store = childStore()[0]
-    if ([...runningChildCounts().values()].some((count) => count > 0)) return true
-    return (store.session ?? []).some((session) => store.session_working(session.id))
+    const busy = busySessionDirectories(sessionWork())
+    if (busy.has(pathKey(props.project.worktree))) return true
+    return (props.project.sandboxes ?? []).some((sandbox) => busy.has(pathKey(sandbox)))
   })
   const hasMore = createMemo(() => sessionTotal() > visibleSessions().length)
 

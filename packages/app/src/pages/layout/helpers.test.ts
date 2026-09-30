@@ -9,6 +9,7 @@ import {
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import {
   busyChildrenByParent,
+  busySessionDirectories,
   childSessions,
   closeHomeProject,
   compareSessionTime,
@@ -314,18 +315,18 @@ describe("layout workspace helpers", () => {
     expect(childSessions(list, "root", 3).map((item) => item.id)).toEqual(["newest", "newer", "older"])
   })
 
-  test("counts busy and retrying children, never idle or root sessions", () => {
-    const list = [
-      session({ id: "root", directory: "/workspace" }),
-      session({ id: "busy", directory: "/workspace", parentID: "root" }),
-      session({ id: "retrying", directory: "/workspace", parentID: "root" }),
-      session({ id: "idle", directory: "/workspace", parentID: "root" }),
-      session({ id: "other", directory: "/workspace", parentID: "elsewhere" }),
-    ]
+  test("counts working children by parent, ignoring idle and root sessions", () => {
+    const info = {
+      root: session({ id: "root", directory: "/workspace" }),
+      busy: session({ id: "busy", directory: "/workspace", parentID: "root" }),
+      retrying: session({ id: "retrying", directory: "/workspace", parentID: "root" }),
+      idle: session({ id: "idle", directory: "/workspace", parentID: "root" }),
+      other: session({ id: "other", directory: "/workspace", parentID: "elsewhere" }),
+    }
 
     expect(
       busyChildrenByParent({
-        session: list,
+        info,
         session_status: {
           busy: { type: "busy" },
           retrying: { type: "retry", attempt: 1, message: "rate limited", next: 2 },
@@ -341,8 +342,26 @@ describe("layout workspace helpers", () => {
     )
   })
 
-  test("treats a child with no reported status as idle", () => {
-    expect(busyChildrenByParent({ session: [session({ id: "kid", directory: "/workspace", parentID: "root" })], session_status: {} })).toEqual(new Map())
+  test("treats a session with no reported status as idle", () => {
+    expect(
+      busyChildrenByParent({
+        info: { kid: session({ id: "kid", directory: "/workspace", parentID: "root" }) },
+        session_status: {},
+      }),
+    ).toEqual(new Map())
+  })
+
+  test("collects directories holding a working session", () => {
+    expect(
+      busySessionDirectories({
+        info: {
+          busy: session({ id: "busy", directory: "/workspace" }),
+          kid: session({ id: "kid", directory: "/workspace", parentID: "busy" }),
+          idle: session({ id: "idle", directory: "/other" }),
+        },
+        session_status: { busy: { type: "busy" }, idle: { type: "idle" } },
+      }),
+    ).toEqual(new Set([pathKey("/workspace")]))
   })
 
   test("formats fallback project display name", () => {

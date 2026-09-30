@@ -55,6 +55,14 @@ const baseState = (input: Partial<State> = {}) =>
     ...input,
   }) as State
 
+// The badge helper reads the server-scoped session data shape (info keyed by id
+// + session_status); the reducer harness produces the per-directory store, so
+// reshape it here rather than coupling the helper to the child store.
+const workData = (store: State) => ({
+  info: Object.fromEntries(store.session.map((session) => [session.id, session])),
+  session_status: store.session_status,
+})
+
 describe("badge reactivity", () => {
   test("empty start: reducer writes land and the helper counts the busy child", () => {
     const [store, setStore] = createStore(baseState())
@@ -88,7 +96,7 @@ describe("badge reactivity", () => {
     })
 
     expect(store.session_status.ses_kid).toEqual({ type: "busy" })
-    expect(busyChildrenByParent(store).get("ses_root")).toBe(1)
+    expect(busyChildrenByParent(workData(store)).get("ses_root")).toBe(1)
   })
 
   test("populated start: a status write is read by the helper", () => {
@@ -112,6 +120,6 @@ describe("badge reactivity", () => {
     })
 
     expect(store.session_status.ses_kid).toEqual({ type: "busy" })
-    expect(busyChildrenByParent(store).get("ses_root")).toBe(1)
+    expect(busyChildrenByParent(workData(store)).get("ses_root")).toBe(1)
   })
 })

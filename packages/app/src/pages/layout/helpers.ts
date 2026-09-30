@@ -61,27 +61,38 @@ export const restorableSessions = (
   return keep === undefined ? restorable : restorable.slice(0, keep)
 }
 
-export const busyChildrenByParent = (store: {
-  session?: Session[]
+// Live statuses live on the server-scoped session store (server-session.ts
+// `session_status`, seeded from the server-wide GET /session/status). The
+// per-directory child store exposes a second, same-named `session_status` map
+// that no production code writes, so reading it is always empty.
+type SessionWorkData = {
+  info: Record<string, Session | undefined>
   session_status: Record<string, SessionStatus | undefined>
-  sessionVersion?: number
-}) => {
-  // Keyed reconcile never signals array readers (proven by
-  // badge-reactivity.test.ts), so subscribe to the reducer's coarse
-  // mutation counter: it re-runs the memo on every session event, and
-  // the direct reads below then observe fresh data.
-  void store.sessionVersion
-  const snapshot = [...(store.session ?? [])]
-  const status = store.session_status
-  return snapshot.reduce((counts, session) => {
-    if (!session.parentID) return counts
-    // Matches session_working (server-session.ts): any non-idle status is work,
-    // so retrying children light the tree the same way busy ones do.
-    if ((status[session.id]?.type ?? "idle") === "idle") return counts
-    counts.set(session.parentID, (counts.get(session.parentID) ?? 0) + 1)
-    return counts
-  }, new Map<string, number>())
 }
+
+// Matches session_working (server-session.ts): any non-idle status is work, so
+// retrying children light the tree the same way busy ones do.
+const working = (data: SessionWorkData, sessionID: string) =>
+  (data.session_status[sessionID]?.type ?? "idle") !== "idle"
+
+export const busyChildrenByParent = (data: SessionWorkData) => {
+  const counts = new Map<string, number>()
+  for (const session of Object.values(data.info)) {
+    if (!session?.parentID) continue
+    if (!working(data, session.id)) continue
+    counts.set(session.parentID, (counts.get(session.parentID) ?? 0) + 1)
+  }
+  return counts
+}
+
+// Directories holding at least one working session. Server-scoped, so a project
+// the user has switched away from still reports its work.
+export const busySessionDirectories = (data: SessionWorkData) =>
+  new Set(
+    Object.values(data.info)
+      .filter((session): session is Session => !!session && working(data, session.id))
+      .map((session) => pathKey(session.directory)),
+  )
 
 export const displayName = (project: { name?: string; worktree: string }) =>
   project.name || getFilename(project.worktree) || project.worktree
