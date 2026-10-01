@@ -1570,8 +1570,6 @@ test("config parser decodes brain configuration", () => {
     {
       brain: {
         model: "anthropic/claude-sonnet-4-5",
-        hands_model: "zai/glm-4.7",
-        reviewer_model: "openai/gpt-5",
         enforcement: "strict",
       },
     },
@@ -1579,8 +1577,6 @@ test("config parser decodes brain configuration", () => {
   )
   expect(strict.brain).toEqual({
     model: "anthropic/claude-sonnet-4-5",
-    hands_model: "zai/glm-4.7",
-    reviewer_model: "openai/gpt-5",
     enforcement: "strict",
   })
 

@@ -1407,7 +1407,7 @@ export const dict = {
   "settings.subagent.row.model.title": "Model",
   "settings.subagent.row.model.description": "Model the subagent runs on; the brain's hand model takes precedence for hands",
   "settings.subagent.row.capabilities.title": "Capabilities",
-  "settings.subagent.row.capabilities.description": "Declared specialties. The first mapped capability selects the brain model (explore/implement to hands, review to reviewer, advise to guru, gui to computer-aid).",
+  "settings.subagent.row.capabilities.description": "Free-form discovery tags advertised to brain when it looks for a subagent. They do not change models or permissions.",
   "settings.subagent.row.description.title": "Description",
   "settings.subagent.row.description.description": "Shown wherever the subagent is offered",
   "settings.subagent.row.mode.title": "Mode",

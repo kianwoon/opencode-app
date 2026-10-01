@@ -42,41 +42,6 @@ type AgentBlock = {
   disable?: boolean
 }
 
-type BrainConfig = {
-  model?: string
-  hands_model?: string
-  reviewer_model?: string
-  guru_model?: string
-  computer_aid_model?: string
-}
-
-type BrainModelKey = "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model"
-
-// brain.* overwrites agent.<name>.model at config-expand time
-// (packages/opencode/src/config/brain.ts), so a hand agent's model MUST be
-// written to its brain key: an agent-block `model` there reads as live while
-// being dead. `hands_model` drives both hands.
-//
-// The server resolves that wiring by CAPABILITY with a legacy-name fallback;
-// these two maps mirror it literally because the app cannot import the server
-// package across the bundle boundary (same pattern as JEV_DEFAULT_MODEL in
-// orchestration.tsx). Keep them in sync with brain.ts.
-const CAPABILITY_BRAIN_KEY: Record<string, BrainModelKey> = {
-  explore: "hands_model",
-  implement: "hands_model",
-  review: "reviewer_model",
-  advise: "guru_model",
-  gui: "computer_aid_model",
-}
-
-const LEGACY_NAME_BRAIN_KEY: Record<string, BrainModelKey> = {
-  explorer: "hands_model",
-  implementer: "hands_model",
-  reviewer: "reviewer_model",
-  guru: "guru_model",
-  "computer-aid": "computer_aid_model",
-}
-
 // Defined locally rather than imported: the tool inventory must be able to
 // diverge from the Permissions tab without coupling two settings panels.
 const OWNS_GROUPS = [
@@ -115,7 +80,6 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const agents = createMemo<Record<string, AgentBlock | undefined>>(
     () => (config().agent ?? {}) as Record<string, AgentBlock | undefined>,
   )
-  const brain = createMemo<BrainConfig>(() => serverSync().data.config.brain ?? {})
   // Provider-free on purpose: this tab renders OUTSIDE the directory Sync
   // provider, so the directory-scoped sync hook throws at render. Same
   // dual-protocol resource shape as the skills fetch below.
@@ -180,32 +144,8 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       })
   }
 
-  // A brain-owned model field lives in its OWN config block, so it needs its own
-  // writer rather than the agent-block patch path.
-  const commitBrainModel = (field: keyof BrainConfig, value: string) => {
-    if (active().name === "") return
-    void serverSync()
-      .updateConfig({ brain: { ...brain(), [field]: value } })
-      .then(() => refetchSkills())
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err)
-        showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
-      })
-  }
-
-  const brainKeyFor = (name: string) => {
-    if (name === "brain") return "model"
-    const runtime = agentList.latest?.find((item) => item.name === name)
-    const capability = (runtime?.capabilities ?? block(name).capabilities)?.find(
-      (item) => item in CAPABILITY_BRAIN_KEY,
-    )
-    return capability ? CAPABILITY_BRAIN_KEY[capability] : LEGACY_NAME_BRAIN_KEY[name]
-  }
-
-  const modelField = createMemo(() => brainKeyFor(active().name))
   const currentModel = createMemo(() => {
-    const field = modelField()
-    const value = field ? brain()[field] ?? "" : block(active().name).model ?? ""
+    const value = block(active().name).model ?? ""
     const [providerID, ...rest] = value.split("/")
     const modelID = rest.join("/")
     if (!providerID || !modelID) return
@@ -216,10 +156,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     list: models.list,
     current: currentModel,
     set(item: ModelKey | undefined) {
-      const value = item ? `${item.providerID}/${item.modelID}` : ""
-      const field = modelField()
-      if (field) return commitBrainModel(field, value)
-      commit(active().name, { model: value })
+      commit(active().name, { model: item ? `${item.providerID}/${item.modelID}` : "" })
     },
     visible: (item: ModelKey) => models.visible(item),
     setVisibility: (item: ModelKey, visible: boolean) => models.setVisibility(item, visible),
@@ -338,12 +275,12 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     () => agentList.latest?.find((item) => item.name === active().name)?.prompt ?? "",
   )
 
-  // brain.<key> models and brain's permission.task allowlist are keyed by the
-  // literal name, so a brain-wired or native agent's key must not move.
+  // A native agent is provided by the runtime and its key must not move. There is
+  // no brain clause any more: brain dispatch is registry-driven and brain no
+  // longer owns any other agent's model.
   const renameBlock = createMemo(() => {
     const runtime = agentList.latest?.find((item) => item.name === active().name)
     if (runtime?.native) return language.t("settings.subagent.rename.disabled.native")
-    if (brainKeyFor(active().name)) return language.t("settings.subagent.rename.disabled.brain")
     return ""
   })
 
@@ -515,30 +452,21 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               title={language.t("settings.subagent.row.capabilities.title")}
               description={language.t("settings.subagent.row.capabilities.description")}
             >
-              <div class="w-full flex flex-col gap-1" data-action="settings-subagent-capabilities">
-                <For each={Object.keys(CAPABILITY_BRAIN_KEY)}>
-                  {(cap) => (
-                    <div data-action={`settings-subagent-capability-${cap}`}>
-                      <CheckboxV2
-                        label={
-                          <>
-                            {cap}{" "}
-                            <span class="settings-v2-plugins-hint">{CAPABILITY_BRAIN_KEY[cap]}</span>
-                          </>
-                        }
-                        checked={capabilities().includes(cap)}
-                        onChange={() =>
-                          commit(
-                            active().name,
-                            capabilities().includes(cap)
-                              ? { capabilities: capabilities().filter((item) => item !== cap) }
-                              : { capabilities: [...capabilities(), cap] },
-                          )
-                        }
-                      />
-                    </div>
-                  )}
-                </For>
+              <div class="w-full sm:w-[320px]" data-action="settings-subagent-capabilities">
+                <TextInputV2
+                  type="text"
+                  appearance="base"
+                  value={capabilities().join(", ")}
+                  aria-label={language.t("settings.subagent.row.capabilities.title")}
+                  onChange={(event) =>
+                    commit(active().name, {
+                      capabilities: event.currentTarget.value
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
               </div>
             </SettingsRowV2>
             <SettingsRowV2

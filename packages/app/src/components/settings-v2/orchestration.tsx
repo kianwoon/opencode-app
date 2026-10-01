@@ -32,10 +32,6 @@ const JEV_DEFAULT_THRESHOLD = 0.7
 
 type BrainConfig = {
   model?: string
-  hands_model?: string
-  reviewer_model?: string
-  guru_model?: string
-  computer_aid_model?: string
   enforcement?: Enforcement
 }
 
@@ -157,7 +153,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       })
   }
 
-  const currentFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => {
+  const currentFor = (field: "model") => {
     const value = brain()[field] ?? ""
     const [providerID, ...rest] = value.split("/")
     const modelID = rest.join("/")
@@ -165,7 +161,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
     return models.find({ providerID, modelID })
   }
 
-  const commitField = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model", item: ModelKey | undefined) => {
+  const commitField = (field: "model", item: ModelKey | undefined) => {
     commit({ [field]: item ? `${item.providerID}/${item.modelID}` : "" })
   }
 
@@ -173,7 +169,7 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
   // picker expects. Selection reads from server config; commit writes back.
   // The picker also uses `recent.push` when selecting; that only affects the
   // composer's recent list, which is harmless here.
-  const stateFor = (field: "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model") => ({
+  const stateFor = (field: "model") => ({
     ready: models.ready,
     list: models.list,
     current: () => currentFor(field),
@@ -230,26 +226,6 @@ export const SettingsOrchestrationV2: Component = () => {  const language = useL
       field: "model" as const,
       title: () => language.t("settings.orchestration.row.model.title"),
       description: () => language.t("settings.orchestration.row.model.description"),
-    },
-    {
-      field: "hands_model" as const,
-      title: () => language.t("settings.orchestration.row.handsModel.title"),
-      description: () => language.t("settings.orchestration.row.handsModel.description"),
-    },
-    {
-      field: "reviewer_model" as const,
-      title: () => language.t("settings.orchestration.row.reviewerModel.title"),
-      description: () => language.t("settings.orchestration.row.reviewerModel.description"),
-    },
-    {
-      field: "guru_model" as const,
-      title: () => language.t("settings.orchestration.row.guruModel.title"),
-      description: () => language.t("settings.orchestration.row.guruModel.description"),
-    },
-    {
-      field: "computer_aid_model" as const,
-      title: () => language.t("settings.orchestration.row.computerAidModel.title"),
-      description: () => language.t("settings.orchestration.row.computerAidModel.description"),
     },
   ]
 
