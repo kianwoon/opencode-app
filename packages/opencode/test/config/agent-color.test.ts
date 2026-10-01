@@ -39,10 +39,14 @@ it.instance(
       const instance = yield* TestInstance
       const loaded = yield* Effect.promise(() => ConfigAgent.load(instance.directory))
       expect(loaded.scout?.origin).toBe("md")
+      expect(loaded.scout?.originPath).toEndWith(path.join("agent", "scout.md"))
+      expect(loaded.scout?.originPath && path.isAbsolute(loaded.scout.originPath)).toBe(true)
       const helper = yield* AgentSvc.use.get("helper")
       expect(helper?.origin).toBe("config")
+      expect(helper?.originPath).toBeUndefined()
       const plan = yield* AgentSvc.use.get("plan")
       expect(plan?.origin).toBe("native")
+      expect(plan?.originPath).toBeUndefined()
     }),
   {
     git: true,

@@ -2499,6 +2499,7 @@ export type Agent = {
   mode: "subagent" | "primary" | "all"
   native?: boolean
   origin?: "native" | "md" | "config"
+  originPath?: string
   hidden?: boolean
   topP?: number
   temperature?: number

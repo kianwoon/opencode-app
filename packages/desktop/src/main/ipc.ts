@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { readFile, stat, writeFile } from "node:fs/promises"
+import { basename, extname, join, resolve, sep } from "node:path"
 import { homedir } from "node:os"
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -33,6 +33,20 @@ const pickerFilters = (ext?: string[]) => {
 }
 
 const pickedFiles = createPickedFileAuthorizations()
+
+// Renderer-supplied paths are untrusted: only `.md` files inside a known agent
+// root are reachable, so the bridge can never be turned into arbitrary fs access.
+const scopedAgentMarkdown = (path: string) => {
+  const target = resolve(path)
+  if (extname(target) !== ".md") throw new Error(`refusing non-markdown path: ${target}`)
+  const segments = target.split(sep)
+  const projectRoot = segments.lastIndexOf(".opencode")
+  if (projectRoot >= 0 && (segments[projectRoot + 1] === "agent" || segments[projectRoot + 1] === "agents"))
+    return target
+  const configRoot = join(homedir(), ".config", "opencode")
+  if (["agent", "agents"].some((dir) => target.startsWith(join(configRoot, dir) + sep))) return target
+  throw new Error(`refusing path outside an agent root: ${target}`)
+}
 
 type Deps = {
   killSidecar: () => Promise<void> | void
@@ -243,6 +257,14 @@ export function registerIpcHandlers(deps: Deps) {
     if (!exists) return false
     shell.showItemInFolder(path)
     return true
+  })
+
+  ipcMain.handle("read-file", async (_event: IpcMainInvokeEvent, path: string) => {
+    return readFile(scopedAgentMarkdown(path), "utf8")
+  })
+
+  ipcMain.handle("write-file", async (_event: IpcMainInvokeEvent, path: string, content: string) => {
+    await writeFile(scopedAgentMarkdown(path), content, "utf8")
   })
 
   ipcMain.handle("read-clipboard-image", () => {

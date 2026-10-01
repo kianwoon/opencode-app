@@ -10,6 +10,7 @@ import { TextareaV2 } from "@opencode-ai/ui/v2/textarea-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
+import { usePlatform } from "@/context/platform"
 import type { ModelKey } from "@/context/local"
 import { useServerProtocol } from "@/context/server-sdk"
 import { useServerSDK } from "@/context/server-sdk"
@@ -281,6 +282,36 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     () => agentList.latest?.find((item) => item.name === active().name)?.origin === "md",
   )
 
+  // The md BODY is the prompt, so the panel can edit it in place -- but only
+  // through the desktop bridge, whose main-process guard scopes writes to the
+  // agent roots. Web (and config/native agents) keep the read-only view.
+  const platform = usePlatform()
+  const promptEditable = createMemo(() => mdBacked() && !!platform.readFile && !!platform.writeFile)
+  const [promptEditor, setPromptEditor] = createSignal<{ name: string; body: string } | null>(null)
+
+  // `.md` agents are `---\n<frontmatter>\n---\n<body>`: keep everything through
+  // the closing `---` AND its newline verbatim and replace only the body, so a
+  // hand-tuned frontmatter is never regenerated, reformatted or dropped.
+  const savePrompt = () => {
+    const draft = promptEditor()
+    const path = agentList.latest?.find((item) => item.name === draft?.name)?.originPath
+    const read = platform.readFile
+    const write = platform.writeFile
+    if (!draft || !path || !read || !write) return
+    return read(path)
+      .then((current) => write(path, (current.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)?.[0] ?? "") + draft.body))
+      // The md write is invisible to config until a config write invalidates it.
+      .then(() => commitAgentPatch({}))
+      .then((ok) => {
+        if (ok) setPromptEditor(null)
+        return ok
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+      })
+  }
+
   // A native agent is provided by the runtime and its key must not move. There is
   // no brain clause any more: brain dispatch is registry-driven and brain no
   // longer owns any other agent's model.
@@ -499,24 +530,71 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
             </SettingsRowV2>
             <SettingsRowV2
               title={language.t("settings.subagent.prompt.title")}
-              description={language.t("settings.subagent.prompt.description")}
+              description={language.t(
+                promptEditable()
+                  ? "settings.subagent.prompt.editableDescription"
+                  : "settings.subagent.prompt.description",
+              )}
             >
               <div class="w-full sm:w-[420px]">
                 <Show
-                  when={resolvedPrompt()}
+                  when={promptEditor()?.name === active().name ? promptEditor() : undefined}
                   fallback={
-                    <p class="settings-v2-plugins-hint" data-action="settings-subagent-prompt-empty">
-                      {language.t("settings.subagent.prompt.empty")}
-                    </p>
+                    <>
+                      <Show
+                        when={resolvedPrompt()}
+                        fallback={
+                          <p class="settings-v2-plugins-hint" data-action="settings-subagent-prompt-empty">
+                            {language.t("settings.subagent.prompt.empty")}
+                          </p>
+                        }
+                      >
+                        {(prompt) => (
+                          <pre
+                            class="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-12-regular"
+                            data-action="settings-subagent-prompt"
+                          >
+                            {prompt()}
+                          </pre>
+                        )}
+                      </Show>
+                      <Show when={promptEditable()}>
+                        <div class="mt-2">
+                          <ButtonV2
+                            variant="ghost"
+                            size="small"
+                            data-action="settings-subagent-prompt-edit"
+                            onClick={() => setPromptEditor({ name: active().name, body: resolvedPrompt() })}
+                          >
+                            {language.t("settings.subagent.prompt.edit")}
+                          </ButtonV2>
+                        </div>
+                      </Show>
+                    </>
                   }
                 >
-                  {(prompt) => (
-                    <pre
-                      class="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-12-regular"
-                      data-action="settings-subagent-prompt"
-                    >
-                      {prompt()}
-                    </pre>
+                  {(draft) => (
+                    <div class="w-full flex flex-col gap-2">
+                      <TextareaV2
+                        rows={8}
+                        value={draft().body}
+                        aria-label={language.t("settings.subagent.prompt.title")}
+                        onChange={(event) => setPromptEditor({ name: active().name, body: event.currentTarget.value })}
+                      />
+                      <div class="flex items-center gap-2">
+                        <ButtonV2 size="small" data-action="settings-subagent-prompt-save" onClick={() => savePrompt()}>
+                          {language.t("settings.subagent.prompt.save")}
+                        </ButtonV2>
+                        <ButtonV2
+                          variant="ghost"
+                          size="small"
+                          data-action="settings-subagent-prompt-cancel"
+                          onClick={() => setPromptEditor(null)}
+                        >
+                          {language.t("settings.subagent.prompt.cancel")}
+                        </ButtonV2>
+                      </div>
+                    </div>
                   )}
                 </Show>
               </div>

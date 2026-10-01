@@ -12,7 +12,7 @@ import { ConfigParse } from "./parse"
 // enters the user-facing config surface — `normalize()` funnels an unknown key
 // into `options`, and remeda's `mergeDeep` (which carries this into the loaded
 // config) copies own enumerable keys only.
-export type MdDerived = ConfigAgentV1.Info & { origin: "md" }
+export type MdDerived = ConfigAgentV1.Info & { origin: "md"; originPath: string }
 
 export async function load(dir: string) {
   const result: Record<string, MdDerived> = {}
@@ -32,7 +32,7 @@ export async function load(dir: string) {
       ...md.data,
       prompt: md.content.trim(),
     }
-    result[config.name] = { ...ConfigParse.schema(ConfigAgentV1.Info, config, item), origin: "md" }
+    result[config.name] = { ...ConfigParse.schema(ConfigAgentV1.Info, config, item), origin: "md", originPath: item }
   }
   return result
 }

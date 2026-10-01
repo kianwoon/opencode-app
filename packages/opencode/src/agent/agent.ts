@@ -41,6 +41,8 @@ export const Info = Schema.Struct({
   // Data-derived origin: a built-in, an agent `.md` file, or a plain config
   // block. Never user-set, so it is absent from the config schema.
   origin: Schema.optional(Schema.Literals(["native", "md", "config"])),
+  // Absolute path of the `.md` this agent was loaded from; absent otherwise.
+  originPath: Schema.optional(Schema.String),
   hidden: Schema.optional(Schema.Boolean),
   topP: Schema.optional(Schema.Finite),
   temperature: Schema.optional(Schema.Finite),
@@ -307,6 +309,7 @@ const layer = Layer.effect(
           // ConfigAgent.load attaches the marker after schema decode, so it is data
           // rather than a user-set key; a built-in keeps `native`, else it is config.
           item.origin = (value as MdDerived).origin ?? (item.native ? "native" : "config")
+          item.originPath = (value as MdDerived).originPath
         }
 
         // Built-ins absent from config never reach the loop above, so default the

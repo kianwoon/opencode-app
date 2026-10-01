@@ -45,6 +45,12 @@ type PlatformBase = {
   /** Reveal a local path in the system file manager; false when the path does not exist (desktop only) */
   revealPath?(path: string): Promise<boolean>
 
+  /** Read a scoped `.md` agent file as UTF-8 (desktop only) */
+  readFile?(path: string): Promise<string>
+
+  /** Write UTF-8 content to a scoped `.md` agent file (desktop only) */
+  writeFile?(path: string, content: string): Promise<void>
+
   /** Restart the app  */
   restart(): Promise<void>
 

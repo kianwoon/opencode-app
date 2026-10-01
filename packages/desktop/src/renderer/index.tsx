@@ -244,6 +244,12 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     async revealPath(path: string) {
       return window.api.revealPath(path)
     },
+    async readFile(path: string) {
+      return window.api.readFile(path)
+    },
+    async writeFile(path: string, content: string) {
+      return window.api.writeFile(path, content)
+    },
 
     storage,
     draftStore: createDraftStore({
