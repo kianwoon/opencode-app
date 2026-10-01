@@ -8,8 +8,14 @@ import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigParse } from "./parse"
 
+// Origin marker for an `.md`-derived agent. Set AFTER schema decode so it never
+// enters the user-facing config surface — `normalize()` funnels an unknown key
+// into `options`, and remeda's `mergeDeep` (which carries this into the loaded
+// config) copies own enumerable keys only.
+export type MdDerived = ConfigAgentV1.Info & { origin: "md" }
+
 export async function load(dir: string) {
-  const result: Record<string, ConfigAgentV1.Info> = {}
+  const result: Record<string, MdDerived> = {}
   for (const item of await Glob.scan("{agent,agents}/**/*.md", {
     cwd: dir,
     absolute: true,
@@ -26,7 +32,7 @@ export async function load(dir: string) {
       ...md.data,
       prompt: md.content.trim(),
     }
-    result[config.name] = ConfigParse.schema(ConfigAgentV1.Info, config, item)
+    result[config.name] = { ...ConfigParse.schema(ConfigAgentV1.Info, config, item), origin: "md" }
   }
   return result
 }

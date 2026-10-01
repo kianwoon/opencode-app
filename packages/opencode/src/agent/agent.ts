@@ -31,12 +31,16 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { Location } from "@opencode-ai/core/location"
 import { PluginV2 } from "@opencode-ai/core/plugin"
+import type { MdDerived } from "@/config/agent"
 
 export const Info = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
   mode: Schema.Literals(["subagent", "primary", "all"]),
   native: Schema.optional(Schema.Boolean),
+  // Data-derived origin: a built-in, an agent `.md` file, or a plain config
+  // block. Never user-set, so it is absent from the config schema.
+  origin: Schema.optional(Schema.Literals(["native", "md", "config"])),
   hidden: Schema.optional(Schema.Boolean),
   topP: Schema.optional(Schema.Finite),
   temperature: Schema.optional(Schema.Finite),
@@ -300,7 +304,14 @@ const layer = Layer.effect(
           item.capabilities = value.capabilities ?? item.capabilities
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
+          // ConfigAgent.load attaches the marker after schema decode, so it is data
+          // rather than a user-set key; a built-in keeps `native`, else it is config.
+          item.origin = (value as MdDerived).origin ?? (item.native ? "native" : "config")
         }
+
+        // Built-ins absent from config never reach the loop above, so default the
+        // rest; an `.md`-derived entry already resolved to "md" and is left alone.
+        for (const item of Object.values(agents)) item.origin ??= item.native ? "native" : "config"
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured
         for (const name in agents) {

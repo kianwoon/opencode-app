@@ -275,6 +275,12 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     () => agentList.latest?.find((item) => item.name === active().name)?.prompt ?? "",
   )
 
+  // `.md` frontmatter wins over opencode.json (config.ts merges md as the 2nd
+  // arg), so a config write to a key the md declares is silently dead.
+  const mdBacked = createMemo(
+    () => agentList.latest?.find((item) => item.name === active().name)?.origin === "md",
+  )
+
   // A native agent is provided by the runtime and its key must not move. There is
   // no brain clause any more: brain dispatch is registry-driven and brain no
   // longer owns any other agent's model.
@@ -473,14 +479,23 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               title={language.t("settings.subagent.row.description.title")}
               description={language.t("settings.subagent.row.description.description")}
             >
-              <div class="w-full sm:w-[320px]" data-action="settings-subagent-description">
-                <TextareaV2
-                  rows={3}
-                  value={block(active().name).description ?? ""}
-                  aria-label={language.t("settings.subagent.row.description.title")}
-                  onChange={(event) => commit(active().name, { description: event.currentTarget.value })}
-                />
-              </div>
+              <Show
+                when={!mdBacked()}
+                fallback={
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-description-md">
+                    {language.t("settings.subagent.mdBacked", { file: `agent/${active().name}.md` })}
+                  </p>
+                }
+              >
+                <div class="w-full sm:w-[320px]" data-action="settings-subagent-description">
+                  <TextareaV2
+                    rows={3}
+                    value={block(active().name).description ?? ""}
+                    aria-label={language.t("settings.subagent.row.description.title")}
+                    onChange={(event) => commit(active().name, { description: event.currentTarget.value })}
+                  />
+                </div>
+              </Show>
             </SettingsRowV2>
             <SettingsRowV2
               title={language.t("settings.subagent.prompt.title")}
@@ -614,19 +629,28 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               title={language.t("settings.subagent.row.mode.title")}
               description={language.t("settings.subagent.row.mode.description")}
             >
-              <div class="w-full sm:w-[220px]">
-                <SelectV2
-                  appearance="inline"
-                  data-action="settings-subagent-mode"
-                  options={modeOptions.map((mode) => ({ mode }))}
-                  current={{ mode: block(active().name).mode ?? "subagent" }}
-                  placement="bottom-end"
-                  gutter={6}
-                  value={(option) => option.mode}
-                  label={(option) => language.t(`settings.subagent.mode.${option.mode}`)}
-                  onSelect={(option) => option && commit(active().name, { mode: option.mode })}
-                />
-              </div>
+              <Show
+                when={!mdBacked()}
+                fallback={
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-mode-md">
+                    {language.t("settings.subagent.mdBacked", { file: `agent/${active().name}.md` })}
+                  </p>
+                }
+              >
+                <div class="w-full sm:w-[220px]">
+                  <SelectV2
+                    appearance="inline"
+                    data-action="settings-subagent-mode"
+                    options={modeOptions.map((mode) => ({ mode }))}
+                    current={{ mode: block(active().name).mode ?? "subagent" }}
+                    placement="bottom-end"
+                    gutter={6}
+                    value={(option) => option.mode}
+                    label={(option) => language.t(`settings.subagent.mode.${option.mode}`)}
+                    onSelect={(option) => option && commit(active().name, { mode: option.mode })}
+                  />
+                </div>
+              </Show>
             </SettingsRowV2>
             <SettingsRowV2
               title={language.t("settings.subagent.row.hidden.title")}
