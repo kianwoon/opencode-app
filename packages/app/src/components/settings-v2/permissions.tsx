@@ -46,25 +46,12 @@ const OWNS_GROUPS = [
   },
 ] as const
 
-// How-rows. Every one carries a single action plus a pattern, written as
-// `agent.<name>.permission.<tool>`.
-const HOW_ROWS = [
-  "read",
-  "edit",
-  "glob",
-  "grep",
-  "list",
-  "bash",
-  "task",
-  "external_directory",
-  "todowrite",
-  "question",
-  "webfetch",
-  "websearch",
-  "lsp",
-  "skill",
-  "doom_loop",
-] as const
+const ALL_TOOLS: readonly string[] = OWNS_GROUPS.flatMap((group) => [...group.tools])
+
+// Only pattern-bearing tools get a pattern input. The evaluator matches every
+// rule against a pattern, so a bare action is the canonical form for the rest
+// and a visible "*" input for all of them was pure noise.
+const PATTERN_TOOLS: readonly string[] = ["bash", "read", "edit", "external_directory"]
 
 const actionOptions: Action[] = ["allow", "ask", "deny"]
 
@@ -230,6 +217,13 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                 />
               </div>
             </SettingsRowV2>
+            <p class="settings-v2-plugins-hint settings-v2-permissions-summary" data-action="settings-permissions-summary">
+              {language.t("settings.permissions.agent.summary", {
+                owned: ALL_TOOLS.filter((tool) => owns(tool)).length,
+                total: ALL_TOOLS.length,
+                skills: selectedSkills().length,
+              })}
+            </p>
           </SettingsListV2>
         </div>
 
@@ -239,21 +233,64 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
           <For each={OWNS_GROUPS}>
             {(group) => (
               <div class="settings-v2-section" data-component="settings-permissions-owns-group">
-                <h4 class="settings-v2-section-title">{language.t(group.label)}</h4>
-                <div class="settings-v2-plugins-skill-actions">
+                <h4 class="settings-v2-section-title">
+                  {language.t(group.label)}{" "}
+                  <span class="settings-v2-permissions-count">
+                    {language.t("settings.permissions.owns.count", {
+                      owned: group.tools.filter((tool) => owns(tool)).length,
+                      total: group.tools.length,
+                    })}
+                  </span>
+                </h4>
+                <SettingsListV2>
                   <For each={group.tools}>
                     {(tool) => (
-                      <div data-action={`settings-permissions-owns-${tool}`}>
-                        <CheckboxV2
-                          label={tool}
-                          checked={owns(tool)}
-                          onChange={(checked) => toggleOwns(tool, checked === true)}
-                          hideLabel
-                        />
-                      </div>
+                      <SettingsRowV2
+                        title={language.t(`settings.permissions.tool.${tool}.title`)}
+                        description={
+                          tool === "bash"
+                            ? language.t("settings.permissions.tool.bash.hint")
+                            : language.t(`settings.permissions.tool.${tool}.description`)
+                        }
+                      >
+                        <div class="settings-v2-permissions-row-controls">
+                          <div data-action={`settings-permissions-owns-${tool}`}>
+                            <CheckboxV2
+                              label={language.t("settings.permissions.owns.toggle")}
+                              checked={owns(tool)}
+                              onChange={(checked) => toggleOwns(tool, checked === true)}
+                            />
+                          </div>
+                          <div
+                            class="settings-v2-permissions-row-actions"
+                            classList={{ "settings-v2-permissions-row-dim": !owns(tool) }}
+                            data-action={`settings-permissions-how-${tool}`}
+                          >
+                            <SelectV2
+                              appearance="inline"
+                              options={actionOptions}
+                              current={howEntry(tool).action}
+                              placement="bottom-end"
+                              gutter={6}
+                              value={(option) => option}
+                              label={actionLabel}
+                              onSelect={(option) => option && setHow(tool, option, howEntry(tool).pattern)}
+                            />
+                            <Show when={PATTERN_TOOLS.includes(tool)}>
+                              <TextInputV2
+                                type="text"
+                                appearance="base"
+                                value={howEntry(tool).pattern}
+                                aria-label={language.t("settings.permissions.pattern.label")}
+                                onChange={(event) => setHow(tool, howEntry(tool).action, event.currentTarget.value)}
+                              />
+                            </Show>
+                          </div>
+                        </div>
+                      </SettingsRowV2>
                     )}
                   </For>
-                </div>
+                </SettingsListV2>
               </div>
             )}
           </For>
@@ -269,15 +306,12 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
             <SettingsListV2>
               <For each={skills.latest}>
                 {(skill) => (
-                  <SettingsRowV2
-                    title={skill.name}
-                    description={language.t("settings.permissions.section.skills.row.description")}
-                  >
+                  <SettingsRowV2 title={skill.name} description="">
                     <div data-action={`settings-permissions-skill-${skill.name}`}>
                       <CheckboxV2
                         label={language.t("settings.permissions.section.skills.row.toggle", { name: skill.name })}
                         checked={selectedSkills().includes(skill.name)}
-                        onChange={(checked) => checked === true && toggleSkill(skill.name)}
+                        onChange={(checked) => toggleSkill(skill.name)}
                         hideLabel
                       />
                     </div>
@@ -286,45 +320,6 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
               </For>
             </SettingsListV2>
           </Show>
-        </div>
-
-        <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.how.title")}</h3>
-          <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.how.description")}</p>
-          <SettingsListV2>
-            <For each={HOW_ROWS}>
-              {(tool) => (
-                <SettingsRowV2
-                  title={language.t(`settings.permissions.tool.${tool}.title`)}
-                  description={
-                    tool === "bash"
-                      ? language.t("settings.permissions.tool.bash.hint")
-                      : language.t(`settings.permissions.tool.${tool}.description`)
-                  }
-                >
-                  <div class="settings-v2-plugins-skill-actions" data-action={`settings-permissions-how-${tool}`}>
-                    <SelectV2
-                      appearance="inline"
-                      options={actionOptions}
-                      current={howEntry(tool).action}
-                      placement="bottom-end"
-                      gutter={6}
-                      value={(option) => option}
-                      label={actionLabel}
-                      onSelect={(option) => option && setHow(tool, option, howEntry(tool).pattern)}
-                    />
-                    <TextInputV2
-                      type="text"
-                      appearance="base"
-                      value={howEntry(tool).pattern}
-                      aria-label={language.t("settings.permissions.pattern.label")}
-                      onChange={(event) => setHow(tool, howEntry(tool).action, event.currentTarget.value)}
-                    />
-                  </div>
-                </SettingsRowV2>
-              )}
-            </For>
-          </SettingsListV2>
         </div>
 
         <div class="settings-v2-section">

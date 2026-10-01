@@ -816,6 +816,50 @@
   gap: 8px;
 }
 
+/* Permissions tab: one row per tool carries owns + action + optional pattern.
+   Fixed widths stop the row from overflowing the settings panel at narrow widths. */
+.settings-v2-permissions-row-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-v2-permissions-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-v2-permissions-row-actions [data-component="select-v2-root"] {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+}
+
+.settings-v2-permissions-row-actions [data-component="text-input-v2"] {
+  width: 160px;
+  min-width: 0;
+  max-width: 160px;
+}
+
+.settings-v2-permissions-row-dim {
+  opacity: 0.45;
+}
+
+.settings-v2-permissions-count {
+  font-weight: 440;
+  color: var(--v2-text-text-muted);
+}
+
+.settings-v2-permissions-summary {
+  padding-top: 0;
+}
+
 .settings-v2-plugins-location {
   display: flex;
   align-items: center;
