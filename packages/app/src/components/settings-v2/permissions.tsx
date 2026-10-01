@@ -7,7 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useServerProtocol } from "@/context/server-sdk"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
-import { useSync } from "@/context/sync"
+import { normalizeAgentList } from "@/context/global-sync/utils"
 import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
@@ -75,17 +75,27 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const serverSdk = useServerSDK()
   const protocol = useServerProtocol()
   const serverSync = useServerSync()
-  const sync = useSync()
 
   const config = createMemo(() => serverSync().data.config ?? {})
   const agents = createMemo<Record<string, AgentBlock | undefined>>(() =>
     (config().agent ?? {}) as Record<string, AgentBlock | undefined>,
   )
+  // Provider-free on purpose: this tab renders OUTSIDE the directory Sync
+  // provider, so the directory-scoped sync hook throws at render. Same
+  // dual-protocol resource shape as the skills fetch below.
+  const [agentList] = createResource(
+    () => ({ protocol: protocol(), directory: props.directory() }),
+    async (input) => {
+      if (input.protocol === undefined) return []
+      if (input.protocol === "v1") return normalizeAgentList((await serverSdk().client.app.agents()).data ?? [])
+      return normalizeAgentList((await serverSdk().api.agent.list({ location: { directory: input.directory } })).data)
+    },
+  )
   // Every agent the runtime publishes is individually editable. Config-only
   // entries (agent.<name> in config with no runtime match) are unioned in so a
   // hand-written block never disappears from the list.
   const agentOptions = createMemo(() => {
-    const runtime = sync().data.agent
+    const runtime = agentList.latest ?? []
     const mode = new Map(runtime.map((item) => [item.name, item.mode]))
     const names = [...new Set([...runtime.map((item) => item.name), ...Object.keys(agents())])]
       .filter((name) => !runtime.some((item) => item.name === name && item.hidden))
