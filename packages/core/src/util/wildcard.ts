@@ -10,5 +10,8 @@ export function match(input: string, pattern: string) {
 
   if (escaped.endsWith(" .*")) escaped = escaped.slice(0, -3) + "( .*)?"
 
-  return new RegExp("^" + escaped + "$", process.platform === "win32" ? "si" : "s").test(normalized)
+  return new RegExp(
+    "^" + escaped + "$",
+    typeof process !== "undefined" && process.platform === "win32" ? "si" : "s",
+  ).test(normalized)
 }
