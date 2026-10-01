@@ -1,5 +1,5 @@
-import { For, Show, createMemo, createResource, createSignal, type Accessor, type Component } from "solid-js"
-import { createStore } from "solid-js/store"
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, type Accessor, type Component } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { CheckboxV2 } from "@opencode-ai/ui/v2/checkbox-v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
@@ -288,6 +288,18 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const platform = usePlatform()
   const promptEditable = createMemo(() => mdBacked() && !!platform.readFile && !!platform.writeFile)
   const [promptEditor, setPromptEditor] = createSignal<{ name: string; body: string } | null>(null)
+  // The server re-reads the `.md` asynchronously (and only when the config write
+  // is non-empty), so the resource can lag a save. Retaining the saved body
+  // keeps the row and the next Edit prefill correct immediately; the resource
+  // remains the source of truth and takes over again on a refetch.
+  const [promptOverride, setPromptOverride] = createStore<Record<string, string>>({})
+  createEffect(
+    on(
+      () => active().name,
+      () => setPromptOverride(reconcile({})),
+    ),
+  )
+  const shownPrompt = createMemo(() => promptOverride[active().name] ?? resolvedPrompt())
 
   // `.md` agents are `---\n<frontmatter>\n---\n<body>`: keep everything through
   // the closing `---` AND its newline verbatim and replace only the body, so a
@@ -300,12 +312,15 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     if (!draft || !path || !read || !write) return
     return read(path)
       .then((current) => write(path, (current.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)?.[0] ?? "") + draft.body))
-      // The md write is invisible to config until a config write invalidates it.
-      .then(() => commitAgentPatch({}))
+      // An empty patch can make `Config.updateGlobal` compute `changed === false`
+      // and skip `invalidate()`, leaving the server on the pre-write `.md`. The
+      // md still wins the prompt for display; the value only forces the reload.
+      .then(() => commitAgentPatch({ [draft.name]: { prompt: draft.body } }))
       .then((ok) => {
         // A save can land after the user moved on: only close the editor it
         // saved, and only refresh for that agent.
         if (!ok || promptEditor()?.name !== draft.name) return ok
+        setPromptOverride(draft.name, draft.body)
         // The `.md` body changed on disk, so the list must be re-read or the
         // row -- and the next Edit prefill -- keep rendering the old prompt.
         return Promise.resolve(refetchAgents()).then(() => {
@@ -549,7 +564,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                   fallback={
                     <>
                       <Show
-                        when={resolvedPrompt()}
+                        when={shownPrompt()}
                         fallback={
                           <p class="settings-v2-plugins-hint" data-action="settings-subagent-prompt-empty">
                             {language.t("settings.subagent.prompt.empty")}
@@ -571,7 +586,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                             variant="ghost"
                             size="small"
                             data-action="settings-subagent-prompt-edit"
-                            onClick={() => setPromptEditor({ name: active().name, body: resolvedPrompt() })}
+                            onClick={() => setPromptEditor({ name: active().name, body: shownPrompt() })}
                           >
                             {language.t("settings.subagent.prompt.edit")}
                           </ButtonV2>
