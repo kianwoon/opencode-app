@@ -84,7 +84,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   // Provider-free on purpose: this tab renders OUTSIDE the directory Sync
   // provider, so the directory-scoped sync hook throws at render. Same
   // dual-protocol resource shape as the skills fetch below.
-  const [agentList] = createResource(
+  const [agentList, { refetch: refetchAgents }] = createResource(
     () => ({ protocol: protocol(), directory: props.directory() }),
     async (input) => {
       if (input.protocol === undefined) return []
@@ -303,8 +303,15 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       // The md write is invisible to config until a config write invalidates it.
       .then(() => commitAgentPatch({}))
       .then((ok) => {
-        if (ok) setPromptEditor(null)
-        return ok
+        // A save can land after the user moved on: only close the editor it
+        // saved, and only refresh for that agent.
+        if (!ok || promptEditor()?.name !== draft.name) return ok
+        // The `.md` body changed on disk, so the list must be re-read or the
+        // row -- and the next Edit prefill -- keep rendering the old prompt.
+        return Promise.resolve(refetchAgents()).then(() => {
+          setPromptEditor(null)
+          return true
+        })
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
