@@ -1251,6 +1251,7 @@ export const dict = {
   "settings.permissions.section.owns.group.general": "General",
   "settings.permissions.section.owns.group.planning": "Planning",
   "settings.permissions.section.owns.group.webDynamic": "Web and dynamic",
+  "settings.permissions.section.owns.group.jev": "JEV advisory",
   "settings.permissions.section.skills.title": "Skills",
   "settings.permissions.section.skills.description": "Skills the agent is allowed to load",
   "settings.permissions.section.skills.empty": "No skills discovered for this directory.",
@@ -1317,6 +1318,15 @@ export const dict = {
   "settings.permissions.tool.cua_batch.description": "Drive the computer in batched actions",
   "settings.permissions.tool.session_rename.title": "Session Rename",
   "settings.permissions.tool.session_rename.description": "Rename the current session",
+  "settings.permissions.tool.jev_accept.title": "jev_accept",
+  "settings.permissions.tool.jev_accept.description":
+    "Measured acceptance gate for handoff returns (fail-open, advisory)",
+  "settings.permissions.tool.jev_label.title": "jev_label",
+  "settings.permissions.tool.jev_label.description":
+    "Session state labeling: thrive, stall, bloat, or drift (advisory, fails open)",
+  "settings.permissions.tool.jev_rank.title": "jev_rank",
+  "settings.permissions.tool.jev_rank.description":
+    "Advisory read pre-ranking: scores candidates and returns a read order (fails open)",
 
   "settings.subagent.title": "Subagents",
   "settings.subagent.summary": "{{owned}} of {{total}} tools owned · {{skills}} skills",
@@ -1348,6 +1358,7 @@ export const dict = {
   "settings.subagent.owns.group.general": "General",
   "settings.subagent.owns.group.planning": "Planning",
   "settings.subagent.owns.group.webDynamic": "Web and dynamic",
+  "settings.subagent.owns.group.jev": "JEV advisory",
   "settings.subagent.section.skills.title": "Skills",
   "settings.subagent.section.skills.description": "Skills the agent is allowed to load",
   "settings.subagent.section.skills.empty": "No skills discovered for this directory.",

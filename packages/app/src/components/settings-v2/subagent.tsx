@@ -59,6 +59,10 @@ const OWNS_GROUPS = [
     label: "settings.subagent.owns.group.webDynamic",
     tools: ["webfetch", "websearch", "skill", "lsp", "tool_search", "cua_batch", "session_rename"],
   },
+  {
+    label: "settings.subagent.owns.group.jev",
+    tools: ["jev_accept", "jev_label", "jev_rank"],
+  },
 ] as const
 
 const ALL_TOOLS: readonly string[] = OWNS_GROUPS.flatMap((group) => [...group.tools])

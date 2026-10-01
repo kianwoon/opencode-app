@@ -109,6 +109,17 @@ describe("tool.registry", () => {
     }),
   )
 
+  it.instance("exposes the jev tools", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).toContain("jev_accept")
+      expect(ids).toContain("jev_label")
+      expect(ids).toContain("jev_rank")
+    }),
+  )
+
   it.instance("does not expose execute unless code mode is enabled", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
