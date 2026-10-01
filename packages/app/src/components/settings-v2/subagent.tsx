@@ -367,19 +367,13 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   }
 
   // Deleting a subagent is a tombstone write: the config API deep-merges and has
-  // no delete, so the key survives with `disable: true` and the runtime drops
-  // it. The native/brain guards are the same ones rename uses — neither may
-  // disappear from the runtime.
-  const deleteBlock = createMemo(() => {
-    const runtime = agentList.latest?.find((item) => item.name === active().name)
-    if (runtime?.native) return language.t("settings.subagent.delete.disabled.native")
-    if (brainKeyFor(active().name)) return language.t("settings.subagent.delete.disabled.brain")
-    return ""
-  })
-
+  // no delete, so the key survives with `disable: true`, the runtime drops it
+  // (agent.ts honours the tombstone) and the list filters it out. No brain/native
+  // guard: brain dispatch is registry-driven (`task: {"*":"allow"}`), so a brain
+  // wired agent disappears from the runtime as a whole rather than half-existing.
   const confirmDelete = async () => {
     const name = active().name
-    if (name === "" || deleteBlock() !== "") return
+    if (name === "") return
     if (!(await commitAgentPatch({ [name]: { disable: true } }))) return
     setSelected(agentOptions()[0]?.name ?? "")
     closeEditor()
@@ -620,45 +614,34 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               title={language.t("settings.subagent.delete.title")}
               description={language.t("settings.subagent.delete.description")}
             >
-              <Show
-                when={deleteBlock()}
-                fallback={
-                  <div class="w-full sm:w-[320px] flex items-center gap-2">
-                    <ButtonV2
-                      variant="ghost"
-                      size="small"
-                      data-action="settings-subagent-delete"
-                      onClick={() => setEditor({ kind: "delete", name: "", error: "" })}
-                    >
-                      {language.t("settings.subagent.delete.action")}
-                    </ButtonV2>
-<Show when={editor.kind === "delete"}>
-                      <ButtonV2
-                        variant="ghost"
-                        size="small"
-                        data-action="settings-subagent-delete-confirm"
-                        onClick={confirmDelete}
-                      >
-                        {language.t("settings.subagent.delete.confirm")}
-                      </ButtonV2>
-                      <ButtonV2
-                        variant="ghost"
-                        size="small"
-                        data-action="settings-subagent-delete-cancel"
-                        onClick={closeEditor}
-                      >
-                        {language.t("settings.subagent.delete.cancel")}
-                      </ButtonV2>
-                    </Show>
-                  </div>
-                }
-              >
-                {(reason) => (
-                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-delete-blocked">
-                    {reason()}
-                  </p>
-                )}
-              </Show>
+              <div class="w-full sm:w-[320px] flex items-center gap-2">
+                <ButtonV2
+                  variant="ghost"
+                  size="small"
+                  data-action="settings-subagent-delete"
+                  onClick={() => setEditor({ kind: "delete", name: "", error: "" })}
+                >
+                  {language.t("settings.subagent.delete.action")}
+                </ButtonV2>
+                <Show when={editor.kind === "delete"}>
+                  <ButtonV2
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-delete-confirm"
+                    onClick={confirmDelete}
+                  >
+                    {language.t("settings.subagent.delete.confirm")}
+                  </ButtonV2>
+                  <ButtonV2
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-delete-cancel"
+                    onClick={closeEditor}
+                  >
+                    {language.t("settings.subagent.delete.cancel")}
+                  </ButtonV2>
+                </Show>
+              </div>
             </SettingsRowV2>
             <Show when={editor.kind === "delete"}>
               <div class="w-full flex flex-col gap-2">

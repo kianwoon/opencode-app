@@ -442,4 +442,15 @@ describe("brain config expansion", () => {
     })
     expect(agent.hands?.model).toBe("user/own")
   })
+
+  test("a disable tombstone on a legacy-named agent survives expand", () => {
+    const agent = expand({
+      brain: { hands_model: "test/model" },
+      agent: { explorer: { disable: true } },
+    })
+    // Loop 1 walks the declared key and only sets its model; loop 2 skips it via
+    // `wired`, so the tombstone is never replaced by a fresh materialised agent.
+    expect(agent.explorer?.disable).toBe(true)
+    expect(agent.explorer?.model).toBe("test/model")
+  })
 })
