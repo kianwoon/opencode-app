@@ -244,6 +244,8 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     commit(active().name, { skills: current.includes(skill) ? current.filter((item) => item !== skill) : [...current, skill] })
   }
 
+  const capabilities = createMemo(() => block(active().name).capabilities ?? [])
+
   const howEntry = (tool: string) => {
     const value = block(active().name).permission?.[tool]
     if (!value) return { action: "ask" as Action, pattern: "*" }
@@ -507,6 +509,36 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                     </ButtonV2>
                   )}
                 />
+              </div>
+            </SettingsRowV2>
+            <SettingsRowV2
+              title={language.t("settings.subagent.row.capabilities.title")}
+              description={language.t("settings.subagent.row.capabilities.description")}
+            >
+              <div class="w-full flex flex-col gap-1" data-action="settings-subagent-capabilities">
+                <For each={Object.keys(CAPABILITY_BRAIN_KEY)}>
+                  {(cap) => (
+                    <div data-action={`settings-subagent-capability-${cap}`}>
+                      <CheckboxV2
+                        label={
+                          <>
+                            {cap}{" "}
+                            <span class="settings-v2-plugins-hint">{CAPABILITY_BRAIN_KEY[cap]}</span>
+                          </>
+                        }
+                        checked={capabilities().includes(cap)}
+                        onChange={() =>
+                          commit(
+                            active().name,
+                            capabilities().includes(cap)
+                              ? { capabilities: capabilities().filter((item) => item !== cap) }
+                              : { capabilities: [...capabilities(), cap] },
+                          )
+                        }
+                      />
+                    </div>
+                  )}
+                </For>
               </div>
             </SettingsRowV2>
             <SettingsRowV2
