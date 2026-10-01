@@ -796,6 +796,47 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("refuses to dispatch to a primary agent as a subagent", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+      const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+      const ctx = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        extra: { promptOps },
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      const primary = yield* Effect.exit(
+        def.execute({ description: "ship it", prompt: "go", subagent_type: "build" }, ctx),
+      )
+      // `build` is mode primary: describeTask never advertises it, so admitting it
+      // as a subagent would widen permissions past what the tool advertises.
+      expect(Exit.isFailure(primary)).toBe(true)
+      if (Exit.isFailure(primary))
+        expect(Cause.prettyErrors(primary.cause).map(String).join("\n")).toContain(
+          'Agent type "build" is a primary agent and cannot be invoked as a subagent',
+        )
+      expect(yield* sessions.children(chat.id)).toHaveLength(0)
+      expect(seen).toBeUndefined()
+
+      // The guard is primary-only: a normal subagent name still dispatches.
+      const subagent = yield* Effect.exit(
+        def.execute({ description: "inspect bug", prompt: "look into the cache key path", subagent_type: "general" }, ctx),
+      )
+      expect(Exit.isFailure(subagent)).toBe(false)
+      expect(seen?.agent).toBe("general")
+    }),
+  )
+
   it.instance("prevents subagents from launching subagents by default", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

@@ -52,13 +52,13 @@ const BRAIN_PERMISSION_STRICT = () => ({
     // "*>*" catches all redirection variants; last matching rule wins (permission/index.ts findLast)
     "*>*": "deny",
   },
+  // Registry-driven dispatch: brain may dispatch to any subagent. The runtime
+  // discovers taskable subagents from the live agent registry (`describeTask` in
+  // tool/registry.ts lists `agents.list()` filtered to mode !== "primary" and
+  // non-denied `task`), so no fixed name list belongs here — a hardcoded
+  // allowlist would hide every newly installed subagent from brain.
   task: {
-    "*": "deny",
-    explorer: "allow",
-    implementer: "allow",
-    reviewer: "allow",
-    guru: "allow",
-    "computer-aid": "allow",
+    "*": "allow",
   },
 }) as const
 
@@ -91,27 +91,55 @@ export function expand(config: ConfigV1.Info) {
   agent.brain.permission ??= {}
   agent.brain.permission.session_rename ??= "allow"
 
-  for (const [name, model] of [
-    ["explorer", brain.hands_model],
-    ["implementer", brain.hands_model],
-    ["reviewer", brain.reviewer_model],
-    ["guru", brain.guru_model],
-    ["computer-aid", brain.computer_aid_model],
-  ] as const) {
-    if (!model) continue
+  // Model wiring is capability-driven: an agent declares what it does via
+  // `agent.<name>.capabilities` and picks up the matching brain model without a
+  // name being registered here. `LEGACY_NAME_BRAIN_KEY` keeps configs that
+  // predate capabilities wired exactly as before; the FIRST mapped capability
+  // wins, an unmapped capability with no legacy name leaves the entry untouched.
+  type BrainModelKey = "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model"
+
+  const CAPABILITY_BRAIN_KEY: Record<string, BrainModelKey> = {
+    explore: "hands_model",
+    implement: "hands_model",
+    review: "reviewer_model",
+    advise: "guru_model",
+    gui: "computer_aid_model",
+  }
+
+  const LEGACY_NAME_BRAIN_KEY: Record<string, BrainModelKey> = {
+    explorer: "hands_model",
+    implementer: "hands_model",
+    reviewer: "reviewer_model",
+    guru: "guru_model",
+    "computer-aid": "computer_aid_model",
+  }
+
+  const wired = new Set<string>()
+
+  for (const name of Object.keys(agent)) {
     const entry = agent[name]
-    if (!entry) {
-      agent[name] = {
-        mode: "subagent",
-        ...(model ? { model } : {}),
-        permission: strict ? { task: "deny" } : {},
-      }
-      continue
-    }
+    const capability = entry.capabilities?.find((c) => c in CAPABILITY_BRAIN_KEY)
+    const key = capability ? CAPABILITY_BRAIN_KEY[capability] : LEGACY_NAME_BRAIN_KEY[name]
+    if (!key) continue
+    wired.add(name)
     // Non-empty brain model wins; empty/absent leaves the entry untouched.
-    if (model) entry.model = model
+    const model = brain[key]
+    if (!model) continue
+    entry.model = model
     if (!strict) continue
     entry.permission ??= {}
     if (entry.permission.task === undefined) entry.permission.task = "deny"
+  }
+
+  // Agents a config never declared are still materialised for the legacy names.
+  for (const [name, key] of Object.entries(LEGACY_NAME_BRAIN_KEY)) {
+    if (wired.has(name)) continue
+    const model = brain[key]
+    if (!model) continue
+    agent[name] = {
+      mode: "subagent",
+      model,
+      permission: strict ? { task: "deny" } : {},
+    }
   }
 }

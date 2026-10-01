@@ -1795,6 +1795,7 @@ export type AgentConfig = {
   }
   owned_tools?: Array<string>
   skills?: Array<string>
+  capabilities?: Array<string>
   disable?: boolean
   description?: string
   mode?: "subagent" | "primary" | "all"
@@ -1816,6 +1817,7 @@ export type AgentConfig = {
     | {
         [key: string]: boolean
       }
+    | Array<string>
     | Array<string>
     | Array<string>
     | boolean
@@ -2515,6 +2517,9 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
+  tools?: Array<string>
+  skills?: Array<string>
+  capabilities?: Array<string>
 }
 
 export type SkillRemoveError = {

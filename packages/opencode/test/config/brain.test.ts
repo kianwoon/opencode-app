@@ -17,6 +17,7 @@ import { ConfigBrain } from "../../src/config/brain"
 import { ConfigParse } from "../../src/config/parse"
 import { Env } from "../../src/env"
 import { InstanceRuntime } from "../../src/project/instance-runtime"
+import { Permission } from "../../src/permission"
 import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
@@ -156,14 +157,16 @@ describe("brain config expansion", () => {
             read: "allow",
             grep: "allow",
             glob: "allow",
-            task: {
-              "*": "deny",
-              explorer: "allow",
-              implementer: "allow",
-              reviewer: "allow",
-              guru: "allow",
-            },
           })
+          // Dispatch is registry-driven: any subagent name resolves to allow,
+          // including names outside the retired literal five-name allowlist.
+          const task = permission?.task
+          expect(task).toEqual({ "*": "allow" })
+          expect(task).not.toHaveProperty("explorer")
+          const ruleset = Permission.fromConfig(permission ?? {})
+          for (const name of ["explorer", "implementer", "reviewer", "guru", "computer-aid", "explore"]) {
+            expect(Permission.evaluate("task", name, ruleset).action).toBe("allow")
+          }
           // bash echo-allow + redirect-deny shape; edit falls under the "*" deny.
           expect(permission?.bash).toMatchObject({
             "*": "deny",
@@ -257,16 +260,8 @@ describe("brain config expansion", () => {
       Effect.tap((config) =>
         Effect.sync(() => {
           expect(config.agent?.guru).toBeUndefined()
-          expect(config.agent?.brain?.permission).toMatchObject({
-            task: {
-              "*": "deny",
-              explorer: "allow",
-              implementer: "allow",
-              reviewer: "allow",
-              guru: "allow",
-              "computer-aid": "allow",
-            },
-          })
+          // Registry-driven dispatch: no name list, and an unguru'd name still resolves.
+          expect(config.agent?.brain?.permission?.task).toEqual({ "*": "allow" })
         }),
       ),
       Effect.asVoid,
@@ -356,5 +351,95 @@ describe("brain config expansion", () => {
     )
     ConfigBrain.expand(userSet)
     expect(userSet.agent?.implementer?.model).toBe("anthropic/hands")
+  })
+
+  const expand = (input: object) => {
+    const config = ConfigParse.schema(ConfigV1.Info, input, "test")
+    ConfigBrain.expand(config)
+    return config.agent ?? {}
+  }
+
+  test("capabilities drive the model wiring instead of the agent name", () => {
+    const agent = expand({
+      brain: {
+        hands_model: "anthropic/hands",
+        reviewer_model: "anthropic/reviewer",
+        guru_model: "anthropic/guru",
+        computer_aid_model: "anthropic/computer-aid",
+      },
+      agent: {
+        hands: { capabilities: ["implement"] },
+        critic: { capabilities: ["review"] },
+        advisor: { capabilities: ["advise"] },
+        driver: { capabilities: ["gui"] },
+      },
+    })
+    expect(agent.hands?.model).toBe("anthropic/hands")
+    expect(agent.critic?.model).toBe("anthropic/reviewer")
+    expect(agent.advisor?.model).toBe("anthropic/guru")
+    expect(agent.driver?.model).toBe("anthropic/computer-aid")
+  })
+
+  test("explore capability maps onto the hands model", () => {
+    const agent = expand({
+      brain: { hands_model: "anthropic/hands" },
+      agent: { scout: { capabilities: ["explore"] } },
+    })
+    expect(agent.scout?.model).toBe("anthropic/hands")
+  })
+
+  test("the first mapped capability wins", () => {
+    const agent = expand({
+      brain: { hands_model: "anthropic/hands", reviewer_model: "anthropic/reviewer" },
+      agent: { hands: { capabilities: ["review", "implement"] } },
+    })
+    expect(agent.hands?.model).toBe("anthropic/reviewer")
+  })
+
+  test("unmapped capability without a legacy name leaves the model untouched", () => {
+    const agent = expand({
+      brain: { hands_model: "anthropic/hands" },
+      agent: { scripter: { capabilities: ["scripting"], model: "user/own" } },
+    })
+    expect(agent.scripter?.model).toBe("user/own")
+  })
+
+  test("legacy agent names still resolve with no capabilities declared", () => {
+    const agent = expand({
+      brain: {
+        hands_model: "anthropic/hands",
+        reviewer_model: "anthropic/reviewer",
+        guru_model: "anthropic/guru",
+        computer_aid_model: "anthropic/computer-aid",
+      },
+      agent: {
+        explorer: {},
+        implementer: {},
+        reviewer: {},
+        guru: {},
+        "computer-aid": {},
+      },
+    })
+    expect(agent.explorer?.model).toBe("anthropic/hands")
+    expect(agent.implementer?.model).toBe("anthropic/hands")
+    expect(agent.reviewer?.model).toBe("anthropic/reviewer")
+    expect(agent.guru?.model).toBe("anthropic/guru")
+    expect(agent["computer-aid"]?.model).toBe("anthropic/computer-aid")
+  })
+
+  test("strict enforcement denies task on a capability-driven agent", () => {
+    const agent = expand({
+      brain: { hands_model: "anthropic/hands", enforcement: "strict" },
+      agent: { hands: { capabilities: ["implement"] } },
+    })
+    expect(agent.hands).toMatchObject({ model: "anthropic/hands", permission: { task: "deny" } })
+  })
+
+  test("empty brain model does not overwrite a capability-driven agent entry", () => {
+    const agent = expand({
+      brain: { hands_model: "" },
+      agent: { hands: { capabilities: ["implement"], model: "user/own" } },
+    })
+    expect(agent.hands?.model).toBe("user/own")
   })
 })

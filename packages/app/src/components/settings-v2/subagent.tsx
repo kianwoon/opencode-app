@@ -29,6 +29,7 @@ type AgentBlock = {
   model?: string
   owned_tools?: string[]
   skills?: string[]
+  capabilities?: string[]
   permission?: { [tool: string]: PermissionRule }
   steps?: number
   temperature?: number
@@ -49,12 +50,26 @@ type BrainConfig = {
   computer_aid_model?: string
 }
 
+type BrainModelKey = "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model"
+
 // brain.* overwrites agent.<name>.model at config-expand time
 // (packages/opencode/src/config/brain.ts), so a hand agent's model MUST be
 // written to its brain key: an agent-block `model` there reads as live while
 // being dead. `hands_model` drives both hands.
-const BRAIN_MODEL_KEY: Record<string, "model" | "hands_model" | "reviewer_model" | "guru_model" | "computer_aid_model"> = {
-  brain: "model",
+//
+// The server resolves that wiring by CAPABILITY with a legacy-name fallback;
+// these two maps mirror it literally because the app cannot import the server
+// package across the bundle boundary (same pattern as JEV_DEFAULT_MODEL in
+// orchestration.tsx). Keep them in sync with brain.ts.
+const CAPABILITY_BRAIN_KEY: Record<string, BrainModelKey> = {
+  explore: "hands_model",
+  implement: "hands_model",
+  review: "reviewer_model",
+  advise: "guru_model",
+  gui: "computer_aid_model",
+}
+
+const LEGACY_NAME_BRAIN_KEY: Record<string, BrainModelKey> = {
   explorer: "hands_model",
   implementer: "hands_model",
   reviewer: "reviewer_model",
@@ -178,7 +193,16 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       })
   }
 
-  const modelField = createMemo(() => BRAIN_MODEL_KEY[active().name])
+  const brainKeyFor = (name: string) => {
+    if (name === "brain") return "model"
+    const runtime = agentList.latest?.find((item) => item.name === name)
+    const capability = (runtime?.capabilities ?? block(name).capabilities)?.find(
+      (item) => item in CAPABILITY_BRAIN_KEY,
+    )
+    return capability ? CAPABILITY_BRAIN_KEY[capability] : LEGACY_NAME_BRAIN_KEY[name]
+  }
+
+  const modelField = createMemo(() => brainKeyFor(active().name))
   const currentModel = createMemo(() => {
     const field = modelField()
     const value = field ? brain()[field] ?? "" : block(active().name).model ?? ""
@@ -317,7 +341,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const renameBlock = createMemo(() => {
     const runtime = agentList.latest?.find((item) => item.name === active().name)
     if (runtime?.native) return language.t("settings.subagent.rename.disabled.native")
-    if (BRAIN_MODEL_KEY[active().name]) return language.t("settings.subagent.rename.disabled.brain")
+    if (brainKeyFor(active().name)) return language.t("settings.subagent.rename.disabled.brain")
     return ""
   })
 
@@ -349,7 +373,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const deleteBlock = createMemo(() => {
     const runtime = agentList.latest?.find((item) => item.name === active().name)
     if (runtime?.native) return language.t("settings.subagent.delete.disabled.native")
-    if (BRAIN_MODEL_KEY[active().name]) return language.t("settings.subagent.delete.disabled.brain")
+    if (brainKeyFor(active().name)) return language.t("settings.subagent.delete.disabled.brain")
     return ""
   })
 

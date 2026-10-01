@@ -27,6 +27,9 @@ const AgentSchema = Schema.StructWithRest(
     skills: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
       description: "Allowlist of skill names this agent owns. Undefined means every skill.",
     }),
+    capabilities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+      description: "Declarative capability tags for this agent.",
+    }),
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
     mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
@@ -65,6 +68,7 @@ const KNOWN_KEYS = new Set([
   "tools",
   "owned_tools",
   "skills",
+  "capabilities",
 ])
 
 const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema.Type<typeof AgentSchema> => {

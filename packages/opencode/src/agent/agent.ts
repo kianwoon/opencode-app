@@ -54,6 +54,7 @@ export const Info = Schema.Struct({
   steps: Schema.optional(Schema.Finite),
   tools: Schema.optional(Schema.Array(Schema.String)),
   skills: Schema.optional(Schema.Array(Schema.String)),
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -296,6 +297,7 @@ const layer = Layer.effect(
           item.steps = value.steps ?? item.steps
           item.tools = value.owned_tools ?? item.tools
           item.skills = value.skills ?? item.skills
+          item.capabilities = value.capabilities ?? item.capabilities
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }

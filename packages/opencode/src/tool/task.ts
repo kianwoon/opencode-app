@@ -397,6 +397,14 @@ export const TaskTool = Tool.define(
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
+      // describeTask only ADVERTISES mode !== "primary" agents, and brain's strict
+      // `task: {"*": "allow"}` admits any name — so enforcement must reject a
+      // primary agent here, before any session side effect.
+      if (next.mode === "primary") {
+        return yield* Effect.fail(
+          new Error(`Agent type "${params.subagent_type}" is a primary agent and cannot be invoked as a subagent`),
+        )
+      }
 
       const session = taskSession
       const reused = params.task_id !== undefined || params.reuse === false || params.reuse === "false"
