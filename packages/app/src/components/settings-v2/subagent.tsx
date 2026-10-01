@@ -1,10 +1,12 @@
 import { For, Show, createMemo, createResource, createSignal, type Accessor, type Component } from "solid-js"
+import { createStore } from "solid-js/store"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { CheckboxV2 } from "@opencode-ai/ui/v2/checkbox-v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
+import { TextareaV2 } from "@opencode-ai/ui/v2/textarea-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
@@ -32,6 +34,11 @@ type AgentBlock = {
   temperature?: number
   top_p?: number
   hidden?: boolean
+  // A rename copies the RESOLVED prompt/description/mode onto the new key, so
+  // the moved block must carry them; `disable` is the tombstone left behind on
+  // the old key (updateConfig deep-merges and cannot delete).
+  prompt?: string
+  disable?: boolean
 }
 
 type BrainConfig = {
@@ -107,11 +114,13 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   )
   // Subagent panel only: the primary agent is the Orchestration tab's business,
   // and config-only entries are unioned in so a hand-written block never
-  // disappears from the list.
+  // disappears from the list. A `disable: true` tombstone (left behind by a
+  // rename, since updateConfig cannot delete a key) is not selectable.
   const agentOptions = createMemo(() => {
     const runtime = agentList.latest ?? []
     const names = [...new Set([...runtime.map((item) => item.name), ...Object.keys(agents())])].filter(
-      (name) => !runtime.some((item) => item.name === name && item.mode === "primary"),
+      (name) =>
+        !runtime.some((item) => item.name === name && item.mode === "primary") && agents()[name]?.disable !== true,
     )
     return names.sort((a, b) => a.localeCompare(b)).map((name) => ({ name }))
   })
@@ -239,6 +248,97 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     commit(active().name, { [field]: value })
   }
 
+  // One inline editor serves both create and rename, so the draft name and its
+  // error live in a single store rather than a signal per field.
+  const [editor, setEditor] = createStore<{ kind: "" | "create" | "rename"; name: string; error: string }>({
+    kind: "",
+    name: "",
+    error: "",
+  })
+  const closeEditor = () => setEditor({ kind: "", name: "", error: "" })
+
+  // agentOptions() deliberately hides primary agents, so it is the WRONG set for
+  // a duplicate check: creating or renaming to build/plan/brain would otherwise
+  // pass and clobber that agent's config block. Every existing name counts here,
+  // primary and native included; only a disabled tombstone is free to reuse.
+  const reservedNames = createMemo(
+    () =>
+      new Set(
+        [...(agentList.latest ?? []).map((item) => item.name), ...Object.keys(agents())].filter(
+          (name) => agents()[name]?.disable !== true,
+        ),
+      ),
+  )
+
+  // task.ts resolves a subagent by config KEY (agent.get(name)), so a rename has
+  // to move the key itself; both flows share this one validator.
+  const nameError = (raw: string) => {
+    const name = raw.trim()
+    if (name === "") return language.t("settings.subagent.name.error.empty")
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) return language.t("settings.subagent.name.error.invalid")
+    if (reservedNames().has(name)) return language.t("settings.subagent.name.error.duplicate")
+    return ""
+  }
+
+  // Create and rename must move the selection only once the write lands, so they
+  // await it; the row controls keep commit()'s fire-and-forget path. The agent
+  // map is deep-merged, so a partial patch adds or overwrites without restating
+  // untouched keys. Resolves false so the caller can skip setSelected.
+  const commitAgentPatch = (patch: Record<string, AgentBlock>) =>
+    serverSync()
+      .updateConfig({ agent: patch })
+      .then(
+        () => true,
+        (err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err)
+          showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+          return false
+        },
+      )
+
+  const confirmCreate = async () => {
+    const error = nameError(editor.name)
+    if (error !== "") return setEditor("error", error)
+    const name = editor.name.trim()
+    if (!(await commitAgentPatch({ [name]: { mode: "subagent" } }))) return
+    setSelected(name)
+    closeEditor()
+  }
+
+  const resolvedPrompt = createMemo(
+    () => agentList.latest?.find((item) => item.name === active().name)?.prompt ?? "",
+  )
+
+  // brain.<key> models and brain's permission.task allowlist are keyed by the
+  // literal name, so a brain-wired or native agent's key must not move.
+  const renameBlock = createMemo(() => {
+    const runtime = agentList.latest?.find((item) => item.name === active().name)
+    if (runtime?.native) return language.t("settings.subagent.rename.disabled.native")
+    if (BRAIN_MODEL_KEY[active().name]) return language.t("settings.subagent.rename.disabled.brain")
+    return ""
+  })
+
+  const confirmRename = async () => {
+    const from = active().name
+    if (from === "" || renameBlock() !== "") return
+    const error = nameError(editor.name)
+    if (error !== "") return setEditor("error", error)
+    const to = editor.name.trim()
+    const runtime = agentList.latest?.find((item) => item.name === from)
+    // Carry the RESOLVED values onto the new key: once the old key is
+    // tombstoned the runtime no longer resolves its prompt/description/mode.
+    const moved: AgentBlock = { ...agents()[from] }
+    if (moved.prompt === undefined) moved.prompt = runtime?.prompt
+    if (moved.description === undefined) moved.description = runtime?.description
+    if (moved.mode === undefined) moved.mode = runtime?.mode ?? "subagent"
+    delete moved.disable
+    // Selecting `to` before the write lands would leave the panel pointing at a
+    // key that does not exist yet, so the selection waits on the tombstone.
+    if (!(await commitAgentPatch({ [to]: moved, [from]: { disable: true } }))) return
+    setSelected(to)
+    closeEditor()
+  }
+
   const actionLabel = (action: Action) => language.t(`settings.permissions.action.${action}`)
   const current = createMemo(() => currentModel() as { provider?: { id: string }; name?: string } | undefined)
 
@@ -255,7 +355,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               title={language.t("settings.subagent.agent.title")}
               description={language.t("settings.subagent.agent.description")}
             >
-              <div class="w-full sm:w-[220px]">
+              <div class="w-full sm:w-[220px] flex items-center gap-2">
                 <SelectV2
                   appearance="inline"
                   data-action="settings-subagent-agent"
@@ -267,8 +367,51 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                   label={(option) => option.name}
                   onSelect={(option) => option && setSelected(option.name)}
                 />
+                <ButtonV2
+                  variant="ghost"
+                  size="small"
+                  data-action="settings-subagent-new"
+                  onClick={() => setEditor({ kind: "create", name: "", error: "" })}
+                >
+                  {language.t("settings.subagent.create.title")}
+                </ButtonV2>
               </div>
             </SettingsRowV2>
+            <Show when={editor.kind === "create"}>
+              <div class="w-full flex flex-col gap-2" data-action="settings-subagent-create">
+                <div class="w-full sm:w-[320px] flex items-center gap-2">
+                  <TextInputV2
+                    type="text"
+                    appearance="base"
+                    value={editor.name}
+                    invalid={editor.error !== ""}
+                    aria-label={language.t("settings.subagent.create.title")}
+                    onChange={(event) => setEditor({ name: event.currentTarget.value, error: "" })}
+                  />
+                  <ButtonV2
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-create-confirm"
+                    onClick={confirmCreate}
+                  >
+                    {language.t("settings.subagent.create.confirm")}
+                  </ButtonV2>
+                  <ButtonV2
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-create-cancel"
+                    onClick={closeEditor}
+                  >
+                    {language.t("settings.subagent.create.cancel")}
+                  </ButtonV2>
+                </div>
+                <Show when={editor.error !== ""}>
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-create-error">
+                    {editor.error}
+                  </p>
+                </Show>
+              </div>
+            </Show>
             <p class="settings-v2-plugins-hint" data-action="settings-subagent-summary">
               {language.t("settings.subagent.summary", {
                 owned: ALL_TOOLS.filter((tool) => owns(tool)).length,
@@ -331,15 +474,102 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               description={language.t("settings.subagent.row.description.description")}
             >
               <div class="w-full sm:w-[320px]" data-action="settings-subagent-description">
-                <TextInputV2
-                  type="text"
-                  appearance="base"
+                <TextareaV2
+                  rows={3}
                   value={block(active().name).description ?? ""}
                   aria-label={language.t("settings.subagent.row.description.title")}
                   onChange={(event) => commit(active().name, { description: event.currentTarget.value })}
                 />
               </div>
             </SettingsRowV2>
+            <SettingsRowV2
+              title={language.t("settings.subagent.prompt.title")}
+              description={language.t("settings.subagent.prompt.description")}
+            >
+              <div class="w-full sm:w-[420px]">
+                <Show
+                  when={resolvedPrompt()}
+                  fallback={
+                    <p class="settings-v2-plugins-hint" data-action="settings-subagent-prompt-empty">
+                      {language.t("settings.subagent.prompt.empty")}
+                    </p>
+                  }
+                >
+                  {(prompt) => (
+                    <pre
+                      class="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-12-regular"
+                      data-action="settings-subagent-prompt"
+                    >
+                      {prompt()}
+                    </pre>
+                  )}
+                </Show>
+              </div>
+            </SettingsRowV2>
+            <SettingsRowV2
+              title={language.t("settings.subagent.rename.title")}
+              description={language.t("settings.subagent.rename.description")}
+            >
+              <Show
+                when={renameBlock()}
+                fallback={
+                  <div class="w-full sm:w-[320px] flex items-center gap-2">
+                    <ButtonV2
+                      variant="ghost"
+                      size="small"
+                      data-action="settings-subagent-rename"
+                      onClick={() => setEditor({ kind: "rename", name: active().name, error: "" })}
+                    >
+                      {language.t("settings.subagent.rename.action")}
+                    </ButtonV2>
+                    <Show when={editor.kind === "rename"}>
+                      <TextInputV2
+                        type="text"
+                        appearance="base"
+                        value={editor.name}
+                        invalid={editor.error !== ""}
+                        aria-label={language.t("settings.subagent.rename.title")}
+                        onChange={(event) => setEditor({ name: event.currentTarget.value, error: "" })}
+                      />
+                      <ButtonV2
+                        variant="ghost"
+                        size="small"
+                        data-action="settings-subagent-rename-confirm"
+                        onClick={confirmRename}
+                      >
+                        {language.t("settings.subagent.rename.confirm")}
+                      </ButtonV2>
+                      <ButtonV2
+                        variant="ghost"
+                        size="small"
+                        data-action="settings-subagent-rename-cancel"
+                        onClick={closeEditor}
+                      >
+                        {language.t("settings.subagent.rename.cancel")}
+                      </ButtonV2>
+                    </Show>
+                  </div>
+                }
+              >
+                {(reason) => (
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-rename-blocked">
+                    {reason()}
+                  </p>
+                )}
+              </Show>
+            </SettingsRowV2>
+            <Show when={editor.kind === "rename"}>
+              <div class="w-full flex flex-col gap-2">
+                <Show when={editor.error !== ""}>
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-rename-error">
+                    {editor.error}
+                  </p>
+                </Show>
+                <p class="settings-v2-plugins-hint" data-action="settings-subagent-rename-tombstone">
+                  {language.t("settings.subagent.rename.tombstone", { from: active().name })}
+                </p>
+              </div>
+            </Show>
             <SettingsRowV2
               title={language.t("settings.subagent.row.mode.title")}
               description={language.t("settings.subagent.row.mode.description")}
