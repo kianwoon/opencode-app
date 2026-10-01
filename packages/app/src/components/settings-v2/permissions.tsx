@@ -7,6 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useServerProtocol } from "@/context/server-sdk"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
+import { useSync } from "@/context/sync"
 import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
@@ -19,17 +20,6 @@ type AgentBlock = {
   skills?: string[]
   permission?: { [tool: string]: PermissionRule }
 }
-
-// Config `agent.<name>` keys the tab edits. `hands` owns both hand agents: the
-// brain expansion maps brain.hands_model onto explorer + implementer, so both
-// entries are written in ONE updateConfig call (never a second write path).
-const AGENT_TARGETS = [
-  { id: "brain", keys: ["brain"] },
-  { id: "hands", keys: ["explorer", "implementer"] },
-  { id: "reviewer", keys: ["reviewer"] },
-  { id: "guru", keys: ["guru"] },
-  { id: "computer_aid", keys: ["computer-aid"] },
-] as const
 
 const OWNS_GROUPS = [
   {
@@ -85,28 +75,37 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const serverSdk = useServerSDK()
   const protocol = useServerProtocol()
   const serverSync = useServerSync()
+  const sync = useSync()
 
   const config = createMemo(() => serverSync().data.config ?? {})
   const agents = createMemo<Record<string, AgentBlock | undefined>>(() =>
     (config().agent ?? {}) as Record<string, AgentBlock | undefined>,
   )
-  const [selected, setSelected] = createSignal<string>(AGENT_TARGETS[0].id)
-  const targets = createMemo<{ id: string; keys: readonly string[] }>(
-    () => AGENT_TARGETS.find((item) => item.id === selected()) ?? AGENT_TARGETS[0],
-  )
-  // Custom agents are whatever else the server already knows about; the tab
-  // never invents an agent name the runtime has not published.
-  const customAgents = createMemo(() => {
-    const owned = new Set<string>(AGENT_TARGETS.flatMap((item) => [...item.keys]))
-    return Object.keys(agents())
-      .filter((name) => !owned.has(name))
-      .sort((a, b) => a.localeCompare(b))
+  // Every agent the runtime publishes is individually editable. Config-only
+  // entries (agent.<name> in config with no runtime match) are unioned in so a
+  // hand-written block never disappears from the list.
+  const agentOptions = createMemo(() => {
+    const runtime = sync().data.agent
+    const mode = new Map(runtime.map((item) => [item.name, item.mode]))
+    const names = [...new Set([...runtime.map((item) => item.name), ...Object.keys(agents())])]
+      .filter((name) => !runtime.some((item) => item.name === name && item.hidden))
+      .sort((a, b) => {
+        if (a === "brain") return -1
+        if (b === "brain") return 1
+        const rank = (name: string) => (mode.get(name) === "subagent" ? 1 : 0)
+        return rank(a) - rank(b) || a.localeCompare(b)
+      })
+    return names.map((name) => ({ name }))
   })
-  const agentOptions = createMemo(() => [
-    ...AGENT_TARGETS.map((item) => ({ id: item.id, keys: [...item.keys], label: item.id })),
-    ...customAgents().map((name) => ({ id: name, keys: [name], label: name })),
-  ])
-  const active = createMemo(() => agentOptions().find((item) => item.id === selected()) ?? agentOptions()[0])
+  const [selected, setSelected] = createSignal<string>("")
+  // Empty list is possible when the runtime has not published agents and config
+  // has no agent block; the row read sites deref this, so keep it total.
+  const active = createMemo(
+    () =>
+      agentOptions().find((item) => item.name === selected()) ??
+      agentOptions().find((item) => item.name === "brain") ??
+      agentOptions()[0] ?? { name: "" },
+  )
 
   const block = (key: string) => agents()[key] ?? {}
 
@@ -128,7 +127,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const commit = (name: string, patch: AgentBlock) => {
     const next = { ...config() }
     const agent = { ...agents() }
-    for (const key of targets().keys) agent[key] = { ...block(key), ...patch }
+    agent[name] = { ...block(name), ...patch }
     next.agent = agent
     void serverSync()
       .updateConfig(next)
@@ -142,48 +141,46 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   // An absent owned_tools means every tool, matching resolveTools in
   // packages/opencode/src/session/llm/request.ts. The deprecated boolean `tools`
   // map is never read or written here — it would be a second, unconnected source.
-  const owns = (tool: string) => block(active().keys[0]).owned_tools?.includes(tool) ?? true
+  const owns = (tool: string) => block(active().name).owned_tools?.includes(tool) ?? true
   const toggleOwns = (tool: string, checked: boolean) => {
-    const current = block(active().keys[0]).owned_tools
+    const current = block(active().name).owned_tools
     const known = OWNS_GROUPS.flatMap((group) => group.tools)
     const owned_tools = checked
       ? [...new Set([...(current ?? known.filter((name) => owns(name))), tool])]
       : (current ?? known).filter((name) => name !== tool)
-    commit(active().label, { owned_tools })
+    commit(active().name, { owned_tools })
   }
 
-  const selectedSkills = () => block(active().keys[0]).skills ?? []
+  const selectedSkills = () => block(active().name).skills ?? []
   const toggleSkill = (skill: string) => {
     const current = selectedSkills()
     const next = current.includes(skill) ? current.filter((item) => item !== skill) : [...current, skill]
-    commit(active().label, { skills: next })
+    commit(active().name, { skills: next })
   }
 
   const howEntry = (tool: string) => {
-    const value = block(active().keys[0]).permission?.[tool]
+    const value = block(active().name).permission?.[tool]
     if (!value) return { action: "ask" as Action, pattern: "*" }
     if (typeof value === "string") return { action: value, pattern: "*" }
     const [pattern, action] = Object.entries(value)[0] ?? ["*", "ask" as Action]
     return { action, pattern }
   }
   const setHow = (tool: string, action: Action, pattern: string) => {
-    const permission = { ...block(active().keys[0]).permission }
+    const permission = { ...block(active().name).permission }
     // The bare-action form keeps the config canonical for the "*" pattern;
     // anything else needs the pattern map.
     permission[tool] = pattern.trim() === "" || pattern === "*" ? action : { [pattern.trim()]: action }
-    commit(active().label, { permission })
+    commit(active().name, { permission })
   }
 
   const manifest = createMemo(() => {
     const ruleset: { permission: string; pattern: string; action: Action }[] = []
-    for (const key of active().keys) {
-      for (const [tool, value] of Object.entries(block(key).permission ?? {})) {
-        ruleset.push(
-          ...(typeof value === "string"
-            ? [{ permission: tool, pattern: "*", action: value }]
-            : Object.entries(value).map(([pattern, action]) => ({ permission: tool, pattern, action }))),
-        )
-      }
+    for (const [tool, value] of Object.entries(block(active().name).permission ?? {})) {
+      ruleset.push(
+        ...(typeof value === "string"
+          ? [{ permission: tool, pattern: "*", action: value }]
+          : Object.entries(value).map(([pattern, action]) => ({ permission: tool, pattern, action }))),
+      )
     }
     return effectiveManifest(ruleset)
   })
@@ -211,9 +208,9 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                   current={active()}
                   placement="bottom-end"
                   gutter={6}
-                  value={(option) => option.id}
-                  label={(option) => option.label}
-                  onSelect={(option) => option && setSelected(option.id)}
+                  value={(option) => option.name}
+                  label={(option) => option.name}
+                  onSelect={(option) => option && setSelected(option.name)}
                 />
               </div>
             </SettingsRowV2>
