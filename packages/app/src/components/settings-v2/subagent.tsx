@@ -20,6 +20,7 @@ import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
+import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
 import "./settings-v2.css"
 
 type Action = "allow" | "ask" | "deny"
@@ -288,10 +289,9 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const platform = usePlatform()
   const promptEditable = createMemo(() => mdBacked() && !!platform.readFile && !!platform.writeFile)
   const [promptEditor, setPromptEditor] = createSignal<{ name: string; body: string } | null>(null)
-  // The server re-reads the `.md` asynchronously (and only when the config write
-  // is non-empty), so the resource can lag a save. Retaining the saved body
-  // keeps the row and the next Edit prefill correct immediately; the resource
-  // remains the source of truth and takes over again on a refetch.
+  // A file read is async, so a save can land before it returns. Retaining the
+  // saved body keeps the row and the next Edit prefill correct immediately; the
+  // file read is the source of truth and takes over again on a refetch.
   const [promptOverride, setPromptOverride] = createStore<Record<string, string>>({})
   createEffect(
     on(
@@ -299,34 +299,49 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       () => setPromptOverride(reconcile({})),
     ),
   )
-  const shownPrompt = createMemo(() => promptOverride[active().name] ?? resolvedPrompt())
+  // For an md agent the `.md` body IS the prompt, so it is read from the file
+  // rather than the server's cached copy -- the file is already correct the
+  // moment a save lands. A config or native agent has no file, keeps the server
+  // value, and never triggers a read.
+  const [mdPrompt, { refetch: refetchMdPrompt }] = createResource(
+    () => {
+      const item = agentList.latest?.find((entry) => entry.name === active().name)
+      return item?.origin === "md" ? item.originPath : undefined
+    },
+    async (path) => {
+      const read = platform.readFile
+      if (!path || !read) return undefined
+      return promptBody(await read(path))
+    },
+  )
+  const shownPrompt = createMemo(() =>
+    resolvePrompt({
+      override: promptOverride[active().name],
+      file: mdBacked() ? mdPrompt() : undefined,
+      server: resolvedPrompt(),
+    }),
+  )
 
-  // `.md` agents are `---\n<frontmatter>\n---\n<body>`: keep everything through
-  // the closing `---` AND its newline verbatim and replace only the body, so a
-  // hand-tuned frontmatter is never regenerated, reformatted or dropped.
+  // The body is written through `writePromptBody`, which preserves the leading
+  // frontmatter byte-for-byte. Deliberately no config write here: a
+  // `PATCH /config` makes `Config.updateGlobal` fork
+  // `disposeAllInstancesAndEmitGlobalDisposed`, disposing every instance and
+  // killing the very run that clicked Save.
   const savePrompt = () => {
     const draft = promptEditor()
     const path = agentList.latest?.find((item) => item.name === draft?.name)?.originPath
     const read = platform.readFile
     const write = platform.writeFile
     if (!draft || !path || !read || !write) return
-    return read(path)
-      .then((current) => write(path, (current.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)?.[0] ?? "") + draft.body))
-      // An empty patch can make `Config.updateGlobal` compute `changed === false`
-      // and skip `invalidate()`, leaving the server on the pre-write `.md`. The
-      // md still wins the prompt for display; the value only forces the reload.
-      .then(() => commitAgentPatch({ [draft.name]: { prompt: draft.body } }))
-      .then((ok) => {
+    return writePromptBody({ readFile: read, writeFile: write }, path, draft.body)
+      .then(() => {
         // A save can land after the user moved on: only close the editor it
-        // saved, and only refresh for that agent.
-        if (!ok || promptEditor()?.name !== draft.name) return ok
-        setPromptOverride(draft.name, draft.body)
-        // The `.md` body changed on disk, so the list must be re-read or the
-        // row -- and the next Edit prefill -- keep rendering the old prompt.
-        return Promise.resolve(refetchAgents()).then(() => {
+        // saved, and only retain that agent's body.
+        if (promptEditor()?.name === draft.name) {
+          setPromptOverride(draft.name, draft.body)
           setPromptEditor(null)
-          return true
-        })
+        }
+        return Promise.all([refetchMdPrompt(), refetchAgents()])
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
