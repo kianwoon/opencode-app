@@ -1793,6 +1793,8 @@ export type AgentConfig = {
   tools?: {
     [key: string]: boolean
   }
+  owned_tools?: Array<string>
+  skills?: Array<string>
   disable?: boolean
   description?: string
   mode?: "subagent" | "primary" | "all"
@@ -1814,6 +1816,8 @@ export type AgentConfig = {
     | {
         [key: string]: boolean
       }
+    | Array<string>
+    | Array<string>
     | boolean
     | "subagent"
     | "primary"

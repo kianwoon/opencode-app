@@ -21,6 +21,12 @@ const AgentSchema = Schema.StructWithRest(
     tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
       description: "@deprecated Use 'permission' field instead",
     }),
+    owned_tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+      description: "Allowlist of tool names this agent owns. Undefined means every tool.",
+    }),
+    skills: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+      description: "Allowlist of skill names this agent owns. Undefined means every skill.",
+    }),
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
     mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
@@ -57,6 +63,8 @@ const KNOWN_KEYS = new Set([
   "permission",
   "disable",
   "tools",
+  "owned_tools",
+  "skills",
 ])
 
 const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema.Type<typeof AgentSchema> => {

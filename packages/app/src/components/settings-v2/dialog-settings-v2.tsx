@@ -11,6 +11,7 @@ import { SettingsModelsV2 } from "./models"
 import { SettingsOrchestrationV2 } from "./orchestration"
 import { SettingsPluginsV2 } from "./plugins"
 import { SettingsSkillsV2 } from "./skills"
+import { SettingsPermissionsV2 } from "./permissions"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -94,6 +95,10 @@ export const DialogSettings: Component<{
                       <Icon name="folder" />
                       {language.t("settings.skills.title")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="permissions">
+                      <Icon name="shield" />
+                      {language.t("settings.permissions.title")}
+                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="orchestration">
                       <Icon name="brain" />
                       {language.t("settings.orchestration.title")}
@@ -122,6 +127,9 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="permissions" class="settings-v2-panel">
+          <SettingsPermissionsV2 directory={directory} />
         </TabsV2.Content>
         <TabsV2.Content value="orchestration" class="settings-v2-panel">
           <SettingsOrchestrationV2 />
