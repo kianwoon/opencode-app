@@ -255,6 +255,31 @@ describe("tool.task", () => {
     },
   )
 
+  it.instance(
+    "description lists declared capabilities and omits the suffix otherwise",
+    () =>
+      Effect.gen(function* () {
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const registry = yield* ToolRegistry.Service
+        const description =
+          (yield* registry.tools({ ...ref, agent: build })).find((tool) => tool.id === TaskTool.id)?.description ?? ""
+
+        expect(description).toContain("Available agent types and their declared capabilities:")
+        expect(description).toContain("- hands: Hands agent [capabilities: implement]")
+        // `plain` sorts last, so the no-suffix form is the tail of the block.
+        expect(description.trimEnd().endsWith("- plain: Plain agent")).toBe(true)
+      }),
+    {
+      config: {
+        agent: {
+          hands: { description: "Hands agent", mode: "subagent", capabilities: ["implement"] },
+          plain: { description: "Plain agent", mode: "subagent" },
+        },
+      },
+    },
+  )
+
   it.instance("execute resumes an existing task session from task_id", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

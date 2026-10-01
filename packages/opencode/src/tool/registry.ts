@@ -294,12 +294,12 @@ const layer = Layer.effect(
       )
       const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
       const description = list
-        .map(
-          (item) =>
-            `- ${item.name}: ${item.description ?? "This subagent should only be called manually by the user."}`,
-        )
+        .map((item) => {
+          const suffix = item.capabilities?.length ? ` [capabilities: ${item.capabilities.join(", ")}]` : ""
+          return `- ${item.name}: ${item.description ?? "This subagent should only be called manually by the user."}${suffix}`
+        })
         .join("\n")
-      return ["Available agent types and the tools they have access to:", description].join("\n")
+      return ["Available agent types and their declared capabilities:", description].join("\n")
     })
 
     const describeCodeMode = Effect.fn("ToolRegistry.describeCodeMode")(function* (input: {
