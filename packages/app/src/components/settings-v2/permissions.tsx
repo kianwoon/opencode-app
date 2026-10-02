@@ -181,6 +181,48 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     commit(active().name, { owned_tools })
   }
 
+  // One commit flips a whole group, reusing toggleOwns's owned_tools shape so
+  // the write path cannot diverge. It always acts on the group's FULL tool
+  // list: the search filter narrows what is rendered, never what is written.
+  const toggleGroupOwns = (tools: readonly string[], checked: boolean) => {
+    const current = block(active().name).owned_tools
+    const known = [
+      ...OWNS_GROUPS.flatMap((group) => group.tools),
+      ...(current ?? []),
+      ...discoveredRegistry().map((tool) => tool.id),
+    ]
+    const owned_tools = checked
+      ? [...new Set([...(current ?? known.filter((name) => owns(name))), ...tools])]
+      : (current ?? known).filter((name) => !tools.includes(name))
+    commit(active().name, { owned_tools })
+  }
+
+  // Session-local catalog search, never persisted. An empty query renders every
+  // group whole; a group whose rows all filter out drops out entirely.
+  const [ownsQuery, setOwnsQuery] = createSignal("")
+  const visibleOwnsGroups = createMemo(() => {
+    const query = ownsQuery().trim().toLowerCase()
+    return OWNS_GROUPS.map((group) => ({
+      ...group,
+      // The group master and the count badge read allTools, keeping their
+      // owned/total meaning independent of the active search.
+      allTools: group.tools,
+      tools:
+        query === ""
+          ? [...group.tools]
+          : group.tools.filter(
+              (tool) =>
+                `${language.t(`settings.permissions.tool.${tool}.title`)} ${
+                  tool === "bash"
+                    ? language.t("settings.permissions.tool.bash.hint")
+                    : language.t(`settings.permissions.tool.${tool}.description`)
+                }`
+                  .toLowerCase()
+                  .includes(query),
+            ),
+    })).filter((group) => group.tools.length > 0)
+  })
+
   const selectedSkills = () => block(active().name).skills ?? []
   const toggleSkill = (skill: string) => {
     const current = selectedSkills()
@@ -277,17 +319,45 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
         <div class="settings-v2-section">
           <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.owns.title")}</h3>
           <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.owns.description")}</p>
-          <For each={OWNS_GROUPS}>
+          <div class="settings-v2-plugins-search">
+            <TextInputV2
+              type="search"
+              appearance="base"
+              value={ownsQuery()}
+              onInput={(event) => setOwnsQuery(event.currentTarget.value)}
+              placeholder={language.t("settings.permissions.owns.search")}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              aria-label={language.t("settings.permissions.owns.search")}
+            />
+          </div>
+          <For each={visibleOwnsGroups()}>
             {(group) => (
               <div class="settings-v2-section" data-component="settings-permissions-owns-group">
                 <h4 class="settings-v2-section-title">
                   {language.t(group.label)}{" "}
                   <span class="settings-v2-permissions-count">
                     {language.t("settings.permissions.owns.count", {
-                      owned: group.tools.filter((tool) => owns(tool)).length,
-                      total: group.tools.length,
+                      owned: group.allTools.filter((tool) => owns(tool)).length,
+                      total: group.allTools.length,
                     })}
-                  </span>
+                  </span>{" "}
+                  <div
+                    class="inline-flex align-middle"
+                    data-action={`settings-permissions-owns-all-${group.label.split(".").pop()}`}
+                  >
+                    <CheckboxV2
+                      label={language.t("settings.permissions.owns.groupToggle")}
+                      checked={group.allTools.every((tool) => owns(tool))}
+                      indeterminate={
+                        group.allTools.some((tool) => owns(tool)) && !group.allTools.every((tool) => owns(tool))
+                      }
+                      onChange={(checked) => toggleGroupOwns(group.allTools, checked === true)}
+                      hideLabel
+                    />
+                  </div>
                 </h4>
                 <SettingsListV2>
                   <For each={group.tools}>
