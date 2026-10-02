@@ -342,16 +342,42 @@ function stableStringify(value: unknown): string {
 // tools are skipped because their inputs change on every call and would mask a
 // stall behind cosmetic churn.
 export function turnAdvancesWork(seen: Set<string>, parts: SessionV1.Part[]): boolean {
-  let advanced = false
-  for (const part of parts) {
-    if (part.type !== "tool") continue
-    if (part.tool === "todowrite" || part.tool === "todoread") continue
-    const signature = `${part.tool}:${stableStringify(part.state.input ?? null)}`
-    if (seen.has(signature)) continue
-    seen.add(signature)
-    advanced = true
+  const novel = turnSignatures(parts).filter((signature) => !seen.has(signature))
+  novel.forEach((signature) => seen.add(signature))
+  return novel.length > 0
+}
+
+// The signatures a turn contributes, derived exactly like `turnAdvancesWork` so
+// the two can never disagree about what counts as a repeated call. Sorted and
+// de-duplicated by the caller to form a turn fingerprint.
+export function turnSignatures(parts: SessionV1.Part[]): string[] {
+  return parts.flatMap((part) =>
+    part.type !== "tool" || part.tool === "todowrite" || part.tool === "todoread"
+      ? []
+      : [`${part.tool}:${stableStringify(part.state.input ?? null)}`],
+  )
+}
+
+// Run-scoped stall bookkeeping: counts consecutive no-progress turns and
+// reports whether the CURRENT turn repeated the PREVIOUS no-progress turn's
+// exact, non-empty batch. Two consecutive identical batches are not "possibly
+// repeating" — they are repeating (observed ses_f06df872, 2026-10-02: one
+// identical step persisted 3x), and the slow 3/6/10 ladder would burn two more
+// full generations proving what the fingerprints already prove, so the caller
+// escalates straight to wrap-up. An empty (pure-text) batch or an alternating
+// A,B,A,B cycle never matches, and stays on the ladder.
+export function nextStall(
+  seen: Set<string>,
+  state: { repeatCount: number; fingerprint: string },
+  parts: SessionV1.Part[],
+): { repeatCount: number; identical: boolean; fingerprint: string } {
+  if (turnAdvancesWork(seen, parts)) return { repeatCount: 0, identical: false, fingerprint: "" }
+  const fingerprint = [...new Set(turnSignatures(parts))].sort().join("|")
+  return {
+    repeatCount: state.repeatCount + 1,
+    identical: fingerprint !== "" && fingerprint === state.fingerprint,
+    fingerprint,
   }
-  return advanced
 }
 
 // Global Jev tool-routing: narrows the turn tool list via the Jev decision
@@ -1883,6 +1909,7 @@ const layer = Layer.effect(
         let step = 0
         const seenWork = new Set<string>()
         let repeatCount = 0
+        let stallFingerprint = ""
         let forceWrapUp = false
         // Jev routing decision cache: a single slot keyed by the current user
         // message id (the turn boundary). A new user message changes the key,
@@ -2848,8 +2875,9 @@ const layer = Layer.effect(
             const stallParts = yield* MessageV2.parts(handle.message.id).pipe(
               Effect.provideService(Database.Service, database),
             )
-            if (turnAdvancesWork(seenWork, stallParts)) repeatCount = 0
-            else repeatCount++
+            const stall = nextStall(seenWork, { repeatCount, fingerprint: stallFingerprint }, stallParts)
+            repeatCount = stall.repeatCount
+            stallFingerprint = stall.fingerprint
             if (repeatCount >= REPETITION_BREAK) {
               handle.message.error = new SessionV1.MaxStepsError({
                 message: `Agent "${agent.name}" repeated the same tool calls ${repeatCount} times without making progress. The run was stopped automatically. Re-run with a more specific prompt, or increase the agent's "steps" config if the repetition is expected.`,
@@ -2864,7 +2892,19 @@ const layer = Layer.effect(
               })
               return "break" as const
             }
-            if (repeatCount >= REPETITION_WRAPUP) {
+            if (stall.identical) {
+              // Fast lane: the current turn repeated the previous no-progress
+              // turn's EXACT batch. The ladder would spend two more full
+              // generations to reach WARN/WRAPUP for a pattern already proven
+              // (ses_f06df872: the same step persisted 3x), so the wrap-up is
+              // the intervention — no warn injection needed before it.
+              forceWrapUp = true
+              yield* Effect.logWarning("loop repeating identical consecutive batch, forcing wrap-up", {
+                "session.id": sessionID,
+                step,
+                fingerprint: createHash("sha256").update(stall.fingerprint).digest("hex").slice(0, 12),
+              })
+            } else if (repeatCount >= REPETITION_WRAPUP) {
               forceWrapUp = true
               yield* Effect.logWarning("loop repeating identical turns, forcing wrap-up", {
                 "session.id": sessionID,

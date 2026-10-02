@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { turnAdvancesWork } from "@/session/prompt"
+import { turnAdvancesWork, nextStall } from "@/session/prompt"
 
 const bash = (command: string): SessionV1.Part =>
   ({
@@ -53,6 +53,58 @@ describe("turnAdvancesWork", () => {
     expect(stalls[11]).toBe(10)
     expect(stalls[12]).toBe(0)
     expect(stalls[15]).toBe(3)
+  })
+
+  // Regression (ses_f06df872, 2026-10-02): the same step persisted 3x because
+  // two consecutive turns carrying an IDENTICAL batch rode the slow ladder and
+  // only tripped the wrap-up several generations later.
+  test("consecutive turns with an identical non-empty batch escalate at the first repeat", () => {
+    const seen = new Set<string>()
+    const batch = [bash("git status --short")]
+    // T1 advances work, so there is no previous no-progress turn to match and
+    // the escalation cannot fire on the first stall.
+    const t1 = nextStall(seen, { repeatCount: 0, fingerprint: "" }, batch)
+    expect(t1.repeatCount).toBe(0)
+    expect(t1.identical).toBe(false)
+    expect(t1.fingerprint).toBe("")
+    // T2 is the first no-progress turn: its batch is new as a FINGERPRINT, so
+    // it only establishes the baseline.
+    const t2 = nextStall(seen, { repeatCount: t1.repeatCount, fingerprint: t1.fingerprint }, batch)
+    expect(t2.repeatCount).toBe(1)
+    expect(t2.identical).toBe(false)
+    // T3 repeats T2's exact batch at repeatCount 2 — far below WARN=3, yet the
+    // escalation already fires, so no third identical generation is burned.
+    const t3 = nextStall(seen, { repeatCount: t2.repeatCount, fingerprint: t2.fingerprint }, batch)
+    expect(t3.repeatCount).toBe(2)
+    expect(t3.identical).toBe(true)
+  })
+
+  test("an alternating cycle and pure-text turns never take the fast lane", () => {
+    const seen = new Set<string>()
+    let state = { repeatCount: 0, fingerprint: "" }
+    // Seed both batches as work so the A,B,A,B cycle below is genuinely stalled.
+    for (const parts of [[bash("git status --short")], [bash("git log --oneline -5")]] as SessionV1.Part[][])
+      state = { ...state, ...nextStall(seen, state, parts) }
+    const first = nextStall(seen, state, [bash("git status --short")])
+    expect(first.identical).toBe(false)
+    const second = nextStall(seen, { repeatCount: first.repeatCount, fingerprint: first.fingerprint }, [
+      bash("git log --oneline -5"),
+    ])
+    expect(second.identical).toBe(false)
+    const third = nextStall(seen, { repeatCount: second.repeatCount, fingerprint: second.fingerprint }, [
+      bash("git status --short"),
+    ])
+    expect(third.identical).toBe(false)
+    expect(third.repeatCount).toBe(3)
+    // A turn with no counted tool part has an empty fingerprint, so two in a
+    // row are NOT treated as an identical batch.
+    const text = [{ type: "text", text: "still thinking" }] as unknown as SessionV1.Part
+    const t1 = nextStall(seen, { repeatCount: 0, fingerprint: "seeded" }, [text])
+    expect(t1.identical).toBe(false)
+    expect(t1.fingerprint).toBe("")
+    const t2 = nextStall(seen, { repeatCount: t1.repeatCount, fingerprint: t1.fingerprint }, [text])
+    expect(t2.identical).toBe(false)
+    expect(t2.repeatCount).toBe(2)
   })
 
   test("todo churn never counts as work and key order does not change a signature", () => {
