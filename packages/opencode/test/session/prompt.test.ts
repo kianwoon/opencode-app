@@ -285,6 +285,9 @@ const cfg = {
       },
     },
   },
+  agent: {
+    builder: { mode: "subagent" as const },
+  },
 }
 
 function providerCfg(url: string) {
@@ -2739,8 +2742,8 @@ it.instance(
       yield* llm.tool("workflow", {
         title: "ship",
         steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+          { id: "build", prompt: "build it", description: "build", agent: "builder" },
+          { id: "test", prompt: "test it", description: "test", agent: "builder", dependsOn: ["build"] },
         ],
       })
       // 2. Step subagents (task tool child sessions) and the post-workflow
@@ -2802,15 +2805,15 @@ it.instance(
         title: "ship",
         steps: [
           { id: "build", prompt: "build it", description: "build", agent: "nope" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+          { id: "test", prompt: "test it", description: "test", agent: "builder", dependsOn: ["build"] },
         ],
       })
       // 2. Model reads the tool error and retries with the fixed agent.
       yield* llm.tool("workflow", {
         title: "ship",
         steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+          { id: "build", prompt: "build it", description: "build", agent: "builder" },
+          { id: "test", prompt: "test it", description: "test", agent: "builder", dependsOn: ["build"] },
         ],
       })
       // 3. Steps run and the final turn completes.
@@ -2861,8 +2864,8 @@ it.instance(
       yield* llm.tool("workflow", {
         title: "ship",
         steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+          { id: "build", prompt: "build it", description: "build", agent: "builder" },
+          { id: "test", prompt: "test it", description: "test", agent: "builder", dependsOn: ["build"] },
         ],
       })
       yield* llm.error(400, { message: "insufficient_quota_for_this_org" })
@@ -2910,8 +2913,8 @@ it.instance(
       yield* llm.tool("workflow", {
         title: "ship",
         steps: [
-          { id: "build", prompt: "build it", description: "build", agent: "build" },
-          { id: "test", prompt: "test it", description: "test", agent: "build", dependsOn: ["build"] },
+          { id: "build", prompt: "build it", description: "build", agent: "builder" },
+          { id: "test", prompt: "test it", description: "test", agent: "builder", dependsOn: ["build"] },
         ],
       })
       yield* llm.text(`step done: build ${huge}`)
@@ -3130,7 +3133,7 @@ it.instance(
 
       yield* llm.tool("workflow", {
         title: "ship",
-        steps: [{ id: "build", prompt: "build it", description: "build", agent: "build" }],
+        steps: [{ id: "build", prompt: "build it", description: "build", agent: "builder" }],
       })
       yield* llm.text("step done: build")
       yield* llm.text("all done")
