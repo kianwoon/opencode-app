@@ -17,6 +17,7 @@ import "./settings-v2.css"
 type Action = "allow" | "ask" | "deny"
 type PermissionRule = Action | { [pattern: string]: Action }
 type AgentBlock = {
+  mode?: "subagent" | "primary" | "all"
   owned_tools?: string[]
   skills?: string[]
   permission?: { [tool: string]: PermissionRule }
@@ -96,19 +97,21 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
       return normalizeAgentList((await serverSdk().api.agent.list({ location: { directory: input.directory } })).data)
     },
   )
-  // Every agent the runtime publishes is individually editable. Config-only
-  // entries (agent.<name> in config with no runtime match) are unioned in so a
-  // hand-written block never disappears from the list.
+  // Every PRIMARY (or mode-less) agent the runtime publishes is individually
+  // editable. Config-only entries (agent.<name> in config with no runtime match)
+  // are unioned in so a hand-written block never disappears from the list. This
+  // panel owns primary/all agents; `mode: subagent` belongs to the Subagent tab.
   const agentOptions = createMemo(() => {
     const runtime = agentList.latest ?? []
     const mode = new Map(runtime.map((item) => [item.name, item.mode]))
+    const effectiveMode = (name: string) => mode.get(name) ?? agents()[name]?.mode
     const names = [...new Set([...runtime.map((item) => item.name), ...Object.keys(agents())])]
       .filter((name) => !runtime.some((item) => item.name === name && item.hidden))
+      .filter((name) => effectiveMode(name) !== "subagent")
       .sort((a, b) => {
         if (a === "brain") return -1
         if (b === "brain") return 1
-        const rank = (name: string) => (mode.get(name) === "subagent" ? 1 : 0)
-        return rank(a) - rank(b) || a.localeCompare(b)
+        return a.localeCompare(b)
       })
     return names.map((name) => ({ name }))
   })

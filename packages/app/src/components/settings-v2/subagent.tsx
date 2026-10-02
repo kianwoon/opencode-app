@@ -101,12 +101,18 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   // Subagent panel only: the primary agent is the Orchestration tab's business,
   // and config-only entries are unioned in so a hand-written block never
   // disappears from the list. A `disable: true` tombstone (left behind by a
-  // rename, since updateConfig cannot delete a key) is not selectable.
+  // rename, since updateConfig cannot delete a key) is not selectable. Mode is
+  // read off the runtime entry when there is one, else the config block, so a
+  // config-only `mode: primary` cannot slip into this tab either.
   const agentOptions = createMemo(() => {
     const runtime = agentList.latest ?? []
+    const mode = new Map(runtime.map((item) => [item.name, item.mode]))
+    const effectiveMode = (name: string) => mode.get(name) ?? agents()[name]?.mode
     const names = [...new Set([...runtime.map((item) => item.name), ...Object.keys(agents())])].filter(
       (name) =>
-        !runtime.some((item) => item.name === name && item.mode === "primary") && agents()[name]?.disable !== true,
+        !runtime.some((item) => item.name === name && item.mode === "primary") &&
+        agents()[name]?.disable !== true &&
+        effectiveMode(name) !== "primary",
     )
     return names.sort((a, b) => a.localeCompare(b)).map((name) => ({ name }))
   })
