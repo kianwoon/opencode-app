@@ -1257,6 +1257,11 @@ export const dict = {
   "settings.permissions.section.skills.empty": "No skills discovered for this directory.",
   "settings.permissions.section.skills.row.description": "Allow this agent to load the skill by name",
   "settings.permissions.section.skills.row.toggle": "Allow {{name}}",
+  "settings.permissions.section.tools.title": "Discovered tools",
+  "settings.permissions.section.tools.description":
+    "Every registry and MCP tool currently discoverable on the server, beyond the curated groups above.",
+  "settings.permissions.section.tools.loading": "Loading tool inventory...",
+  "settings.permissions.section.tools.error": "Tool inventory unavailable.",
   "settings.permissions.section.how.title": "How",
   "settings.permissions.section.how.description": "Default action and matching pattern per tool; the last matching rule wins",
   "settings.permissions.pattern.label": "Pattern",

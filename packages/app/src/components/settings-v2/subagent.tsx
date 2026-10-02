@@ -21,6 +21,7 @@ import { showToast } from "@/utils/toast"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
+import { fetchToolInventory } from "./tool-inventory"
 import "./settings-v2.css"
 
 type Action = "allow" | "ask" | "deny"
@@ -131,6 +132,14 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     },
   )
 
+  // Assignable tools the curated OWNS_GROUPS do not cover, plus every MCP tool
+  // grouped by its server. The endpoint lives on the experimental HttpApi, which
+  // the generated client contract does not include, hence the plain fetch.
+  const [inventory] = createResource(() => fetchToolInventory(serverSdk().server.http))
+  const discoveredRegistry = createMemo(() =>
+    (inventory.latest?.registry ?? []).filter((tool) => !ALL_TOOLS.includes(tool.id)),
+  )
+
   // THE single write path: every control funnels through here, so there is
   // exactly one updateConfig call shape for the tab.
   const commit = (name: string, patch: AgentBlock) => {
@@ -204,6 +213,16 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     // form fails the config decode with ConfigInvalidError.
     permission[tool] = pattern.trim() === "" || pattern === "*" ? action : { [pattern.trim()]: action }
     commit(active().name, { permission })
+  }
+
+  // An MCP tool is denied when its rule resolves to "deny", whether stored bare
+  // or as a pattern map whose "*" denies. Unset means allowed, so the checkbox
+  // is inverted: checked = allowed.
+  const denied = (tool: string) => {
+    const value = block(active().name).permission?.[tool]
+    if (typeof value === "string") return value === "deny"
+    if (value && typeof value === "object") return value["*"] === "deny"
+    return false
   }
 
   // Numeric budgets commit on `change` (blur/Enter), never per keystroke, so a
@@ -853,6 +872,60 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               </div>
             )}
           </For>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.tools.title")}</h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.tools.description")}</p>
+          <Show
+            when={!inventory.loading && !inventory.error}
+            fallback={
+              <p class="settings-v2-plugins-hint">
+                {language.t(
+                  inventory.error ? "settings.permissions.section.tools.error" : "settings.permissions.section.tools.loading",
+                )}
+              </p>
+            }
+          >
+            <For each={discoveredRegistry()}>
+              {(tool) => (
+                <SettingsListV2>
+                  <SettingsRowV2 title={tool.id} description={tool.description ?? ""}>
+                    <div data-action={`settings-subagent-tool-${tool.id}`}>
+                      <CheckboxV2
+                        label={language.t("settings.subagent.owns.toggle")}
+                        checked={owns(tool.id)}
+                        onChange={(checked) => toggleOwns(tool.id, checked === true)}
+                      />
+                    </div>
+                  </SettingsRowV2>
+                </SettingsListV2>
+              )}
+            </For>
+            <For each={inventory.latest?.mcp ?? []}>
+              {(server) => (
+                <div class="settings-v2-section" data-component="settings-subagent-mcp-server">
+                  <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">{server.server}</h4>
+                  <SettingsListV2>
+                    <For each={server.tools}>
+                      {(tool) => (
+                        <SettingsRowV2 title={tool.name} description={tool.description ?? ""}>
+                          <div data-action={`settings-subagent-mcp-${tool.name}`}>
+                            <CheckboxV2
+                              label={language.t("settings.subagent.owns.toggle")}
+                              checked={!denied(tool.name)}
+                              onChange={(checked) => setHow(tool.name, checked === true ? "allow" : "deny", "*")}
+                              hideLabel
+                            />
+                          </div>
+                        </SettingsRowV2>
+                      )}
+                    </For>
+                  </SettingsListV2>
+                </div>
+              )}
+            </For>
+          </Show>
         </div>
 
         <div class="settings-v2-section">

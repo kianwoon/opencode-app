@@ -1,4 +1,6 @@
 import { MCP } from "@/mcp"
+import { McpCatalog } from "@/mcp/catalog"
+import { ToolRegistry } from "@/tool/registry"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -8,9 +10,27 @@ import { AddPayload, AuthCallbackPayload, StatusMap, UnsupportedOAuthError } fro
 export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handlers) =>
   Effect.gen(function* () {
     const mcp = yield* MCP.Service
+    const registry = yield* ToolRegistry.Service
 
     const status = Effect.fn("McpHttpApi.status")(function* () {
       return yield* mcp.status()
+    })
+
+    const inventory = Effect.fn("McpHttpApi.inventory")(function* () {
+      const clients = yield* mcp.clients()
+      const available = Object.entries(yield* mcp.tools())
+      return {
+        registry: (yield* registry.all()).map((tool) => ({
+          id: tool.id,
+          ...(tool.description ? { description: tool.description } : {}),
+        })),
+        mcp: Object.keys(clients).map((server) => ({
+          server,
+          tools: available
+            .filter(([name]) => name.startsWith(`${McpCatalog.sanitize(server)}_`))
+            .map(([name, tool]) => ({ name, ...(tool.def.description ? { description: tool.def.description } : {}) })),
+        })),
+      }
     })
 
     const add = Effect.fn("McpHttpApi.add")(function* (ctx: { payload: typeof AddPayload.Type }) {
@@ -100,6 +120,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
 
     return handlers
       .handle("status", status)
+      .handle("inventory", inventory)
       .handle("add", add)
       .handle("authStart", authStart)
       .handle("authCallback", authCallback)

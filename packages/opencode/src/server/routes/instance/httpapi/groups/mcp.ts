@@ -24,6 +24,23 @@ export const AuthCallbackPayload = Schema.Struct({
 export const AuthRemoveResponse = Schema.Struct({
   success: Schema.Literal(true),
 })
+export const InventoryTool = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+})
+export const InventoryServer = Schema.Struct({
+  server: Schema.String,
+  tools: Schema.Array(InventoryTool),
+})
+export const Inventory = Schema.Struct({
+  registry: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      description: Schema.optional(Schema.String),
+    }),
+  ),
+  mcp: Schema.Array(InventoryServer),
+})
 export class UnsupportedOAuthError extends Schema.ErrorClass<UnsupportedOAuthError>("McpUnsupportedOAuthError")(
   { error: Schema.String },
   { httpApiStatus: 400 },
@@ -36,6 +53,7 @@ export const McpPaths = {
   authAuthenticate: "/mcp/:name/auth/authenticate",
   connect: "/mcp/:name/connect",
   disconnect: "/mcp/:name/disconnect",
+  inventory: "/mcp/inventory",
 } as const
 
 export const McpApi = HttpApi.make("mcp")
@@ -123,6 +141,17 @@ export const McpApi = HttpApi.make("mcp")
           OpenApi.annotations({
             identifier: "mcp.connect",
             description: "Connect an MCP server.",
+          }),
+        ),
+        HttpApiEndpoint.get("inventory", McpPaths.inventory, {
+          query: WorkspaceRoutingQuery,
+          success: described(Inventory, "Full assignable tool inventory"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "mcp.inventory.list",
+            summary: "List tool inventory",
+            description:
+              "List every registry tool (id + description) and every MCP tool grouped by its server, as available for per-agent assignment.",
           }),
         ),
         HttpApiEndpoint.post("disconnect", McpPaths.disconnect, {
