@@ -13,7 +13,7 @@ import { Agent } from "@/agent/agent"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { CONTROLS_MAX, LABEL_MAX } from "@/jev/controller"
-import { Parameters, UiRunTool, buildCandidates, decodeObservation, needsForegroundDelivery } from "@/tool/ui-run"
+import { Parameters, UiRunTool, buildCandidates, decodeObservation, needsForegroundDelivery, normalizeExpect } from "@/tool/ui-run"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -195,6 +195,29 @@ describe("needsForegroundDelivery", () => {
 
   test("false for the empty string", () => {
     expect(needsForegroundDelivery("")).toBe(false)
+  })
+})
+
+describe("normalizeExpect", () => {
+  test('coerces a stringly-typed exists while leaving the string field untouched', () => {
+    expect(normalizeExpect([{ element: { exists: "true", label_contains: "Form submitted" } }])).toEqual([
+      { element: { exists: true, label_contains: "Form submitted" } },
+    ])
+  })
+
+  test('coerces "false" and passes real booleans through unchanged', () => {
+    expect(normalizeExpect([{ window: { exists: "false", enabled: true, selected: false } }])).toEqual([
+      { window: { exists: false, enabled: true, selected: false } },
+    ])
+  })
+
+  test("returns an empty array for empty input", () => {
+    expect(normalizeExpect([])).toEqual([])
+  })
+
+  test("passes unknown keys and non-object values through unchanged", () => {
+    const predicates = [{ role: "button", count: 3, label: "OK", list: [1, 2], enabled: "TRUE" }]
+    expect(normalizeExpect(predicates)).toEqual(predicates)
   })
 })
 

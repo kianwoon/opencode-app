@@ -81,6 +81,34 @@ export function needsForegroundDelivery(errorText: string): boolean {
   return errorText.includes("same_pid_keyboard_ambiguity")
 }
 
+const EXPECT_BOOLEAN_KEYS = ["exists", "enabled", "selected"]
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const normalizePredicate = (predicate: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(predicate).map(([key, value]) => [
+      key,
+      isPlainObject(value)
+        ? normalizePredicate(value)
+        : EXPECT_BOOLEAN_KEYS.includes(key) && (value === "true" || value === "false")
+          ? value === "true"
+          : value,
+    ]),
+  )
+
+/**
+ * `verify_state` types `exists`/`enabled`/`selected` as booleans, but models emit
+ * the string form of those tokens (the documented prose-token failure mode) and
+ * its strict `Schema.Boolean` rejects a string, failing every verify. The read
+ * site therefore coerces exactly those tokens, exact lowercase match only, and
+ * passes every other key and value through verbatim.
+ */
+export function normalizeExpect(expect: ReadonlyArray<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return expect.map(normalizePredicate)
+}
+
 export const Parameters = Schema.Struct({
   goal: Schema.String.annotate({ description: "Run-level goal, kept as context for every step" }),
   window: Schema.Struct({ pid: Schema.Int, window_id: Schema.Int }).annotate({
@@ -279,7 +307,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             const verified = yield* callDriver(
               tools,
               "cua-driver_verify_state",
-              { pid: params.window.pid, window_id: params.window.window_id, expect: params.expect },
+              { pid: params.window.pid, window_id: params.window.window_id, expect: normalizeExpect(params.expect) },
               ctx.abort,
             )
             if (!verified.ok) {
