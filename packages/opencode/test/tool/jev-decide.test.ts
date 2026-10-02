@@ -5,6 +5,7 @@ import {
   toControlLabels,
   toControllerInput,
   toLastAction,
+  truncationMarker,
 } from "@/tool/jev-decide"
 import { CONTROLS_MAX, LABEL_MAX } from "@/jev/controller"
 
@@ -54,6 +55,40 @@ describe("toControllerInput mapping", () => {
     expect(input.key).toBe("key-123")
     expect(input.lastAction).toContain("http://x")
     expect(input.lastAction).toContain("clicked home")
+  })
+})
+
+describe("CONTROLS_MAX truncation is marked explicitly", () => {
+  const table = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `${i}`, action: "click", label: `label-${i}` }))
+
+  test("an oversize table marks the drop in the controller state and the output", () => {
+    const controls = table(CONTROLS_MAX + 5)
+    expect(controls.length).toBe(65)
+    const marker = truncationMarker(controls)
+    expect(marker).toContain("truncated")
+    expect(marker).toContain("65")
+    const state = toControllerInput({ goal: "g", controls, state: "page" }, "k").lastAction
+    expect(state).toContain("truncated")
+    expect(state).toContain("65")
+    const { output } = formatDecision(
+      { action: "click", target: null, success: false, stuck: false, needScreenshot: false, strength: 0.8 },
+      marker,
+    )
+    expect(output).toContain("truncated")
+    expect(output).toContain("65")
+  })
+
+  test("exactly CONTROLS_MAX emits no marker anywhere", () => {
+    const controls = table(CONTROLS_MAX)
+    expect(truncationMarker(controls)).toBeUndefined()
+    const state = toControllerInput({ goal: "g", controls, state: "page" }, "k").lastAction
+    expect(state).not.toContain("truncated")
+    const { output } = formatDecision(
+      { action: "click", target: null, success: false, stuck: false, needScreenshot: false, strength: 0.8 },
+      truncationMarker(controls),
+    )
+    expect(output).not.toContain("truncated")
   })
 })
 

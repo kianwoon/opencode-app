@@ -14,11 +14,15 @@
  *   stuck           yes | no
  *   need_screenshot yes | no
  *
- * Order-bias guard: the control set is NEVER truncated to fit the state budget
- * — every label stays a choice option at every size. Only the per-label
- * description is shrunk (LABEL_MAX) and the surrounding prose is clipped
- * (STATE_MAX). Dropping tail labels would silently remove valid targets and
- * bias the model toward whichever labels happened to survive.
+ * ENFORCED contract — the control table is CAPPED, not lossless: the tool
+ * boundary (src/tool/jev-decide.ts) slices to CONTROLS_MAX (60) and
+ * buildState/buildControllerQuestions re-slice defensively, so controls beyond
+ * 60 are DROPPED. The cap exists because buildState clips the whole state JSON
+ * to STATE_MAX: an oversize table would clip the state mid-JSON and corrupt it.
+ * Truncation is therefore always marked explicitly — the marker reaches both the
+ * controller state and the tool output — so a hidden tail target is never
+ * mistaken for an absent one. Per-label descriptions are shrunk to LABEL_MAX and
+ * the surrounding prose to STATE_MAX; the cap is never raised silently.
  */
 
 import { readFileSync } from "node:fs"
@@ -184,6 +188,9 @@ export const foldController = (
   if (!actionRow || !isAction(actionRow.choice) || actionRow.strength < floor || actionRow.strength < threshold)
     return null
   const targetRow = jevMeasuredChoice(rows["target"])
+  // Deliberate step-0 asymmetry: a target row is gated by the threshold ONLY,
+  // never by the action confidence floor — a floor-gated target would drop a
+  // low-strength target even when the action itself is well-measured.
   const target =
     targetRow && targetRow.strength >= threshold && targetRow.choice !== "none"
       ? targetRow.choice.replace(/^\d+:/, "")
@@ -216,7 +223,7 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
   const floor = input.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
   const timeoutMs = input.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS
   const state = buildState(input)
-  const key = `${input.id ?? "ctl"}:${threshold}:${controllerHash(state)}`
+  const key = controllerMemoKey(input.id, transport.id, threshold, floor, timeoutMs, controllerHash(state))
   const hit = controllerMemo.get(key)
   if (hit && hit.expires > Date.now()) return hit.decision
   try {
@@ -243,6 +250,21 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
 const CONTROLLER_MEMO_MAX = 200
 const CONTROLLER_MEMO_TTL_MS = 60_000
 const controllerMemo = new Map<string, { decision: ControllerDecision; expires: number }>()
+
+/**
+ * Memo identity for one controller batch. Covers every input that can change the
+ * decision: the namespace id, the RESOLVED transport model, the threshold, the
+ * confidence floor, the timeout and the state hash. Without transportId a model
+ * swap replays a stale memoized decision inside the 60s TTL.
+ */
+export const controllerMemoKey = (
+  id: string | undefined,
+  transportId: string,
+  threshold: number,
+  floor: number,
+  timeoutMs: number,
+  stateHash: string,
+): string => `${id ?? "ctl"}:${transportId}:${threshold}:${floor}:${timeoutMs}:${stateHash}`
 
 /** Inline djb2 string hash — no imports, matching the client's memo keying. */
 const controllerHash = (s: string): string => {

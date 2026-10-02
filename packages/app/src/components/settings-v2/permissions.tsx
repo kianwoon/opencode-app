@@ -34,7 +34,7 @@ const OWNS_GROUPS = [
   },
   {
     label: "settings.permissions.section.owns.group.webDynamic",
-    tools: ["webfetch", "websearch", "skill", "lsp", "tool_search", "cua_batch", "session_rename"],
+    tools: ["webfetch", "websearch", "skill", "lsp", "tool_search", "cua_batch", "ui_run", "session_rename"],
   },
   {
     label: "settings.permissions.section.owns.group.jev",

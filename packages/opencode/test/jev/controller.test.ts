@@ -4,6 +4,7 @@ import {
   LABEL_MAX,
   buildControllerQuestions,
   buildState,
+  controllerMemoKey,
   foldController,
   type JevAction,
 } from "@/jev/controller"
@@ -107,6 +108,23 @@ describe("buildState", () => {
   test("carries the control labels as JSON controls[]", () => {
     const s = buildState({ goal: "open settings", lastAction: "(first step)", controls: ["File", "Settings"] })
     expect(JSON.parse(s).controls).toEqual(["File", "Settings"])
+  })
+})
+
+describe("controllerMemoKey", () => {
+  const base = ["ctl", "jev-latest", 0.7, 0.5, 30_000, "h1"] as const
+
+  test("identical inputs produce an identical key", () => {
+    expect(controllerMemoKey(...base)).toBe(controllerMemoKey(...base))
+  })
+
+  test("transport, floor, timeout and threshold each change the key", () => {
+    expect(controllerMemoKey("ctl", "other-model", 0.7, 0.5, 30_000, "h1")).not.toBe(controllerMemoKey(...base))
+    expect(controllerMemoKey("ctl", "jev-latest", 0.9, 0.5, 30_000, "h1")).not.toBe(controllerMemoKey(...base))
+    expect(controllerMemoKey("ctl", "jev-latest", 0.7, 0.9, 30_000, "h1")).not.toBe(controllerMemoKey(...base))
+    expect(controllerMemoKey("ctl", "jev-latest", 0.7, 0.5, 60_000, "h1")).not.toBe(controllerMemoKey(...base))
+    expect(controllerMemoKey("other", "jev-latest", 0.7, 0.5, 30_000, "h1")).not.toBe(controllerMemoKey(...base))
+    expect(controllerMemoKey("ctl", "jev-latest", 0.7, 0.5, 30_000, "h2")).not.toBe(controllerMemoKey(...base))
   })
 })
 

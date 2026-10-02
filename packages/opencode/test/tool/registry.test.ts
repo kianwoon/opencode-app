@@ -120,6 +120,16 @@ describe("tool.registry", () => {
     }),
   )
 
+  it.instance("exposes the cua adapter tools", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).toContain("cua_batch")
+      expect(ids).toContain("ui_run")
+    }),
+  )
+
   it.instance("does not expose execute unless code mode is enabled", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

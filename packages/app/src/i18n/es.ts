@@ -1313,6 +1313,8 @@ export const dict = {
   "settings.permissions.tool.tool_search.description": "Search for additional tools to load",
   "settings.permissions.tool.cua_batch.title": "CUA Batch",
   "settings.permissions.tool.cua_batch.description": "Drive the computer in batched actions",
+  "settings.permissions.tool.ui_run.title": "UI Run",
+  "settings.permissions.tool.ui_run.description": "Run a bounded observe-decide-act-verify loop on the computer",
   "settings.permissions.tool.session_rename.title": "Session Rename",
   "settings.permissions.tool.session_rename.description": "Rename the current session",
 

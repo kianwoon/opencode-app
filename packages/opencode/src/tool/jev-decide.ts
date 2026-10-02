@@ -42,20 +42,33 @@ export function toLastAction(state?: string, recent?: readonly string[]): string
   return parts.join(" | ")
 }
 
+/**
+ * Marker for a control table that hit the CONTROLS_MAX cap at this tool boundary.
+ * The controller can only see the first CONTROLS_MAX labels, so a hidden tail
+ * target must be stated outright — never left to look like an absent control.
+ */
+export function truncationMarker(controls: readonly Control[]): string | undefined {
+  return controls.length > CONTROLS_MAX
+    ? `controls truncated from ${controls.length} to ${CONTROLS_MAX}; tail labels are invisible to the decision model`
+    : undefined
+}
+
 export function toControllerInput(params: Params, key: string): ControllerInput {
+  const marker = truncationMarker(params.controls)
+  const lastAction = [toLastAction(params.state, params.recent), marker].filter(Boolean).join(" | ") || undefined
   return {
     goal: params.goal,
     controls: toControlLabels(params.controls),
-    ...(toLastAction(params.state, params.recent) ? { lastAction: toLastAction(params.state, params.recent)! } : {}),
+    ...(lastAction ? { lastAction } : {}),
     key,
   }
 }
 
-export function formatDecision(decision: ControllerDecision): { title: string; output: string } {
+export function formatDecision(decision: ControllerDecision, marker?: string): { title: string; output: string } {
   const target = decision.target ? ` [${decision.target}]` : ""
   return {
     title: `jev: ${decision.action}${target}`,
-    output: `operation=${decision.action} target=${decision.target ?? "none"} confidence=${decision.strength}\n${JSON.stringify(decision)}`,
+    output: `${marker ? marker + "\n" : ""}operation=${decision.action} target=${decision.target ?? "none"} confidence=${decision.strength}\n${JSON.stringify(decision)}`,
   }
 }
 
@@ -81,7 +94,7 @@ export const JevDecideTool = Tool.define<typeof Parameters, Metadata, never>(
             Effect.catch(() => Effect.succeed(null)),
           )
           if (!decision) return { ...formatUnavailable(), metadata: {} }
-          return { ...formatDecision(decision), metadata: {} }
+          return { ...formatDecision(decision, truncationMarker(params.controls)), metadata: {} }
         }),
     }
   }),
