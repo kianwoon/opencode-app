@@ -71,6 +71,16 @@ export function buildCandidates(elements: readonly Element[]): {
   }
 }
 
+/**
+ * The cua-driver refuses process-scoped key events when one pid owns several
+ * eligible top-level windows (process-scoped input cannot be proven to reach the
+ * intended one). It names that refusal `same_pid_keyboard_ambiguity` and offers
+ * `delivery_mode:"foreground"` as the remedy.
+ */
+export function needsForegroundDelivery(errorText: string): boolean {
+  return errorText.includes("same_pid_keyboard_ambiguity")
+}
+
 export const Parameters = Schema.Struct({
   goal: Schema.String.annotate({ description: "Run-level goal, kept as context for every step" }),
   window: Schema.Struct({ pid: Schema.Int, window_id: Schema.Int }).annotate({
@@ -226,17 +236,31 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               lines.push(`[escalate ${i + 1}/${params.steps.length}] jev target is not an offered control`)
               break
             }
-            const outcome = yield* callDriver(
+            const actArgs = {
+              element_token: element.element_token,
+              pid: params.window.pid,
+              window_id: params.window.window_id,
+              ...(step.value !== undefined ? { text: step.value } : {}),
+            }
+            const attempt = yield* callDriver(
               tools,
               step.value !== undefined ? "cua-driver_type_text" : "cua-driver_click",
-              {
-                element_token: element.element_token,
-                pid: params.window.pid,
-                window_id: params.window.window_id,
-                ...(step.value !== undefined ? { text: step.value } : {}),
-              },
+              actArgs,
               ctx.abort,
             )
+            // Exactly one rung: the driver refuses process-scoped key events when one pid
+            // owns several eligible windows, and offers foreground delivery as the remedy.
+            // click is NEVER escalated — pointer/AXPress is already window-targeted, so the
+            // refusal class is keyboard-delivery-specific only.
+            const retried = !attempt.ok && step.value !== undefined && needsForegroundDelivery(attempt.error)
+            const outcome = retried
+              ? yield* callDriver(
+                  tools,
+                  "cua-driver_type_text",
+                  { ...actArgs, delivery_mode: "foreground" },
+                  ctx.abort,
+                )
+              : attempt
             if (!outcome.ok) {
               status = "failed"
               previous = `[fail ${i + 1}/${params.steps.length}] ${step.value !== undefined ? "type_text" : "click"} → ${decision.target}`
@@ -248,7 +272,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               step.value !== undefined
                 ? `[ok ${i + 1}/${params.steps.length}] type_text "${step.value}" → ${decision.target}`
                 : `[ok ${i + 1}/${params.steps.length}] click → ${decision.target}`
-            lines.push(`${previous} (jev ${decision.strength})`)
+            lines.push(`${previous} (jev ${decision.strength}${retried ? ", foreground retry" : ""})`)
           }
 
           if (status === "completed" && params.expect !== undefined) {

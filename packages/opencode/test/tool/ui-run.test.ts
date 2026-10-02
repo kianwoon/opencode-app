@@ -13,7 +13,7 @@ import { Agent } from "@/agent/agent"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { CONTROLS_MAX, LABEL_MAX } from "@/jev/controller"
-import { Parameters, UiRunTool, buildCandidates, decodeObservation } from "@/tool/ui-run"
+import { Parameters, UiRunTool, buildCandidates, decodeObservation, needsForegroundDelivery } from "@/tool/ui-run"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -170,6 +170,31 @@ describe("buildCandidates", () => {
 
     expect(labels[0].length).toBe(LABEL_MAX)
     expect(byLabel.get(labels[0])?.element_token).toBe("s00000011:1")
+  })
+})
+
+describe("needsForegroundDelivery", () => {
+  // Verbatim driver refusal from the 2026-10-03 flight: one pid owning 15 sibling
+  // windows, so process-scoped key events cannot be proven to reach the target.
+  const refusal =
+    `Background input refused (same_pid_keyboard_ambiguity): pid 1316 owns 15 other eligible top-level window(s); ` +
+    `process-scoped key events cannot be proven to reach window 2332 and could mutate a sibling window. ` +
+    `Use an exact element action, the page tool for browser content, or delivery_mode:"foreground"`
+
+  test("true for the verbatim multi-window keyboard refusal", () => {
+    expect(needsForegroundDelivery(refusal)).toBe(true)
+  })
+
+  test("false for a missing-tool failure", () => {
+    expect(needsForegroundDelivery("cua-driver_click: tool not found on cua-driver server")).toBe(false)
+  })
+
+  test("false for an ordinary AX failure", () => {
+    expect(needsForegroundDelivery("AXError: cannot perform action on AXStaticText")).toBe(false)
+  })
+
+  test("false for the empty string", () => {
+    expect(needsForegroundDelivery("")).toBe(false)
   })
 })
 
