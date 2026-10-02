@@ -61,7 +61,7 @@ const OWNS_GROUPS = [
   },
   {
     label: "settings.subagent.owns.group.jev",
-    tools: ["jev_accept", "jev_label", "jev_rank"],
+    tools: ["jev_accept", "jev_label", "jev_rank", "jev_decide"],
   },
 ] as const
 

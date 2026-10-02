@@ -1327,6 +1327,9 @@ export const dict = {
   "settings.permissions.tool.jev_rank.title": "jev_rank",
   "settings.permissions.tool.jev_rank.description":
     "Advisory read pre-ranking: scores candidates and returns a read order (fails open)",
+  "settings.permissions.tool.jev_decide.title": "jev_decide",
+  "settings.permissions.tool.jev_decide.description":
+    "Categorical UI-steering decision: pick the target control for a goal from an indexed control table (advisory, fail-open)",
 
   "settings.subagent.title": "Subagents",
   "settings.subagent.summary": "{{owned}} of {{total}} tools owned · {{skills}} skills",

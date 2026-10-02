@@ -36,7 +36,7 @@ const OWNS_GROUPS = [
   },
   {
     label: "settings.permissions.section.owns.group.jev",
-    tools: ["jev_accept", "jev_label", "jev_rank"],
+    tools: ["jev_accept", "jev_label", "jev_rank", "jev_decide"],
   },
 ] as const
 
