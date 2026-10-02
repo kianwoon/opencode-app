@@ -183,7 +183,11 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const owns = (tool: string) => block(active().name).owned_tools?.includes(tool) ?? true
   const toggleOwns = (tool: string, checked: boolean) => {
     const current = block(active().name).owned_tools
-    const known = OWNS_GROUPS.flatMap((group) => group.tools)
+    const known = [
+      ...OWNS_GROUPS.flatMap((group) => group.tools),
+      ...(current ?? []),
+      ...discoveredRegistry().map((tool) => tool.id),
+    ]
     const owned_tools = checked
       ? [...new Set([...(current ?? known.filter((name) => owns(name))), tool])]
       : (current ?? known).filter((name) => name !== tool)
