@@ -215,6 +215,16 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     commit(active().name, { permission })
   }
 
+  // One commit flips every tool of a server, reusing the bare-action entry
+  // shape setHow writes for the "*" pattern so evaluation is identical.
+  const setAllForServer = (tools: { name: string }[], action: "allow" | "deny") => {
+    const permission = {
+      ...block(active().name).permission,
+      ...Object.fromEntries(tools.map((tool) => [tool.name, action])),
+    }
+    commit(active().name, { permission })
+  }
+
   // An MCP tool is denied when its rule resolves to "deny", whether stored bare
   // or as a pattern map whose "*" denies. Unset means allowed, so the checkbox
   // is inverted: checked = allowed.
@@ -905,7 +915,20 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
             <For each={inventory.latest?.mcp ?? []}>
               {(server) => (
                 <div class="settings-v2-section" data-component="settings-subagent-mcp-server">
-                  <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">{server.server}</h4>
+                  <div class="flex items-center gap-2">
+                    <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">{server.server}</h4>
+                    <div data-action={`settings-subagent-mcp-all-${server.server}`}>
+                      <CheckboxV2
+                        label={language.t("settings.subagent.owns.toggle")}
+                        checked={server.tools.every((tool) => !denied(tool.name))}
+                        indeterminate={
+                          !server.tools.every((tool) => !denied(tool.name)) && server.tools.some((tool) => !denied(tool.name))
+                        }
+                        onChange={(checked) => setAllForServer(server.tools, checked === true ? "allow" : "deny")}
+                        hideLabel
+                      />
+                    </div>
+                  </div>
                   <SettingsListV2>
                     <For each={server.tools}>
                       {(tool) => (

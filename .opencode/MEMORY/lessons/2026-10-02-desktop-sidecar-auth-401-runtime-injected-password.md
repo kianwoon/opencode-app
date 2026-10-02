@@ -1,0 +1,9 @@
+# 2026-10-02 — Desktop sidecar 401: auth password is runtime-injected, unreachable from CLI
+
+The desktop sidecar (Electron NodeService helper) enforces Basic auth on EVERY route (including /global/health) when OPENCODE_SERVER_PASSWORD is set. The password arrives via worker-thread data from the Electron main process and is injected into process.env AT RUNTIME by `prepareSidecarEnv` (`packages/desktop/src/main/sidecar.ts:91-99`) — so it is invisible to `ps -E`/`ps eww` (those show only the spawn environment), absent from `default.dat`, and absent from the parent process env.
+
+Consequence: external `curl` to the sidecar always 401s, and the credentials are NOT recoverable from any file or process inspection — only the app's own renderer holds them (passed in memory). Diagnose a 401 as the auth wall, never as a missing route. The auth middleware (`packages/opencode/src/server/routes/instance/httpapi/middleware/authorization.ts:12-14,77-83`) accepts `?auth_token=<base64 user:pass>` before the Basic header, validated against env-read `ServerAuth.Config` (`packages/opencode/src/server/auth.ts:17-20`).
+
+Acceptance gate: before live-verifying a new endpoint over HTTP, first compare the sidecar process start time (`ps -p <pid> -o lstart`) against the build's asar mtime — a stale sidecar 401s/404s for endpoints its binary predates; then route the check through the app's own authenticated surface rather than hunting env/files for the password.
+
+Verify: `grep -c "runtime-injected" /Users/kianwoonwong/Downloads/opencode/.opencode/MEMORY/lessons/2026-10-02-desktop-sidecar-auth-401-runtime-injected-password.md` prints at least 1, and `ls -la` on the file shows it non-empty.
