@@ -1236,7 +1236,7 @@ export const dict = {
   "settings.plugins.skills.directories.remove": "Remove",
   "settings.plugins.skills.directories.remove.failed": "Failed to remove skills directory",
 
-  "settings.permissions.title": "Permissions",
+  "settings.permissions.title": "Agents",
   "settings.permissions.description": "Control what tools the server can use by default.",
   "settings.permissions.section.tools": "Tools",
   "settings.permissions.toast.updateFailed.title": "Failed to update permissions",
