@@ -237,9 +237,24 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     commit(active().name, { skills: next })
   }
 
+  // The evaluator flattens the agent block into ONE ruleset and findLast picks
+  // the last match, so an earlier catch-all still governs every later key — the
+  // UI must resolve rules the same way or it shows grants the agent never gets.
+  const effectiveAction = (tool: string, fallback: Action) => {
+    const ruleset = Object.entries(block(active().name).permission ?? {}).flatMap(([permission, value]) =>
+      typeof value === "string"
+        ? [{ permission, pattern: "*", action: value }]
+        : Object.entries(value).map(([pattern, action]) => ({ permission, pattern, action })),
+    )
+    return (
+      ruleset.findLast((rule) => Wildcard.match(tool, rule.permission) && Wildcard.match(tool, rule.pattern))
+        ?.action ?? fallback
+    )
+  }
+
   const howEntry = (tool: string) => {
     const value = block(active().name).permission?.[tool]
-    if (!value) return { action: "ask" as Action, pattern: "*" }
+    if (!value) return { action: effectiveAction(tool, "ask"), pattern: "*" }
     if (typeof value === "string") return { action: value, pattern: "*" }
     const [pattern, action] = Object.entries(value)[0] ?? ["*", "ask" as Action]
     return { action, pattern }
@@ -262,15 +277,8 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     commit(active().name, { permission })
   }
 
-  // An MCP tool is denied when its rule resolves to "deny", whether stored bare
-  // or as a pattern map whose "*" denies. Unset means allowed, so the checkbox
-  // is inverted: checked = allowed.
-  const denied = (tool: string) => {
-    const value = block(active().name).permission?.[tool]
-    if (typeof value === "string") return value === "deny"
-    if (value && typeof value === "object") return value["*"] === "deny"
-    return false
-  }
+  // Unset means allowed, so the checkbox is inverted: checked = allowed.
+  const denied = (tool: string) => effectiveAction(tool, "allow") === "deny"
 
   const manifest = createMemo(() => {
     const ruleset: { permission: string; pattern: string; action: Action }[] = []
