@@ -26,12 +26,14 @@ describe("shell env", () => {
       {
         PATH: "/desktop/path",
         OPENCODE_CLIENT: "desktop",
+        OPENCODE_EXPERIMENTAL_PLAN_MODE: "true",
       },
     )
 
     expect(env.PATH).toBe("/desktop/path")
     expect(env.HOME).toBe("/tmp/home")
     expect(env.OPENCODE_CLIENT).toBe("desktop")
+    expect(env.OPENCODE_EXPERIMENTAL_PLAN_MODE).toBe("true")
   })
 
   test("resolveUserShell falls back to the login shell before /bin/sh", () => {

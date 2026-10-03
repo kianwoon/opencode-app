@@ -1,0 +1,8 @@
+# Live-fire: drag, canvas, multi-window, cursor (2026-10-03)
+Battery on the user desktop via computer-aid hands; fixture capability-probe.html (canvas pad, slider sl at 10, square sq, zone).
+WEB (Brave ROUTE GUI, 24 cua calls plus 3 osascript, 1 tab): canvas pixel-drag strokes 0 to 1 plus screenshot PASS; slider thumb drag value 10 to 77 PASS; square to zone DROPPED PASS.
+Drag facts: foreground only on macOS (background refused); duration 500-700ms with steps 20-30 in window-local screenshot pixels; bring_to_front BEFORE the first drag.
+Gotchas confirmed: AXSlider exposes no AXValue (verify_state unknown after 16 samples) so verify the sibling readout text; get_window_state truncates at low max_elements so use query plus max_elements 400; jev last-action unverified can be false-negative after successful drags so AX read-back rules.
+NATIVE: Calculator 7 by 8 via cua_batch AXPress, display 56 PASS with visual confirm. TextEdit FAIL blocked: modal Open panel at launch; untitled windows elements=0 with no AXWindow while set_window_frame and bring_to_front reject (WindowServer and AX mismatch); nothing typed, nothing saved. Driver-ticket candidate.
+CURSOR OVERLAY: no overlay visible in window-local screenshot after a foreground title-bar drag; that drag did not move the window so pointer position was unconfirmed; rendering still UNPROVEN. get_cursor_position proves readability only.
+Acceptance gate for reuse: web readouts via AX read-back (stroke count, slider readout, zone text); Calculator display 56 via read-back; the two-window marker test needs an app whose windows expose AX surfaces (TextEdit does not reliably).

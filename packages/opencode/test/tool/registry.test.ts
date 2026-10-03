@@ -94,6 +94,19 @@ const withEmptyCodeMode = testEffect(
   ]),
 )
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
+// Plan mode is gated on the flag AND the client; desktop sets both.
+const withDesktopPlanMode = testEffect(
+  LayerNode.compile(root, [
+    [Config.node, configLayer],
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalPlanMode: true, client: "desktop" })],
+  ]),
+)
+const withDesktopNoPlanMode = testEffect(
+  LayerNode.compile(root, [
+    [Config.node, configLayer],
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalPlanMode: false, client: "desktop" })],
+  ]),
+)
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -136,6 +149,33 @@ describe("tool.registry", () => {
       const ids = yield* registry.ids()
 
       expect(ids).not.toContain("execute")
+    }),
+  )
+
+  it.instance("does not expose plan_exit without plan mode", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).not.toContain("plan_exit")
+    }),
+  )
+
+  withDesktopPlanMode.instance("exposes plan_exit on desktop when plan mode is enabled", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).toContain("plan_exit")
+    }),
+  )
+
+  withDesktopNoPlanMode.instance("does not expose plan_exit on desktop without plan mode", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).not.toContain("plan_exit")
     }),
   )
 

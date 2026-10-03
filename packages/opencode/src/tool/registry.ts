@@ -277,7 +277,7 @@ const layer = Layer.effect(
             tool.ui_run,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
-            ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+            ...(flags.experimentalPlanMode && ["cli", "desktop"].includes(flags.client) ? [tool.plan] : []),
           ],
           task: tool.task,
           read: tool.read,

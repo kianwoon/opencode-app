@@ -1,0 +1,4 @@
+# Lume attach viewer codec failure - use the ls VNC URL with native Screen Sharing (2026-10-03)
+lume attach on a macOS 26 host shows no-acceptable-codec (WebRTC negotiation) and never renders; lume 0.6.0 is current so no update fix; guest-side screensharing cannot be enabled (sandbox has no passwordless sudo).
+Fix: lume ls prints a per-VM vnc URL with embedded password (vnc://:PASS@127.0.0.1:PORT) and lsof confirms the port listening; open that URL - the native Screen Sharing.app connects with auto-auth (verify with pgrep -fl Screen-Sharing or similar). It is the same VNC channel cua sb screenshot uses, so screenshots working proves the endpoint is alive.
+Gate: Screen Sharing process running and the VM desktop visible on screen; if prompted, the password is the one embedded in the lume ls VNC URL.
