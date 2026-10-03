@@ -1248,6 +1248,7 @@ export const dict = {
   "settings.permissions.section.owns.description": "Tool sets the agent always has available",
   "settings.permissions.owns.toggle": "Owns",
   "settings.permissions.owns.count": "({{owned}} of {{total}})",
+  "settings.permissions.owns.notExposed": "Not exposed in this build",
   "settings.permissions.owns.search": "Search tools",
   "settings.permissions.owns.groupToggle": "Own every tool in this group",
   "settings.permissions.section.owns.group.general": "General",

@@ -147,6 +147,9 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const discoveredRegistry = createMemo(() =>
     (inventory.latest?.registry ?? []).filter((tool) => !ALL_TOOLS.includes(tool.id)),
   )
+  const exposedIds = createMemo(() => new Set((inventory.latest?.registry ?? []).map((tool) => tool.id)))
+  // Before the inventory resolves everything counts as exposed, so no row flickers.
+  const isExposed = (tool: string) => inventory.latest === undefined || exposedIds().has(tool)
 
   // THE single write path: every control funnels through here, so there is
   // exactly one updateConfig call shape for the tab.
@@ -170,11 +173,13 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const owns = (tool: string) => block(active().name).owned_tools?.includes(tool) ?? true
   const toggleOwns = (tool: string, checked: boolean) => {
     const current = block(active().name).owned_tools
+    // INVARIANT: unchecking must never materialize a tool id this build does not
+    // expose, so `known` is filtered to the registry the server actually serves.
     const known = [
       ...OWNS_GROUPS.flatMap((group) => group.tools),
       ...(current ?? []),
       ...discoveredRegistry().map((tool) => tool.id),
-    ]
+    ].filter(isExposed)
     const owned_tools = checked
       ? [...new Set([...(current ?? known.filter((name) => owns(name))), tool])]
       : (current ?? known).filter((name) => name !== tool)
@@ -186,11 +191,13 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   // list: the search filter narrows what is rendered, never what is written.
   const toggleGroupOwns = (tools: readonly string[], checked: boolean) => {
     const current = block(active().name).owned_tools
+    // INVARIANT: unchecking must never materialize a tool id this build does not
+    // expose, so `known` is filtered to the registry the server actually serves.
     const known = [
       ...OWNS_GROUPS.flatMap((group) => group.tools),
       ...(current ?? []),
       ...discoveredRegistry().map((tool) => tool.id),
-    ]
+    ].filter(isExposed)
     const owned_tools = checked
       ? [...new Set([...(current ?? known.filter((name) => owns(name))), ...tools])]
       : (current ?? known).filter((name) => !tools.includes(name))
@@ -308,8 +315,8 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
             </SettingsRowV2>
             <p class="settings-v2-plugins-hint settings-v2-permissions-summary" data-action="settings-permissions-summary">
               {language.t("settings.permissions.agent.summary", {
-                owned: ALL_TOOLS.filter((tool) => owns(tool)).length,
-                total: ALL_TOOLS.length,
+                owned: ALL_TOOLS.filter(isExposed).filter((tool) => owns(tool)).length,
+                total: ALL_TOOLS.filter(isExposed).length,
                 skills: selectedSkills().length,
               })}
             </p>
@@ -340,8 +347,8 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                   {language.t(group.label)}{" "}
                   <span class="settings-v2-permissions-count">
                     {language.t("settings.permissions.owns.count", {
-                      owned: group.allTools.filter((tool) => owns(tool)).length,
-                      total: group.allTools.length,
+                      owned: group.allTools.filter(isExposed).filter((tool) => owns(tool)).length,
+                      total: group.allTools.filter(isExposed).length,
                     })}
                   </span>{" "}
                   <div
@@ -350,11 +357,12 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                   >
                     <CheckboxV2
                       label={language.t("settings.permissions.owns.groupToggle")}
-                      checked={group.allTools.every((tool) => owns(tool))}
+                      checked={group.allTools.filter(isExposed).every((tool) => owns(tool))}
                       indeterminate={
-                        group.allTools.some((tool) => owns(tool)) && !group.allTools.every((tool) => owns(tool))
+                        group.allTools.filter(isExposed).some((tool) => owns(tool)) &&
+                        !group.allTools.filter(isExposed).every((tool) => owns(tool))
                       }
-                      onChange={(checked) => toggleGroupOwns(group.allTools, checked === true)}
+                      onChange={(checked) => toggleGroupOwns(group.allTools.filter(isExposed), checked === true)}
                       hideLabel
                     />
                   </div>
@@ -365,16 +373,22 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                       <SettingsRowV2
                         title={language.t(`settings.permissions.tool.${tool}.title`)}
                         description={
-                          tool === "bash"
+                          (tool === "bash"
                             ? language.t("settings.permissions.tool.bash.hint")
-                            : language.t(`settings.permissions.tool.${tool}.description`)
+                            : language.t(`settings.permissions.tool.${tool}.description`)) +
+                          (isExposed(tool) ? "" : ` — ${language.t("settings.permissions.owns.notExposed")}`)
                         }
                       >
-                        <div class="settings-v2-permissions-row-controls">
+                        <div
+                          class="settings-v2-permissions-row-controls"
+                          classList={{ "settings-v2-permissions-row-dim": !isExposed(tool) }}
+                        >
                           <div data-action={`settings-permissions-owns-${tool}`}>
                             <CheckboxV2
                               label={language.t("settings.permissions.owns.toggle")}
                               checked={owns(tool)}
+                              // A stale owned entry stays checkable so it can be pruned.
+                              disabled={!owns(tool) && !isExposed(tool)}
                               onChange={(checked) => toggleOwns(tool, checked === true)}
                             />
                           </div>
