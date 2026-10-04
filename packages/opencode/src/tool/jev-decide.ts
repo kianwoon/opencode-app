@@ -20,7 +20,7 @@ export const JevControlSchema = Schema.Struct({
 export const Parameters = Schema.Struct({
   goal: Schema.String.annotate({ description: "What the agent is trying to accomplish" }),
   controls: Schema.Array(JevControlSchema).annotate({
-    description: "Indexed control table: visible interactive controls in order",
+    description: "Indexed option/control table, in order (UI controls, decision candidates, or call-shape choices)",
   }),
   state: Schema.optional(Schema.String).annotate({
     description: "Brief page/window context (url, title, anchor)",
@@ -107,7 +107,7 @@ export const JevDecideTool = Tool.define<typeof Parameters, Metadata, never>(
   Effect.gen(function* () {
     return {
       description:
-        "Categorical UI-steering decision via the jev SystemOne endpoint over an indexed control table; fail-open by design.",
+        "Categorical decision over an indexed control table via the jev SystemOne endpoint — UI steering, option-space rating, routing/plan/next call shapes; fail-open by design.",
       parameters: Parameters,
       execute: (params: Params) =>
         Effect.gen(function* () {
