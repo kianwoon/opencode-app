@@ -1252,6 +1252,8 @@ export const dict = {
   "settings.permissions.tool.list.description": "ڈائریکٹری دے اندر فائلاں دی فہرست بناؤ",
   "settings.permissions.tool.bash.title": "Bash",
   "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.section.guard.title": "Execution guard",
+  "settings.permissions.section.guard.description": "Permissions for bash command categories detected by the execution guard",
   "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "شیل کمانڈز چلاؤ",
   "settings.permissions.tool.task.title": "کم",

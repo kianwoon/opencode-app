@@ -1268,6 +1268,8 @@ export const dict = {
   "settings.permissions.tool.list.description": "ޑައިރެކްޓަރީއެއްގެ ތެރޭގައި ފައިލްތައް ލިސްޓްކުރުން",
   "settings.permissions.tool.bash.title": "ބާޝް",
   "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.section.guard.title": "Execution guard",
+  "settings.permissions.section.guard.description": "Permissions for bash command categories detected by the execution guard",
   "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "ޝެލް ކޮމާންޑްތައް ހިންގާށެވެ",
   "settings.permissions.tool.task.title": "މަސައްކަތެއް",

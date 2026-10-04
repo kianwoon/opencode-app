@@ -234,11 +234,12 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
 
   // Every section starts COLLAPSED: the store records only the sections the
   // user explicitly expanded; an absent key stays folded. A non-empty search
-  // forces the curated groups open so results stay visible.
+  // forces the curated groups open so results stay visible. The guard section is
+  // the one exception — it holds a single row whose findability is the point.
   const [expanded, setExpanded] = createStore({
     groups: {} as Record<string, boolean>,
     servers: {} as Record<string, boolean>,
-    sections: {} as Record<string, boolean>,
+    sections: { guard: true } as Record<string, boolean>,
   })
   const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || expanded.groups[group] === true
   const serverExpanded = (server: string) => expanded.servers[server] === true
@@ -575,6 +576,54 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
               )}
             </For>
           </Show>
+          </Show>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-guard-toggle"
+              aria-expanded={sectionExpanded("guard")}
+              onClick={() => setExpanded("sections", "guard", !sectionExpanded("guard"))}
+            >
+              <Icon name={sectionExpanded("guard") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.permissions.section.guard.title")}
+            </button>
+          </h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.guard.description")}</p>
+          <Show when={sectionExpanded("guard")}>
+            <SettingsListV2>
+              <For each={["package_install"]}>
+                {(tool) => (
+                  <SettingsRowV2
+                    title={language.t(`settings.permissions.tool.${tool}.title`)}
+                    description={language.t(`settings.permissions.tool.${tool}.description`)}
+                  >
+                    <div class="settings-v2-permissions-row-controls" data-action={`settings-permissions-how-${tool}`}>
+                      <SelectV2
+                        appearance="inline"
+                        options={actionOptions}
+                        current={howEntry(tool).action}
+                        placement="bottom-end"
+                        gutter={6}
+                        value={(option) => option}
+                        label={actionLabel}
+                        onSelect={(option) => option && setHow(tool, option, howEntry(tool).pattern)}
+                      />
+                      <TextInputV2
+                        type="text"
+                        appearance="base"
+                        value={howEntry(tool).pattern}
+                        aria-label={language.t("settings.permissions.pattern.label")}
+                        onChange={(event) => setHow(tool, howEntry(tool).action, event.currentTarget.value)}
+                      />
+                    </div>
+                  </SettingsRowV2>
+                )}
+              </For>
+            </SettingsListV2>
           </Show>
         </div>
 
