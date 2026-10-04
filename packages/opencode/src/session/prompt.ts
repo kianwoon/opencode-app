@@ -364,14 +364,17 @@ export function turnSignatures(parts: SessionV1.Part[]): string[] {
 // repeating" — they are repeating (observed ses_f06df872, 2026-10-02: one
 // identical step persisted 3x), and the slow 3/6/10 ladder would burn two more
 // full generations proving what the fingerprints already prove, so the caller
-// escalates straight to wrap-up. An empty (pure-text) batch or an alternating
-// A,B,A,B cycle never matches, and stays on the ladder.
+// escalates straight to wrap-up. The ladder counts TOOL CALLS only: a turn
+// that issued no real tool call (pure text or bookkeeping-only) is transparent
+// to it — it neither accumulates nor resets the count (2026-10-04: three
+// deliberate text/bookkeeping replies false-fired WARN=3).
 export function nextStall(
   seen: Set<string>,
   state: { repeatCount: number; fingerprint: string },
   parts: SessionV1.Part[],
 ): { repeatCount: number; identical: boolean; fingerprint: string } {
   if (turnAdvancesWork(seen, parts)) return { repeatCount: 0, identical: false, fingerprint: "" }
+  if (turnSignatures(parts).length === 0) return { ...state, identical: false }
   const fingerprint = [...new Set(turnSignatures(parts))].sort().join("|")
   return {
     repeatCount: state.repeatCount + 1,

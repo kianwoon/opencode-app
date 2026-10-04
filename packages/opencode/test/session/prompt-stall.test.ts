@@ -96,15 +96,29 @@ describe("turnAdvancesWork", () => {
     ])
     expect(third.identical).toBe(false)
     expect(third.repeatCount).toBe(3)
-    // A turn with no counted tool part has an empty fingerprint, so two in a
-    // row are NOT treated as an identical batch.
+    // A turn with no real tool call is transparent to the ladder: it neither
+    // accumulates nor resets the count, and the fingerprint is untouched.
     const text = [{ type: "text", text: "still thinking" }] as unknown as SessionV1.Part
-    const t1 = nextStall(seen, { repeatCount: 0, fingerprint: "seeded" }, [text])
+    const t1 = nextStall(seen, { repeatCount: 2, fingerprint: "seeded" }, [text])
+    expect(t1.repeatCount).toBe(2)
+    expect(t1.fingerprint).toBe("seeded")
     expect(t1.identical).toBe(false)
-    expect(t1.fingerprint).toBe("")
-    const t2 = nextStall(seen, { repeatCount: t1.repeatCount, fingerprint: t1.fingerprint }, [text])
-    expect(t2.identical).toBe(false)
-    expect(t2.repeatCount).toBe(2)
+    // Transparency does not break tool-ladder accumulation: repeat, text,
+    // repeat still reaches 2 stalls.
+    const repeated = [bash("git status --short")]
+    const before = nextStall(seen, { repeatCount: 0, fingerprint: "" }, repeated)
+    const mid = nextStall(seen, { ...before }, [text])
+    const after = nextStall(seen, { repeatCount: mid.repeatCount, fingerprint: mid.fingerprint }, repeated)
+    expect(mid.repeatCount).toBe(before.repeatCount)
+    expect(after.repeatCount).toBe(2)
+  })
+
+  test("a bookkeeping-only turn is transparent to the ladder", () => {
+    const seen = new Set<string>()
+    const out = nextStall(seen, { repeatCount: 4, fingerprint: "seeded" }, [todowrite()])
+    expect(out.repeatCount).toBe(4)
+    expect(out.fingerprint).toBe("seeded")
+    expect(out.identical).toBe(false)
   })
 
   test("todo churn never counts as work and key order does not change a signature", () => {
