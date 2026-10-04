@@ -1,6 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import path from "path"
+import { createHash } from "node:crypto"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Effect, Layer, Context } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -12,7 +13,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
 import type { MessageV2 } from "./message-v2"
-import type { MessageID } from "./schema"
+import type { MessageID, PartID } from "./schema"
 
 function extract(messages: SessionV1.WithParts[]) {
   const paths = new Set<string>()
@@ -31,8 +32,18 @@ function extract(messages: SessionV1.WithParts[]) {
   return paths
 }
 
+const BLOCK_OPEN = "<project-instructions>"
+const BLOCK_CLOSE = "</project-instructions>"
+// Durable fingerprint of the persisted block. Presence AND freshness both read
+// from projected history, so a restart — which empties any process-local cache —
+// neither re-attaches a duplicate nor misses a refresh.
+export const BLOCK_META = "instructionBlock"
+
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
+  readonly staticBlock: (input: {
+    messages: SessionV1.WithParts[]
+  }) => Effect.Effect<{ text: string; hash: string; replace: PartID | undefined } | undefined, FSUtil.Error>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
   readonly system: () => Effect.Effect<string[], FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
@@ -246,6 +257,32 @@ const layer: Layer.Layer<
       return loaded
     })
 
+    // The static block is ~8k tokens and is byte-identical across requests, so
+    // re-attaching it at the tail every LLM call re-bills it uncached. Persist
+    // it once instead. The durable hash on the persisted part is the ONLY source
+    // of presence and freshness: process-local state would be empty after a
+    // restart and would re-attach a duplicate. `replace` points at the prior
+    // part so an edit updates it in place — the invariant is at most one block
+    // part in history, so no stale contradictory copy can accumulate.
+    const staticBlock = Effect.fn("Instruction.staticBlock")(function* (input: {
+      messages: SessionV1.WithParts[]
+    }) {
+      const prior = input.messages
+        .flatMap((msg) => msg.parts)
+        .find(
+          (part): part is SessionV1.TextPart =>
+            part.type === "text" && typeof part.metadata?.[BLOCK_META] === "string",
+        )
+      const blocks = yield* system()
+      if (blocks.length === 0) return undefined
+      const text = [BLOCK_OPEN, ...blocks, BLOCK_CLOSE].join("\n")
+      const hash = createHash("sha256").update(text).digest("hex")
+      // Absent part (post-compaction or never attached) attaches fresh; a
+      // matching durable hash suppresses; a stale one refreshes in place.
+      if (prior?.metadata?.[BLOCK_META] === hash) return undefined
+      return { text, hash, replace: prior?.id }
+    })
+
     const find = Effect.fn("Instruction.find")(function* (dir: string) {
       for (const file of instructionFiles) {
         const filepath = path.resolve(path.join(dir, file))
@@ -301,7 +338,7 @@ const layer: Layer.Layer<
       return results
     })
 
-    return Service.of({ clear, systemPaths, system, find, resolve })
+    return Service.of({ clear, staticBlock, systemPaths, system, find, resolve })
   }),
 )
 

@@ -34,6 +34,7 @@ const layers = (rulePaths: string[], todos: Todo.Info[] = []) =>
       Instruction.Service,
       Instruction.Service.of({
         clear: () => Effect.void,
+        staticBlock: () => Effect.succeed(undefined),
         systemPaths: () => Effect.succeed(new Set(rulePaths)),
         system: () => Effect.succeed([]),
         find: () => Effect.succeed(undefined),

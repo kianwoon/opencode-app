@@ -2313,17 +2313,39 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, workflowGuidance, permissionsManifest, rulePaths, modelMsgs] =
+            // Static instruction block: persist-once + refresh-on-change. It used to
+            // ride every request as a trailing user message, which re-billed the
+            // whole ~8k block uncached per turn. Now one part is persisted and its
+            // metadata carries the rendered hash, so presence/freshness survive a
+            // restart and an edit refreshes that same part instead of appending.
+            // A transient FS error must not kill the loop; degrade to whatever
+            // loaded and keep going.
+            const block = yield* instruction.staticBlock({ messages: msgs }).pipe(
+              Effect.catch((error) =>
+                Effect.logError("failed to load instruction files", { error }).pipe(Effect.as(undefined)),
+              ),
+            )
+            const host =
+              (block?.replace ? msgs.find((msg) => msg.parts.some((p) => p.id === block.replace)) : undefined) ??
+              msgs.findLast((msg) => msg.info.role === "user")
+            if (block && host) {
+              const part = yield* sessions.updatePart({
+                id: block.replace ?? PartID.ascending(),
+                messageID: host.info.id,
+                sessionID,
+                type: "text",
+                text: block.text,
+                synthetic: true,
+                metadata: { [Instruction.BLOCK_META]: block.hash },
+              })
+              const at = block.replace ? host.parts.findIndex((p) => p.id === block.replace) : -1
+              host.parts = at >= 0 ? host.parts.with(at, part) : [...host.parts, part]
+            }
+
+            const [skills, env, mcpInstructions, workflowGuidance, permissionsManifest, rulePaths, modelMsgs] =
               yield* Effect.all([
                 sys.skills(agent),
                 sys.environment(model),
-                // A transient FS error while reading instruction files must not kill
-                // the prompt loop; degrade to whatever loaded and keep going.
-                instruction.system().pipe(
-                  Effect.catch((error) =>
-                    Effect.logError("failed to load instruction files", { error }).pipe(Effect.as([] as string[])),
-                  ),
-                ),
                 sys.mcp(agent, session.permission),
                 sys.workflow(agent),
                 sys.permissions(agent, session.permission),
@@ -2807,19 +2829,6 @@ const layer = Layer.effect(
                         content: forceWrapUp
                           ? `${MAX_STEPS_PROMPT}\n\nAdditionally, you have repeated the same tool calls ${repeatCount} times in a row. Your tool access has been removed. Produce your final answer now as plain text.`
                           : MAX_STEPS_PROMPT,
-                      },
-                    ]
-                  : []),
-                // Instructions ride a trailing block, NOT the system prefix: the provider
-                // caches a byte prefix of the request, so instruction-file content in the
-                // system array means any AGENTS.md edit re-bills the whole cached prefix.
-                // Regenerated identically every turn, after all history, so history bytes
-                // stay stable and only this tail block can move.
-                ...(instructions.length > 0
-                  ? [
-                      {
-                        role: "user" as const,
-                        content: [{ type: "text" as const, text: instructions.join("\n") }],
                       },
                     ]
                   : []),

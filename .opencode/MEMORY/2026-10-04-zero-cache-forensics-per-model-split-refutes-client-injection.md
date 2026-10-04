@@ -1,0 +1,20 @@
+# Zero-cache message forensics: per-model split is the decisive lens; client mid-prompt injection re-refuted (2026-10-04)
+
+Symptom: user suspected mid-prompt injection causing zero-upstream-cache messages (`cache.read=0`).
+
+Method (reusable, ~10 sqlite/awk queries, no instrumentation):
+1. Filter pollution FIRST: `cr=0` counts include (a) first-turn colds (first assistant msg per session — expected), (b) EMPTY BILLS (`inp=0 AND cw=0 AND cr=0` — aborted/errored, no request billed). Subtract both before counting real dips.
+2. True dip = `cr=0 AND inp>0` with lag(cr) over assistant-only partition NOT 0 (warm predecessor). Turn-boundary split needs TWO lags (assistant-only for cr; all-messages for role) — `prev_cr IS NOT NULL` silently drops after-user dips (user rows carry no token bill).
+3. Gap histogram discriminates TTL expiry vs content change; model-switch lag(model) share; plugin-text adjacency via LIKE on parts.
+4. THE decisive natural experiment: per-model full-miss rate through the IDENTICAL client pipeline. Observed: qwen3.8-27b 96.7%, meta/muse-spark 31%, muse-spark 14%, glm-5.3-flash 13.4% vs space-bunny-free 0.1% (3/4591), glm-5.3 0.3%. Client-side prefix mutation cannot be that selective → provider-bound (instance routing / TTL on flash+free tiers).
+5. head-hash.log forensics for free: same turn= + same msgcount + different msgs hash = mid-history content mutation. Observed 18/16,048 pairs (0.11%), clustered 09-21/09-29 (old builds, pre plugin-disable), NONE correlated with a billed turn ±2min. System head changes: 3/16,048.
+6. Instruction-file/adherence injections ("Rule adherence check:", "The following instruction files apply") are RENDER-TIME: 0 user-role rows in DB (only assistant reasoning QUOTING them). DB LIKE searches cannot see render-time injections; absence in DB ≠ absence in prompt.
+7. Count-drift gotcha: messages in orphaned sessions (session row pruned) survive the message table — a session-table JOIN silently drops ~15% of dips (103/715 here).
+
+Verdict: 2559 cr=0 rows = 555 first-turn colds + 293 empty bills + 1709 full re-bills (~713 directly after warm turn). Dominant cause = provider-side (flaky flash/free tiers), NOT injection. 3-day all-turn hit rates: glm-5.3-flash 70.3%, muse-spark 77.5%, deepseek-v4.1 78.7%, space-bunny 81.6% — none ≥90% gate, but that window includes colds/rebuilds.
+
+Caveat: head-hash.log hashes are UPSTREAM of transforms — render-time message mutations are invisible to it; the per-model experiment is the bound that holds regardless.
+
+Gate to re-verify after any prompt-pipeline change: per-model full-miss table (space-bunny-free must stay ~0.1%) + warm-turn hit rate ≥90%.
+
+Instruction-block firing mechanism (verified in code, 2026-10-04): `packages/opencode/src/session/instruction.ts` — `system()` runs PER LOOP STEP; `claims` Map is keyed per assistant MessageID (de-dup scope = one assistant message); nested-guide index is byte-sorted "for stability". The "The following instruction files apply…" block re-attaches at the conversation tail on EVERY LLM request and is never persisted — so it must re-fire or the model loses the rules after request 1. MEASURED (live catch 2026-10-04 06:45, session XxzDdH): warm-turn uncached delta = 18,093 tok avg (3,491 turns, space-bunny-free), live 15.8–22.1k/turn. Composition: advisory = 31,986 bytes (global AGENTS.md 12,135 + project 19,851 ≈ ~8k tok) + prev assistant replay + user + tool results. The tail-riding tax is the main partial-miss residual (81.8% warm on best route). FULL MISSES are provider-bound, live-confirmed: the cr=0 dip at 06:45:30 (83k re-billed) had system head AND syslen byte-stable across the boundary (8b00f81c841e / 6932, upstream layer) with msgs hash only appending — nothing client-side changed; flaky-tier route signature (glm-5.3-flash 13.4% full-miss).
