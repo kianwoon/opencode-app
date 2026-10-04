@@ -218,5 +218,11 @@ export const SessionStableHeadTable = sqliteTable("session_stable_head", {
     .references(() => SessionTable.id, { onDelete: "cascade" }),
   system: text({ mode: "json" }).notNull().$type<string[]>(),
   tools: text({ mode: "json" }).notNull().$type<string[]>(),
+  // Every registry id this session has ever observed, which is a SUPERSET of
+  // `tools` whenever the initial JEV verdict narrowed the head. Only the
+  // adopt-on-change probe reads it: without it a gate-dropped id reads as
+  // freshly-registered after a restart and re-adopts itself, losing the verdict.
+  // Defaults to empty so a legacy row parses as "nothing extra known".
+  seen: text({ mode: "json" }).notNull().$type<string[]>().default([]),
   time_created: integer().notNull(),
 })

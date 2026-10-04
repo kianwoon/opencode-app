@@ -244,8 +244,11 @@ const jevGovHead = new Map<SessionID, { blocksHash: string; dropped: ReadonlySet
 // Keyed by SessionID ALONE: the emitted tool list must not re-freeze when
 // per-turn state changes (wrapUp flag, tool count). Keying on those let a
 // narrowed turn (or a wrap-up flip) rewrite the array and re-bill the whole
-// cached prefix.
-const jevHeadTools = new Map<SessionID, Record<string, unknown>>()
+// cached prefix. `seen` is every registry id the session has observed, which is
+// a SUPERSET of the emitted head whenever the initial JEV verdict narrowed it —
+// without it, the ids that verdict dropped would read as freshly-registered on
+// the very next turn and re-adopt themselves immediately.
+const jevHeadTools = new Map<SessionID, { head: Record<string, unknown>; seen: Set<string> }>()
 
 // Durable per-session freeze of the cache-relevant prefix (system blocks + tool
 // names). The provider caches a byte prefix of the request, so any change to the
@@ -263,34 +266,117 @@ const readStableHead = (db: Database.Interface["db"], sessionID: SessionID) =>
     return row[0]
   })
 
-const writeStableHead = (db: Database.Interface["db"], sessionID: SessionID, system: string[], tools: string[]) =>
+// `seen` records EVERY registry id observed at freeze time, including the ones
+// the initial JEV verdict dropped from `tools`. The probe that decides adoption
+// runs after a restart too, and the in-memory memo is gone by then, so a dropped
+// id persisted only in `tools` would read as freshly-registered and re-adopt
+// itself — losing the verdict and busting the cached prefix.
+const writeStableHead = (
+  db: Database.Interface["db"],
+  sessionID: SessionID,
+  system: string[],
+  tools: string[],
+  seen: string[],
+) =>
   db
     .insert(SessionStableHeadTable)
-    .values({ session_id: sessionID, system, tools, time_created: Date.now() })
+    .values({ session_id: sessionID, system, tools, seen, time_created: Date.now() })
     .onConflictDoNothing()
+
+// Adoption rewrite: a session that gained a tool AFTER it froze must keep the
+// grown head across the next restart, or the process relaunch re-adopts and the
+// cached prefix is cold again for one turn. Same columns as the insert, so the
+// row identity (and its read path) is unchanged. `seen` only ever grows: the new
+// full live set is unioned with what the row already knew.
+const updateStableHead = (
+  db: Database.Interface["db"],
+  sessionID: SessionID,
+  system: string[],
+  tools: string[],
+  seen: string[],
+) =>
+  db
+    .insert(SessionStableHeadTable)
+    .values({ session_id: sessionID, system, tools, seen, time_created: Date.now() })
+    .onConflictDoUpdate({
+      target: SessionStableHeadTable.session_id,
+      set: { system, tools, seen, time_created: Date.now() },
+    })
 
 /** @internal Exported for testing */
 export function freezeHead<T extends Record<string, unknown>>(
   sessionID: SessionID,
   current: T,
-  persisted: { system: string[]; tools: string[] } | undefined,
-): T {
-  const frozen = jevHeadTools.get(sessionID)
-  if (frozen) return frozen as T
+  persisted: { system: string[]; tools: string[]; seen?: string[] | null } | undefined,
+  // The per-turn JEV-narrowed set. Used ONLY to shape the session's INITIAL head;
+  // it is deliberately excluded from the evolution probe below.
+  initialGate?: Partial<T>,
+  // The full known set for this session, for the caller to persist alongside the
+  // emitted head. Grows monotonically, so an in-process restart-free run and a
+  // post-restart one reach the same probe answer.
+): { head: T; adopted: boolean; seen: string[] } {
+  // `current` is ALWAYS the full live registry set. The evolution probe reads
+  // from it, never from a gated subset: a per-turn JEV verdict is recomputed
+  // every turn and need not be nested with the frozen set, so probing a gated
+  // subset made a non-nested keep-set (t1 keep{A,B}, t2 keep{A,C}) report `C`
+  // as fresh, adopt the narrowed head and DROP the frozen `B` — busting the
+  // cached prefix on every single turn.
+  const live = Object.keys(current)
+  // Insertion order IS the emitted order, so sort by name once here: the same
+  // session can otherwise resolve tools in a different order between turns.
+  const sortedOf = (names: readonly string[]) =>
+    Object.fromEntries(names.toSorted().map((name) => [name, current[name]])) as T
+  const memo = jevHeadTools.get(sessionID)
+  const frozen = memo?.head
+  // INITIAL freeze (no memo AND no persisted head): this is the only point where
+  // the JEV verdict may shape the head. Nothing to adopt yet, so the probe is
+  // skipped entirely — but the FULL registry is still recorded as `seen`, so the
+  // ids this verdict drops can never read as freshly-registered on a later turn.
+  if (frozen === undefined && persisted === undefined) {
+    const initial = sortedOf(initialGate ? Object.keys(initialGate) : live)
+    jevHeadTools.set(sessionID, { head: initial, seen: new Set(live) })
+    capMemo(jevHeadTools)
+    return { head: initial, adopted: false, seen: live }
+  }
+  // Every id this session already knows about: the frozen memo's OBSERVED set
+  // (a superset of its emitted head) plus whatever the durable head recorded. A
+  // live id outside that set was registered AFTER the session froze (e.g. a
+  // newly added jev_* tool), so the freeze adopts the FULL live set. Narrowing
+  // never does — `live` is the unfiltered registry, so a JEV verdict cannot
+  // manufacture a fresh id. `persisted.seen` is what makes the probe answer the
+  // SAME after a restart, when the memo is gone; a legacy row with none falls
+  // back to `persisted.tools` exactly as before.
+  const known = new Set<string>([
+    ...(memo?.seen ?? []),
+    ...(persisted?.tools ?? []),
+    ...(persisted?.seen ?? []),
+  ])
+  const fresh = live.filter((name) => !known.has(name) && !JEV_EXEMPT_TOOLS.has(name))
+  if (fresh.length > 0) {
+    const adopted = sortedOf(live)
+    const observed = [...new Set([...known, ...live])].toSorted()
+    jevHeadTools.set(sessionID, { head: adopted, seen: new Set(observed) })
+    capMemo(jevHeadTools)
+    return { head: adopted, adopted: true, seen: observed }
+  }
+  if (frozen) {
+    const observed = [...new Set([...known, ...live])].toSorted()
+    memo!.seen = new Set(observed)
+    return { head: frozen as T, adopted: false, seen: observed }
+  }
   const names = persisted
     ? [
         ...new Set(
-          Object.keys(current).filter((name) => persisted.tools.includes(name) || JEV_EXEMPT_TOOLS.has(name)),
+          live.filter((name) => persisted.tools.includes(name) || JEV_EXEMPT_TOOLS.has(name)),
         ),
       ]
-    : Object.keys(current)
-  const keep = names.length > 0 ? names : Object.keys(current)
-  // Insertion order IS the emitted order, so sort by name once here: the same
-  // session can otherwise resolve tools in a different order between turns.
-  const sorted = Object.fromEntries(keep.toSorted().map((name) => [name, current[name]]))
-  jevHeadTools.set(sessionID, sorted)
+    : live
+  const keep = names.length > 0 ? names : live
+  const sorted = sortedOf(keep)
+  const observed = [...new Set([...known, ...live])].toSorted()
+  jevHeadTools.set(sessionID, { head: sorted, seen: new Set(observed) })
   capMemo(jevHeadTools)
-  return sorted as T
+  return { head: sorted, adopted: false, seen: observed }
 }
 
 // Module-global session-keyed memos never get an explicit session-end hook, so
@@ -2775,11 +2861,17 @@ const layer = Layer.effect(
             // Prefix-cache invariant: the head (system blocks + sorted tool list)
             // is APPEND-ONLY across a session. Freeze once so every later turn
             // emits byte-identical head bytes. The JEV verdict becomes the
-            // session's INITIAL head (gatedHead is undefined on every fail-open
-            // path, so the full list is frozen exactly as before); once frozen,
-            // no later turn may rewrite it — a per-turn fold would re-bill the
-            // whole cached prefix.
-            const headTools = freezeHead(sessionID, gatedHead ?? tools, persistedHead)
+            // session's INITIAL head only (initialGate; undefined on every
+            // fail-open path, so the full list is frozen exactly as before) —
+            // once frozen, no later verdict may reshape it, because a per-turn
+            // fold would re-bill the whole cached prefix. The probe source is
+            // the FULL registry (`tools`), never `gatedHead`, so a non-nested
+            // verdict cannot re-adopt a narrowed head and drop frozen ids.
+            // Growth is the one exception: a tool registered after the session
+            // began is adopted once (freezeHead), so it can actually reach the
+            // session.
+            const frozen = freezeHead(sessionID, tools, persistedHead, gatedHead)
+            const headTools = frozen.head
             // Probe: one line per step with a short digest of the cache-relevant
             // head (joined system string + sorted tool names). Always on; the log
             // write is best-effort and must never break the turn.
@@ -2792,8 +2884,20 @@ const layer = Layer.effect(
               )
             } catch {}
             try {
+              // `seen` persists what the probe needs ACROSS a restart. The first
+              // freeze stores the whole observed registry (including the ids the
+              // JEV verdict dropped from the head) and an adoption stores the
+              // union, so a gate-dropped id never re-adopts itself on relaunch.
               if (!persistedHead) {
-                yield* writeStableHead(db, sessionID, system, Object.keys(headTools)).pipe(Effect.catch(() => Effect.void))
+                yield* writeStableHead(db, sessionID, system, Object.keys(headTools), frozen.seen).pipe(
+                  Effect.catch(() => Effect.void),
+                )
+              } else if (frozen.adopted) {
+                // The freeze grew the head, so the durable row must grow with it or
+                // the next process restart re-adopts from the stale tool list.
+                yield* updateStableHead(db, sessionID, system, Object.keys(headTools), frozen.seen).pipe(
+                  Effect.catch(() => Effect.void),
+                )
               }
             } catch {}
             // Advisory rides the TAIL, not the cached head: append it as a

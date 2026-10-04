@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "71a2a301-6251-4926-9613-98d4b7e14f65",
+  "id": "e55267b7-d9de-45ad-83e1-7509d72aa199",
   "prevIds": [
-    "01ff5ff5-a1da-4336-976b-c43d7b0111b4"
+    "71a2a301-6251-4926-9613-98d4b7e14f65"
   ],
   "ddl": [
     {
@@ -1283,6 +1283,16 @@
       "default": null,
       "generated": null,
       "name": "tools",
+      "entityType": "columns",
+      "table": "session_stable_head"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'[]'",
+      "generated": null,
+      "name": "seen",
       "entityType": "columns",
       "table": "session_stable_head"
     },
