@@ -546,7 +546,7 @@ export async function jevFetchRetry(
  * and MUST gate on `choice` + `probabilities[choice]`, never `confidence`.
  */
 export async function jevAsk(input: JevAskInput): Promise<Record<string, unknown> | undefined> {
-  const transport = jevTransport(input.model)
+  const transport = input.transport ?? jevTransport(input.model)
   if (!transport) return undefined
   const res = await jevFetchRetry(transport.endpoint, input.timeoutMs, {
     method: "POST",
@@ -603,6 +603,8 @@ export interface JevAskInput {
   readonly onUsage?: (u: { inputTokens?: number; cost?: number; model?: string }) => void
   /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
   readonly model?: string
+  /** Endpoint seam for tests; overrides the transport lookup when set. */
+  readonly transport?: Pick<JevTransport, "endpoint" | "id">
 }
 
 /**

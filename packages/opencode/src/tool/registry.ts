@@ -21,6 +21,7 @@ import { SessionRenameTool } from "./session-rename"
 import { CuaBatchTool } from "./cua-batch"
 import { UiRunTool } from "./ui-run"
 import { JevAcceptTool } from "./jev-accept"
+import { JevAskTool } from "./jev-ask"
 import { JevDecideTool } from "./jev-decide"
 import { JevLabelTool } from "./jev-label"
 import { JevRankTool } from "./jev-rank"
@@ -125,6 +126,7 @@ const layer = Layer.effect(
     const skilltool = yield* SkillTool
     const sessionrename = yield* SessionRenameTool
     const jevaccept = yield* JevAcceptTool
+    const jevask = yield* JevAskTool
     const jevdecide = yield* JevDecideTool
     const jevlabel = yield* JevLabelTool
     const jevrank = yield* JevRankTool
@@ -238,6 +240,7 @@ const layer = Layer.effect(
           skill: Tool.init(skilltool),
           session_rename: Tool.init(sessionrename),
           jev_accept: Tool.init(jevaccept),
+          jev_ask: Tool.init(jevask),
           jev_decide: Tool.init(jevdecide),
           jev_label: Tool.init(jevlabel),
           jev_rank: Tool.init(jevrank),
@@ -270,6 +273,7 @@ const layer = Layer.effect(
             tool.session_rename,
             tool.jev_decide,
             tool.jev_accept,
+            tool.jev_ask,
             tool.jev_label,
             tool.jev_rank,
             tool.patch,
