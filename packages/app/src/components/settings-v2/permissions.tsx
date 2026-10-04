@@ -1,5 +1,7 @@
 import { For, Show, createMemo, createResource, createSignal, type Accessor, type Component } from "solid-js"
+import { createStore } from "solid-js/store"
 import { CheckboxV2 } from "@opencode-ai/ui/v2/checkbox-v2"
+import { Icon } from "@opencode-ai/ui/v2/icon"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { Wildcard } from "@opencode-ai/core/util/wildcard"
@@ -230,6 +232,16 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     })).filter((group) => group.tools.length > 0)
   })
 
+  // Collapsed-by-default sections: each curated group and each MCP server folds
+  // its tool rows until its header is clicked; a non-empty search forces the
+  // groups open so the query is always visible in results.
+  const [collapsed, setCollapsed] = createStore({
+    groups: {} as Record<string, boolean>,
+    servers: {} as Record<string, boolean>,
+  })
+  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || !collapsed.groups[group]
+  const serverExpanded = (server: string) => !collapsed.servers[server]
+
   const selectedSkills = () => block(active().name).skills ?? []
   const toggleSkill = (skill: string) => {
     const current = selectedSkills()
@@ -350,9 +362,22 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
           </div>
           <For each={visibleOwnsGroups()}>
             {(group) => (
-              <div class="settings-v2-section" data-component="settings-permissions-owns-group">
+              <div
+                class="settings-v2-section"
+                data-component="settings-permissions-owns-group"
+                data-expanded={ownsExpanded(group.label) ? "" : undefined}
+              >
                 <h4 class="settings-v2-section-title">
-                  {language.t(group.label)}{" "}
+                  <button
+                    type="button"
+                    class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                    data-action={`settings-permissions-owns-group-toggle-${group.label.split(".").pop()}`}
+                    aria-expanded={ownsExpanded(group.label)}
+                    onClick={() => setCollapsed("groups", group.label, ownsExpanded(group.label))}
+                  >
+                    <Icon name={ownsExpanded(group.label) ? "chevron-down" : "chevron-right"} size="small" />
+                    {language.t(group.label)}
+                  </button>{" "}
                   <span class="settings-v2-permissions-count">
                     {language.t("settings.permissions.owns.count", {
                       owned: group.allTools.filter(isExposed).filter((tool) => owns(tool)).length,
@@ -375,6 +400,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                     />
                   </div>
                 </h4>
+                <Show when={ownsExpanded(group.label)}>
                 <SettingsListV2>
                   <For each={group.tools}>
                     {(tool) => (
@@ -430,6 +456,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                     )}
                   </For>
                 </SettingsListV2>
+                </Show>
               </div>
             )}
           </For>
@@ -465,9 +492,24 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
             </For>
             <For each={inventory.latest?.mcp ?? []}>
               {(server) => (
-                <div class="settings-v2-section" data-component="settings-permissions-mcp-server">
+                <div
+                  class="settings-v2-section"
+                  data-component="settings-permissions-mcp-server"
+                  data-expanded={serverExpanded(server.server) ? "" : undefined}
+                >
                   <div class="flex items-center gap-2">
-                    <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">{server.server}</h4>
+                    <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">
+                      <button
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                        data-action={`settings-permissions-mcp-toggle-${server.server}`}
+                        aria-expanded={serverExpanded(server.server)}
+                        onClick={() => setCollapsed("servers", server.server, serverExpanded(server.server))}
+                      >
+                        <Icon name={serverExpanded(server.server) ? "chevron-down" : "chevron-right"} size="small" />
+                        {server.server}
+                      </button>
+                    </h4>
                     <div data-action={`settings-permissions-mcp-all-${server.server}`}>
                       <CheckboxV2
                         label={language.t("settings.permissions.owns.toggle")}
@@ -480,6 +522,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                       />
                     </div>
                   </div>
+                  <Show when={serverExpanded(server.server)}>
                   <SettingsListV2>
                     <For each={server.tools}>
                       {(tool) => (
@@ -496,6 +539,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                       )}
                     </For>
                   </SettingsListV2>
+                  </Show>
                 </div>
               )}
             </For>

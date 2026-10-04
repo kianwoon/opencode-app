@@ -246,6 +246,16 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     })).filter((group) => group.tools.length > 0)
   })
 
+  // Collapsed-by-default sections: each curated group and each MCP server folds
+  // its tool rows until its header is clicked; a non-empty search forces the
+  // groups open so the query is always visible in results.
+  const [collapsed, setCollapsed] = createStore({
+    groups: {} as Record<string, boolean>,
+    servers: {} as Record<string, boolean>,
+  })
+  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || !collapsed.groups[group]
+  const serverExpanded = (server: string) => !collapsed.servers[server]
+
   const selectedSkills = createMemo(() => block(active().name).skills ?? [])
   const toggleSkill = (skill: string) => {
     const current = selectedSkills()
@@ -929,9 +939,22 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
           </div>
           <For each={visibleOwnsGroups()}>
             {(group) => (
-              <div class="settings-v2-section" data-component="settings-subagent-owns-group">
+              <div
+                class="settings-v2-section"
+                data-component="settings-subagent-owns-group"
+                data-expanded={ownsExpanded(group.label) ? "" : undefined}
+              >
                 <h4 class="settings-v2-section-title">
-                  {language.t(group.label)}{" "}
+                  <button
+                    type="button"
+                    class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                    data-action={`settings-subagent-owns-group-toggle-${group.label.split(".").pop()}`}
+                    aria-expanded={ownsExpanded(group.label)}
+                    onClick={() => setCollapsed("groups", group.label, ownsExpanded(group.label))}
+                  >
+                    <Icon name={ownsExpanded(group.label) ? "chevron-down" : "chevron-right"} size="small" />
+                    {language.t(group.label)}
+                  </button>{" "}
                   <span class="settings-v2-permissions-count">
                     {language.t("settings.subagent.owns.count", {
                       owned: group.allTools.filter(isExposed).filter((tool) => owns(tool)).length,
@@ -954,6 +977,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                     />
                   </div>
                 </h4>
+                <Show when={ownsExpanded(group.label)}>
                 <SettingsListV2>
                   <For each={group.tools}>
                     {(tool) => (
@@ -981,6 +1005,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                     )}
                   </For>
                 </SettingsListV2>
+                </Show>
               </div>
             )}
           </For>
@@ -1016,9 +1041,24 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
             </For>
             <For each={inventory.latest?.mcp ?? []}>
               {(server) => (
-                <div class="settings-v2-section" data-component="settings-subagent-mcp-server">
+                <div
+                  class="settings-v2-section"
+                  data-component="settings-subagent-mcp-server"
+                  data-expanded={serverExpanded(server.server) ? "" : undefined}
+                >
                   <div class="flex items-center gap-2">
-                    <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">{server.server}</h4>
+                    <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">
+                      <button
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                        data-action={`settings-subagent-mcp-toggle-${server.server}`}
+                        aria-expanded={serverExpanded(server.server)}
+                        onClick={() => setCollapsed("servers", server.server, serverExpanded(server.server))}
+                      >
+                        <Icon name={serverExpanded(server.server) ? "chevron-down" : "chevron-right"} size="small" />
+                        {server.server}
+                      </button>
+                    </h4>
                     <div data-action={`settings-subagent-mcp-all-${server.server}`}>
                       <CheckboxV2
                         label={language.t("settings.subagent.owns.toggle")}
@@ -1031,6 +1071,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                       />
                     </div>
                   </div>
+                  <Show when={serverExpanded(server.server)}>
                   <SettingsListV2>
                     <For each={server.tools}>
                       {(tool) => (
@@ -1047,6 +1088,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                       )}
                     </For>
                   </SettingsListV2>
+                  </Show>
                 </div>
               )}
             </For>
