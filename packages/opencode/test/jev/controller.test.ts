@@ -26,20 +26,23 @@ describe("foldController", () => {
       },
       0.7,
     )
-    expect(d?.action).toBe("click")
-    expect(d?.target).toBe("Settings")
-    expect(d?.success).toBe(true)
-    expect(d?.stuck).toBe(false)
-    expect(d?.needScreenshot).toBe(true)
-    expect(d?.strength).toBeCloseTo(0.82)
+    expect(d.verdict).toBe("accepted")
+    if (d.verdict !== "accepted") throw new Error("expected accepted")
+    expect(d.decision.action).toBe("click")
+    expect(d.decision.target).toBe("Settings")
+    expect(d.decision.success).toBe(true)
+    expect(d.decision.stuck).toBe(false)
+    expect(d.decision.needScreenshot).toBe(true)
+    expect(d.decision.strength).toBeCloseTo(0.82)
   })
 
-  test("fails open to null when the action strength is below the threshold", () => {
-    const d = foldController(
-      { answers: { action: ans("click", { click: 0.42, wait: 0.58 }) } },
-      0.7,
-    )
-    expect(d).toBeNull()
+  test("a measured action below the threshold is below_gate, not unavailable", () => {
+    const d = foldController({ answers: { action: ans("click", { click: 0.55, wait: 0.45 }) } }, 0.7)
+    expect(d.verdict).toBe("below_gate")
+    if (d.verdict !== "below_gate") throw new Error("expected below_gate")
+    expect(d.choice).toBe("click")
+    expect(d.action).toBe("click")
+    expect(d.strength).toBeCloseTo(0.55)
   })
 
   test("nulls a target that resolves to `none`", () => {
@@ -47,26 +50,34 @@ describe("foldController", () => {
       { answers: { action: ans("done", { done: 0.99 }), target: ans("none", { none: 0.95 }) } },
       0.7,
     )
-    expect(d?.action).toBe("done")
-    expect(d?.target).toBeNull()
+    expect(d.verdict).toBe("accepted")
+    if (d.verdict !== "accepted") throw new Error("expected accepted")
+    expect(d.decision.action).toBe("done")
+    expect(d.decision.target).toBeNull()
   })
 
   test("fails open on a missing answers envelope", () => {
-    expect(foldController({}, 0.7)).toBeNull()
-    expect(foldController(null, 0.7)).toBeNull()
+    expect(foldController({}, 0.7).verdict).toBe("unmeasured")
+    expect(foldController(null, 0.7).verdict).toBe("unmeasured")
   })
 
-  test("a choice with no probabilities map fails open (no blind click)", () => {
+  test("a choice with no probabilities map is unmeasured (no blind click)", () => {
     // Degraded echo: a label without `probabilities[choice]` carries no score to
     // trust. Emitting the click here would be a blind click at threshold 0.
-    const d = foldController({ answers: { action: { type: "choice", choice: "click" } } }, 0)
-    expect(d).toBeNull()
+    expect(foldController({ answers: { action: { type: "choice", choice: "click" } } }, 0).verdict).toBe("unmeasured")
   })
 
-  test("an action strength below the confidence floor fails open (null)", () => {
-    // threshold 0 but floor 0.3: a 0.1-strength click must not be trusted.
+  test("an action strength below the confidence floor is below_gate", () => {
+    // threshold 0 but floor 0.3: a 0.1-strength click must not be trusted — but the
+    // model DID weigh it, so the outcome is uncertain, not unmeasured.
     const d = foldController({ answers: { action: ans("click", { click: 0.1, wait: 0.9 }) } }, 0, 0.3)
-    expect(d).toBeNull()
+    expect(d.verdict).toBe("below_gate")
+    if (d.verdict !== "below_gate") throw new Error("expected below_gate")
+    expect(d.strength).toBeCloseTo(0.1)
+  })
+
+  test("an unknown action choice is unmeasured, never a below_gate verdict", () => {
+    expect(foldController({ answers: { action: ans("teleport", { teleport: 0.99 }) } }, 0.7).verdict).toBe("unmeasured")
   })
 })
 

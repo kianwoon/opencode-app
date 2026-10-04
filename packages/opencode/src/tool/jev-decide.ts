@@ -1,6 +1,14 @@
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
-import { CONTROLS_MAX, LABEL_MAX, STATE_MAX, jevControl, jevKey, type ControllerDecision, type ControllerInput } from "../jev/controller"
+import {
+  CONTROLS_MAX,
+  LABEL_MAX,
+  STATE_MAX,
+  jevControlDetailed,
+  jevKey,
+  type ControllerDecision,
+  type ControllerInput,
+} from "../jev/controller"
 
 export const JevControlSchema = Schema.Struct({
   id: Schema.String,
@@ -79,6 +87,21 @@ export function formatUnavailable(): { title: string; output: string } {
   }
 }
 
+/**
+ * A measured-but-below-gate verdict is an "uncertain" outcome, not unavailable:
+ * it carries the choice and its strength so the caller can see the model weighed
+ * a real action and declined to trust it.
+ */
+export function formatBelowGate(
+  outcome: { choice: string; strength: number },
+  marker?: string,
+): { title: string; output: string } {
+  return {
+    title: "jev: below_gate",
+    output: `${marker ? marker + "\n" : ""}${JSON.stringify({ decision: null, reason: "below_gate", choice: outcome.choice, strength: outcome.strength })}`,
+  }
+}
+
 export const JevDecideTool = Tool.define<typeof Parameters, Metadata, never>(
   "jev_decide",
   Effect.gen(function* () {
@@ -90,11 +113,13 @@ export const JevDecideTool = Tool.define<typeof Parameters, Metadata, never>(
         Effect.gen(function* () {
           const key = jevKey()
           if (!key) return { ...formatUnavailable(), metadata: {} }
-          const decision = yield* Effect.promise(() => jevControl(toControllerInput(params, key))).pipe(
-            Effect.catch(() => Effect.succeed(null)),
+          const outcome = yield* Effect.promise(() => jevControlDetailed(toControllerInput(params, key))).pipe(
+            Effect.catch(() => Effect.succeed({ verdict: "unmeasured" } as const)),
           )
-          if (!decision) return { ...formatUnavailable(), metadata: {} }
-          return { ...formatDecision(decision, truncationMarker(params.controls)), metadata: {} }
+          if (outcome.verdict === "below_gate")
+            return { ...formatBelowGate(outcome, truncationMarker(params.controls)), metadata: {} }
+          if (outcome.verdict !== "accepted") return { ...formatUnavailable(), metadata: {} }
+          return { ...formatDecision(outcome.decision, truncationMarker(params.controls)), metadata: {} }
         }),
     }
   }),

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  formatBelowGate,
   formatDecision,
   formatUnavailable,
   toControlLabels,
@@ -110,5 +111,18 @@ describe("decision output shaping", () => {
   test("formatUnavailable is fail-open null shape", () => {
     const { output } = formatUnavailable()
     expect(output).toBe(JSON.stringify({ decision: null, reason: "unavailable" }))
+  })
+
+  test("formatBelowGate surfaces the measured choice and strength", () => {
+    const { title, output } = formatBelowGate({ choice: "click", strength: 0.55 })
+    expect(title).toBe("jev: below_gate")
+    expect(JSON.parse(output)).toEqual({ decision: null, reason: "below_gate", choice: "click", strength: 0.55 })
+  })
+
+  test("formatBelowGate prepends the truncation marker when present", () => {
+    const controls = Array.from({ length: CONTROLS_MAX + 1 }, (_, i) => ({ id: `${i}`, action: "click", label: `l-${i}` }))
+    const { output } = formatBelowGate({ choice: "click", strength: 0.55 }, truncationMarker(controls))
+    expect(output).toContain("truncated")
+    expect(JSON.parse(output.slice(output.indexOf("{"))).reason).toBe("below_gate")
   })
 })

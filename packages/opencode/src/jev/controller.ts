@@ -173,20 +173,37 @@ export function buildControllerQuestions(
 
 const isAction = (v: string): v is JevAction => (ACTIONS as string[]).includes(v)
 
+/**
+ * Fold one controller response body into a three-outcome verdict. `below_gate` is
+ * distinct from `unmeasured`: a measured-but-weak action is a real "uncertain"
+ * verdict that must surface its choice and strength, while `unmeasured` (no body,
+ * no answers, no measured action row) is a true fail-open.
+ */
+export type ControllerOutcome =
+  | { readonly verdict: "accepted"; readonly decision: ControllerDecision }
+  | {
+      readonly verdict: "below_gate"
+      readonly choice: string
+      readonly action: JevAction | null
+      readonly strength: number
+    }
+  | { readonly verdict: "unmeasured" }
+
 export const foldController = (
   body: unknown,
   threshold: number,
   floor = JEV_DEFAULT_CONFIDENCE_FLOOR,
-): ControllerDecision | null => {
-  if (typeof body !== "object" || body === null) return null
+): ControllerOutcome => {
+  if (typeof body !== "object" || body === null) return { verdict: "unmeasured" }
   const answers = (body as Record<string, unknown>).answers
-  if (typeof answers !== "object" || answers === null) return null
+  if (typeof answers !== "object" || answers === null) return { verdict: "unmeasured" }
   const rows = answers as Record<string, unknown>
-  // Measured only — fabricated strength=1 would emit a blind click. A row below
-  // the confidence floor is treated as unmeasured and fails open (null).
+  // Measured only — fabricated strength=1 would emit a blind click. An unmeasured
+  // or unknown action row fails open as unmeasured, never as a below-gate verdict.
   const actionRow = jevMeasuredChoice(rows["action"])
-  if (!actionRow || !isAction(actionRow.choice) || actionRow.strength < floor || actionRow.strength < threshold)
-    return null
+  if (!actionRow || !isAction(actionRow.choice)) return { verdict: "unmeasured" }
+  if (actionRow.strength < floor || actionRow.strength < threshold)
+    return { verdict: "below_gate", choice: actionRow.choice, action: actionRow.choice, strength: actionRow.strength }
   const targetRow = jevMeasuredChoice(rows["target"])
   // Deliberate step-0 asymmetry: a target row is gated by the threshold ONLY,
   // never by the action confidence floor — a floor-gated target would drop a
@@ -196,36 +213,41 @@ export const foldController = (
       ? targetRow.choice.replace(/^\d+:/, "")
       : null
   return {
-    action: actionRow.choice,
-    target,
-    success: jevMeasuredChoice(rows["success"])?.choice === "yes",
-    stuck: jevMeasuredChoice(rows["stuck"])?.choice === "yes",
-    needScreenshot: jevMeasuredChoice(rows["need_screenshot"])?.choice === "yes",
-    strength: actionRow.strength,
+    verdict: "accepted",
+    decision: {
+      action: actionRow.choice,
+      target,
+      success: jevMeasuredChoice(rows["success"])?.choice === "yes",
+      stuck: jevMeasuredChoice(rows["stuck"])?.choice === "yes",
+      needScreenshot: jevMeasuredChoice(rows["need_screenshot"])?.choice === "yes",
+      strength: actionRow.strength,
+    },
   }
 }
 
 /**
- * One detached controller call. Returns the gated action+target, or `null`
- * fail-open on any error/timeout/sub-threshold action. The key is never logged.
+ * One detached controller call, full three-outcome result: the accepted decision,
+ * a measured `below_gate` verdict, or `null` when the call itself was unmeasured
+ * (error/timeout/no key). The key is never logged.
  *
  * A module-level memo (TTL 60s, max 200 FIFO) short-circuits an identical
  * request — same id, threshold and state — returning the byte-identical cached
- * decision. Only the success path is memoized: miss/timeout/error paths bypass
- * the memo entirely and are not cached, so a transient failure never sticks.
+ * decision. Only the accepted path is memoized: below-gate and miss/timeout/error
+ * paths bypass the memo entirely and are not cached, so a transient failure or a
+ * weak verdict never sticks.
  */
-export async function jevControl(input: ControllerInput): Promise<ControllerDecision | null> {
+export async function jevControlDetailed(input: ControllerInput): Promise<ControllerOutcome> {
   const questions = buildControllerQuestions(input.controls)
-  if (!questions) return null
+  if (!questions) return { verdict: "unmeasured" }
   const transport = jevTransport(input.model)
-  if (!transport) return null
+  if (!transport) return { verdict: "unmeasured" }
   const threshold = input.threshold ?? JEV_DEFAULT_THRESHOLD
   const floor = input.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
   const timeoutMs = input.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS
   const state = buildState(input)
   const key = controllerMemoKey(input.id, transport.id, threshold, floor, timeoutMs, controllerHash(state))
   const hit = controllerMemo.get(key)
-  if (hit && hit.expires > Date.now()) return hit.decision
+  if (hit && hit.expires > Date.now()) return { verdict: "accepted", decision: hit.decision }
   try {
     const res = await jevFetchRetry(transport.endpoint, timeoutMs, {
       method: "POST",
@@ -237,14 +259,25 @@ export async function jevControl(input: ControllerInput): Promise<ControllerDeci
       },
       body: JSON.stringify({ model: transport.id, state, questions }),
     })
-    if (!res) return null
-    if (!res.ok) return null
-    const decision = foldController(await res.json(), threshold, floor)
-    if (decision) controllerRemember(key, decision)
-    return decision
+    if (!res) return { verdict: "unmeasured" }
+    if (!res.ok) return { verdict: "unmeasured" }
+    const outcome = foldController(await res.json(), threshold, floor)
+    if (outcome.verdict === "accepted") controllerRemember(key, outcome.decision)
+    return outcome
   } catch {
-    return null
+    return { verdict: "unmeasured" }
   }
+}
+
+/**
+ * Actionable-decision view over jevControlDetailed. Keeps the historical
+ * `ControllerDecision | null` contract: a below-gate verdict is uncertain, not
+ * actionable, so callers that drive the UI still fail open to null. Callers that
+ * must SEE the uncertain verdict use jevControlDetailed.
+ */
+export async function jevControl(input: ControllerInput): Promise<ControllerDecision | null> {
+  const outcome = await jevControlDetailed(input)
+  return outcome.verdict === "accepted" ? outcome.decision : null
 }
 
 const CONTROLLER_MEMO_MAX = 200
