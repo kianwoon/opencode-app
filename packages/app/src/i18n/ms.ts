@@ -1247,6 +1247,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Senarai",
   "settings.permissions.tool.list.description": "Senaraikan fail dalam folder",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Jalankan arahan shell",
   "settings.permissions.tool.task.title": "Tugas",
   "settings.permissions.tool.task.description": "Lancarkan sub-ejen",

@@ -1255,6 +1255,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Saraksts",
   "settings.permissions.tool.list.description": "Uzskaitīt failus mapē",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Izpildīt čaulas komandas",
   "settings.permissions.tool.task.title": "Uzdevums",
   "settings.permissions.tool.task.description": "Palaist apakšaģentus",

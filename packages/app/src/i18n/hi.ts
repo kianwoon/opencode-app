@@ -1254,6 +1254,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "सूची",
   "settings.permissions.tool.list.description": "किसी निर्देशिका में फ़ाइलों की सूची बनाएं",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "शेल कमांड चलाएँ",
   "settings.permissions.tool.task.title": "कार्य",
   "settings.permissions.tool.task.description": "उप-एजेंट लॉन्च करें",

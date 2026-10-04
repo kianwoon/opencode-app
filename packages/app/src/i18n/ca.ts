@@ -1265,6 +1265,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Llista",
   "settings.permissions.tool.list.description": "Llista els fitxers dins d'un directori",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Executeu ordres de shell",
   "settings.permissions.tool.task.title": "Tasca",
   "settings.permissions.tool.task.description": "Llançar subagents",

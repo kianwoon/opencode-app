@@ -1257,6 +1257,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Seznam",
   "settings.permissions.tool.list.description": "Seznam datotek v imeniku",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Zagon lupinskih ukazov",
   "settings.permissions.tool.task.title": "Naloga",
   "settings.permissions.tool.task.description": "Zagon pod-agentov",

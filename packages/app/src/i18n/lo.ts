@@ -1238,6 +1238,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "ລາຍການ",
   "settings.permissions.tool.list.description": "ລາຍຊື່ໄຟລ໌ພາຍໃນໄດເລກະທໍລີ",
   "settings.permissions.tool.bash.title": "ບາຊ",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "ດໍາເນີນການຄໍາສັ່ງ shell",
   "settings.permissions.tool.task.title": "ວຽກງານ",
   "settings.permissions.tool.task.description": "ເປີດຕົວຕົວແທນຍ່ອຍ",

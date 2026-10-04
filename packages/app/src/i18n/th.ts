@@ -1225,6 +1225,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "แสดงรายการ",
   "settings.permissions.tool.list.description": "แสดงรายการไฟล์ภายในไดเรกทอรี",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "เรียกใช้คำสั่งเชลล์",
   "settings.permissions.tool.task.title": "งาน",
   "settings.permissions.tool.task.description": "เปิดเอเจนต์ย่อย",

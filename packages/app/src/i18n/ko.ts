@@ -857,6 +857,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "목록",
   "settings.permissions.tool.list.description": "디렉터리 내 파일 나열",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "셸 명령어 실행",
   "settings.permissions.tool.task.title": "작업",
   "settings.permissions.tool.task.description": "하위 에이전트 실행",

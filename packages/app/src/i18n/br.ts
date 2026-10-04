@@ -1174,6 +1174,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Listar",
   "settings.permissions.tool.list.description": "Listar arquivos dentro de um diretório",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Executar comandos shell",
   "settings.permissions.tool.task.title": "Tarefa",
   "settings.permissions.tool.task.description": "Iniciar subagentes",

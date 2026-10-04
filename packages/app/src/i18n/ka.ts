@@ -1246,6 +1246,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "სია",
   "settings.permissions.tool.list.description": "ფაილების სია დირექტორიაში",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "გარსის ბრძანებების გაშვება",
   "settings.permissions.tool.task.title": "ამოცანა",
   "settings.permissions.tool.task.description": "ქვე-აგენტების გაშვება",

@@ -72,7 +72,7 @@ const ALL_TOOLS: readonly string[] = OWNS_GROUPS.flatMap((group) => [...group.to
 // Only pattern-bearing tools get a pattern input; the rest stay canonical bare
 // actions. Copy permissions.tsx — a shared map here would silently couple the
 // two tabs' canonical form.
-const PATTERN_TOOLS: readonly string[] = ["bash", "read", "edit", "external_directory"]
+const PATTERN_TOOLS: readonly string[] = ["bash", "read", "edit", "external_directory", "package_install"]
 
 const actionOptions: Action[] = ["allow", "ask", "deny"]
 const modeOptions = ["subagent", "primary", "all"] as const

@@ -1259,6 +1259,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Siyahı",
   "settings.permissions.tool.list.description": "Qovluq daxilindəki faylları siyahıla",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Shell əmrlərini işlət",
   "settings.permissions.tool.task.title": "Tapşırıq",
   "settings.permissions.tool.task.description": "Alt agentləri işə sal",

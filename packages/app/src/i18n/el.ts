@@ -1263,6 +1263,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Λίστα",
   "settings.permissions.tool.list.description": "Λίστα αρχείων σε έναν κατάλογο",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Εκτέλεση εντολών κελύφους",
   "settings.permissions.tool.task.title": "Εργασία",
   "settings.permissions.tool.task.description": "Εκκίνηση υπο-πρακτόρων",

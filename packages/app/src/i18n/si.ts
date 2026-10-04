@@ -1243,6 +1243,8 @@ export const dict: Record<string, string> = {
   "settings.permissions.tool.list.title": "ලැයිස්තුව",
   "settings.permissions.tool.list.description": "නාමාවලියක් තුළ ගොනු ලැයිස්තුගත කරන්න",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "shell විධාන ක්‍රියාත්මක කරන්න",
   "settings.permissions.tool.task.title": "කාර්යය",
   "settings.permissions.tool.task.description": "උප නියෝජිතයන් දියත් කරන්න",

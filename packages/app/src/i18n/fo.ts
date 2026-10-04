@@ -1244,6 +1244,8 @@ export const dict = {
   "settings.permissions.tool.list.title": "Listi",
   "settings.permissions.tool.list.description": "Lista fílur innan eina mappu",
   "settings.permissions.tool.bash.title": "Bash",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "Koyr shell-skipanir",
   "settings.permissions.tool.task.title": "Uppgáva",
   "settings.permissions.tool.task.description": "Sjóset undiragentar",

@@ -1271,6 +1271,8 @@ export const dict: Record<string, string> = {
   "settings.permissions.tool.list.title": "ཐོ",
   "settings.permissions.tool.list.description": "སྣོད་ཐོ་ཅིག་གི་ནང་འཁོད་ཡིག་སྣོད་ཚུ་ཐོ་བཀོད་འབད།",
   "settings.permissions.tool.bash.title": "Bash།",
+  "settings.permissions.tool.package_install.title": "Package install",
+  "settings.permissions.tool.package_install.description": "Bash commands the execution guard classifies as package installs (npm install, bun add, brew install, pip install, cargo add)",
   "settings.permissions.tool.bash.description": "ཤལ་བརྡ་བཀོད་ཚུ་གཡོག་བཀོལ།",
   "settings.permissions.tool.task.title": "ལཱ",
   "settings.permissions.tool.task.description": "ཡན་ལག་ལས་ཚབ་ཚུ་འགོ་བཙུགས།",

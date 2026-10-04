@@ -49,7 +49,7 @@ const ALL_TOOLS: readonly string[] = OWNS_GROUPS.flatMap((group) => [...group.to
 // Only pattern-bearing tools get a pattern input. The evaluator matches every
 // rule against a pattern, so a bare action is the canonical form for the rest
 // and a visible "*" input for all of them was pure noise.
-const PATTERN_TOOLS: readonly string[] = ["bash", "read", "edit", "external_directory"]
+const PATTERN_TOOLS: readonly string[] = ["bash", "read", "edit", "external_directory", "package_install"]
 
 const actionOptions: Action[] = ["allow", "ask", "deny"]
 
