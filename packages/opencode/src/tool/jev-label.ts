@@ -17,7 +17,7 @@ export const Parameters = Schema.Struct({
     description: "The session's stated objective, for drift judgments",
   }),
   threshold: Schema.optional(Schema.Number).annotate({
-    description: "Minimum noul (0..1) to trust the label (default 0.7)",
+    description: "Minimum measured strength, i.e. probabilities[choice] (0..1), to trust the label (default 0.7)",
   }),
 })
 
@@ -40,7 +40,7 @@ export function formatLabel(result: JevLabelResult): { title: string; output: st
     .join(" ")
   return {
     title: result.labeled ? "jev: label" : "jev: unlabeled",
-    output: `label=${result.label}\nmeasured=${result.measured}\nnoul=${result.noul}\nstrength=${result.strength}\nprobabilities=${probabilities}`,
+    output: `label=${result.label}\nmeasured=${result.measured}\nstrength=${result.strength}\nprobabilities=${probabilities}`,
   }
 }
 
@@ -56,7 +56,7 @@ export const JevLabelTool = Tool.define<typeof Parameters, Metadata, never>(
   Effect.gen(function* () {
     return {
       description:
-        "Session state labeling: classifies a telemetry snapshot as thrive|stall|bloat|drift via one JEV decide call (choice + probabilities + noul). Advisory predictive features, never a gate; fails open unlabeled.",
+        "Session state labeling: classifies a telemetry snapshot as thrive|stall|bloat|drift via one JEV decide call (choice + probabilities). Advisory predictive features, never a gate; fails open unlabeled.",
       parameters: Parameters,
       execute: (params: Params) =>
         Effect.gen(function* () {
@@ -75,7 +75,7 @@ export const JevLabelTool = Tool.define<typeof Parameters, Metadata, never>(
           const labelParams: LabelParams = {
             ...params,
             snapshot,
-            ...(built ? { objective: built.title } : {}),
+            objective: params.objective ?? built?.title,
           }
           const result = yield* Effect.promise(() => jevLabel(toLabelInput(labelParams, key))).pipe(
             Effect.catch(() => Effect.succeed(undefined)),

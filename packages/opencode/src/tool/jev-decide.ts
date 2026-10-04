@@ -76,7 +76,7 @@ export function formatDecision(decision: ControllerDecision, marker?: string): {
   const target = decision.target ? ` [${decision.target}]` : ""
   return {
     title: `jev: ${decision.action}${target}`,
-    output: `${marker ? marker + "\n" : ""}operation=${decision.action} target=${decision.target ?? "none"} confidence=${decision.strength}\n${JSON.stringify(decision)}`,
+    output: `${marker ? marker + "\n" : ""}operation=${decision.action} target=${decision.target ?? "none"} strength=${decision.strength}\n${JSON.stringify(decision)}`,
   }
 }
 

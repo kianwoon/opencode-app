@@ -2,10 +2,11 @@
  * Handoff acceptance gate — "did the returned result satisfy the acceptance
  * gate?" as a measured verdict, powering the two-strike subagent budget
  * mechanically instead of by prompt discipline. Doctrine (jev.md §3/§4):
- * noul is a fail-closed PREFILTER, choice is the verdict, gate on choice +
- * `probabilities[choice]`, never `confidence`. Fail-open: an unmeasured
- * decision returns `measured:false` so the caller falls back to the
- * prompt-level rule — a broken gate must never reject a good result.
+ * noul ACCOMPANIES the choice row and never replaces it, choice is the
+ * verdict, gate on choice + `probabilities[choice]`, never `confidence`.
+ * Fail-open: an unmeasured decision returns `measured:false` so the caller
+ * falls back to the prompt-level rule — a broken gate must never reject a
+ * good result.
  */
 import {
   JEV_DEFAULT_THRESHOLD,
@@ -66,29 +67,23 @@ const noulOf = (value: unknown): number | undefined => {
 }
 
 /**
- * Pure fold. Measured noul below the threshold rejects immediately; otherwise
- * a MEASURED choice verdict decides; a measured noul pass with no choice row
- * accepts; anything unmeasured fails open to `measured:false`.
+ * Pure fold. The `verdict` choice row IS the decision: a MEASURED row accepts
+ * iff it says `accept` at or above the threshold. `noul` ACCOMPANIES the choice
+ * for display and never gates — jev.md §2/§3: noul is a fail-open prefilter,
+ * the choice row is the gate. With no choice row the verdict is unmeasured
+ * (`measured:false`): a noul-only answer neither accepts nor rejects.
  */
 export function foldJevAccept(answers: Record<string, unknown>, threshold: number): JevAcceptDecision {
   const noul = noulOf(answers["gate_ok"])
   const row = jevMeasuredChoice(answers["verdict"])
-  // noul 0 means "not at all satisfied" — it must never read as a pass, even
-  // when a caller passes threshold 0 and `noul < threshold` is false.
-  if (noul !== undefined && (noul === 0 || noul < threshold)) {
-    return { accept: false, measured: true, noul, choice: row?.choice, strength: row?.strength }
+  if (!row) return { ...unmeasured(), noul }
+  return {
+    accept: row.choice === "accept" && row.strength >= threshold,
+    measured: true,
+    noul,
+    choice: row.choice,
+    strength: row.strength,
   }
-  if (row) {
-    return {
-      accept: row.choice === "accept" && row.strength >= threshold,
-      measured: true,
-      noul,
-      choice: row.choice,
-      strength: row.strength,
-    }
-  }
-  if (noul !== undefined) return { accept: true, measured: true, noul, choice: undefined, strength: undefined }
-  return unmeasured()
 }
 
 export async function jevAccept(input: JevAcceptInput): Promise<JevAcceptDecision> {

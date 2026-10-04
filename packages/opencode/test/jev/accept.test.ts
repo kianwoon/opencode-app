@@ -5,7 +5,7 @@ const acceptRow = (strength: number) => ({ choice: "accept", probabilities: { ac
 const refireRow = (strength: number) => ({ choice: "refire", probabilities: { refire: strength } })
 
 describe("foldJevAccept", () => {
-  test("accepts on measured noul pass + measured accept choice", () => {
+  test("accepts on a measured accept choice (noul accompanies, never gates)", () => {
     const d = foldJevAccept({ gate_ok: { noul: 0.95 }, verdict: acceptRow(0.9) }, 0.7)
     expect(d.accept).toBe(true)
     expect(d.measured).toBe(true)
@@ -13,8 +13,16 @@ describe("foldJevAccept", () => {
     expect(d.choice).toBe("accept")
   })
 
-  test("noul below threshold rejects (prefilter) even with a passing choice", () => {
+  test("a low noul never vetoes a strong accept choice", () => {
+    // jev.md §2/§3: noul accompanies the choice row, it does not replace it.
     const d = foldJevAccept({ gate_ok: { noul: 0.3 }, verdict: acceptRow(0.95) }, 0.7)
+    expect(d.accept).toBe(true)
+    expect(d.measured).toBe(true)
+    expect(d.noul).toBe(0.3)
+  })
+
+  test("a low choice strength rejects even with a passing noul", () => {
+    const d = foldJevAccept({ gate_ok: { noul: 0.99 }, verdict: acceptRow(0.4) }, 0.7)
     expect(d.accept).toBe(false)
     expect(d.measured).toBe(true)
   })
@@ -33,9 +41,12 @@ describe("foldJevAccept", () => {
     expect(d.noul).toBeUndefined()
   })
 
-  test("noul-only pass accepts, noul-only miss rejects", () => {
-    expect(foldJevAccept({ gate_ok: { noul: 0.9 } }, 0.7).accept).toBe(true)
-    expect(foldJevAccept({ gate_ok: { noul: 0.5 } }, 0.7).accept).toBe(false)
+  test("a noul-only answer is unmeasured: it neither accepts nor rejects", () => {
+    const pass = foldJevAccept({ gate_ok: { noul: 0.9 } }, 0.7)
+    expect(pass.accept).toBe(false)
+    expect(pass.measured).toBe(false)
+    expect(pass.noul).toBe(0.9)
+    expect(foldJevAccept({ gate_ok: { noul: 0.5 } }, 0.7).measured).toBe(false)
   })
 
   test("fails open (measured:false) when both rows are unmeasured", () => {
@@ -44,9 +55,9 @@ describe("foldJevAccept", () => {
     expect(d.measured).toBe(false)
   })
 
-  test("threshold 0 with noul exactly 0 rejects (noul 0 is never a pass)", () => {
+  test("noul exactly 0 still leaves the measured accept choice standing", () => {
     const d = foldJevAccept({ gate_ok: { noul: 0 }, verdict: acceptRow(0.9) }, 0)
-    expect(d.accept).toBe(false)
+    expect(d.accept).toBe(true)
     expect(d.measured).toBe(true)
   })
 })

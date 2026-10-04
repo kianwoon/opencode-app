@@ -58,6 +58,35 @@ describe("foldJevRank", () => {
 })
 
 describe("jevRank transport", () => {
+  test("sends `criteria` as a legend record keyed by scale value, never an array", async () => {
+    // jev.md §2: `criteria` is `label → description`. An array of labels leaves
+    // the scale ambiguous and breaks the score/legend normalization contract.
+    let body: { questions?: Record<string, { criteria?: unknown }> } = {}
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        body = (await req.json()) as typeof body
+        return Response.json({ answers: {} })
+      },
+    })
+    try {
+      await jevRank({
+        key: "test-key",
+        question: "q",
+        candidates: ["a.ts", "b.ts"],
+        transport: { endpoint: `http://127.0.0.1:${server.port}/v1/systemone`, id: "jev-latest" },
+      })
+    } finally {
+      server.stop(true)
+    }
+    expect(Array.isArray(body.questions?.["cand:0"]?.criteria)).toBe(false)
+    expect(body.questions?.["cand:0"]?.criteria).toEqual({
+      "0": "irrelevant to the question",
+      "1": "tangentially related",
+      "2": "relevant context",
+      "3": "must read to answer the question",
+    })
+  })
   test("retries a flaky endpoint (SDK parity) and folds the ranking", async () => {
     let hits = 0
     const server = Bun.serve({

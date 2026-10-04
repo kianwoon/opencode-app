@@ -1,21 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import { foldJevLabel, jevLabel, LABEL_OPTIONS } from "../../src/jev/label"
 
-const labelAnswer = (choice: string, strength: number, noul: number) => ({
+const labelAnswer = (choice: string, strength: number) => ({
   choice,
   probabilities: { thrive: 0, stall: 0, bloat: 0, drift: 0, [choice]: strength },
-  noul,
 })
 
 describe("foldJevLabel", () => {
   test("labels a measured valid choice at or above the threshold", () => {
-    const answer = labelAnswer("thrive", 0.91, 0.88)
+    const answer = labelAnswer("thrive", 0.91)
     const result = foldJevLabel(answer, LABEL_OPTIONS, 0.7)
     expect(result).toEqual({
       labeled: true,
       label: "thrive",
       measured: true,
-      noul: 0.88,
       strength: 0.91,
       probabilities: answer.probabilities,
       options: LABEL_OPTIONS,
@@ -23,19 +21,28 @@ describe("foldJevLabel", () => {
   })
 
   test("keeps the measured label exposed below the threshold", () => {
-    const result = foldJevLabel(labelAnswer("stall", 0.84, 0.42), LABEL_OPTIONS, 0.7)
+    const result = foldJevLabel(labelAnswer("stall", 0.42), LABEL_OPTIONS, 0.7)
     expect(result.labeled).toBe(false)
     expect(result.label).toBe("stall")
     expect(result.measured).toBe(true)
-    expect(result.noul).toBe(0.42)
+    expect(result.strength).toBe(0.42)
+  })
+
+  test("gates on probabilities[choice], never on a prefilter row", () => {
+    // jev.md §3: the choice row is the verdict. A stray low noul in the payload
+    // must not strip a label whose measured strength clears the threshold.
+    const answer = { ...labelAnswer("thrive", 0.95), noul: { noul: 0.05 } }
+    const result = foldJevLabel(answer, LABEL_OPTIONS, 0.7)
+    expect(result.labeled).toBe(true)
+    expect(result.label).toBe("thrive")
   })
 
   test("rejects a measured choice outside the supplied options", () => {
-    const result = foldJevLabel(labelAnswer("focus", 0.93, 0.95), LABEL_OPTIONS, 0.7)
+    const result = foldJevLabel(labelAnswer("focus", 0.93), LABEL_OPTIONS, 0.7)
     expect(result.measured).toBe(true)
     expect(result.label).toBeNull()
     expect(result.labeled).toBe(false)
-    expect(result.noul).toBe(0.95)
+    expect(result.strength).toBeNull()
     expect(result.probabilities).toEqual({})
   })
 
@@ -44,7 +51,7 @@ describe("foldJevLabel", () => {
     expect(result.measured).toBe(false)
     expect(result.labeled).toBe(false)
     expect(result.label).toBeNull()
-    expect(result.noul).toBeNull()
+    expect(result.strength).toBeNull()
     expect(result.probabilities).toEqual({})
   })
 
@@ -55,7 +62,7 @@ describe("foldJevLabel", () => {
   })
 
   test("uses a custom threshold for the labeled verdict", () => {
-    const answer = labelAnswer("bloat", 0.82, 0.6)
+    const answer = labelAnswer("bloat", 0.6)
     expect(foldJevLabel(answer, LABEL_OPTIONS, 0.7).labeled).toBe(false)
     expect(foldJevLabel(answer, LABEL_OPTIONS, 0.5).labeled).toBe(true)
   })
@@ -73,7 +80,6 @@ describe("jevLabel transport", () => {
           : Response.json({
               answers: {
                 label: { choice: "thrive", probabilities: { thrive: 0.9, stall: 0.04, bloat: 0.03, drift: 0.03 } },
-                noul: { noul: 0.85 },
               },
             })
       },
@@ -93,7 +99,7 @@ describe("jevLabel transport", () => {
     }
   })
 
-  test("requests a separate noul row alongside the label choice", async () => {
+  test("sends exactly one `label` choice question and no meta-classification noul row", async () => {
     const requests: unknown[] = []
     const server = Bun.serve({
       port: 0,
@@ -102,7 +108,6 @@ describe("jevLabel transport", () => {
         return Response.json({
           answers: {
             label: { choice: "thrive", probabilities: { thrive: 0.9, stall: 0.04, bloat: 0.03, drift: 0.03 } },
-            noul: { noul: 0.85 },
           },
         })
       },
@@ -113,9 +118,11 @@ describe("jevLabel transport", () => {
         snapshot: "tokens=12000 cost=0.42 prompts=8 duration=12m activity=steady progress=healthy",
         transport: { endpoint: `http://127.0.0.1:${server.port}/v1/systemone`, id: "jev-latest" },
       })
-      const body = requests[0] as { questions?: Record<string, unknown> }
-      expect(body.questions?.["noul"]).toEqual({ type: "noul", instructions: expect.any(String) })
+      const body = requests[0] as { questions?: Record<string, { type?: string }> }
+      expect(Object.keys(body.questions ?? {})).toEqual(["label"])
+      expect(body.questions?.["label"]?.type).toBe("choice")
       expect(result.measured).toBe(true)
+      expect(result.labeled).toBe(true)
     } finally {
       server.stop(true)
     }

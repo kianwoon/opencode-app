@@ -1,7 +1,9 @@
 /**
  * Session state labeling — advisory classification for predictive features, never
- * a gate. The measured noul is a numeric prefilter; the constrained choice and
- * its probability are the verdict. Unmeasured labels fail open unlabeled.
+ * a gate. The constrained choice and `probabilities[choice]` are the verdict;
+ * NO noul row is sent, because meta-classification wording ("is this
+ * classification reliable?") hurts the answer rather than gating it (jev.md
+ * §3). Unmeasured labels fail open unlabeled.
  */
 import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client.ts"
 
@@ -22,7 +24,7 @@ export interface JevLabelInput {
   readonly key: string
   readonly snapshot: string
   readonly objective?: string
-  /** Minimum measured noul (0..1) to trust the label (default 0.7). */
+  /** Minimum measured `probabilities[choice]` (0..1) to trust the label (default 0.7). */
   readonly threshold?: number
   readonly timeoutMs?: number
   /** `provider/model-id` spec; defaults to `typesafe/jev-latest` (SystemOne). */
@@ -35,7 +37,6 @@ export interface JevLabelResult {
   readonly labeled: boolean
   readonly label: string | null
   readonly measured: boolean
-  readonly noul: number | null
   readonly strength: number | null
   readonly probabilities: Readonly<Record<string, number>>
   readonly options: readonly string[]
@@ -45,7 +46,6 @@ const unlabeled = (options: readonly string[]): JevLabelResult => ({
   labeled: false,
   label: null,
   measured: false,
-  noul: null,
   strength: null,
   probabilities: {},
   options,
@@ -56,32 +56,15 @@ const probability = (value: unknown): number | null =>
 
 export function foldJevLabel(answer: unknown, options: readonly string[], threshold: number): JevLabelResult {
   const root = typeof answer === "object" && answer !== null ? (answer as Record<string, unknown>) : {}
-  const choiceAnswer = Object.hasOwn(root, "label") ? root["label"] : root
-  const noulAnswer = Object.hasOwn(root, "noul")
-    ? typeof root["noul"] === "object"
-      ? root["noul"]
-      : { noul: root["noul"] }
-    : root
-  const parsed = parseJevAnswer(choiceAnswer)
-  const noulDecision = parseJevAnswer(noulAnswer)
-  const noul = noulDecision.type === "noul" ? noulDecision.noul : null
-  if (noul === null || parsed.type !== "choice") return unlabeled(options)
+  const parsed = parseJevAnswer(Object.hasOwn(root, "label") ? root["label"] : root)
+  if (parsed.type !== "choice") return unlabeled(options)
   const choice = parsed.choice
-  const probabilities = parsed.probabilities
   if (!options.includes(choice)) {
-    return { labeled: false, label: null, measured: true, noul, strength: null, probabilities: {}, options }
+    return { labeled: false, label: null, measured: true, strength: null, probabilities: {}, options }
   }
-  const strength = probability(probabilities[choice])
+  const strength = probability(parsed.probabilities[choice])
   if (strength === null) return unlabeled(options)
-  return {
-    labeled: noul >= threshold,
-    label: choice,
-    measured: true,
-    noul,
-    strength,
-    probabilities,
-    options,
-  }
+  return { labeled: strength >= threshold, label: choice, measured: true, strength, probabilities: parsed.probabilities, options }
 }
 
 export async function jevLabel(input: JevLabelInput): Promise<JevLabelResult> {
@@ -109,10 +92,6 @@ export async function jevLabel(input: JevLabelInput): Promise<JevLabelResult> {
           type: "choice",
           instructions: "Which state is this session in? Choose exactly one.",
           criteria: LABEL_CRITERIA,
-        },
-        noul: {
-          type: "noul",
-          instructions: "Is the session state classification reliable? 1 = fully reliable, 0 = not at all.",
         },
       },
     }),

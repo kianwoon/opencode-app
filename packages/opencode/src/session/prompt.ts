@@ -387,7 +387,7 @@ export function nextStall(
 // model. The transport + verdict algebra live in the shared, zero-dependency
 // `@/jev/client` module (copyable into plugins that cannot import the runtime);
 // this re-export keeps the historical import path used by tests stable.
-export { jevFoldTools, jevKeepTools, jevVerdict, jevDecide, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
+export { jevVerdict, jevBelowFloor, jevGaugeKeep, jevAsk } from "@/jev/client"
 import { jevBelowFloor, jevBatch, jevTransport, jevModelFor, resolveJevModel, resolveJevSurface } from "@/jev/client"
 import { jevKey } from "@/jev/controller"
 import { boosterPush, applyDrops } from "@/jev/gate"

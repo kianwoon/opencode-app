@@ -15,12 +15,15 @@ export const RANK_CANDIDATE_MAX = 200
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
 
-const RANK_CRITERIA = [
-  "irrelevant to the question",
-  "tangentially related",
-  "relevant context",
-  "must read to answer the question",
-]
+// `criteria` is a legend record keyed by scale value (jev.md §2), never an
+// array of labels: the key IS the score the model may return, so 3 is the
+// legend maximum and `normalizedScore = score / 3`.
+const RANK_CRITERIA: Record<string, string> = {
+  "0": "irrelevant to the question",
+  "1": "tangentially related",
+  "2": "relevant context",
+  "3": "must read to answer the question",
+}
 
 export interface JevRankInput {
   readonly key: string
