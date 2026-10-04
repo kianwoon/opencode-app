@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Schema } from "effect"
+import { Cause, Effect, Exit, Schema } from "effect"
 import {
+  NOUL_CRITERIA_MESSAGE,
   Parameters,
   QUESTIONS_MAX,
   askQuestions,
@@ -58,6 +59,16 @@ describe("Schema rejects the wire-422 shapes at the tool boundary", () => {
       { goal: "g", questions: [{ id: "c", type: "noul", instructions: "i", criteria: { x: "y" } }] },
     ]
     for (const args of bad) await expect(Effect.runPromise(decode(args as never))).rejects.toThrow()
+  })
+
+  test("noul with criteria fails decode with guidance naming `instructions`, not `Expected never`", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "c", type: "noul", instructions: "i", criteria: { x: "y" } }] } as never),
+    )
+    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+    expect(message).toContain(NOUL_CRITERIA_MESSAGE)
+    expect(message).not.toContain("Expected never")
   })
 
   test("the well-formed shape decodes and carries three questions", async () => {

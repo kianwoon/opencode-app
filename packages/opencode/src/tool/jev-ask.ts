@@ -4,6 +4,15 @@ import { jevKey } from "../jev/controller"
 import { JEV_DEFAULT_TIMEOUT_MS, jevAsk, jevModelFor, parseJevAnswer, type JevTransport } from "../jev/client"
 
 /**
+ * Decode-error text for the noul arm's `criteria` field. Effect honors a
+ * `message` annotation on the optional(Never) node even inside a
+ * discriminated union, so the caller learns the fix instead of reading
+ * `Expected never | undefined`.
+ */
+export const NOUL_CRITERIA_MESSAGE =
+  'noul questions take NO criteria — encode the outcome semantics in `instructions` (e.g. "1 = premise holds, 0 = it does not")'
+
+/**
  * Per-type question shape, enforced HERE so the wire-422 class is impossible
  * from the tool boundary (jev.md §2): `choice` criteria is a record
  * `label → description`, `score` criteria is an ORDERED string array of level
@@ -32,7 +41,10 @@ export const Question = Schema.Union([
     id: Schema.String,
     type: Schema.Literal("noul"),
     instructions: Schema.String,
-    criteria: Schema.optional(Schema.Never),
+    criteria: Schema.optional(Schema.Never).annotate({ message: NOUL_CRITERIA_MESSAGE }),
+  }).annotate({
+    description:
+      'yes/no probability question — carries NO criteria; outcome semantics go in `instructions` (e.g. "1 = premise holds, 0 = it does not")',
   }),
 ]).annotate({ discriminator: "type" })
 
@@ -136,7 +148,7 @@ export const JevAskTool = Tool.define<typeof Parameters, Metadata, never>(
   Effect.gen(function* () {
     return {
       description:
-        "Typed batch decision tool: send choice/score/noul questions in ONE SystemOne POST and get typed answers back; advisory, fail-open.",
+        "Typed batch decision tool: send choice/score/noul questions in ONE SystemOne POST and get typed answers back; advisory, fail-open. Criteria are per-type: choice = record of label → description, score = ordered array of level descriptions, noul = none (outcome semantics go in `instructions`).",
       parameters: Parameters,
       execute: (params: Params) =>
         Effect.gen(function* () {
