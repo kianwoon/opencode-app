@@ -1345,6 +1345,9 @@ export const dict = {
   "settings.permissions.tool.jev_decide.title": "jev_decide",
   "settings.permissions.tool.jev_decide.description":
     "Categorical UI-steering decision: pick the target control for a goal from an indexed control table (advisory, fail-open)",
+  "settings.permissions.tool.jev_ask.title": "jev_ask",
+  "settings.permissions.tool.jev_ask.description":
+    "Typed batch decision tool: send choice/score/noul questions in one SystemOne POST (advisory, fail-open)",
 
   "settings.subagent.title": "Subagents",
   "settings.subagent.summary": "{{owned}} of {{total}} tools owned · {{skills}} skills",

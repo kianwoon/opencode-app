@@ -25,6 +25,13 @@ type AgentBlock = {
   permission?: { [tool: string]: PermissionRule }
 }
 
+/**
+ * A group either lists its members or CLAIMS them by predicate. The JEV family is
+ * claimed by prefix, so a tool added server-side (or a plugin registering a
+ * `jev_*` id) appears in this group with zero edits to this file.
+ */
+const isJevTool = (id: string) => id.startsWith("jev_")
+
 const OWNS_GROUPS = [
   {
     label: "settings.permissions.section.owns.group.general",
@@ -40,11 +47,9 @@ const OWNS_GROUPS = [
   },
   {
     label: "settings.permissions.section.owns.group.jev",
-    tools: ["jev_accept", "jev_label", "jev_rank", "jev_decide"],
+    match: isJevTool,
   },
 ] as const
-
-const ALL_TOOLS: readonly string[] = OWNS_GROUPS.flatMap((group) => [...group.tools])
 
 // Only pattern-bearing tools get a pattern input. The evaluator matches every
 // rule against a pattern, so a bare action is the canonical form for the rest
@@ -146,9 +151,23 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   // grouped by its server. The endpoint lives on the experimental HttpApi, which
   // the generated client contract does not include, hence the plain fetch.
   const [inventory] = createResource(() => fetchToolInventory(serverSdk().server.http))
-  const discoveredRegistry = createMemo(() =>
-    (inventory.latest?.registry ?? []).filter((tool) => !ALL_TOOLS.includes(tool.id)),
-  )
+  const registryEntries = createMemo(() => inventory.latest?.registry ?? [])
+  const groupTools = (group: (typeof OWNS_GROUPS)[number]) =>
+    "tools" in group ? [...group.tools] : registryEntries().filter((tool) => group.match(tool.id)).map((tool) => tool.id)
+  // Every member of every group, so "+ Tools" can offer only what no group
+  // already claims and the section total counts the auto-discovered jev_* ids.
+  const ownedGroupTools = createMemo(() => OWNS_GROUPS.flatMap(groupTools))
+  const discoveredRegistry = createMemo(() => registryEntries().filter((tool) => !ownedGroupTools().includes(tool.id)))
+  const registryDescription = (tool: string) => registryEntries().find((entry) => entry.id === tool)?.description
+  // A jev_* row is described by the registry the server actually serves, so a
+  // new tool needs no i18n entry; the curated keys stay as the fallback and the
+  // bare id is the last resort. Non-jev groups keep their i18n copy verbatim.
+  const rowTitle = (tool: string) => (isJevTool(tool) ? tool : (language.t(`settings.permissions.tool.${tool}.title`) ?? tool))
+  const rowDescription = (tool: string) => {
+    if (tool === "bash") return language.t("settings.permissions.tool.bash.hint")
+    if (isJevTool(tool)) return registryDescription(tool) ?? language.t(`settings.permissions.tool.${tool}.description`) ?? tool
+    return language.t(`settings.permissions.tool.${tool}.description`)
+  }
   const exposedIds = createMemo(() => new Set((inventory.latest?.registry ?? []).map((tool) => tool.id)))
   // Before the inventory resolves everything counts as exposed, so no row flickers.
   const isExposed = (tool: string) => inventory.latest === undefined || exposedIds().has(tool)
@@ -178,7 +197,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     // INVARIANT: unchecking must never materialize a tool id this build does not
     // expose, so `known` is filtered to the registry the server actually serves.
     const known = [
-      ...OWNS_GROUPS.flatMap((group) => group.tools),
+      ...ownedGroupTools(),
       ...(current ?? []),
       ...discoveredRegistry().map((tool) => tool.id),
     ].filter(isExposed)
@@ -196,7 +215,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     // INVARIANT: unchecking must never materialize a tool id this build does not
     // expose, so `known` is filtered to the registry the server actually serves.
     const known = [
-      ...OWNS_GROUPS.flatMap((group) => group.tools),
+      ...ownedGroupTools(),
       ...(current ?? []),
       ...discoveredRegistry().map((tool) => tool.id),
     ].filter(isExposed)
@@ -211,25 +230,17 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const [ownsQuery, setOwnsQuery] = createSignal("")
   const visibleOwnsGroups = createMemo(() => {
     const query = ownsQuery().trim().toLowerCase()
-    return OWNS_GROUPS.map((group) => ({
-      ...group,
-      // The group master and the count badge read allTools, keeping their
-      // owned/total meaning independent of the active search.
-      allTools: group.tools,
-      tools:
-        query === ""
-          ? [...group.tools]
-          : group.tools.filter(
-              (tool) =>
-                `${language.t(`settings.permissions.tool.${tool}.title`)} ${
-                  tool === "bash"
-                    ? language.t("settings.permissions.tool.bash.hint")
-                    : language.t(`settings.permissions.tool.${tool}.description`)
-                }`
-                  .toLowerCase()
-                  .includes(query),
-            ),
-    })).filter((group) => group.tools.length > 0)
+    return OWNS_GROUPS.map((group) => {
+      const members = groupTools(group)
+      return {
+        ...group,
+        // The group master and the count badge read allTools, keeping their
+        // owned/total meaning independent of the active search.
+        allTools: members,
+        tools:
+          query === "" ? members : members.filter((tool) => `${rowTitle(tool)} ${rowDescription(tool)}`.toLowerCase().includes(query)),
+      }
+    }).filter((group) => group.tools.length > 0)
   })
 
   // Every section starts COLLAPSED: the store records only the sections the
@@ -338,8 +349,8 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
             </SettingsRowV2>
             <p class="settings-v2-plugins-hint settings-v2-permissions-summary" data-action="settings-permissions-summary">
               {language.t("settings.permissions.agent.summary", {
-                owned: ALL_TOOLS.filter(isExposed).filter((tool) => owns(tool)).length,
-                total: ALL_TOOLS.filter(isExposed).length,
+                owned: ownedGroupTools().filter(isExposed).filter((tool) => owns(tool)).length,
+                total: ownedGroupTools().filter(isExposed).length,
                 skills: selectedSkills().length,
               })}
             </p>
@@ -408,12 +419,9 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                   <For each={group.tools}>
                     {(tool) => (
                       <SettingsRowV2
-                        title={language.t(`settings.permissions.tool.${tool}.title`)}
+                        title={rowTitle(tool)}
                         description={
-                          (tool === "bash"
-                            ? language.t("settings.permissions.tool.bash.hint")
-                            : language.t(`settings.permissions.tool.${tool}.description`)) +
-                          (isExposed(tool) ? "" : ` — ${language.t("settings.permissions.owns.notExposed")}`)
+                          rowDescription(tool) + (isExposed(tool) ? "" : ` — ${language.t("settings.permissions.owns.notExposed")}`)
                         }
                       >
                         <div
