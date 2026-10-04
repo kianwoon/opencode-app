@@ -71,11 +71,17 @@ export const IDENTICAL_TASK_WINDOW_MS = 60_000
 export const HAND_REUSE_TTL_MS = 20 * 60 * 1000
 export const HAND_REUSE_MAX_TOKENS = 150_000
 
-// Sessions currently adopted by an in-flight run. A session can only be handed
+// Sessions currently owned by an in-flight run. A session can only be handed
 // to ONE run at a time: two parallel same-agent tasks that both pass the
 // liveness/TTL guards would otherwise adopt the same child and interleave two
-// prompts in one session. Claimed on adoption, released when the run settles
-// (ensuring fires on success, interrupt and defect alike, so a claim can't leak).
+// prompts in one session. Claimed on adoption AND on fresh creation — the
+// liveness guard only sees jobs already registered with BackgroundJob, so a
+// just-created child is invisible to it for the whole create→start window.
+// Claim and use must stay in ONE synchronous continuation (no yield between
+// them) or two parallel calls slip through. Released on every exit between the
+// claim and the dispatch handoff — the early failures below and the ensuring at
+// the end of this generator — so a claim can never outlive its run and wedge
+// that session as permanently unreusable.
 const adoptedInFlight = new Set<string>()
 
 /** Terminal refusal for a repeated identical task. Shared so the wording stays in one place. */
@@ -475,6 +481,10 @@ export const TaskTool = Tool.define(
           ],
         }))
 
+      // Claim in the same synchronous continuation as the create: any yield here
+      // would let a parallel call's reuse scan adopt the live-but-unregistered child.
+      if (!session && !reused) adoptedInFlight.add(nextSession.id)
+
       if (reused)
         yield* sessions.setTitle({
           sessionID: nextSession.id,
@@ -492,6 +502,9 @@ export const TaskTool = Tool.define(
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
         Effect.provideService(Database.Service, database),
+        // orDie turns this into a defect that skips every later release path, so
+        // the claim has to be dropped here or the session is never reusable again.
+        Effect.catchCause((cause) => Effect.flatMap(releaseAdopted, () => Effect.failCause(cause))),
         Effect.orDie,
       )
       if (msg.info.role !== "assistant") {
@@ -707,6 +720,9 @@ export const TaskTool = Tool.define(
         })
         if (extended) {
           owned.handedOff = true
+          // The stub promises the queued result will be delivered; keep that
+          // promise (background.start's onPromote does this on its own path).
+          yield* notify(nextSession.id)
           return {
             title: params.description,
             metadata: {
