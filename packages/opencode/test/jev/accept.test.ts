@@ -72,6 +72,7 @@ describe("jevAccept transport", () => {
         return hits < 2
           ? new Response("boom", { status: 500 })
           : Response.json({
+              model: "jev-1.13.0",
               answers: { gate_ok: { noul: 0.95 }, verdict: { choice: "accept", probabilities: { accept: 0.9 } } },
             })
       },

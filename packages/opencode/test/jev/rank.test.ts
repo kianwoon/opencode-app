@@ -58,15 +58,16 @@ describe("foldJevRank", () => {
 })
 
 describe("jevRank transport", () => {
-  test("sends `criteria` as a legend record keyed by scale value, never an array", async () => {
-    // jev.md §2: `criteria` is `label → description`. An array of labels leaves
-    // the scale ambiguous and breaks the score/legend normalization contract.
+  test("sends SCORE `criteria` as an ordered string array (the record form 422s)", async () => {
+    // jev.md §2: `criteria` shape is per question TYPE. choice = record
+    // label→description; score = ORDERED STRING ARRAY of level descriptions
+    // (lowest first). The record form returns HTTP 422 `list_type`.
     let body: { questions?: Record<string, { criteria?: unknown }> } = {}
     const server = Bun.serve({
       port: 0,
       fetch: async (req) => {
         body = (await req.json()) as typeof body
-        return Response.json({ answers: {} })
+        return Response.json({ model: "jev-1.13.0", answers: {} })
       },
     })
     try {
@@ -79,13 +80,13 @@ describe("jevRank transport", () => {
     } finally {
       server.stop(true)
     }
-    expect(Array.isArray(body.questions?.["cand:0"]?.criteria)).toBe(false)
-    expect(body.questions?.["cand:0"]?.criteria).toEqual({
-      "0": "irrelevant to the question",
-      "1": "tangentially related",
-      "2": "relevant context",
-      "3": "must read to answer the question",
-    })
+    expect(Array.isArray(body.questions?.["cand:0"]?.criteria)).toBe(true)
+    expect(body.questions?.["cand:0"]?.criteria).toEqual([
+      "irrelevant to the question",
+      "tangentially related",
+      "relevant context",
+      "must read to answer the question",
+    ])
   })
   test("retries a flaky endpoint (SDK parity) and folds the ranking", async () => {
     let hits = 0
@@ -95,7 +96,10 @@ describe("jevRank transport", () => {
         hits++
         return hits < 2
           ? new Response("boom", { status: 500 })
-          : Response.json({ answers: { "cand:0": scoreRow(1, 2), "cand:1": scoreRow(2, 2) } })
+          : Response.json({
+              model: "jev-1.13.0",
+              answers: { "cand:0": scoreRow(1, 2), "cand:1": scoreRow(2, 2) },
+            })
       },
     })
     try {

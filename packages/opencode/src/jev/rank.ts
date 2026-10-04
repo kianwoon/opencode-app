@@ -7,7 +7,14 @@
  * session/arbitrate.ts: below-threshold = unranked tail, never dropped; ties
  * keep input order; unmeasured rows fail open; <2 candidates is unranked.
  */
-import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client.ts"
+import {
+  JEV_DEFAULT_TIMEOUT_MS,
+  hasTransportMarker,
+  jevFetchRetry,
+  jevTransport,
+  parseJevAnswer,
+  type JevTransport,
+} from "./client.ts"
 
 export const RANK_THRESHOLD_DEFAULT = 0.5
 export const RANK_QUESTION_MAX = 2_000
@@ -15,15 +22,18 @@ export const RANK_CANDIDATE_MAX = 200
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
 
-// `criteria` is a legend record keyed by scale value (jev.md §2), never an
-// array of labels: the key IS the score the model may return, so 3 is the
-// legend maximum and `normalizedScore = score / 3`.
-const RANK_CRITERIA: Record<string, string> = {
-  "0": "irrelevant to the question",
-  "1": "tangentially related",
-  "2": "relevant context",
-  "3": "must read to answer the question",
-}
+// `criteria` for a SCORE question is an ORDERED STRING ARRAY of level
+// descriptions, lowest first (probed: the record form returns HTTP 422
+// `list_type ... Input should be a valid list`). The returned `legend` is what
+// client parseJevAnswer normalizes by, so the level count lives on the wire,
+// not in these keys. CHOICE criteria, by contrast, IS a label→description
+// record (jev.md §2).
+const RANK_CRITERIA: readonly string[] = [
+  "irrelevant to the question",
+  "tangentially related",
+  "relevant context",
+  "must read to answer the question",
+]
 
 export interface JevRankInput {
   readonly key: string
@@ -116,6 +126,7 @@ export async function jevRank(input: JevRankInput): Promise<JevRankResult> {
   const payload = await res.json().catch((): undefined => undefined)
   if (typeof payload !== "object" || payload === null) return unranked(input.candidates)
   const root = payload as Record<string, unknown>
+  if (!hasTransportMarker(root)) return unranked(input.candidates)
   const answers = root["answers"] ?? root["decisions"] ?? root["results"]
   return typeof answers === "object" && answers !== null
     ? foldJevRank(answers as Record<string, unknown>, input.candidates, threshold)

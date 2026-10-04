@@ -5,7 +5,14 @@
  * classification reliable?") hurts the answer rather than gating it (jev.md
  * §3). Unmeasured labels fail open unlabeled.
  */
-import { JEV_DEFAULT_TIMEOUT_MS, jevFetchRetry, jevTransport, parseJevAnswer, type JevTransport } from "./client.ts"
+import {
+  JEV_DEFAULT_TIMEOUT_MS,
+  hasTransportMarker,
+  jevFetchRetry,
+  jevTransport,
+  parseJevAnswer,
+  type JevTransport,
+} from "./client.ts"
 
 export const LABEL_OPTIONS = ["thrive", "stall", "bloat", "drift"] as const
 export const LABEL_THRESHOLD_DEFAULT = 0.7
@@ -100,6 +107,7 @@ export async function jevLabel(input: JevLabelInput): Promise<JevLabelResult> {
   const payload = await res.json().catch((): undefined => undefined)
   if (typeof payload !== "object" || payload === null) return unlabeled(LABEL_OPTIONS)
   const root = payload as Record<string, unknown>
+  if (!hasTransportMarker(root)) return unlabeled(LABEL_OPTIONS)
   const answers = root["answers"] ?? root["decisions"] ?? root["results"]
   return typeof answers === "object" && answers !== null
     ? foldJevLabel(answers as Record<string, unknown>, LABEL_OPTIONS, threshold)

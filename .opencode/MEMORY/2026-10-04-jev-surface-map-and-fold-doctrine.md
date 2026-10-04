@@ -18,8 +18,7 @@
   `confidence` (confidence in the label chosen) and never on `noul` alone.
 - noul is a prefilter/display value: it may not veto a strong choice (old accept.ts veto
   bug) and may not accept alone (old noul-only `accept:true` bug).
-- `criteria` on the wire is a record `label → description`, never a string array
-  (rank.ts bug; spec §2).
+- `criteria` on the wire is per question type (live-probed 2026-10-04): CHOICE = record `label → description`; SCORE = ORDERED STRING ARRAY of level descriptions (record form → HTTP 422 `list_type`, which silently fail-opens the whole call). jev.md §2's "never an array" applies to choice only. An envelope WITHOUT the `model` echo is not a decision response — `hasTransportMarker` gates every fold (fail open).
 - Meta-classification questions ("is the classification reliable?") are noise per §3 —
   label.ts now sends exactly one `label` choice question.
 - Tool-wrapper gotchas fixed: `objective: params.objective ?? built?.title` in

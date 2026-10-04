@@ -5,6 +5,7 @@ import {
   JEV_OPENROUTER_MODEL,
   JEV_DEFAULT_MODEL,
   batchToolKeep,
+  hasTransportMarker,
   jevNoulKeep,
   jevScoreRank,
   jevGaugeKeep,
@@ -319,5 +320,24 @@ describe("jevScoreRank — numeric score or undefined", () => {
     expect(jevScoreRank({})).toBeUndefined()
     expect(jevScoreRank({ score: "0.9" })).toBeUndefined()
     expect(jevScoreRank(Number.NaN)).toBeUndefined()
+  })
+})
+
+describe("hasTransportMarker — the envelope `model` echo gates every fold", () => {
+  // jev.md §2: the envelope is `{ answers, model, usage }` and the resolved-id
+  // `model` echo is the ONLY transport marker. Without it the body is not a
+  // decision response, so parsers fail open instead of folding `answers`.
+  const answers = { q1: { choice: "use", probabilities: { use: 0.9 } } }
+
+  test("an envelope WITHOUT a model field is not a decision response (fail open)", () => {
+    expect(hasTransportMarker({ answers })).toBe(false)
+    expect(hasTransportMarker({ answers, model: "" })).toBe(false)
+    expect(hasTransportMarker({ answers, model: 7 })).toBe(false)
+  })
+
+  test("an envelope WITH a resolved model id folds normally", () => {
+    expect(hasTransportMarker({ answers, model: "jev-1.13.0" })).toBe(true)
+    // …and the gated fold it guards: same answers, so the fold is unchanged.
+    expect(jevGaugeKeep(answers, ["q1"], 0.7)).toEqual(new Set(["q1"]))
   })
 })

@@ -78,6 +78,7 @@ describe("jevLabel transport", () => {
         return hits < 2
           ? new Response("boom", { status: 500 })
           : Response.json({
+              model: "jev-1.13.0",
               answers: {
                 label: { choice: "thrive", probabilities: { thrive: 0.9, stall: 0.04, bloat: 0.03, drift: 0.03 } },
               },
@@ -106,6 +107,7 @@ describe("jevLabel transport", () => {
       fetch: async (request) => {
         requests.push(await request.json())
         return Response.json({
+          model: "jev-1.13.0",
           answers: {
             label: { choice: "thrive", probabilities: { thrive: 0.9, stall: 0.04, bloat: 0.03, drift: 0.03 } },
           },

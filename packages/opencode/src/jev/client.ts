@@ -237,6 +237,17 @@ export const JEV_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
   "cua-driver_list_sessions",
 ])
 
+/**
+ * Transport-marker check (jev.md §2). A decisions envelope IS
+ * `{ answers, model, usage }`, and `model` — the resolved id echoed back
+ * ("jev-1.13.0") — is the ONLY marker field: it proves the response came from a
+ * decision transport and is not some other JSON body. An envelope without a
+ * non-empty `model` string is not a decision response, so every parser must
+ * fail open rather than fold whatever shape `answers` happens to have.
+ */
+export const hasTransportMarker = (root: Record<string, unknown>): boolean =>
+  typeof root["model"] === "string" && root["model"].length > 0
+
 export interface JevVerdict {
   readonly use: boolean
   readonly strength: number
@@ -552,6 +563,7 @@ export async function jevAsk(input: JevAskInput): Promise<Record<string, unknown
   if (typeof payload !== "object" || payload === null) return undefined
   const root = payload as Record<string, unknown>
   if (typeof input.onUsage === "function") input.onUsage(jevUsage(root, transport.id))
+  if (!hasTransportMarker(root)) return undefined
   const answers = root["answers"] ?? root["decisions"] ?? root["results"]
   return typeof answers === "object" && answers !== null ? (answers as Record<string, unknown>) : undefined
 }
@@ -703,9 +715,11 @@ const batchBoost = (answers: Record<string, unknown>, options: readonly string[]
  * per-call paths: gate on `choice` + `probabilities[choice]` (never
  * `confidence`), keep exempt tools, and fail open below `confidenceFloor`.
  *
- * Fail-open: on any transport error, timeout, unknown provider, or missing
- * answers envelope the WHOLE call resolves `undefined`, so the caller keeps its
- * existing per-call behaviour instead of acting on a partial fold.
+ * Fail-open: on any transport error, timeout, unknown provider, missing
+ * transport marker, or missing answers envelope the WHOLE call resolves
+ * `undefined`, so the caller keeps its existing per-call behaviour instead of
+ * acting on a partial fold. The marker gate itself lives in `jevAsk`, which is
+ * the only place this batch reads an envelope.
  */
 export async function jevBatch(input: JevBatchInput): Promise<JevBatchResult | undefined> {
   const questions: Record<string, unknown> = {}

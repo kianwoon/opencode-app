@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { jevFetchRetry } from "../../src/jev/client"
 
 const payload = () =>
-  Response.json({ answers: { q1: { choice: "use", probabilities: { use: 0.9 } } } })
+  Response.json({ model: "jev-1.13.0", answers: { q1: { choice: "use", probabilities: { use: 0.9 } } } })
 
 const init = () => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
 

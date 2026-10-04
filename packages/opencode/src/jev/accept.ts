@@ -14,6 +14,7 @@ import {
   jevFetchRetry,
   jevMeasuredChoice,
   jevTransport,
+  hasTransportMarker,
   type JevTransport,
 } from "./client.ts"
 
@@ -123,6 +124,7 @@ export async function jevAccept(input: JevAcceptInput): Promise<JevAcceptDecisio
   const payload = await res.json().catch((): undefined => undefined)
   if (typeof payload !== "object" || payload === null) return unmeasured()
   const root = payload as Record<string, unknown>
+  if (!hasTransportMarker(root)) return unmeasured()
   const answers = root["answers"] ?? root["decisions"] ?? root["results"]
   return typeof answers === "object" && answers !== null
     ? foldJevAccept(answers as Record<string, unknown>, threshold)
