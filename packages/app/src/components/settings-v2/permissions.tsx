@@ -232,15 +232,17 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
     })).filter((group) => group.tools.length > 0)
   })
 
-  // Collapsed-by-default sections: each curated group and each MCP server folds
-  // its tool rows until its header is clicked; a non-empty search forces the
-  // groups open so the query is always visible in results.
-  const [collapsed, setCollapsed] = createStore({
+  // Every section starts COLLAPSED: the store records only the sections the
+  // user explicitly expanded; an absent key stays folded. A non-empty search
+  // forces the curated groups open so results stay visible.
+  const [expanded, setExpanded] = createStore({
     groups: {} as Record<string, boolean>,
     servers: {} as Record<string, boolean>,
+    sections: {} as Record<string, boolean>,
   })
-  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || !collapsed.groups[group]
-  const serverExpanded = (server: string) => !collapsed.servers[server]
+  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || expanded.groups[group] === true
+  const serverExpanded = (server: string) => expanded.servers[server] === true
+  const sectionExpanded = (key: string) => expanded.sections[key] === true
 
   const selectedSkills = () => block(active().name).skills ?? []
   const toggleSkill = (skill: string) => {
@@ -373,7 +375,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                     class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
                     data-action={`settings-permissions-owns-group-toggle-${group.label.split(".").pop()}`}
                     aria-expanded={ownsExpanded(group.label)}
-                    onClick={() => setCollapsed("groups", group.label, ownsExpanded(group.label))}
+                    onClick={() => setExpanded("groups", group.label, !ownsExpanded(group.label))}
                   >
                     <Icon name={ownsExpanded(group.label) ? "chevron-down" : "chevron-right"} size="small" />
                     {language.t(group.label)}
@@ -463,8 +465,20 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
         </div>
 
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.tools.title")}</h3>
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-tools-toggle"
+              aria-expanded={sectionExpanded("tools")}
+              onClick={() => setExpanded("sections", "tools", !sectionExpanded("tools"))}
+            >
+              <Icon name={sectionExpanded("tools") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.permissions.section.tools.title")}
+            </button>
+          </h3>
           <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.tools.description")}</p>
+          <Show when={sectionExpanded("tools")}>
           <Show
             when={!inventory.loading && !inventory.error}
             fallback={
@@ -475,21 +489,38 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
               </p>
             }
           >
-            <For each={discoveredRegistry()}>
-              {(tool) => (
-                <SettingsListV2>
-                  <SettingsRowV2 title={tool.id} description={tool.description ?? ""}>
-                    <div data-action={`settings-permissions-tool-${tool.id}`}>
-                      <CheckboxV2
-                        label={language.t("settings.permissions.owns.toggle")}
-                        checked={owns(tool.id)}
-                        onChange={(checked) => toggleOwns(tool.id, checked === true)}
-                      />
-                    </div>
-                  </SettingsRowV2>
-                </SettingsListV2>
-              )}
-            </For>
+            <Show when={discoveredRegistry().length > 0}>
+              <h4 class="settings-v2-section-title">
+                <button
+                  type="button"
+                  class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                  data-action="settings-permissions-section-discovered-toggle"
+                  aria-expanded={sectionExpanded("discovered")}
+                  onClick={() => setExpanded("sections", "discovered", !sectionExpanded("discovered"))}
+                >
+                  <Icon name={sectionExpanded("discovered") ? "chevron-down" : "chevron-right"} size="small" />
+                  {language.t("settings.permissions.section.discovered.title")}
+                  <span class="settings-v2-permissions-count">{discoveredRegistry().length}</span>
+                </button>
+              </h4>
+              <Show when={sectionExpanded("discovered")}>
+                <For each={discoveredRegistry()}>
+                  {(tool) => (
+                    <SettingsListV2>
+                      <SettingsRowV2 title={tool.id} description={tool.description ?? ""}>
+                        <div data-action={`settings-permissions-tool-${tool.id}`}>
+                          <CheckboxV2
+                            label={language.t("settings.permissions.owns.toggle")}
+                            checked={owns(tool.id)}
+                            onChange={(checked) => toggleOwns(tool.id, checked === true)}
+                          />
+                        </div>
+                      </SettingsRowV2>
+                    </SettingsListV2>
+                  )}
+                </For>
+              </Show>
+            </Show>
             <For each={inventory.latest?.mcp ?? []}>
               {(server) => (
                 <div
@@ -504,7 +535,7 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
                         class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
                         data-action={`settings-permissions-mcp-toggle-${server.server}`}
                         aria-expanded={serverExpanded(server.server)}
-                        onClick={() => setCollapsed("servers", server.server, serverExpanded(server.server))}
+                        onClick={() => setExpanded("servers", server.server, !serverExpanded(server.server))}
                       >
                         <Icon name={serverExpanded(server.server) ? "chevron-down" : "chevron-right"} size="small" />
                         {server.server}
@@ -544,43 +575,71 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
               )}
             </For>
           </Show>
-        </div>
-
-        <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.skills.title")}</h3>
-          <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.skills.description")}</p>
-          <Show
-            when={skills.latest?.length}
-            fallback={<p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.skills.empty")}</p>}
-          >
-            <SettingsListV2>
-              <For each={skills.latest}>
-                {(skill) => (
-                  <SettingsRowV2 title={skill.name} description="">
-                    <div data-action={`settings-permissions-skill-${skill.name}`}>
-                      <CheckboxV2
-                        label={language.t("settings.permissions.section.skills.row.toggle", { name: skill.name })}
-                        checked={selectedSkills().includes(skill.name)}
-                        onChange={(checked) => toggleSkill(skill.name)}
-                        hideLabel
-                      />
-                    </div>
-                  </SettingsRowV2>
-                )}
-              </For>
-            </SettingsListV2>
           </Show>
         </div>
 
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.manifest.title")}</h3>
-          <Show
-            when={manifest()}
-            fallback={<p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.manifest.empty")}</p>}
-          >
-            <pre class="settings-v2-plugins-hint" data-action="settings-permissions-manifest">
-              {manifest()}
-            </pre>
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-skills-toggle"
+              aria-expanded={sectionExpanded("skills")}
+              onClick={() => setExpanded("sections", "skills", !sectionExpanded("skills"))}
+            >
+              <Icon name={sectionExpanded("skills") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.permissions.section.skills.title")}
+              <span class="settings-v2-permissions-count">{skills.latest?.length ?? 0}</span>
+            </button>
+          </h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.skills.description")}</p>
+          <Show when={sectionExpanded("skills")}>
+            <Show
+              when={skills.latest?.length}
+              fallback={<p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.skills.empty")}</p>}
+            >
+              <SettingsListV2>
+                <For each={skills.latest}>
+                  {(skill) => (
+                    <SettingsRowV2 title={skill.name} description="">
+                      <div data-action={`settings-permissions-skill-${skill.name}`}>
+                        <CheckboxV2
+                          label={language.t("settings.permissions.section.skills.row.toggle", { name: skill.name })}
+                          checked={selectedSkills().includes(skill.name)}
+                          onChange={(checked) => toggleSkill(skill.name)}
+                          hideLabel
+                        />
+                      </div>
+                    </SettingsRowV2>
+                  )}
+                </For>
+              </SettingsListV2>
+            </Show>
+          </Show>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-manifest-toggle"
+              aria-expanded={sectionExpanded("manifest")}
+              onClick={() => setExpanded("sections", "manifest", !sectionExpanded("manifest"))}
+            >
+              <Icon name={sectionExpanded("manifest") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.permissions.section.manifest.title")}
+            </button>
+          </h3>
+          <Show when={sectionExpanded("manifest")}>
+            <Show
+              when={manifest()}
+              fallback={<p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.manifest.empty")}</p>}
+            >
+              <pre class="settings-v2-plugins-hint" data-action="settings-permissions-manifest">
+                {manifest()}
+              </pre>
+            </Show>
           </Show>
         </div>
       </div>

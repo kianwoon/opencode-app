@@ -1284,6 +1284,7 @@ export const dict = {
   "settings.permissions.section.owns.group.planning": "Planning",
   "settings.permissions.section.owns.group.webDynamic": "Web and dynamic",
   "settings.permissions.section.skills.title": "Skills",
+  "settings.permissions.section.discovered.title": "Discovered tools",
   "settings.permissions.section.skills.description": "Skills the agent is allowed to load",
   "settings.permissions.section.skills.empty": "No skills discovered for this directory.",
   "settings.permissions.section.skills.row.description": "Allow this agent to load the skill by name",

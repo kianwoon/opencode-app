@@ -1256,11 +1256,12 @@ export const dict = {
   "settings.permissions.section.owns.group.webDynamic": "Web and dynamic",
   "settings.permissions.section.owns.group.jev": "JEV advisory",
   "settings.permissions.section.skills.title": "Skills",
+  "settings.permissions.section.discovered.title": "Discovered tools",
   "settings.permissions.section.skills.description": "Skills the agent is allowed to load",
   "settings.permissions.section.skills.empty": "No skills discovered for this directory.",
   "settings.permissions.section.skills.row.description": "Allow this agent to load the skill by name",
   "settings.permissions.section.skills.row.toggle": "Allow {{name}}",
-  "settings.permissions.section.tools.title": "Discovered tools",
+  "settings.permissions.section.tools.title": "Tools",
   "settings.permissions.section.tools.description":
     "Every registry and MCP tool currently discoverable on the server, beyond the curated groups above.",
   "settings.permissions.section.tools.loading": "Loading tool inventory...",

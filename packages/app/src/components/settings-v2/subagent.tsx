@@ -246,15 +246,17 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     })).filter((group) => group.tools.length > 0)
   })
 
-  // Collapsed-by-default sections: each curated group and each MCP server folds
-  // its tool rows until its header is clicked; a non-empty search forces the
-  // groups open so the query is always visible in results.
-  const [collapsed, setCollapsed] = createStore({
+  // Every section starts COLLAPSED: the store records only the sections the
+  // user explicitly expanded; an absent key stays folded. A non-empty search
+  // forces the curated groups open so results stay visible.
+  const [expanded, setExpanded] = createStore({
     groups: {} as Record<string, boolean>,
     servers: {} as Record<string, boolean>,
+    sections: {} as Record<string, boolean>,
   })
-  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || !collapsed.groups[group]
-  const serverExpanded = (server: string) => !collapsed.servers[server]
+  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || expanded.groups[group] === true
+  const serverExpanded = (server: string) => expanded.servers[server] === true
+  const sectionExpanded = (key: string) => expanded.sections[key] === true
 
   const selectedSkills = createMemo(() => block(active().name).skills ?? [])
   const toggleSkill = (skill: string) => {
@@ -950,7 +952,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                     class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
                     data-action={`settings-subagent-owns-group-toggle-${group.label.split(".").pop()}`}
                     aria-expanded={ownsExpanded(group.label)}
-                    onClick={() => setCollapsed("groups", group.label, ownsExpanded(group.label))}
+                    onClick={() => setExpanded("groups", group.label, !ownsExpanded(group.label))}
                   >
                     <Icon name={ownsExpanded(group.label) ? "chevron-down" : "chevron-right"} size="small" />
                     {language.t(group.label)}
@@ -1012,8 +1014,20 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
         </div>
 
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.permissions.section.tools.title")}</h3>
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-subagent-section-tools-toggle"
+              aria-expanded={sectionExpanded("tools")}
+              onClick={() => setExpanded("sections", "tools", !sectionExpanded("tools"))}
+            >
+              <Icon name={sectionExpanded("tools") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.permissions.section.tools.title")}
+            </button>
+          </h3>
           <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.tools.description")}</p>
+          <Show when={sectionExpanded("tools")}>
           <Show
             when={!inventory.loading && !inventory.error}
             fallback={
@@ -1024,21 +1038,38 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               </p>
             }
           >
-            <For each={discoveredRegistry()}>
-              {(tool) => (
-                <SettingsListV2>
-                  <SettingsRowV2 title={tool.id} description={tool.description ?? ""}>
-                    <div data-action={`settings-subagent-tool-${tool.id}`}>
-                      <CheckboxV2
-                        label={language.t("settings.subagent.owns.toggle")}
-                        checked={owns(tool.id)}
-                        onChange={(checked) => toggleOwns(tool.id, checked === true)}
-                      />
-                    </div>
-                  </SettingsRowV2>
-                </SettingsListV2>
-              )}
-            </For>
+            <Show when={discoveredRegistry().length > 0}>
+              <h4 class="settings-v2-section-title">
+                <button
+                  type="button"
+                  class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                  data-action="settings-subagent-section-discovered-toggle"
+                  aria-expanded={sectionExpanded("discovered")}
+                  onClick={() => setExpanded("sections", "discovered", !sectionExpanded("discovered"))}
+                >
+                  <Icon name={sectionExpanded("discovered") ? "chevron-down" : "chevron-right"} size="small" />
+                  {language.t("settings.permissions.section.discovered.title")}
+                  <span class="settings-v2-permissions-count">{discoveredRegistry().length}</span>
+                </button>
+              </h4>
+              <Show when={sectionExpanded("discovered")}>
+                <For each={discoveredRegistry()}>
+                  {(tool) => (
+                    <SettingsListV2>
+                      <SettingsRowV2 title={tool.id} description={tool.description ?? ""}>
+                        <div data-action={`settings-subagent-tool-${tool.id}`}>
+                          <CheckboxV2
+                            label={language.t("settings.subagent.owns.toggle")}
+                            checked={owns(tool.id)}
+                            onChange={(checked) => toggleOwns(tool.id, checked === true)}
+                          />
+                        </div>
+                      </SettingsRowV2>
+                    </SettingsListV2>
+                  )}
+                </For>
+              </Show>
+            </Show>
             <For each={inventory.latest?.mcp ?? []}>
               {(server) => (
                 <div
@@ -1053,7 +1084,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                         class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
                         data-action={`settings-subagent-mcp-toggle-${server.server}`}
                         aria-expanded={serverExpanded(server.server)}
-                        onClick={() => setCollapsed("servers", server.server, serverExpanded(server.server))}
+                        onClick={() => setExpanded("servers", server.server, !serverExpanded(server.server))}
                       >
                         <Icon name={serverExpanded(server.server) ? "chevron-down" : "chevron-right"} size="small" />
                         {server.server}
@@ -1093,37 +1124,64 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               )}
             </For>
           </Show>
-        </div>
-
-        <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.subagent.section.skills.title")}</h3>
-          <p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.skills.description")}</p>
-          <Show
-            when={skills.latest?.length}
-            fallback={<p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.skills.empty")}</p>}
-          >
-            <SettingsListV2>
-              <For each={skills.latest}>
-                {(skill) => (
-                  <SettingsRowV2 title={skill.name} description="">
-                    <div data-action={`settings-subagent-skill-${skill.name}`}>
-                      <CheckboxV2
-                        label={language.t("settings.subagent.section.skills.row.toggle", { name: skill.name })}
-                        checked={selectedSkills().includes(skill.name)}
-                        onChange={() => toggleSkill(skill.name)}
-                        hideLabel
-                      />
-                    </div>
-                  </SettingsRowV2>
-                )}
-              </For>
-            </SettingsListV2>
           </Show>
         </div>
 
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.subagent.section.how.title")}</h3>
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-skills-toggle"
+              aria-expanded={sectionExpanded("skills")}
+              onClick={() => setExpanded("sections", "skills", !sectionExpanded("skills"))}
+            >
+              <Icon name={sectionExpanded("skills") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.subagent.section.skills.title")}
+              <span class="settings-v2-permissions-count">{skills.latest?.length ?? 0}</span>
+            </button>
+          </h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.skills.description")}</p>
+          <Show when={sectionExpanded("skills")}>
+            <Show
+              when={skills.latest?.length}
+              fallback={<p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.skills.empty")}</p>}
+            >
+              <SettingsListV2>
+                <For each={skills.latest}>
+                  {(skill) => (
+                    <SettingsRowV2 title={skill.name} description="">
+                      <div data-action={`settings-subagent-skill-${skill.name}`}>
+                        <CheckboxV2
+                          label={language.t("settings.subagent.section.skills.row.toggle", { name: skill.name })}
+                          checked={selectedSkills().includes(skill.name)}
+                          onChange={() => toggleSkill(skill.name)}
+                          hideLabel
+                        />
+                      </div>
+                    </SettingsRowV2>
+                  )}
+                </For>
+              </SettingsListV2>
+            </Show>
+          </Show>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-how-toggle"
+              aria-expanded={sectionExpanded("how")}
+              onClick={() => setExpanded("sections", "how", !sectionExpanded("how"))}
+            >
+              <Icon name={sectionExpanded("how") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.subagent.section.how.title")}
+            </button>
+          </h3>
           <p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.how.description")}</p>
+          <Show when={sectionExpanded("how")}>
           <SettingsListV2>
             <For each={PATTERN_TOOLS}>
               {(tool) => (
@@ -1158,6 +1216,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               )}
             </For>
           </SettingsListV2>
+          </Show>
         </div>
         </Show>
       </div>
