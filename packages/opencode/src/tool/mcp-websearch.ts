@@ -1,4 +1,4 @@
-import { Duration, Effect, Schema } from "effect"
+import { Duration, Effect, Option, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 
 export const EXA_URL = process.env.EXA_API_KEY
@@ -17,14 +17,29 @@ const McpResult = Schema.Struct({
   }),
 })
 
-const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(McpResult))
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeResult = Schema.decodeUnknownOption(McpResult)
 
 const parsePayload = (payload: string) =>
   Effect.gen(function* () {
     const trimmed = payload.trim()
     if (!trimmed.startsWith("{")) return undefined
-    const data = yield* decode(trimmed)
-    return data.result.content.find((item) => item.text)?.text
+    const parsed = Option.getOrUndefined(decodeJson(trimmed))
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
+    // JSON-RPC error frames carry the provider's own message (rate limits, auth); decoding them
+    // against `McpResult` alone would swallow it behind a schema ParseError.
+    if ("error" in parsed) {
+      const error = parsed.error
+      const message =
+        typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+          ? error.message
+          : undefined
+      if (!message) return undefined
+      return yield* Effect.fail(new Error("Web search failed: " + message))
+    }
+    const result = Option.getOrUndefined(decodeResult(parsed))
+    if (!result) return undefined
+    return result.result.content.find((item) => item.text)?.text
   })
 
 export const parseResponse = Effect.fn("McpWebSearch.parseResponse")(function* (body: string) {

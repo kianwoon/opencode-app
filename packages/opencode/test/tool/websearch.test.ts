@@ -97,4 +97,32 @@ describe("websearch MCP response parser", () => {
       expect(result).toBe("search results")
     }),
   )
+
+  it.effect("surfaces the provider message from JSON-RPC error payloads", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        parseResponse(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            error: {
+              code: -32000,
+              message:
+                "You've hit the free-tier rate limit for Parallel Search MCP. Upgrade your plan or try again later.",
+            },
+          }),
+        ),
+      )
+      expect(error.message).toContain("free-tier rate limit")
+    }),
+  )
+
+  it.effect("skips SSE frames without result or error", () =>
+    Effect.gen(function* () {
+      const result = yield* parseResponse(
+        `event: message\ndata: {"jsonrpc":"2.0","method":"notifications/progress","params":{}}\n\ndata: ${payload}\n\n`,
+      )
+      expect(result).toBe("search results")
+    }),
+  )
 })
