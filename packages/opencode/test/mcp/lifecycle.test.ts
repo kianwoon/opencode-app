@@ -53,6 +53,7 @@ interface LifecycleServerState {
   requestDelay?: number
   roots?: Array<{ uri: string; name?: string }>
   requests: string[]
+  listToolsCalls: number
   aborted: number
 }
 
@@ -66,6 +67,7 @@ function lifecycleServer(input?: { capabilities?: ServerCapabilities; instructio
         resources: [],
         resourceTemplates: [],
         requests: [],
+        listToolsCalls: 0,
         aborted: 0,
       }
 
@@ -80,8 +82,9 @@ function lifecycleServer(input?: { capabilities?: ServerCapabilities; instructio
         })
 
         if (capabilities.tools) {
-          protocol.setRequestHandler(ListToolsRequestSchema, (request) => {
-            if (state.listToolsError) throw new Error(state.listToolsError)
+protocol.setRequestHandler(ListToolsRequestSchema, (request) => {
+          state.listToolsCalls++
+          if (state.listToolsError) throw new Error(state.listToolsError)
             const page = state.toolPages?.[request.params?.cursor ?? "initial"]
             return Promise.resolve({ tools: page?.items ?? state.tools, nextCursor: page?.nextCursor })
           })
@@ -255,6 +258,26 @@ it.instance("tools() reuses cached definitions until a protocol notification", (
       "tool cache did not refresh",
     )
     expect(Object.keys(yield* mcp.tools())).toEqual(["cache-server_next_tool"])
+  }),
+)
+
+it.instance("connected + empty defs → lazy re-list surfaces tools", () =>
+  Effect.gen(function* () {
+    const server = yield* lifecycleServer({ capabilities: { tools: {} } })
+    // Mount with the server's tool list still empty: connected, but with nothing cached.
+    server.state.tools = []
+    const mcp = yield* MCP.Service
+    yield* mcp.add("empty-server", remote(server.url))
+    expect((yield* mcp.status())["empty-server"]?.status).toBe("connected")
+    expect(server.state.listToolsCalls).toBe(1)
+
+    server.state.tools = [{ name: "late_tool", inputSchema: { type: "object" } }]
+    expect(Object.keys(yield* mcp.tools())).toEqual(["empty-server_late_tool"])
+    expect(server.state.listToolsCalls).toBe(2)
+
+    // Second call inside the TTL serves the memoized result rather than re-listing.
+    expect(Object.keys(yield* mcp.tools())).toEqual(["empty-server_late_tool"])
+    expect(server.state.listToolsCalls).toBe(2)
   }),
 )
 

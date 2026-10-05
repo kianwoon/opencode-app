@@ -26,7 +26,7 @@ import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { TuiEvent } from "@/server/tui-event"
-import { Cause, Effect, Exit, Layer, Context, Schedule, Schema, Stream } from "effect"
+import { Cause, Duration, Effect, Exit, Layer, Context, Schedule, Schema, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -37,6 +37,9 @@ import { McpBrowser } from "./browser"
 import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
 
 const DEFAULT_TIMEOUT = 30_000
+// Bounds how often a connected server with empty defs may be re-listed; without it
+// every tools() call (one per session turn and per subagent) would re-issue tools/list.
+const RELIST_TTL = Duration.minutes(5)
 const CLIENT_OPTIONS = {
   capabilities: {
     // https://github.com/anomalyco/opencode/issues/11948
@@ -146,6 +149,13 @@ interface State {
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
   instructions: Record<string, string>
+  relist: Record<string, RelistEntry>
+}
+
+/** TTL-memoized re-list for a client, so concurrent callers share one tools/list. */
+interface RelistEntry {
+  refresh: Effect.Effect<MCPToolDef[] | undefined>
+  invalidate: Effect.Effect<void>
 }
 
 export interface ServerInstructions {
@@ -412,7 +422,9 @@ const layer = Layer.effect(
         }
 
         return yield* Effect.gen(function* () {
-          const listed = mcpClient.getServerCapabilities()?.tools ? yield* McpCatalog.defs(mcpClient, mcp.timeout) : []
+          const listed = mcpClient.getServerCapabilities()?.tools
+            ? yield* McpCatalog.defs(key, mcpClient, mcp.timeout)
+            : []
           if (!listed) {
             return yield* Effect.fail(new Error("Failed to get tools"))
           }
@@ -463,12 +475,30 @@ const layer = Layer.effect(
       Effect.catch(() => Effect.succeed([] as number[])),
     )
 
+    const relist = Effect.fnUntraced(function* (s: State, name: string, client: MCPClient, timeout?: number) {
+      const [refresh, invalidate] = yield* Effect.cachedInvalidateWithTTL(
+        McpCatalog.defs(name, client, timeout).pipe(
+          Effect.tap((listed) => {
+            // Mirror the connected-client guards: a list that resolves after the
+            // client was replaced or dropped must not resurrect its defs.
+            if (!listed || s.clients[name] !== client) return Effect.void
+            s.defs[name] = listed
+            return Effect.void
+          }),
+          Effect.map((listed) => listed ?? undefined),
+        ),
+        RELIST_TTL,
+      )
+      s.relist[name] = { refresh, invalidate }
+    })
+
     function watch(s: State, name: string, client: MCPClient, bridge: EffectBridge.Shape, timeout?: number) {
       client.onclose = () => {
         if (s.clients[name] !== client) return
         delete s.clients[name]
         delete s.defs[name]
         delete s.instructions[name]
+        delete s.relist[name]
         s.status[name] = { status: "failed", error: "Connection closed" }
         bridge.fork(
           Effect.logWarning("MCP connection closed", { server: name }).pipe(
@@ -486,11 +516,12 @@ const layer = Layer.effect(
       client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
         if (s.clients[name] !== client || s.status[name]?.status !== "connected") return
 
-        const listed = await bridge.promise(McpCatalog.defs(client, timeout))
+        // A notification must always re-list, so it bypasses the TTL memo shared with
+        // the lazy path instead of serving a cached (possibly stale) list.
+        const listed = await bridge.promise(s.relist[name]!.invalidate.pipe(Effect.andThen(s.relist[name]!.refresh)))
         if (!listed) return
         if (s.clients[name] !== client || s.status[name]?.status !== "connected") return
 
-        s.defs[name] = listed
         await bridge.promise(events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore))
       })
     }
@@ -524,6 +555,7 @@ const layer = Layer.effect(
           clients: {},
           defs: {},
           instructions: {},
+          relist: {},
         }
 
         yield* Effect.forEach(
@@ -542,12 +574,13 @@ const layer = Layer.effect(
 
               const result = yield* create(key, mcp)
               s.status[key] = result.status
-              if (result.mcpClient) {
-                s.clients[key] = result.mcpClient
-                s.defs[key] = result.defs!
-                if (result.instructions) s.instructions[key] = result.instructions
-                watch(s, key, result.mcpClient, bridge, mcp.timeout)
-              }
+if (result.mcpClient) {
+                  s.clients[key] = result.mcpClient
+                  s.defs[key] = result.defs!
+                  if (result.instructions) s.instructions[key] = result.instructions
+                  yield* relist(s, key, result.mcpClient, mcp.timeout)
+                  watch(s, key, result.mcpClient, bridge, mcp.timeout)
+                }
             }),
           { concurrency: "unbounded" },
         )
@@ -558,6 +591,7 @@ const layer = Layer.effect(
             s.clients = {}
             s.defs = {}
             s.instructions = {}
+            s.relist = {}
             yield* Effect.forEach(
               clients,
               (client) =>
@@ -588,6 +622,7 @@ const layer = Layer.effect(
       delete s.clients[name]
       delete s.defs[name]
       delete s.instructions[name]
+      delete s.relist[name]
       if (!client) return Effect.void
       return Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
     }
@@ -607,6 +642,7 @@ const layer = Layer.effect(
       s.defs[name] = listed
       if (instructions) s.instructions[name] = instructions
       else delete s.instructions[name]
+      yield* relist(s, name, client, timeout)
       watch(s, name, client, bridge, timeout)
       if (previous) yield* Effect.tryPromise(() => previous.close()).pipe(Effect.ignore)
       return s.status[name]
@@ -698,9 +734,15 @@ const layer = Layer.effect(
       for (const [clientName, client] of Object.entries(s.clients)) {
         if (s.status[clientName]?.status !== "connected") continue
         const mcpConfig = config[clientName]
+        const advertisesTools = !!client.getServerCapabilities()?.tools
+        // A server whose tools/list failed or came back empty at mount stays connected
+        // with no defs; re-list once per TTL instead of surfacing zero tools all session.
+        const refresh = s.relist[clientName]?.refresh
+        if (advertisesTools && refresh && !s.defs[clientName]?.length) yield* refresh
         const listed = s.defs[clientName]
-        if (!listed) {
-          yield* Effect.logWarning("missing cached tools for connected server", { clientName })
+        if (!listed?.length) {
+          if (advertisesTools)
+            yield* Effect.logWarning("missing cached tools for connected server", { clientName })
           continue
         }
         const timeout = requestTimeout(s, clientName, mcpConfig, defaultTimeout)
@@ -906,7 +948,7 @@ const layer = Layer.effect(
 
         const listed = client
           ? client.getServerCapabilities()?.tools
-            ? yield* McpCatalog.defs(client, mcpConfig.timeout)
+            ? yield* McpCatalog.defs(mcpName, client, mcpConfig.timeout)
             : []
           : undefined
         if (!client || !listed) {

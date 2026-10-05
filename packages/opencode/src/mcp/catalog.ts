@@ -35,8 +35,18 @@ export async function paginate<T, R extends { nextCursor?: string }>(
   throw new Error(`MCP list exceeded ${MAX_LIST_PAGES} pages`)
 }
 
-export function defs(client: Client, timeout?: number) {
-  return listTools(client, timeout ?? DEFAULT_TIMEOUT).pipe(Effect.catch(() => Effect.void))
+export function defs(clientName: string, client: Client, timeout?: number) {
+  return listTools(client, timeout ?? DEFAULT_TIMEOUT).pipe(
+    Effect.tapError((error) =>
+      Effect.logWarning("failed to get tools", {
+        clientName,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+    // Fail-open: a server whose tools/list fails still stays connected; MCP.tools()
+    // re-lists lazily instead of dropping the server's tools for the session.
+    Effect.catch(() => Effect.void),
+  )
 }
 
 export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number): Tool {

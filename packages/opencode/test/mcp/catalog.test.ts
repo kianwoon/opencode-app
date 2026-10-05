@@ -96,7 +96,7 @@ test("preserves output schema validation across paginated tool discovery", async
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
 
   try {
-    const tools = await Effect.runPromise(McpCatalog.defs(client))
+    const tools = await Effect.runPromise(McpCatalog.defs("pagination-test", client))
     expect(tools?.map((tool) => tool.name)).toEqual(["first", "second"])
     await expect(client.callTool({ name: "first", arguments: {} })).rejects.toThrow(
       "Structured content does not match the tool's output schema",
