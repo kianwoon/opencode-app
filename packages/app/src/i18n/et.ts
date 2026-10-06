@@ -1167,6 +1167,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Mudelid",
+  "settings.models.unavailable.title": "Pole saadaval",
+  "settings.models.unavailable.badge": "Pole saadaval",
+  "settings.models.unavailable.description":
+    "Need mudelid on salvestatud sinu seadistustesse, kuid nende pakkuja ei paku neid enam.",
+  "settings.models.unavailable.use": "Kasuta {{provider}}",
   "settings.models.description": "Mudeli sätteid saab siin konfigureerida.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

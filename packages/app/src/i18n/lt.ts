@@ -1187,6 +1187,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Modeliai",
+  "settings.models.unavailable.title": "Nepasiekiami",
+  "settings.models.unavailable.badge": "Nepasiekiami",
+  "settings.models.unavailable.description":
+    "Šie modeliai įrašyti jūsų nustatymuose, bet jų teikėjas jų nebeteikia.",
+  "settings.models.unavailable.use": "Naudoti {{provider}}",
   "settings.models.description": "Čia bus konfigūruojami modelio nustatymai.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

@@ -1168,6 +1168,11 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "মডেল",
+  "settings.models.unavailable.title": "অনুপলব্ধ",
+  "settings.models.unavailable.badge": "অনুপলব্ধ",
+  "settings.models.unavailable.description":
+    "এই মডেলগুলো আপনার সেটিংসে সংরক্ষিত আছে, কিন্তু তাদের প্রদানকারী আর সেগুলো দেয় না।",
+  "settings.models.unavailable.use": "{{provider}} ব্যবহার করুন",
   "settings.models.description": "মডেল সেটিংস এখানে কনফিগারযোগ্য হবে।",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

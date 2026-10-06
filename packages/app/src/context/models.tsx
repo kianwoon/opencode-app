@@ -22,6 +22,23 @@ function modelKey(model: ModelKey) {
   return `${model.providerID}:${model.modelID}`
 }
 
+// Catalog shape the helpers below need: the provider a model is served by and its id.
+export type AvailableModel = { id: string; provider: { id: string } }
+
+// Stored visibility entries orphaned by a provider dropping a model from its catalog.
+export function unavailableEntries(entries: ReadonlyArray<ModelKey>, available: ReadonlyArray<AvailableModel>) {
+  const served = new Set(available.map((x) => `${x.provider.id}:${x.id}`))
+  return entries.filter((x) => !served.has(`${x.providerID}:${x.modelID}`))
+}
+
+// Same model id under a different provider, so a dropped entry can be restored one click.
+export function alternativeModel(model: ModelKey, available: ReadonlyArray<AvailableModel>): ModelKey | undefined {
+  const candidates = available.filter((x) => x.id === model.modelID && x.provider.id !== model.providerID)
+  const first = candidates.map((x) => x.provider.id).sort()[0]
+  if (!first) return undefined
+  return { providerID: first, modelID: model.modelID }
+}
+
 export const { use: useModels, provider: ModelsProvider } = createSimpleContext({
   name: "Models",
   gate: false,
@@ -128,6 +145,10 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       return false
     }
 
+    const unavailable = createMemo(() => unavailableEntries(store.user, available()))
+
+    const alternative = (key: ModelKey) => alternativeModel(key, available())
+
     const setVisibility = (model: ModelKey, state: boolean) => {
       update(model, state ? "show" : "hide")
     }
@@ -165,6 +186,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       find,
       visible,
       setVisibility,
+      unavailable,
+      alternative,
       recent: {
         list: () => recentModels()!,
         push,

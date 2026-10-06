@@ -1191,6 +1191,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "မော်ဒယ်များ",
+  "settings.models.unavailable.title": "မရရှိနိုင်",
+  "settings.models.unavailable.badge": "မရရှိနိုင်",
+  "settings.models.unavailable.description":
+    "မော်ဒယ်များကို သင့်ဆက်တင်များတွင် သိမ်းထားသော်လည်း ဝန်ဆောင်မှုပေးသူက မတင်ပေးတော့ပါ။",
+  "settings.models.unavailable.use": "{{provider}} ကို သုံးပါ",
   "settings.models.description": "မော်ဒယ်လ်ဆက်တင်များကို ဤနေရာတွင် စီစဉ်သတ်မှတ်နိုင်မည်ဖြစ်သည်။",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

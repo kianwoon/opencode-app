@@ -1185,6 +1185,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Mô hình",
+  "settings.models.unavailable.title": "Không khả dụng",
+  "settings.models.unavailable.badge": "Không khả dụng",
+  "settings.models.unavailable.description":
+    "Các mô hình này đã được lưu trong cài đặt của bạn, nhưng nhà cung cấp không còn cung cấp chúng.",
+  "settings.models.unavailable.use": "Dùng {{provider}}",
   "settings.models.description": "Cài đặt mô hình sẽ được cấu hình ở đây.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

@@ -9,6 +9,7 @@
 - A provider is "manually curated" once `store.user` holds ANY explicit visibility entry (show or hide) for it — selecting a model also writes `show`. Untouched models of a curated provider are hidden; only explicit `show` entries appear.
 - Providers with no explicit entries keep smart defaults (recent "latest" releases, plus models without a valid release date — which is why uncurated OpenRouter shows many models).
 - Do not add a second visibility path for the dropdown; change `visible()` so settings switches and the dropdown can never disagree.
+- Stored visibility entries whose `{providerID, modelID}` left the provider catalog are surfaced in Settings → Models under "Unavailable" (`stored()` / `unavailable()` / `alternative()` in `src/context/models.tsx`), each with a one-click switch to a provider that still serves that model id. Additive only — it never auto-selects the alternative, never changes the current model, and never edits `visible()`.
 
 ## Paste Screenshot Gotchas
 

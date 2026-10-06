@@ -1195,6 +1195,11 @@ export const dict: Record<string, string> = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "དཔེ་ཚད།",
+  "settings.models.unavailable.title": "མི་ཚུགས།",
+  "settings.models.unavailable.badge": "མི་ཚུགས།",
+  "settings.models.unavailable.description":
+    "དཔེ་ཚད་འདི་དག་ཁྱེད་ཀྱི་སྒྲིག་བསྡུར་ནང་ཉིད་འཁོར་ཡོད་ཀྱང་བྱིན་མི་ཚུགས་པས་མི་བསྟན་པ།",
+  "settings.models.unavailable.use": "{{provider}} གིས་བེད་སྤྱོད།",
   "settings.models.description": "དཔེ་ཚད་སྒྲིག་སྟངས་ཚུ་ནཱ་ལུ་རིམ་སྒྲིག་འབད་བཏུབ་འོང་།",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

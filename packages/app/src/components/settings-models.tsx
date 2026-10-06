@@ -3,6 +3,8 @@ import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Switch } from "@opencode-ai/ui/switch"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Tag } from "@opencode-ai/ui/tag"
+import { Button } from "@opencode-ai/ui/button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
@@ -142,6 +144,50 @@ const SettingsModelsContent: Component = () => {
               )}
             </For>
           </Show>
+        </Show>
+
+        <Show when={models.unavailable().length > 0}>
+          <div class="flex flex-col gap-1">
+            <div class="flex items-center gap-2 pb-2">
+              <span class="text-14-medium text-text-strong">
+                {language.t("settings.models.unavailable.title")}
+              </span>
+              <Tag size="normal">{language.t("settings.models.unavailable.badge")}</Tag>
+            </div>
+            <span class="text-12-regular text-text-weak pb-2">
+              {language.t("settings.models.unavailable.description")}
+            </span>
+            <SettingsList>
+              <For each={models.unavailable()}>
+                {(item) => {
+                  const alternative = () => models.alternative(item)
+                  return (
+                    <div class="flex flex-wrap items-center justify-between gap-4 py-3 border-b border-border-weak-base last:border-none">
+                      <div class="min-w-0">
+                        <span class="text-14-regular text-text-strong truncate block">{item.modelID}</span>
+                        <span class="text-12-regular text-text-weak truncate block">{item.providerID}</span>
+                      </div>
+                      <Show when={alternative()}>
+                        {(alt) => (
+                          <div class="flex-shrink-0">
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => models.setVisibility(alt(), true)}
+                            >
+                              {language
+                                .t("settings.models.unavailable.use")
+                                .replace("{{provider}}", alt().providerID)}
+                            </Button>
+                          </div>
+                        )}
+                      </Show>
+                    </div>
+                  )
+                }}
+              </For>
+            </SettingsList>
+          </div>
         </Show>
       </div>
     </div>

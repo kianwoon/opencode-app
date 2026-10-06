@@ -1098,6 +1098,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Modelos",
+  "settings.models.unavailable.title": "Indisponível",
+  "settings.models.unavailable.badge": "Indisponível",
+  "settings.models.unavailable.description":
+    "Estes modelos estão salvos nas suas configurações, mas não são mais oferecidos pelo provedor.",
+  "settings.models.unavailable.use": "Usar {{provider}}",
   "settings.models.description": "Configurações de modelos estarão disponíveis aqui.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

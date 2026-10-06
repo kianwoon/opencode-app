@@ -1164,6 +1164,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "ຕົວແບບ",
+  "settings.models.unavailable.title": "ບໍ່ສາມາດໃຊ້",
+  "settings.models.unavailable.badge": "ບໍ່ສາມາດໃຊ້",
+  "settings.models.unavailable.description":
+    "ຕົວແບບເຫລ໻ານີ້ຖືກບັນທຶກໄວ້ໃນການຕັ້ງຄ່າຂອງທ່ານ ແຕ່ຜູ້ໃຫ້ບໍລິການຂອງພວກເຂົາບໍ່ໄດ້ສະໜຸາອີກແລ້ວ.",
+  "settings.models.unavailable.use": "ໃຊ້ {{provider}}",
   "settings.models.description": "ການຕັ້ງຄ່າຕົວແບບຈະຕັ້ງຄ່າໄດ້ທີ່ນີ້.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",

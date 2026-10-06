@@ -1170,6 +1170,11 @@ export const dict = {
   "settings.providers.routing.fallbacks.description":
     "When off, OpenRouter stays on the pinned provider instead of failing over to a cold replica. Improves prompt-cache stickiness; requests error if that provider is unavailable.",
   "settings.models.title": "Fyrimyndir",
+  "settings.models.unavailable.title": "Ikki tøkt",
+  "settings.models.unavailable.badge": "Ikki tøkt",
+  "settings.models.unavailable.description":
+    "Hesin mælar eru í gongdini, men veitarin bjóðar ikki framvegis í teimum.",
+  "settings.models.unavailable.use": "Nota {{provider}}",
   "settings.models.description": "Model innstillingar verða stillaðar her.",
     "settings.models.routing.pin.placeholder": "e.g. streamlake",
     "settings.models.routing.pin.invalid": "Ignored: bare provider slugs only (no \"/\").",
