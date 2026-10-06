@@ -57,6 +57,46 @@ const clone = (value: State | undefined) => {
   } satisfies State
 }
 
+// Mirrors the model.current() priority: an explicit pick or a recorded session
+// model (restore / snapshot carry no `explicit` flag) wins over the
+// agent-configured model, except after an explicit agent switch
+// (explicit: false) which adopts the agent's configured model.
+export const resolveSessionModel = (
+  state: State | undefined,
+  agentModel: ModelKey | undefined,
+  fallback: ModelKey | undefined,
+  valid: (model: ModelKey) => boolean,
+) => {
+  const options = state?.explicit === false ? [agentModel, state?.model, fallback] : [state?.model, agentModel, fallback]
+  for (const model of options) {
+    if (!model) continue
+    if (valid(model)) return model
+  }
+}
+
+export const resolveAgentState = (
+  prev: State | undefined,
+  currentAgentName: string | undefined,
+  target: { name: string; model?: ModelKey; variant?: string | null },
+) => {
+  // Re-selecting the agent that is already current keeps a user model pick;
+  // only a real agent switch adopts that agent's configured model.
+  if (target.name === currentAgentName && prev?.explicit) {
+    return {
+      agent: target.name,
+      model: prev?.model,
+      variant: prev?.variant ?? null,
+      explicit: true,
+    } satisfies State
+  }
+  return {
+    agent: target.name,
+    model: target.model,
+    variant: target.model ? target.variant : target.variant ?? prev?.variant,
+    explicit: false,
+  } satisfies State
+}
+
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
   init: () => {
@@ -102,14 +142,6 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const validModel = (model: ModelKey) => {
       const provider = providers.all().get(model.providerID)
       return !!provider?.models[model.modelID] && connected().has(model.providerID)
-    }
-
-    const firstModel = (...items: Array<() => ModelKey | undefined>) => {
-      for (const item of items) {
-        const model = item()
-        if (!model) continue
-        if (validModel(model)) return model
-      }
     }
 
     const pickAgent = (name: string | undefined) => {
@@ -194,6 +226,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
 
         batch(() => {
+          const prev = scope()
+          const currentAgentName = agent.current()?.name
+          const next = resolveAgentState(prev, currentAgentName, item)
           setStore("current", item.name)
           setStore("last", {
             type: "agent",
@@ -201,13 +236,6 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             model: item.model,
             variant: item.variant ?? null,
           })
-          const prev = scope()
-          const next = {
-            agent: item.name,
-            model: item.model,
-            variant: item.model ? item.variant : item.variant ?? prev?.variant,
-            explicit: false,
-          } satisfies State
           const session = id()
           if (session) {
             setSaved("session", session, next)
@@ -233,10 +261,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const current = () => {
-      const s = scope()
-      const item = s?.explicit
-        ? firstModel(() => s.model, () => agent.current()?.model, fallback)
-        : firstModel(() => agent.current()?.model, () => s?.model, fallback)
+      const item = resolveSessionModel(scope(), agent.current()?.model, fallback(), validModel)
       if (!item) return
       return models.find(item)
     }
