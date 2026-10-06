@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { Cause, Effect, Exit, Schema } from "effect"
 import {
   CHOICE_CRITERIA_MESSAGE,
+  CRITERIA_LENGTH_MESSAGE,
   NOUL_CRITERIA_MESSAGE,
+  SCORE_CRITERIA_MESSAGE,
   Parameters,
   QUESTIONS_MAX,
   askQuestions,
@@ -173,6 +175,72 @@ describe("Schema rejects the wire-422 shapes at the tool boundary", () => {
     expect(message).toContain(CHOICE_CRITERIA_MESSAGE)
   })
 
+  // Vendor bound: 2000 serialized chars per question, measured on the wire JSON.
+  const choiceAt = (chars: number) => {
+    const each = Math.ceil((chars - 12) / 2)
+    return { keep: "k".repeat(each), drop: "d".repeat(each) }
+  }
+  const scoreAt = (chars: number) => {
+    const each = Math.ceil((chars - 4) / 2)
+    return ["l".repeat(each), "m".repeat(each)]
+  }
+
+  test("choice criteria past the serialized bound fails with the length guidance", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria: choiceAt(2100) }] } as never),
+    )
+    expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(CRITERIA_LENGTH_MESSAGE)
+  })
+
+  test("score criteria past the serialized bound fails with the length guidance", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "s", type: "score", instructions: "i", criteria: scoreAt(2100) }] } as never),
+    )
+    expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(CRITERIA_LENGTH_MESSAGE)
+  })
+
+  test.each([
+    ["choice", "choice", choiceAt(1990)],
+    ["score", "score", scoreAt(1990)],
+  ])("%s criteria just under the serialized bound still decodes", async (_label, type, criteria) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    expect(JSON.stringify(criteria).length).toBeLessThanOrEqual(2000)
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ id: "q", type, instructions: "i", criteria }] } as never),
+    )
+    expect(criteriaOf(toQuestions(params_)["q"])).toEqual(criteria)
+  })
+
+  test.each([
+    ["1 level", ["only one"]],
+    ["11 levels", Array.from({ length: 11 }, (_, index) => `level ${index}`)],
+  ])("score criteria with %s fails with guidance", async (_label, criteria) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "s", type: "score", instructions: "i", criteria }] } as never),
+    )
+    expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(SCORE_CRITERIA_MESSAGE)
+  })
+
+  test("score criteria still rejects a record", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "s", type: "score", instructions: "i", criteria: { "0": "x" } }] } as never),
+    )
+    expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(SCORE_CRITERIA_MESSAGE)
+  })
+
+  test.each([2, 10])("score criteria with exactly %i levels still decodes", async (count) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const criteria = Array.from({ length: count }, (_, index) => `level ${index}`)
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ id: "s", type: "score", instructions: "i", criteria }] } as never),
+    )
+    expect(criteriaOf(toQuestions(params_)["s"])).toEqual(criteria)
+  })
+
   test.each([2, 20])("choice criteria with exactly %i options still decodes", async (count) => {
     const decode = Schema.decodeUnknownEffect(Parameters)
     const criteria = Array.from({ length: count }, (_, index) => `description ${index}`)
@@ -218,6 +286,20 @@ describe("formatAsk / formatUnavailable", () => {
   test("an unparsed row reads as unmeasured instead of vanishing", () => {
     const { output } = formatAsk(params, { verdict: {}, relevance: {}, cheap: {} })
     expect(output).toContain("verdict: unmeasured")
+  })
+
+  test("the vendor cap is 8 questions: a 9th is dropped by name", () => {
+    const questions = Array.from({ length: QUESTIONS_MAX + 1 }, (_, index) => ({
+      id: `q${index}`,
+      type: "choice" as const,
+      instructions: "i",
+      criteria: { keep: "helps", drop: "irrelevant" },
+    }))
+    expect(QUESTIONS_MAX).toBe(8)
+    expect(truncationMarker({ goal: "g", questions })).toBe(
+      `questions truncated from ${QUESTIONS_MAX + 1} to ${QUESTIONS_MAX}; dropped ids: q${QUESTIONS_MAX}`,
+    )
+    expect(Object.keys(toQuestions({ goal: "g", questions }))).toHaveLength(QUESTIONS_MAX)
   })
 
   test("QUESTIONS_MAX truncation is marked explicitly with the dropped ids", () => {

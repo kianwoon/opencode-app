@@ -21,6 +21,23 @@ export const NOUL_CRITERIA_MESSAGE =
 export const CHOICE_CRITERIA_MESSAGE =
   'choice criteria is a RECORD (label → description, e.g. { keep: "helps", drop: "irrelevant" }) — only `score` takes an array'
 
+/**
+ * Decode-error text for a `criteria` payload past the vendor's per-question
+ * serialized size bound. Measured on the JSON the wire actually carries (the
+ * coerced choice record / the score level array), so the caller learns which
+ * payload to shorten.
+ */
+export const CRITERIA_LENGTH_MESSAGE =
+  "serialized `criteria` must be at most 2000 characters per question — shorten the option or level descriptions"
+
+/**
+ * Decode-error text for the score arm's `criteria` field: the vendor accepts an
+ * ordered array of 2-10 levels, and the record form is a 422 (`list_type`), so
+ * say both instead of letting the raw mismatch echo the bad payload back.
+ */
+export const SCORE_CRITERIA_MESSAGE =
+  "score criteria is an ORDERED array of 2-10 level descriptions (lowest first) — a record is never accepted"
+
 /** Vendor bound on a choice option label (question name ≤ 64 chars). */
 const CHOICE_LABEL_MAX = 64
 
@@ -57,6 +74,18 @@ const choiceLabels = (descriptions: string[]) => {
 const failChoiceCriteria = (input: unknown) =>
   Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CHOICE_CRITERIA_MESSAGE }))
 
+const failScoreCriteria = (input: unknown) =>
+  Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: SCORE_CRITERIA_MESSAGE }))
+
+// Vendor level bounds (2–10); never truncated — dropping a level would corrupt the scale.
+const SCORE_LEVELS_MIN = 2
+const SCORE_LEVELS_MAX = 10
+
+/** Vendor bound on serialized criteria per question, measured on the JSON the wire carries. */
+const CRITERIA_MAX = 2000
+
+const serializedLength = (criteria: unknown) => JSON.stringify(criteria).length
+
 /**
  * The encoded side is deliberately `Schema.Unknown` so EVERY malformed payload
  * — a bare scalar, an out-of-range option count, a non-string description —
@@ -71,22 +100,27 @@ const ChoiceCriteria = Schema.Unknown.pipe(
       if (typeof input !== "object" || input === null) return failChoiceCriteria(input)
       if (Array.isArray(input)) {
         const descriptions = input.filter((description): description is string => typeof description === "string")
-        return descriptions.length === input.length &&
-          descriptions.length >= CHOICE_OPTIONS_MIN &&
-          descriptions.length <= CHOICE_OPTIONS_MAX
-          ? Effect.succeed(
-              Object.fromEntries(
-                choiceLabels(descriptions).map((label, index) => [label, descriptions[index]] as const),
-              ),
-            )
-          : failChoiceCriteria(input)
+        if (descriptions.length !== input.length) return failChoiceCriteria(input)
+        if (descriptions.length < CHOICE_OPTIONS_MIN || descriptions.length > CHOICE_OPTIONS_MAX)
+          return failChoiceCriteria(input)
+        const coerced = Object.fromEntries(
+          choiceLabels(descriptions).map((label, index) => [label, descriptions[index]] as const),
+        )
+        return serializedLength(coerced) > CRITERIA_MAX
+          ? Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CRITERIA_LENGTH_MESSAGE }))
+          : Effect.succeed(coerced)
       }
       const entries = Object.entries(input)
-      return entries.length < CHOICE_OPTIONS_MIN ||
+      if (
+        entries.length < CHOICE_OPTIONS_MIN ||
         entries.length > CHOICE_OPTIONS_MAX ||
         entries.some(([, description]) => typeof description !== "string")
-        ? failChoiceCriteria(input)
-        : Effect.succeed(Object.fromEntries(entries.map(([label, description]) => [label, String(description)] as const)))
+      )
+        return failChoiceCriteria(input)
+      const record = Object.fromEntries(entries.map(([label, description]) => [label, String(description)] as const))
+      return serializedLength(record) > CRITERIA_MAX
+        ? Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CRITERIA_LENGTH_MESSAGE }))
+        : Effect.succeed(record)
     }),
     encode: SchemaGetter.passthrough(),
   }),
@@ -115,7 +149,22 @@ export const Question = Schema.Union([
     id: Schema.String,
     type: Schema.Literal("score"),
     instructions: Schema.String,
-    criteria: Schema.Array(Schema.String).annotate({
+    // Unknown-encoded like the choice arm, so an out-of-range level count or an
+    // oversized payload fails with guidance instead of a raw mismatch.
+    criteria: Schema.Unknown.pipe(
+      Schema.decodeTo(Schema.Array(Schema.String), {
+        decode: SchemaGetter.transformOrFail((input) => {
+          if (!Array.isArray(input)) return failScoreCriteria(input)
+          const levels = input.filter((level): level is string => typeof level === "string")
+          if (levels.length !== input.length) return failScoreCriteria(input)
+          if (levels.length < SCORE_LEVELS_MIN || levels.length > SCORE_LEVELS_MAX) return failScoreCriteria(input)
+          return serializedLength(levels) > CRITERIA_MAX
+            ? Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CRITERIA_LENGTH_MESSAGE }))
+            : Effect.succeed(levels)
+        }),
+        encode: SchemaGetter.passthrough(),
+      }),
+    ).annotate({
       description: "Ordered level descriptions, LOWEST first (an array, never a record)",
     }),
   }),
@@ -142,7 +191,8 @@ export const Parameters = Schema.Struct({
 type Params = Schema.Schema.Type<typeof Parameters>
 type Metadata = {}
 
-export const QUESTIONS_MAX = 32
+// Vendor bound: questions per request.
+export const QUESTIONS_MAX = 8
 
 /**
  * Marker for a question list that hit the QUESTIONS_MAX cap at this tool
