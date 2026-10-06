@@ -175,9 +175,7 @@ const SettingsModelsContent: Component = () => {
                               variant="secondary"
                               onClick={() => models.setVisibility(alt(), true)}
                             >
-                              {language
-                                .t("settings.models.unavailable.use")
-                                .replace("{{provider}}", alt().providerID)}
+                              {language.t("settings.models.unavailable.use").replace("{{provider}}", alt().providerID)}
                             </Button>
                           </div>
                         )}

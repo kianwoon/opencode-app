@@ -75,3 +75,53 @@ describe("alternativeModel", () => {
     )
   })
 })
+
+describe("alternativeModel provider-authoritative contract", () => {
+  test("a same-provider rename offers no alternative, since the catalog cannot confirm it", () => {
+    const result = alternativeModel(
+      { providerID: "opencode-go", modelID: "space-bunny-free" },
+      catalog(available("opencode-go", "space-bunny")),
+    )
+
+    expect(result).toBe(undefined)
+  })
+
+  test("an exact same-id match on another provider still resolves", () => {
+    const result = alternativeModel(
+      { providerID: "opencode-go", modelID: "space-bunny-free" },
+      catalog(available("opencode-go", "space-bunny"), available("opencode", "space-bunny-free")),
+    )
+
+    expect(result).toEqual({ providerID: "opencode", modelID: "space-bunny-free" })
+  })
+
+  test("a version-suffixed sibling is never treated as equivalent", () => {
+    expect(alternativeModel({ providerID: "opencode", modelID: "foo" }, catalog(available("other", "foo-v2")))).toBe(
+      undefined,
+    )
+    expect(alternativeModel({ providerID: "opencode", modelID: "foo" }, catalog(available("other", "foo-free")))).toBe(
+      undefined,
+    )
+    expect(alternativeModel({ providerID: "opencode", modelID: "foo" }, catalog(available("other", "foo-preview")))).toBe(
+      undefined,
+    )
+  })
+
+  test("the already-stored key never resolves to itself", () => {
+    const result = alternativeModel(
+      { providerID: "opencode-go", modelID: "space-bunny-free" },
+      catalog(available("opencode-go", "space-bunny-free")),
+    )
+
+    expect(result).toBe(undefined)
+  })
+
+  test("a qualifier-stripped sibling on another provider never resolves", () => {
+    const result = alternativeModel(
+      { providerID: "opencode-go", modelID: "space-bunny-free" },
+      catalog(available("opencode", "space-bunny")),
+    )
+
+    expect(result).toBe(undefined)
+  })
+})

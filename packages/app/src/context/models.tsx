@@ -31,7 +31,9 @@ export function unavailableEntries(entries: ReadonlyArray<ModelKey>, available: 
   return entries.filter((x) => !served.has(`${x.providerID}:${x.modelID}`))
 }
 
-// Same model id under a different provider, so a dropped entry can be restored one click.
+// Restores a dropped entry one click when another provider still serves the exact same id.
+// Only an exact id match qualifies: the catalog carries no rename/alias field, so a provider
+// renaming a model is not something the app can confirm, and it offers no action for that row.
 export function alternativeModel(model: ModelKey, available: ReadonlyArray<AvailableModel>): ModelKey | undefined {
   const candidates = available.filter((x) => x.id === model.modelID && x.provider.id !== model.providerID)
   const first = candidates.map((x) => x.provider.id).sort()[0]
