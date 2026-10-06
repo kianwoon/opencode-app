@@ -13,6 +13,15 @@ export const NOUL_CRITERIA_MESSAGE =
   'noul questions take NO criteria — encode the outcome semantics in `instructions` (e.g. "1 = premise holds, 0 = it does not")'
 
 /**
+ * Decode-error text for the choice arm's `criteria` field. The sibling `score`
+ * arm legitimately takes an array, so a bare array for `choice` reads as a
+ * near-miss; the raw mismatch (`Expected object, got [...]`) echoes the bad
+ * array back and pushes the caller at the wrong shape, so state the fix.
+ */
+export const CHOICE_CRITERIA_MESSAGE =
+  'choice criteria is a RECORD (label → description, e.g. { keep: "helps", drop: "irrelevant" }) — only `score` takes an array'
+
+/**
  * Per-type question shape, enforced HERE so the wire-422 class is impossible
  * from the tool boundary (jev.md §2): `choice` criteria is a record
  * `label → description`, `score` criteria is an ORDERED string array of level
@@ -27,6 +36,7 @@ export const Question = Schema.Union([
     instructions: Schema.String,
     criteria: Schema.Record(Schema.String, Schema.String).annotate({
       description: "label → description, e.g. { keep: \"helps\", drop: \"irrelevant\" }",
+      message: CHOICE_CRITERIA_MESSAGE,
     }),
   }),
   Schema.Struct({

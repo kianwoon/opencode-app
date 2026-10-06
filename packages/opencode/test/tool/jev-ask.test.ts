@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Effect, Exit, Schema } from "effect"
 import {
+  CHOICE_CRITERIA_MESSAGE,
   NOUL_CRITERIA_MESSAGE,
   Parameters,
   QUESTIONS_MAX,
@@ -69,6 +70,15 @@ describe("Schema rejects the wire-422 shapes at the tool boundary", () => {
     const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
     expect(message).toContain(NOUL_CRITERIA_MESSAGE)
     expect(message).not.toContain("Expected never")
+  })
+
+  test("choice with array criteria fails decode with guidance naming the record shape", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria: ["x"] }] } as never),
+    )
+    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+    expect(message).toContain(CHOICE_CRITERIA_MESSAGE)
   })
 
   test("the well-formed shape decodes and carries three questions", async () => {
