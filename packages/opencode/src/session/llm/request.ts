@@ -11,7 +11,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { SystemPrompt } from "../system"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Record } from "effect"
-import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
+import { jsonSchema, tool as aiTool, type ModelMessage, type Tool, type ToolCallRepairFunction } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
 import { createHash } from "node:crypto"
@@ -238,6 +238,34 @@ export function hasToolCalls(messages: ModelMessage[]): boolean {
     }
   }
   return false
+}
+
+export function makeRepairToolCall(tools: Record<string, Tool>): ToolCallRepairFunction<Record<string, Tool>> {
+  return async (failed) => {
+    const lower = failed.toolCall.toolName.toLowerCase()
+    if (lower !== failed.toolCall.toolName && tools[lower]) {
+      return {
+        ...failed.toolCall,
+        toolName: lower,
+      }
+    }
+    // A repaired call is re-parsed against the SAME tool map this request was built
+    // from, so never rewrite to a tool that is absent: `invalid` is a registered
+    // catch-all, but an agent with an explicit `tools` allowlist (resolveTools above)
+    // can drop it — rewriting a NoSuchToolError to `invalid` would then throw a SECOND
+    // NoSuchToolError naming `invalid`, masking the genuinely unavailable tool. Only a
+    // genuine ARGUMENT error is repaired, and only when `invalid` is actually present;
+    // otherwise return null so the SDK rethrows the original, truthful error.
+    if (failed.error.name !== "AI_InvalidToolInputError" || tools["invalid"] === undefined) return null
+    return {
+      ...failed.toolCall,
+      input: JSON.stringify({
+        tool: failed.toolCall.toolName,
+        error: failed.error.message,
+      }),
+      toolName: "invalid",
+    }
+  }
 }
 
 export * as LLMRequestPrep from "./request"
