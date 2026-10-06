@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
 import * as Tool from "./tool"
 import { jevKey } from "../jev/controller"
 import { JEV_DEFAULT_TIMEOUT_MS, jevAsk, jevModelFor, parseJevAnswer, type JevTransport } from "../jev/client"
@@ -21,6 +21,77 @@ export const NOUL_CRITERIA_MESSAGE =
 export const CHOICE_CRITERIA_MESSAGE =
   'choice criteria is a RECORD (label → description, e.g. { keep: "helps", drop: "irrelevant" }) — only `score` takes an array'
 
+/** Vendor bound on a choice option label (question name ≤ 64 chars). */
+const CHOICE_LABEL_MAX = 64
+
+// Vendor option bounds (2–20). Enforced here rather than left to a wire 422,
+// and never by truncation: silently dropping options would corrupt the decision.
+const CHOICE_OPTIONS_MIN = 2
+const CHOICE_OPTIONS_MAX = 20
+
+const choiceLabel = (description: string) =>
+  description
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .split("-")
+    .filter((word) => word.length > 0)
+    .slice(0, 3)
+    .join("-")
+    .slice(0, CHOICE_LABEL_MAX)
+    .replace(/-+$/g, "")
+
+const uniqueChoiceLabel = (base: string, taken: Set<string>, suffix: number): string => {
+  const candidate = suffix === 1 ? base : `${base.slice(0, CHOICE_LABEL_MAX - String(suffix).length - 1)}-${suffix}`
+  return taken.has(candidate) ? uniqueChoiceLabel(base, taken, suffix + 1) : candidate
+}
+
+const choiceLabels = (descriptions: string[]) => {
+  const taken = new Set<string>()
+  return descriptions.map((description) => {
+    const label = uniqueChoiceLabel(choiceLabel(description) || "option", taken, 1)
+    taken.add(label)
+    return label
+  })
+}
+
+const failChoiceCriteria = (input: unknown) =>
+  Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CHOICE_CRITERIA_MESSAGE }))
+
+/**
+ * The encoded side is deliberately `Schema.Unknown` so EVERY malformed payload
+ * — a bare scalar, an out-of-range option count, a non-string description —
+ * reaches the transform and fails with CHOICE_CRITERIA_MESSAGE; this Effect
+ * version drops a union `message` annotation for input rejected inside the
+ * `from` AST. The tolerance is input-side only: the decoded type is still
+ * `Record<string, string>`.
+ */
+const ChoiceCriteria = Schema.Unknown.pipe(
+  Schema.decodeTo(Schema.Record(Schema.String, Schema.String), {
+    decode: SchemaGetter.transformOrFail((input) => {
+      if (typeof input !== "object" || input === null) return failChoiceCriteria(input)
+      if (Array.isArray(input)) {
+        const descriptions = input.filter((description): description is string => typeof description === "string")
+        return descriptions.length === input.length &&
+          descriptions.length >= CHOICE_OPTIONS_MIN &&
+          descriptions.length <= CHOICE_OPTIONS_MAX
+          ? Effect.succeed(
+              Object.fromEntries(
+                choiceLabels(descriptions).map((label, index) => [label, descriptions[index]] as const),
+              ),
+            )
+          : failChoiceCriteria(input)
+      }
+      const entries = Object.entries(input)
+      return entries.length < CHOICE_OPTIONS_MIN ||
+        entries.length > CHOICE_OPTIONS_MAX ||
+        entries.some(([, description]) => typeof description !== "string")
+        ? failChoiceCriteria(input)
+        : Effect.succeed(Object.fromEntries(entries.map(([label, description]) => [label, String(description)] as const)))
+    }),
+    encode: SchemaGetter.passthrough(),
+  }),
+)
+
 /**
  * Per-type question shape, enforced HERE so the wire-422 class is impossible
  * from the tool boundary (jev.md §2): `choice` criteria is a record
@@ -34,9 +105,10 @@ export const Question = Schema.Union([
     id: Schema.String,
     type: Schema.Literal("choice"),
     instructions: Schema.String,
-    criteria: Schema.Record(Schema.String, Schema.String).annotate({
+    // A bare string array is accepted here (callers conflate it with `score`)
+    // and normalized into the record the wire requires.
+    criteria: ChoiceCriteria.annotate({
       description: "label → description, e.g. { keep: \"helps\", drop: \"irrelevant\" }",
-      message: CHOICE_CRITERIA_MESSAGE,
     }),
   }),
   Schema.Struct({

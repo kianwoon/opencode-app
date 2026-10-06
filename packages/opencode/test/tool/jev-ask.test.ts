@@ -51,11 +51,15 @@ describe("toQuestions — per-type wire shape", () => {
   })
 })
 
+const criteriaOf = (row: unknown) =>
+  typeof row === "object" && row !== null && "criteria" in row ? row.criteria : undefined
+
 describe("Schema rejects the wire-422 shapes at the tool boundary", () => {
-  test("choice with array criteria, score with record criteria, and noul with criteria all fail decode", async () => {
+  test("score with record criteria and noul with criteria both fail decode", async () => {
     const decode = Schema.decodeUnknownEffect(Parameters)
+    // choice with an array criteria no longer belongs here: it is COERCED to a
+    // record at decode (see "choice array criteria decodes to a record").
     const bad = [
-      { goal: "g", questions: [{ id: "a", type: "choice", instructions: "i", criteria: ["x"] }] },
       { goal: "g", questions: [{ id: "b", type: "score", instructions: "i", criteria: { "0": "x" } }] },
       { goal: "g", questions: [{ id: "c", type: "noul", instructions: "i", criteria: { x: "y" } }] },
     ]
@@ -72,14 +76,123 @@ describe("Schema rejects the wire-422 shapes at the tool boundary", () => {
     expect(message).not.toContain("Expected never")
   })
 
-  test("choice with array criteria fails decode with guidance naming the record shape", async () => {
+  test("choice array criteria decodes to a record with derived labels", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          {
+            id: "c",
+            type: "choice",
+            instructions: "i",
+            criteria: ["keeps the handoff useful", "totally irrelevant to the fix"],
+          },
+        ],
+      } as never),
+    )
+    expect(criteriaOf(toQuestions(params_)["c"])).toEqual({
+      "keeps-the-handoff": "keeps the handoff useful",
+      "totally-irrelevant-to": "totally irrelevant to the fix",
+    })
+  })
+
+  test("a valid choice record decodes unchanged", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [{ id: "c", type: "choice", instructions: "i", criteria: { keep: "helps", drop: "irrelevant" } }],
+      } as never),
+    )
+    expect(toQuestions(params_)["c"]).toEqual({
+      type: "choice",
+      instructions: "i",
+      criteria: { keep: "helps", drop: "irrelevant" },
+    })
+  })
+
+  test("the score arm still decodes an array criteria as an array", async () => {
+    const questions = toQuestions({
+      goal: "g",
+      questions: [{ id: "s", type: "score", instructions: "i", criteria: ["low", "high"] }],
+    })
+    expect(criteriaOf(questions["s"])).toEqual(["low", "high"])
+  })
+
+  test.each([
+    ["an array containing a non-string", ["a", 5]],
+    ["a record with a non-string value", { a: 1 }],
+    ["an empty array", []],
+  ])("choice criteria that is %s fails decode with guidance", async (_label, criteria) => {
     const decode = Schema.decodeUnknownEffect(Parameters)
     const exit = await Effect.runPromiseExit(
-      decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria: ["x"] }] } as never),
+      decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria }] } as never),
     )
     const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
     expect(message).toContain(CHOICE_CRITERIA_MESSAGE)
   })
+
+  test("derived labels de-duplicate collisions deterministically within the 64-char bound", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const long = `${"x".repeat(30)} ${"y".repeat(30)} ${"z".repeat(30)}`
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          {
+            id: "c",
+            type: "choice",
+            instructions: "i",
+            criteria: ["same words here", "same words here", "!!!", long],
+          },
+        ],
+      } as never),
+    )
+    const labels = Object.keys(criteriaOf(toQuestions(params_)["c"]) ?? {})
+    expect(labels).toEqual([
+      "same-words-here",
+      "same-words-here-2",
+      "option",
+      `${"x".repeat(30)}-${"y".repeat(30)}-${"z".repeat(2)}`,
+    ])
+    expect(labels.every((label) => label.length > 0 && label.length <= 64)).toBe(true)
+  })
+
+  test.each([
+    ["a 25-string array", Array.from({ length: 25 }, (_, index) => `description ${index}`)],
+    ["a 25-entry record", Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`k${index}`, `v${index}`]))],
+    ["a 1-string array", ["only one"]],
+    ["an empty record", {}],
+  ])("choice criteria with an out-of-range option count (%s) fails decode", async (_label, criteria) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(
+      decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria }] } as never),
+    )
+    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+    expect(message).toContain(CHOICE_CRITERIA_MESSAGE)
+  })
+
+  test.each([2, 20])("choice criteria with exactly %i options still decodes", async (count) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const criteria = Array.from({ length: count }, (_, index) => `description ${index}`)
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria }] } as never),
+    )
+    expect(Object.keys(criteriaOf(toQuestions(params_)["c"]) ?? {})).toHaveLength(count)
+  })
+
+  test.each([["a string", "keep it"], ["a number", 5], ["null", null]])(
+    "bare scalar criteria (%s) fails decode with guidance",
+    async (_label, criteria) => {
+      const decode = Schema.decodeUnknownEffect(Parameters)
+      const exit = await Effect.runPromiseExit(
+        decode({ goal: "g", questions: [{ id: "c", type: "choice", instructions: "i", criteria }] } as never),
+      )
+      const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+      expect(message).toContain(CHOICE_CRITERIA_MESSAGE)
+    },
+  )
 
   test("the well-formed shape decodes and carries three questions", async () => {
     const decode = Schema.decodeUnknownEffect(Parameters)
