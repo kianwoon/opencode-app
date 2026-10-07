@@ -1,3 +1,4 @@
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
 import * as Tool from "./tool"
 import { jevKey } from "../jev/controller"
@@ -188,6 +189,75 @@ export const Parameters = Schema.Struct({
   }),
 })
 
+// Hand-authored because `criteria` is deliberately Unknown-encoded above for
+// tolerant, message-carrying decode failures; that makes the GENERATED JSON
+// schema render `criteria` shapeless (`{}`), so the model never learns the
+// per-arm wire shape. This is what the model sees; the test file pins it in
+// sync with the decode behavior the same file enforces.
+const choiceArm: JSONSchema7 = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    type: { const: "choice" },
+    instructions: { type: "string" },
+    criteria: {
+      type: "object",
+      additionalProperties: { type: "string" },
+      description: 'label → description, e.g. { keep: "helps", drop: "irrelevant" }',
+    },
+  },
+  required: ["id", "type", "instructions", "criteria"],
+  additionalProperties: false,
+}
+
+const scoreArm: JSONSchema7 = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    type: { const: "score" },
+    instructions: { type: "string" },
+    criteria: {
+      type: "array",
+      items: { type: "string" },
+      minItems: SCORE_LEVELS_MIN,
+      maxItems: SCORE_LEVELS_MAX,
+      description: "Ordered level descriptions, LOWEST first (an array, never a record)",
+    },
+  },
+  required: ["id", "type", "instructions", "criteria"],
+  additionalProperties: false,
+}
+
+const noulArm: JSONSchema7 = {
+  type: "object",
+  description:
+    'yes/no probability question — carries NO criteria; outcome semantics go in `instructions` (e.g. "1 = premise holds, 0 = it does not")',
+  properties: {
+    id: { type: "string" },
+    type: { const: "noul" },
+    instructions: { type: "string" },
+  },
+  required: ["id", "type", "instructions"],
+  additionalProperties: false,
+}
+
+export const ParametersJsonSchema: JSONSchema7 = {
+  type: "object",
+  properties: {
+    goal: {
+      type: "string",
+      description: "What the decision is for — the decision state sent as `state`",
+    },
+    questions: {
+      type: "array",
+      items: { anyOf: [choiceArm, scoreArm, noulArm] },
+      description: "Typed questions to ask in ONE request; answers come back keyed by the same ids",
+    },
+  },
+  required: ["goal", "questions"],
+  additionalProperties: false,
+}
+
 type Params = Schema.Schema.Type<typeof Parameters>
 type Metadata = {}
 
@@ -282,6 +352,7 @@ export const JevAskTool = Tool.define<typeof Parameters, Metadata, never>(
       description:
         "Typed batch decision tool: send choice/score/noul questions in ONE SystemOne POST and get typed answers back; advisory, fail-open. Criteria are per-type: choice = record of label → description, score = ordered array of level descriptions, noul = none (outcome semantics go in `instructions`).",
       parameters: Parameters,
+      jsonSchema: ParametersJsonSchema,
       execute: (params: Params) =>
         Effect.gen(function* () {
           const result = yield* Effect.promise(() => askQuestions(params, jevKey())).pipe(

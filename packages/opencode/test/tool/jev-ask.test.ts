@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { Cause, Effect, Exit, Schema } from "effect"
 import {
   CHOICE_CRITERIA_MESSAGE,
   CRITERIA_LENGTH_MESSAGE,
   NOUL_CRITERIA_MESSAGE,
+  ParametersJsonSchema,
   SCORE_CRITERIA_MESSAGE,
   Parameters,
   QUESTIONS_MAX,
@@ -445,5 +447,45 @@ describe("askQuestions — fail-open at the tool boundary", () => {
     } finally {
       server.stop(true)
     }
+  })
+})
+
+const isSchema = (value: unknown): value is JSONSchema7 =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+// Navigate the rendered union the way a client does: find the arm whose
+// `type` const matches, since the rendered schema is the model's contract.
+const armOf = (type: string): JSONSchema7 => {
+  const questions = ParametersJsonSchema.properties?.["questions"]
+  if (!isSchema(questions)) throw new Error("questions schema missing")
+  const items = questions.items
+  if (!isSchema(items)) throw new Error("questions items missing")
+  const arm = items.anyOf?.find((candidate) => {
+    if (!isSchema(candidate)) return false
+    const kind = candidate.properties?.["type"]
+    return isSchema(kind) && kind.const === type
+  })
+  if (!isSchema(arm)) throw new Error(`no rendered arm for type=${type}`)
+  return arm
+}
+
+describe("rendered JSON schema carries each arm's true wire shape", () => {
+  test("score arm criteria is a 2-10 item ordered string array", () => {
+    const criteria = armOf("score").properties?.["criteria"]
+    if (!isSchema(criteria)) throw new Error("score criteria schema missing")
+    expect(criteria.type).toBe("array")
+    expect(criteria.minItems).toBe(2)
+    expect(criteria.maxItems).toBe(10)
+  })
+
+  test("choice arm criteria is a string-valued record", () => {
+    const criteria = armOf("choice").properties?.["criteria"]
+    if (!isSchema(criteria)) throw new Error("choice criteria schema missing")
+    expect(criteria.type).toBe("object")
+    expect(criteria.additionalProperties).toEqual({ type: "string" })
+  })
+
+  test("noul arm renders no criteria property", () => {
+    expect(Object.hasOwn(armOf("noul").properties ?? {}, "criteria")).toBe(false)
   })
 })
