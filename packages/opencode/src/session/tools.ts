@@ -599,8 +599,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   }
 
   if (deferral.deferred) {
-    const { ToolSearchTool } = yield* Effect.promise(() => import("@/tool/tool-search"))
+    const { ToolSearchTool, TOOL_SEARCH_TOOL } = yield* Effect.promise(() => import("@/tool/tool-search"))
     const init = yield* Tool.init(yield* ToolSearchTool)
+    // A deferred session whose agent allowlist omits find_tools has no promotion
+    // path; grant it for this session so resolveTools keeps it. The empty-but-truthy
+    // `{}` deferral (jev path) must NOT grant: the session never actually deferred.
+    if (
+      Object.keys(deferral.deferred).length > 0 &&
+      input.agent.tools !== undefined &&
+      !input.agent.tools.includes(TOOL_SEARCH_TOOL)
+    ) {
+      ToolSearch.markAutoGranted(input.session.id)
+    }
     tools[init.id] = tool({
       description: [init.description, deferral.catalog].filter(Boolean).join("\n\n"),
       inputSchema: jsonSchema(ProviderTransform.schema(input.model, ToolJsonSchema.fromTool({ ...init, id: init.id }))),

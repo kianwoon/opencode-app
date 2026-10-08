@@ -1,7 +1,12 @@
 import { describe, expect, test, beforeEach } from "bun:test"
 import type { MCP } from "@/mcp"
+import type { Tool } from "ai"
 import { ToolSearch } from "@/session/tool-search"
 import { McpCatalog } from "@/mcp/catalog"
+import { resolveTools } from "@/session/llm/request"
+import { TOOL_SEARCH_TOOL } from "@/tool/tool-search"
+import type { Agent } from "@/agent/agent"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 function mcpTool(name: string, description: string, schemaProperties: Record<string, object> = {}): MCP.McpTool {
   return {
@@ -259,5 +264,93 @@ describe("McpCatalog compact helpers", () => {
     )
     expect(rendered).toContain("## zai")
     expect(rendered).toContain("- analyze_image: Vision")
+  })
+})
+
+describe("ToolSearch auto-grant", () => {
+  test("markAutoGranted/isAutoGranted round-trip; clear removes; per session", () => {
+    expect(ToolSearch.isAutoGranted("s1")).toBe(false)
+    ToolSearch.markAutoGranted("s1")
+    expect(ToolSearch.isAutoGranted("s1")).toBe(true)
+    expect(ToolSearch.isAutoGranted("s2")).toBe(false)
+    ToolSearch.clear("s1")
+    expect(ToolSearch.isAutoGranted("s1")).toBe(false)
+  })
+})
+
+const RESOLVE_TOOLS = [TOOL_SEARCH_TOOL, "cua-driver_click", "read"]
+
+function toolRecord(names: string[]): Record<string, Tool> {
+  return Object.fromEntries(names.map((name) => [name, {}])) as unknown as Record<string, Tool>
+}
+
+function resolveInput(input: {
+  owned: string[] | undefined
+  sessionID: string
+  deny?: string[]
+  userFalse?: string[]
+}) {
+  return {
+    tools: toolRecord(RESOLVE_TOOLS),
+    agent: { tools: input.owned, permission: [] } as unknown as Agent.Info,
+    permission: (input.deny ?? []).map((permission) => ({ permission, pattern: "*", action: "deny" as const })),
+    user: {
+      tools: Object.fromEntries((input.userFalse ?? []).map((name) => [name, false])),
+    } as unknown as SessionV1.User,
+    sessionID: input.sessionID,
+  }
+}
+
+describe("resolveTools auto-grant", () => {
+  test("granted session keeps find_tools despite an owned allowlist that omits it", () => {
+    ToolSearch.markAutoGranted("s1")
+    const result = resolveTools(resolveInput({ owned: ["cua-driver_click", "read"], sessionID: "s1" }))
+    expect(Object.keys(result).toSorted()).toEqual(["cua-driver_click", "find_tools", "read"])
+  })
+
+  test("without a grant find_tools is stripped from the allowlist", () => {
+    const result = resolveTools(resolveInput({ owned: ["cua-driver_click", "read"], sessionID: "s1" }))
+    expect(Object.keys(result).toSorted()).toEqual(["cua-driver_click", "read"])
+  })
+
+  test("owned undefined leaves the tool set unchanged", () => {
+    const result = resolveTools(resolveInput({ owned: undefined, sessionID: "s1" }))
+    expect(Object.keys(result).toSorted()).toEqual(RESOLVE_TOOLS.toSorted())
+  })
+
+  test("the grant is scoped to find_tools, not the whole allowlist", () => {
+    ToolSearch.markAutoGranted("s1")
+    const result = resolveTools(resolveInput({ owned: ["read"], sessionID: "s1" }))
+    expect(Object.keys(result).toSorted()).toEqual(["find_tools", "read"])
+  })
+
+  test("permission deny still vetoes a granted find_tools", () => {
+    ToolSearch.markAutoGranted("s1")
+    const result = resolveTools(resolveInput({ owned: ["cua-driver_click", "read"], sessionID: "s1", deny: ["find_tools"] }))
+    expect(Object.keys(result).toSorted()).toEqual(["cua-driver_click", "read"])
+  })
+
+  test("the grant is per session", () => {
+    ToolSearch.markAutoGranted("s1")
+    const result = resolveTools(resolveInput({ owned: ["read"], sessionID: "s2" }))
+    expect(Object.keys(result).toSorted()).toEqual(["read"])
+  })
+
+  test("jev-shaped empty deferred grants nothing and find_tools stays filtered", () => {
+    // tools.ts only auto-grants on a non-empty deferred map; the jev path passes
+    // the empty-but-truthy `{}` (tools.ts L476), so no grant is recorded and an
+    // owned-allowlist agent keeps find_tools stripped. The gate itself is
+    // exercised end-to-end in test/session/tools.test.ts.
+    const deferral = { inline: {}, deferred: {}, catalog: "" }
+    expect(Object.keys(deferral.deferred).length).toBe(0)
+    const result = resolveTools(resolveInput({ owned: ["cua-driver_click", "read"], sessionID: "s1" }))
+    expect(ToolSearch.isAutoGranted("s1")).toBe(false)
+    expect(Object.keys(result).toSorted()).toEqual(["cua-driver_click", "read"])
+  })
+
+  test("user.tools=false still vetoes a granted find_tools", () => {
+    ToolSearch.markAutoGranted("s1")
+    const result = resolveTools(resolveInput({ owned: ["read"], sessionID: "s1", userFalse: [TOOL_SEARCH_TOOL] }))
+    expect(Object.keys(result).toSorted()).toEqual(["read"])
   })
 })

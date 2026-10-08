@@ -23,6 +23,12 @@ export const DEFAULT_THRESHOLD = 0.1
 /** Per-session map of MCP tool keys promoted out of the deferred catalog → promotion time (ms). */
 const promoted = new Map<string, Map<string, number>>()
 
+/**
+ * Sessions whose deferral is active but whose agent `owned_tools` allowlist omits
+ * find_tools. Without this they keep deferred tools with no promotion path.
+ */
+const autoGranted = new Set<string>()
+
 /** Bound on tracked sessions; promotion state is cheap but sessions can be long-lived. */
 const MAX_TRACKED_SESSIONS = 1_000
 
@@ -39,9 +45,30 @@ function promotedFor(sessionID: string): Map<string, number> {
   return fresh
 }
 
+/**
+ * Grants find_tools past an explicit `owned_tools` allowlist for this session.
+ * Called when find_tools is registered for the session but the agent's allowlist
+ * omits it, so resolveTools would otherwise silently drop the only promotion path.
+ */
+export function markAutoGranted(sessionID: string) {
+  if (autoGranted.has(sessionID)) return
+  if (autoGranted.size >= MAX_TRACKED_SESSIONS) {
+    // Set iteration order is insertion order: evict the oldest session.
+    const oldest = autoGranted.values().next().value
+    if (oldest !== undefined) autoGranted.delete(oldest)
+  }
+  autoGranted.add(sessionID)
+}
+
+/** True when find_tools was auto-granted for this session (deferral active). */
+export function isAutoGranted(sessionID: string): boolean {
+  return autoGranted.has(sessionID)
+}
+
 /** Drop promotion state (session ended, or budget fell back under threshold). */
 export function clear(sessionID: string) {
   promoted.delete(sessionID)
+  autoGranted.delete(sessionID)
 }
 
 /** Server names whose config sets `alwaysLoad: true`. */
@@ -185,4 +212,5 @@ export function formatResults(input: { tools: Record<string, MCP.McpTool>; keys:
 /** Test hook: reset all per-session promotion state. */
 export function reset() {
   promoted.clear()
+  autoGranted.clear()
 }

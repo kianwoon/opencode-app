@@ -15,6 +15,8 @@ import { jsonSchema, tool as aiTool, type ModelMessage, type Tool, type ToolCall
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
 import { createHash } from "node:crypto"
+import { ToolSearch } from "../tool-search"
+import { TOOL_SEARCH_TOOL } from "@/tool/tool-search"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -218,7 +220,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   }
 })
 
-function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user">) {
+export function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user" | "sessionID">) {
   const disabled = Permission.disabled(
     Object.keys(input.tools),
     Permission.merge(input.agent.permission, input.permission ?? []),
@@ -226,7 +228,10 @@ function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission"
   const owned = input.agent.tools
   return Record.filter(
     input.tools,
-    (_, k) => input.user.tools?.[k] !== false && !disabled.has(k) && (owned === undefined || owned.includes(k)),
+    (_, k) =>
+      input.user.tools?.[k] !== false &&
+      !disabled.has(k) &&
+      (owned === undefined || owned.includes(k) || (k === TOOL_SEARCH_TOOL && ToolSearch.isAutoGranted(input.sessionID))),
   )
 }
 

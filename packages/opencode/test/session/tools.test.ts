@@ -12,6 +12,8 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import { SessionProcessor } from "@/session/processor"
 import { SessionTools, TOOL_EXECUTION_TIMEOUT_MS } from "@/session/tools"
 import { Tool } from "@/tool/tool"
+import { ToolSearch } from "@/session/tool-search"
+import { TOOL_SEARCH_TOOL } from "@/tool/tool-search"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
@@ -544,5 +546,72 @@ it.effect("redacts a thrown MCP tool error (inline deferral branch)", () =>
       tools: () => Effect.succeed({ mcp_srv_boom: mcpTool }),
     })
     expectRedacted(yield* execute({}))
+  }),
+)
+
+// find_tools auto-grant: the grant must fire only for a REAL (non-empty) deferral
+// when the agent allowlist omits find_tools. The jev path passes an empty-but-truthy
+// `{}`, which registers find_tools (pre-existing quirk) but must never grant.
+const ownedAgent: Agent.Info = { ...agent, tools: ["timing"] }
+
+const tinyModel = { ...model, limit: { context: 1, output: 32_000 } } as Provider.Model
+
+function deferringMcpTool(): MCP.McpTool {
+  return {
+    def: {
+      name: "click",
+      description: "cua-driver click",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    } as never,
+    client: {} as never,
+  }
+}
+
+function autoGrantLayer(mcpTools: Record<string, MCP.McpTool>) {
+  return Layer.mergeAll(
+    Layer.succeed(Plugin.Service, fakePlugin),
+    Layer.mock(Agent.Service, { get: () => Effect.succeed(ownedAgent) }),
+    Layer.succeed(Config.Service, TestConfig.make()),
+    Layer.succeed(Permission.Service, fakePermission),
+    mcpLayer({ tools: () => Effect.succeed(mcpTools) }),
+    Layer.succeed(Truncate.Service, fakeTruncate),
+    RuntimeFlags.layer(),
+    Layer.succeed(ToolRegistry.Service, throwingRegistry),
+  )
+}
+
+function resolveOwned(input: { model: Provider.Model; mcpTools: Record<string, MCP.McpTool>; jevEnabled: boolean }) {
+  return SessionTools.resolve({
+    agent: ownedAgent,
+    model: input.model,
+    session: { id: sessionID, permission: [] } as unknown as Session.Info,
+    processor: mcpProcessor(),
+    bypassAgentCheck: false,
+    messages: [],
+    promptOps: {} as never,
+    mcpConfig: {},
+    jevEnabled: input.jevEnabled,
+  }).pipe(Effect.provide(autoGrantLayer(input.mcpTools)))
+}
+
+it.effect("auto-grants find_tools for a real non-empty deferral with an owned allowlist omitting it", () =>
+  Effect.gen(function* () {
+    ToolSearch.reset()
+    const tools = yield* resolveOwned({
+      model: tinyModel,
+      mcpTools: { mcp_cua_click: deferringMcpTool() },
+      jevEnabled: false,
+    })
+    expect(tools[TOOL_SEARCH_TOOL]).toBeDefined()
+    expect(ToolSearch.isAutoGranted(sessionID)).toBe(true)
+  }),
+)
+
+it.effect("jev-enabled empty deferral registers find_tools but does NOT auto-grant", () =>
+  Effect.gen(function* () {
+    ToolSearch.reset()
+    const tools = yield* resolveOwned({ model, mcpTools: {}, jevEnabled: true })
+    expect(tools[TOOL_SEARCH_TOOL]).toBeDefined()
+    expect(ToolSearch.isAutoGranted(sessionID)).toBe(false)
   }),
 )
