@@ -4,6 +4,7 @@ import { Cause, Effect, Exit, Schema } from "effect"
 import {
   CHOICE_CRITERIA_MESSAGE,
   CRITERIA_LENGTH_MESSAGE,
+  INSTRUCTIONS_DEFAULTS,
   NOUL_CRITERIA_MESSAGE,
   ParametersJsonSchema,
   SCORE_CRITERIA_MESSAGE,
@@ -52,6 +53,35 @@ describe("toQuestions — per-type wire shape", () => {
     expect(input.key).toBe("key-123")
     expect(input.model).toBe("typesafe/jev-latest")
     expect(Object.keys(input.questions)).toEqual(["verdict", "relevance", "cheap"])
+  })
+})
+
+describe("instructions is optional-with-default on every arm", () => {
+  test.each([
+    ["c", { id: "c", type: "choice", criteria: { a: "b", c: "d" } }, INSTRUCTIONS_DEFAULTS.choice],
+    ["s", { id: "s", type: "score", criteria: ["low", "high"] }, INSTRUCTIONS_DEFAULTS.score],
+    ["n", { id: "n", type: "noul" }, INSTRUCTIONS_DEFAULTS.noul],
+  ] as const)("%s question without instructions decodes and carries its default", async (id, question, expected) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(decode({ goal: "g", questions: [question] } as never))
+    expect(toQuestions(params_)[id]).toMatchObject({ instructions: expected })
+  })
+
+  test("a mixed batch with no instructions on any arm decodes, defaults applied", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          { id: "c", type: "choice", criteria: { a: "b", c: "d" } },
+          { id: "s", type: "score", criteria: ["low", "high"] },
+          { id: "n", type: "noul" },
+        ],
+      } as never),
+    )
+    expect(toQuestions(params_)["c"]).toMatchObject({ instructions: INSTRUCTIONS_DEFAULTS.choice })
+    expect(toQuestions(params_)["s"]).toMatchObject({ instructions: INSTRUCTIONS_DEFAULTS.score })
+    expect(toQuestions(params_)["n"]).toEqual({ type: "noul", instructions: INSTRUCTIONS_DEFAULTS.noul })
   })
 })
 
@@ -487,5 +517,12 @@ describe("rendered JSON schema carries each arm's true wire shape", () => {
 
   test("noul arm renders no criteria property", () => {
     expect(Object.hasOwn(armOf("noul").properties ?? {}, "criteria")).toBe(false)
+  })
+
+  // `instructions` is optional-with-default at decode, so the rendered arms must
+  // agree: omission accepted in BOTH the Effect schema and the JSON schema.
+  test.each(["choice", "score", "noul"])("%s arm does not require instructions", (type) => {
+    expect(armOf(type).required ?? []).not.toContain("instructions")
+    expect(armOf(type).properties).toHaveProperty("instructions")
   })
 })

@@ -128,6 +128,19 @@ const ChoiceCriteria = Schema.Unknown.pipe(
 )
 
 /**
+ * Default `instructions` per arm. `instructions` is optional-with-default on
+ * EVERY arm, so a missing descriptive field must NEVER reject the batch: each
+ * arm decodes to a wire-valid payload carrying a default instruction. This
+ * eliminates the whole `Missing key ["instructions"]` failure class — one
+ * instance being a score question that omitted instructions — not just one arm.
+ */
+export const INSTRUCTIONS_DEFAULTS = {
+  choice: "Pick the option that best satisfies the goal given the criteria",
+  score: "Rate on the provided scale, lowest level = lowest score",
+  noul: "1 = yes / affirmative, 0 = no",
+} as const
+
+/**
  * Per-type question shape, enforced HERE so the wire-422 class is impossible
  * from the tool boundary (jev.md §2): `choice` criteria is a record
  * `label → description`, `score` criteria is an ORDERED string array of level
@@ -139,7 +152,7 @@ export const Question = Schema.Union([
   Schema.Struct({
     id: Schema.String,
     type: Schema.Literal("choice"),
-    instructions: Schema.String,
+    instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.choice))),
     // A bare string array is accepted here (callers conflate it with `score`)
     // and normalized into the record the wire requires.
     criteria: ChoiceCriteria.annotate({
@@ -149,7 +162,7 @@ export const Question = Schema.Union([
   Schema.Struct({
     id: Schema.String,
     type: Schema.Literal("score"),
-    instructions: Schema.String,
+    instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.score))),
     // Unknown-encoded like the choice arm, so an out-of-range level count or an
     // oversized payload fails with guidance instead of a raw mismatch.
     criteria: Schema.Unknown.pipe(
@@ -172,7 +185,7 @@ export const Question = Schema.Union([
   Schema.Struct({
     id: Schema.String,
     type: Schema.Literal("noul"),
-    instructions: Schema.String,
+    instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.noul))),
     criteria: Schema.optional(Schema.Never).annotate({ message: NOUL_CRITERIA_MESSAGE }),
   }).annotate({
     description:
@@ -206,7 +219,7 @@ const choiceArm: JSONSchema7 = {
       description: 'label → description, e.g. { keep: "helps", drop: "irrelevant" }',
     },
   },
-  required: ["id", "type", "instructions", "criteria"],
+  required: ["id", "type", "criteria"],
   additionalProperties: false,
 }
 
@@ -224,7 +237,7 @@ const scoreArm: JSONSchema7 = {
       description: "Ordered level descriptions, LOWEST first (an array, never a record)",
     },
   },
-  required: ["id", "type", "instructions", "criteria"],
+  required: ["id", "type", "criteria"],
   additionalProperties: false,
 }
 
@@ -237,7 +250,7 @@ const noulArm: JSONSchema7 = {
     type: { const: "noul" },
     instructions: { type: "string" },
   },
-  required: ["id", "type", "instructions"],
+  required: ["id", "type"],
   additionalProperties: false,
 }
 
