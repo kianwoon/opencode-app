@@ -30,6 +30,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
+import { guardProcessExit } from "./exit-guard"
 import { isPathPluginSpec, parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { pluginSpecifier } from "@/config/plugin"
 import type { Origin as ConfigPluginOrigin } from "@/config/plugin"
@@ -203,14 +204,14 @@ async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks:
   const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
   if (plugin) {
     await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-    hooks.push(await (plugin as PluginModule).server(input, load.options))
+    hooks.push(await guardProcessExit(() => (plugin as PluginModule).server(input, load.options)))
     return
   }
 
   const legacy = getLegacyPlugins(load.mod)
   if (!legacy.length) throw new Error(`Plugin ${load.spec} exposes no plugin exports`)
   for (const server of legacy) {
-    hooks.push(await server(input, load.options))
+    hooks.push(await guardProcessExit(() => server(input, load.options)))
   }
 }
 

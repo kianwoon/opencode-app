@@ -13,6 +13,12 @@ import { define } from "../../plugin/internal"
 import { PluginPromise } from "../../plugin/promise"
 import { State } from "../../state"
 
+// Test files in plugin dirs are executed-by-discovery and historically called
+// process.exit at module scope; never auto-load them.
+function isTestPluginFile(file: string): boolean {
+  return /\.(?:test|spec)\.(?:ts|js)$/.test(path.basename(file))
+}
+
 const PluginModule = Schema.Struct({
   default: Schema.Union([
     Schema.Struct({
@@ -68,7 +74,10 @@ export const Plugin = define({
               })
               .pipe(Effect.orElseSucceed(() => []))
             files.sort()
-            for (const file of files) configured.push({ package: file })
+            for (const file of files) {
+              if (isTestPluginFile(file)) continue
+              configured.push({ package: file })
+            }
           }
         }
 

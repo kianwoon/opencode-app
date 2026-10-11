@@ -31,6 +31,7 @@ export async function load(dir: string) {
     dot: true,
     symlink: true,
   })) {
+    if (isTestPluginFile(item)) continue
     plugins.push(pathToFileURL(item).href)
   }
   if (discoveryCache.size >= MAX_CACHED_DIRS) discoveryCache.clear()
@@ -40,6 +41,13 @@ export async function load(dir: string) {
 
 const discoveryCache = new Map<string, readonly ConfigPluginV1.Spec[]>()
 const MAX_CACHED_DIRS = 64
+
+// Test files in plugin dirs are executed-by-discovery and historically called
+// process.exit at module scope (ocu-guards.test.ts killed the server), so the
+// directory glob must never auto-load them.
+function isTestPluginFile(file: string): boolean {
+  return /\.(?:test|spec)\.(?:ts|js)$/.test(path.basename(file))
+}
 
 // Drop memoized plugin-file discovery so the next load() re-scans disk. Per-dir
 // when a dir is given, everything otherwise (config writes may affect any dir).

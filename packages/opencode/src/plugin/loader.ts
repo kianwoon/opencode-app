@@ -11,6 +11,7 @@ import {
 import { ConfigPlugin } from "@/config/plugin"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { guardProcessExit } from "./exit-guard"
 
 export namespace PluginLoader {
   // A normalized plugin declaration derived from config before any filesystem or npm work happens.
@@ -142,7 +143,7 @@ export namespace PluginLoader {
   export async function load(row: Resolved): Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }> {
     let mod
     try {
-      mod = await import(await bustFileEntry(row.entry))
+      mod = await guardProcessExit(async () => import(await bustFileEntry(row.entry)))
     } catch (error) {
       return { ok: false, error }
     }
@@ -206,7 +207,7 @@ export namespace PluginLoader {
     const key = `${resolved.spec}\u0000${busted}`
     const inFlight = moduleCache.get(key)
     if (inFlight) return inFlight
-    const promise = import(busted).then(
+    const promise = guardProcessExit(() => import(busted)).then(
       (mod): { ok: true; value: Loaded } | { ok: false; error: unknown } =>
         mod
           ? { ok: true, value: { ...resolved, mod: mod as Record<string, unknown> } }
