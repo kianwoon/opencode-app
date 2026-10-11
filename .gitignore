@@ -36,3 +36,4 @@ graphify-out/
 
 # local memory backups never belong in git
 *.promoted.bak
+/artifacts/
