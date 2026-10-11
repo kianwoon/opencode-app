@@ -576,3 +576,108 @@ describe("rendered JSON schema carries each arm's true wire shape", () => {
     expect(armOf("noul").required ?? []).not.toContain("criteria")
   })
 })
+
+// Same rejection class as the `instructions` default (commit 116e80d848): a
+// mechanically derivable field must never reject a batch — the id is derived at
+// the single serialization point (`toQuestions`) and explicit ids always win.
+describe("a missing `id` is derived, never rejected", () => {
+  const decode = Schema.decodeUnknownEffect(Parameters)
+
+  // (a) omission on EACH arm decodes and serializes to a positional id.
+  test.each([
+    ["choice", { type: "choice", instructions: "i", criteria: { keep: "helps", drop: "irrelevant" } }],
+    ["score", { type: "score", instructions: "i", criteria: ["low", "high"] }],
+    ["noul", { type: "noul", instructions: "i" }],
+  ] as const)("%s question without an id decodes and serializes as q0", async (arm, question) => {
+    const params_ = await Effect.runPromise(decode({ goal: "g", questions: [question] } as never))
+    const questions = toQuestions(params_)
+    expect(Object.keys(questions)).toEqual(["q0"])
+    expect(questions["q0"]).toMatchObject({ type: arm })
+  })
+
+  // (b) every id omitted → positional ids q0, q1.
+  test("toQuestions fills q0/q1 for a fully id-less batch", async () => {
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          { type: "noul", instructions: "i" },
+          { type: "noul", instructions: "i" },
+        ],
+      } as never),
+    )
+    expect(Object.keys(toQuestions(params_))).toEqual(["q0", "q1"])
+  })
+
+  // (b) mixed batch: explicit ids win, omissions get filled.
+  test("a mixed batch keeps explicit ids and only fills omissions", async () => {
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          { id: "kept", type: "noul", instructions: "i" },
+          { type: "noul", instructions: "i" },
+          { id: "also-kept", type: "noul", instructions: "i" },
+        ],
+      } as never),
+    )
+    expect(Object.keys(toQuestions(params_))).toEqual(["kept", "q1", "also-kept"])
+  })
+
+  // (c) both defaults together: no id AND no instructions still decodes.
+  test("a question missing BOTH id and instructions still decodes", async () => {
+    const params_ = await Effect.runPromise(decode({ goal: "g", questions: [{ type: "noul" }] } as never))
+    expect(toQuestions(params_)["q0"]).toMatchObject({ type: "noul", instructions: INSTRUCTIONS_DEFAULTS.noul })
+  })
+
+  // Tolerance is decode-side only: the hand-authored schema still lets a model SEND id.
+  test.each(["choice", "score", "noul"])("%s arm does not require id but still lists it", (type) => {
+    expect(armOf(type).required ?? []).not.toContain("id")
+    expect(armOf(type).properties).toHaveProperty("id")
+  })
+
+  // (a) GAP 1: an explicit id that collides with an earlier derived default must
+  // NOT silently drop a question — the derived id bumps until free, the explicit
+  // id is untouched, and both survive on the wire under distinct keys.
+  test("an explicit id colliding with a derived default keeps BOTH questions", async () => {
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          { type: "noul", instructions: "i" }, // index 0 → base "q0" (collides)
+          { id: "q0", type: "noul", instructions: "i" }, // explicit "q0" always wins
+        ],
+      } as never),
+    )
+    const questions = toQuestions(params_)
+    expect(Object.keys(questions)).toEqual(["q0-2", "q0"])
+    expect(questions["q0"]).toMatchObject({ type: "noul" })
+    expect(questions["q0-2"]).toMatchObject({ type: "noul" })
+  })
+
+  // Unseen input: an explicit id equal to the FIRST bump candidate, forcing a
+  // second bump (q0 → q0-2 taken → q0-3).
+  test("the derived id keeps bumping past an explicit id equal to the first suffix", async () => {
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          { type: "noul", instructions: "i" },
+          { id: "q0", type: "noul", instructions: "i" },
+          { id: "q0-2", type: "noul", instructions: "i" },
+        ],
+      } as never),
+    )
+    expect(Object.keys(toQuestions(params_))).toEqual(["q0-3", "q0", "q0-2"])
+  })
+
+  // (b) GAP 2: read-back uses the SAME derived key the wire used, not the raw "".
+  test("read-back formats an id-less question under its derived wire key", async () => {
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ type: "noul", instructions: "i" }] } as never),
+    )
+    const { output } = formatAsk(params_, { q0: { noul: 0.3 } })
+    expect(output).toContain("q0: noul=0.3")
+    expect(output).not.toContain(": unmeasured")
+  })
+})

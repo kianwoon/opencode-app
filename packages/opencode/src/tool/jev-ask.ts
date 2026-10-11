@@ -165,7 +165,7 @@ export const INSTRUCTIONS_DEFAULTS = {
  */
 const QuestionArms = Schema.Union([
   Schema.Struct({
-    id: Schema.String,
+    id: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(""))),
     type: Schema.Literal("choice"),
     instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.choice))),
     // A bare string array is accepted here (callers conflate it with `score`)
@@ -175,7 +175,7 @@ const QuestionArms = Schema.Union([
     }),
   }),
   Schema.Struct({
-    id: Schema.String,
+    id: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(""))),
     type: Schema.Literal("score"),
     instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.score))),
     // Unknown-encoded like the choice arm, so an out-of-range level count or an
@@ -198,7 +198,7 @@ const QuestionArms = Schema.Union([
     }),
   }),
   Schema.Struct({
-    id: Schema.String,
+    id: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(""))),
     type: Schema.Literal("noul"),
     instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.noul))),
     criteria: Schema.optional(Schema.Never).annotate({ message: NOUL_CRITERIA_MESSAGE }),
@@ -285,7 +285,7 @@ const choiceArm: JSONSchema7 = {
       description: 'label → description, e.g. { keep: "helps", drop: "irrelevant" }',
     },
   },
-  required: ["id", "type", "criteria"],
+  required: ["type", "criteria"],
   additionalProperties: false,
 }
 
@@ -303,7 +303,7 @@ const scoreArm: JSONSchema7 = {
       description: "Ordered level descriptions, LOWEST first (an array, never a record)",
     },
   },
-  required: ["id", "type", "criteria"],
+  required: ["type", "criteria"],
   additionalProperties: false,
 }
 
@@ -316,7 +316,7 @@ const noulArm: JSONSchema7 = {
     type: { const: "noul" },
     instructions: { type: "string" },
   },
-  required: ["id", "type"],
+  required: ["type"],
   additionalProperties: false,
 }
 
@@ -343,6 +343,32 @@ type Metadata = {}
 // Vendor bound: questions per request.
 export const QUESTIONS_MAX = 8
 
+// `q${index}` bumped with a numeric suffix until free — the id analogue of
+// `uniqueChoiceLabel`, so a derived wire id can never collide with an explicit
+// id or an earlier derived one.
+const uniqueWireId = (base: string, taken: Set<string>, suffix: number): string => {
+  const candidate = suffix === 1 ? base : `${base}-${suffix}`
+  return taken.has(candidate) ? uniqueWireId(base, taken, suffix + 1) : candidate
+}
+
+/**
+ * The ONE wire-id mapping for a batch. Explicit ids always win — seeded into
+ * `taken` wholesale and never rewritten, even on a caller-supplied collision —
+ * so every id-less question derives `q${index}` bumped clear of ANY explicit id,
+ * including one that appears LATER in the list. `toQuestions`, `summarize`, and
+ * `truncationMarker` all consume this same mapping, so a derived key is identical
+ * on the wire and on read-back.
+ */
+function wireIds(params: Params): string[] {
+  const taken = new Set(params.questions.filter((question) => question.id.length > 0).map((question) => question.id))
+  return params.questions.map((question, index) => {
+    if (question.id.length > 0) return question.id
+    const id = uniqueWireId(`q${index}`, taken, 1)
+    taken.add(id)
+    return id
+  })
+}
+
 /**
  * Marker for a question list that hit the QUESTIONS_MAX cap at this tool
  * boundary. Only the first QUESTIONS_MAX questions reach the endpoint, so the
@@ -351,14 +377,15 @@ export const QUESTIONS_MAX = 8
  */
 export function truncationMarker(params: Params): string | undefined {
   if (params.questions.length <= QUESTIONS_MAX) return undefined
-  const dropped = params.questions.slice(QUESTIONS_MAX).map((question) => question.id)
+  const dropped = wireIds(params).slice(QUESTIONS_MAX)
   return `questions truncated from ${params.questions.length} to ${QUESTIONS_MAX}; dropped ids: ${dropped.join(", ")}`
 }
 
 export function toQuestions(params: Params): Record<string, unknown> {
+  const ids = wireIds(params)
   return Object.fromEntries(
-    params.questions.slice(0, QUESTIONS_MAX).map((question) => [
-      question.id,
+    params.questions.slice(0, QUESTIONS_MAX).map((question, index) => [
+      ids[index],
       {
         type: question.type,
         instructions: question.instructions,
@@ -383,13 +410,15 @@ export function toAskInput(params: Params, key: string, transport?: Pick<JevTran
 
 /** One compact `id: primary-field` line per question, in question order. */
 function summarize(params: Params, answers: Record<string, unknown>): string[] {
-  return params.questions.slice(0, QUESTIONS_MAX).map((question) => {
-    const parsed = parseJevAnswer(answers[question.id])
-    if (parsed.type === "choice") return `${question.id}: choice=${parsed.choice}`
-    if (parsed.type === "score") return `${question.id}: score=${parsed.score}`
-    if (parsed.type === "noul") return `${question.id}: noul=${parsed.noul}`
-    return `${question.id}: unmeasured`
-  })
+  return wireIds(params)
+    .slice(0, QUESTIONS_MAX)
+    .map((id) => {
+      const parsed = parseJevAnswer(answers[id])
+      if (parsed.type === "choice") return `${id}: choice=${parsed.choice}`
+      if (parsed.type === "score") return `${id}: score=${parsed.score}`
+      if (parsed.type === "noul") return `${id}: noul=${parsed.noul}`
+      return `${id}: unmeasured`
+    })
 }
 
 export function formatAsk(params: Params, answers: Record<string, unknown>): { title: string; output: string } {
