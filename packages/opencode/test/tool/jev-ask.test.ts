@@ -3,11 +3,13 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 import { Cause, Effect, Exit, Schema } from "effect"
 import {
   CHOICE_CRITERIA_MESSAGE,
+  CHOICE_CRITERIA_REQUIRED_MESSAGE,
   CRITERIA_LENGTH_MESSAGE,
   INSTRUCTIONS_DEFAULTS,
   NOUL_CRITERIA_MESSAGE,
   ParametersJsonSchema,
   SCORE_CRITERIA_MESSAGE,
+  SCORE_CRITERIA_REQUIRED_MESSAGE,
   Parameters,
   QUESTIONS_MAX,
   askQuestions,
@@ -82,6 +84,44 @@ describe("instructions is optional-with-default on every arm", () => {
     expect(toQuestions(params_)["c"]).toMatchObject({ instructions: INSTRUCTIONS_DEFAULTS.choice })
     expect(toQuestions(params_)["s"]).toMatchObject({ instructions: INSTRUCTIONS_DEFAULTS.score })
     expect(toQuestions(params_)["n"]).toEqual({ type: "noul", instructions: INSTRUCTIONS_DEFAULTS.noul })
+  })
+})
+
+// The discriminator is inferable from shape: same normalization rule as
+// INSTRUCTIONS_DEFAULTS, one class earlier (the type field instead of instructions).
+describe("a question without a `type` infers its arm from shape", () => {
+  test.each([
+    ["score", { id: "s", instructions: "i", criteria: ["low", "high"] }],
+    ["choice", { id: "c", instructions: "i", criteria: { keep: "helps", drop: "irrelevant" } }],
+    ["noul", { id: "n", instructions: "i" }],
+  ] as const)("array criteria → score, record criteria → choice, absent → noul (%s)", async (arm, question) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(decode({ goal: "g", questions: [question] } as never))
+    expect(toQuestions(params_)[question.id]).toMatchObject({ type: arm })
+  })
+
+  test("a type-less question with no criteria defaults to noul AND its instructions default", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(decode({ goal: "g", questions: [{ id: "n" }] } as never))
+    expect(toQuestions(params_)["n"]).toEqual({ type: "noul", instructions: INSTRUCTIONS_DEFAULTS.noul })
+  })
+
+  test("a non-object question keeps the pre-inference failure", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    await expect(Effect.runPromise(decode({ goal: "g", questions: [42] } as never))).rejects.toThrow()
+  })
+})
+
+describe("a TYPED question that omits the criteria KEY fails with the arm's guided message", () => {
+  test.each([
+    ["choice", "choice", CHOICE_CRITERIA_REQUIRED_MESSAGE],
+    ["score", "score", SCORE_CRITERIA_REQUIRED_MESSAGE],
+  ] as const)("%s", async (_label, type, expected) => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const exit = await Effect.runPromiseExit(decode({ goal: "g", questions: [{ id: "q", type }] } as never))
+    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+    expect(message).toContain(expected)
+    expect(message).not.toContain("Missing key")
   })
 })
 
@@ -524,5 +564,15 @@ describe("rendered JSON schema carries each arm's true wire shape", () => {
   test.each(["choice", "score", "noul"])("%s arm does not require instructions", (type) => {
     expect(armOf(type).required ?? []).not.toContain("instructions")
     expect(armOf(type).properties).toHaveProperty("instructions")
+  })
+
+  // Tolerance is decode-side only: the hand-authored contract must still teach
+  // a model to SEND criteria on the arms that require it.
+  test.each(["choice", "score"])("%s arm still REQUIRES criteria in the hand-authored schema", (type) => {
+    expect(armOf(type).required ?? []).toContain("criteria")
+  })
+
+  test("noul arm does not require criteria", () => {
+    expect(armOf("noul").required ?? []).not.toContain("criteria")
   })
 })

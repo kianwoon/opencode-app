@@ -39,6 +39,21 @@ export const CRITERIA_LENGTH_MESSAGE =
 export const SCORE_CRITERIA_MESSAGE =
   "score criteria is an ORDERED array of 2-10 level descriptions (lowest first) — a record is never accepted"
 
+/**
+ * Decode-error text for a TYPED `choice` question that omitted its required
+ * `criteria` key. Raw struct decoding reads as `Missing key criteria`, which
+ * teaches the caller nothing; state that criteria is required and what it takes.
+ */
+export const CHOICE_CRITERIA_REQUIRED_MESSAGE =
+  'choice questions REQUIRE criteria — a record of label → description, e.g. { keep: "helps", drop: "irrelevant" }'
+
+/**
+ * Decode-error text for a TYPED `score` question that omitted its required
+ * `criteria` key — the arm-specific fix for the raw `Missing key criteria`.
+ */
+export const SCORE_CRITERIA_REQUIRED_MESSAGE =
+  "score questions REQUIRE criteria — an ORDERED array of 2-10 level descriptions (lowest first)"
+
 /** Vendor bound on a choice option label (question name ≤ 64 chars). */
 const CHOICE_LABEL_MAX = 64
 
@@ -148,7 +163,7 @@ export const INSTRUCTIONS_DEFAULTS = {
  * `noul` carries no criteria at all (`Schema.Never`, so passing one fails
  * decode rather than the endpoint).
  */
-export const Question = Schema.Union([
+const QuestionArms = Schema.Union([
   Schema.Struct({
     id: Schema.String,
     type: Schema.Literal("choice"),
@@ -192,6 +207,57 @@ export const Question = Schema.Union([
       'yes/no probability question — carries NO criteria; outcome semantics go in `instructions` (e.g. "1 = premise holds, 0 = it does not")',
   }),
 ]).annotate({ discriminator: "type" })
+
+/**
+ * Guided message for a typed question whose `criteria` KEY is absent. Handled
+ * before the union so a missing required field reads as the fix, not the raw
+ * `Missing key criteria`; an untyped question is exempt because it INFERS its
+ * arm from the very field that is missing (no criteria → noul).
+ */
+const missingCriteriaMessage = (input: unknown): string | undefined => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined
+  const question = input as Record<string, unknown>
+  if ("criteria" in question) return undefined
+  if (question["type"] === "choice") return CHOICE_CRITERIA_REQUIRED_MESSAGE
+  if (question["type"] === "score") return SCORE_CRITERIA_REQUIRED_MESSAGE
+  return undefined
+}
+
+/**
+ * Missing-`type` inference, decode-side only. A question object without a
+ * `type` key is unambiguous in shape: an array `criteria` is the score arm, a
+ * record `criteria` the choice arm (whose own array→record coercion still
+ * applies), and NO `criteria` key the noul arm (the instructions default then
+ * applies). Objects that carry `type` pass through untouched — they decode
+ * exactly as before — and non-objects keep today's failure. Same rule as
+ * INSTRUCTIONS_DEFAULTS: normalize what the body already implies, reject only
+ * the genuinely uninterpretable.
+ */
+const inferQuestionType = (input: unknown): unknown => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return input
+  const question = input as Record<string, unknown>
+  if ("type" in question) return input
+  if (!("criteria" in question)) return { ...question, type: "noul" }
+  if (Array.isArray(question["criteria"])) return { ...question, type: "score" }
+  if (typeof question["criteria"] === "object" && question["criteria"] !== null) return { ...question, type: "choice" }
+  return input
+}
+
+/**
+ * The model-facing question boundary: normalize the unambiguous (infer a missing
+ * discriminator, guide a missing criteria key) then decode the unchanged union.
+ * The decoded type is the union's, so `toQuestions` and the tool see no change.
+ */
+export const Question = Schema.Unknown.pipe(
+  Schema.decodeTo(QuestionArms, {
+    decode: SchemaGetter.transformOrFail((input) => {
+      const required = missingCriteriaMessage(input)
+      if (required !== undefined) return Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: required }))
+      return Effect.succeed(inferQuestionType(input) as Schema.Codec.Encoded<typeof QuestionArms>)
+    }),
+    encode: SchemaGetter.passthrough(),
+  }),
+)
 
 export const Parameters = Schema.Struct({
   goal: Schema.String.annotate({
