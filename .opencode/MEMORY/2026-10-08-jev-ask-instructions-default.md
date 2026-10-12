@@ -17,3 +17,12 @@ General invariant: **a missing descriptive field must never reject a batch — d
 2. JSON-schema `required` arrays and the Effect decode schema agree (omission accepted in both).
 3. Shipped: `strings <app>/Contents/Resources/app.asar | grep -c "<default instruction>"` ≥ 1.
 4. Live check after app relaunch: a `jev_ask` call omitting `instructions` succeeds.
+
+## Recurrence 2026-10-12 — same class, next key: `id`
+
+The class recurred a third time: `SchemaError(Missing key at ["questions"][0]["id"])` — `id` was still hard-required on all three arms and in all three hand-authored JSON-schema `required` arrays. Same fix shape, plus two gaps the reviewer caught (both test-proven):
+
+- **Derivation must be collision-safe**: naive `q${index}` clobbers an explicit `"q0"` elsewhere in the batch → `Object.fromEntries` silently DROPS a question. Fix: `wireIds(params)` pre-seeds a `taken` set with ALL explicit ids BEFORE deriving, then bump-until-free (`uniqueWireId`, mirrors `uniqueChoiceLabel`). Explicit ids always win, never rewritten.
+- **Read-back must consume the same mapping**: `summarize`/`truncationMarker` originally read raw `question.id` (`": unmeasured"` while answers arrived keyed `q0`). All three now consume the one `wireIds` mapping — derivation lives at the single serialization point, read-side included.
+
+Class invariant (refined): **a mechanically derivable field must never reject, lose, or mis-route a batch — derive it once, uniquely against explicit values, and route every reader through that one mapping.** Semantic keys (`type`, `criteria`, `goal`) stay required. Commit `430d81e7de`; shipped asar verified (`strings app.asar | grep -c uniqueWireId` = 3).

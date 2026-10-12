@@ -9,6 +9,7 @@ import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
+import { SymbolsTool } from "./symbols"
 import { TaskTool } from "./task"
 import { WorkflowTool } from "./workflow"
 import { Database } from "@opencode-ai/core/database/database"
@@ -122,6 +123,7 @@ const layer = Layer.effect(
     const writetool = yield* WriteTool
     const edit = yield* EditTool
     const greptool = yield* GrepTool
+    const symbolstool = yield* SymbolsTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const sessionrename = yield* SessionRenameTool
@@ -230,6 +232,7 @@ const layer = Layer.effect(
           read: Tool.init(read),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
+          symbols: Tool.init(symbolstool),
           edit: Tool.init(edit),
           write: Tool.init(writetool),
           task: Tool.init(task),
@@ -262,6 +265,7 @@ const layer = Layer.effect(
             tool.read,
             tool.glob,
             tool.grep,
+            tool.symbols,
             tool.edit,
             tool.write,
             tool.task,

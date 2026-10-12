@@ -34,6 +34,17 @@ export type Hit = {
   readonly line: number
   readonly kind: string
   readonly name: string
+  readonly endLine?: number
+  readonly depth?: number
+}
+
+/**
+ * v1 outline mode: also emit class methods and function-valued variable
+ * declarations, and annotate every hit with its `endLine` and nesting `depth`.
+ * The default (v2 index) stays declarations-only with raw node-type kinds.
+ */
+export type CollectOptions = {
+  readonly detailed?: boolean
 }
 
 // The wasm assets are addressed as bare specifiers, so they only resolve from a
@@ -46,9 +57,26 @@ const resolveWasm = (asset: string) => {
   return fileURLToPath(url)
 }
 
-type Parsers = {
+export type Parsers = {
   readonly typescript: Parser
+  readonly tsx: Parser
   readonly javascript: Parser
+}
+
+// Extension → parser selection is data so every caller (v2 index, v1 tool) routes
+// identically instead of re-deriving the mapping. `.jsx`/`.mjs`/`.cjs` share JS.
+export const PARSER_BY_EXTENSION: Record<string, keyof Parsers> = {
+  ".ts": "typescript",
+  ".tsx": "tsx",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+}
+
+export const selectParser = (parsers: Parsers, filePath: string): Parser | undefined => {
+  const key = PARSER_BY_EXTENSION[path.extname(filePath).toLowerCase()]
+  return key ? parsers[key] : undefined
 }
 
 let loaders: Promise<Parsers> | undefined
@@ -66,26 +94,32 @@ export const loadParsers = () => {
     const { default: tsWasm } = await import("tree-sitter-typescript/tree-sitter-typescript.wasm" as string, {
       with: { type: "wasm" },
     })
+    const { default: tsxWasm } = await import("tree-sitter-typescript/tree-sitter-tsx.wasm" as string, {
+      with: { type: "wasm" },
+    })
     const { default: jsWasm } = await import("tree-sitter-javascript/tree-sitter-javascript.wasm" as string, {
       with: { type: "wasm" },
     })
-    const [typescript, javascript] = await Promise.all([
+    const [typescript, tsx, javascript] = await Promise.all([
       Language.load(resolveWasm(tsWasm)),
+      Language.load(resolveWasm(tsxWasm)),
       Language.load(resolveWasm(jsWasm)),
     ])
     const tsParser = new TreeSitter()
     tsParser.setLanguage(typescript)
+    const tsxParser = new TreeSitter()
+    tsxParser.setLanguage(tsx)
     const jsParser = new TreeSitter()
     jsParser.setLanguage(javascript)
-    return { typescript: tsParser, javascript: jsParser }
+    return { typescript: tsParser, tsx: tsxParser, javascript: jsParser }
   })()
   loaders = pending
   return pending
 }
 
 // functions/generators name themselves with `identifier`; class, interface, type and
-// enum declarations name themselves with `type_identifier`.
-const NAME_NODES = new Set(["identifier", "type_identifier"])
+// enum declarations with `type_identifier`; methods with `property_identifier`.
+const NAME_NODES = new Set(["identifier", "type_identifier", "property_identifier"])
 
 const declaredName = (node: Node) => {
   for (let index = 0; index < node.namedChildCount; index++) {
@@ -96,30 +130,67 @@ const declaredName = (node: Node) => {
   return undefined
 }
 
-const visit = (node: Node, out: Hit[], cap: number) => {
-  if (out.length >= cap) return
-  // `export` wraps the real declaration, so step through it instead of matching it.
-  if (node.type === "export_statement") {
-    for (let index = 0; index < node.namedChildCount; index++) {
-      const inner = node.namedChild(index)
-      if (inner) visit(inner, out, cap)
-    }
-    return
-  }
-  if (DECLARATION_NODES.has(node.type)) {
-    const name = declaredName(node)
-    if (name) out.push({ path: "", line: node.startPosition.row + 1, kind: node.type, name })
-  }
-  for (let index = 0; index < node.childCount; index++) {
-    const child = node.child(index)
-    if (child) visit(child, out, cap)
+// `const foo = () => {}` / `const foo = function () {}` declare a function; a bare
+// `const foo = 1` does not, so only function-valued declarators are emitted.
+const collectVariableFunctions = (node: Node, out: Hit[], cap: number, depth: number) => {
+  for (let index = 0; index < node.namedChildCount && out.length < cap; index++) {
+    const declarator = node.namedChild(index)
+    if (!declarator || declarator.type !== "variable_declarator") continue
+    const value = declarator.childForFieldName("value")
+    if (!value || (value.type !== "arrow_function" && value.type !== "function_expression")) continue
+    const name = declarator.childForFieldName("name")
+    if (!name) continue
+    out.push({
+      path: "",
+      line: node.startPosition.row + 1,
+      kind: "function",
+      name: name.text,
+      endLine: node.endPosition.row + 1,
+      depth,
+    })
   }
 }
 
-/** Collects declarations only — v1 deliberately skips methods and variables. */
-export const collectSymbols = (tree: Tree, cap: number) => {
+const collect = (node: Node, out: Hit[], cap: number, detailed: boolean, depth: number) => {
+  if (out.length >= cap) return
+  // `export` wraps the real declaration, so step through it without a depth bump.
+  if (node.type === "export_statement") {
+    for (let index = 0; index < node.childCount; index++) {
+      const child = node.child(index)
+      if (child) collect(child, out, cap, detailed, depth)
+    }
+    return
+  }
+  if (detailed && node.type === "lexical_declaration") {
+    collectVariableFunctions(node, out, cap, depth)
+    return
+  }
+  const declaration = DECLARATION_NODES.has(node.type) || (detailed && node.type === "method_definition")
+  if (declaration) {
+    const name = declaredName(node)
+    if (name) {
+      out.push({
+        path: "",
+        line: node.startPosition.row + 1,
+        kind: node.type,
+        name,
+        ...(detailed ? { endLine: node.endPosition.row + 1, depth } : {}),
+      })
+    }
+  }
+  // Nesting depth only advances through declarations, so a method reads as depth 1
+  // inside its class; every other node passes its depth through unchanged.
+  const childDepth = detailed && declaration ? depth + 1 : depth
+  for (let index = 0; index < node.childCount; index++) {
+    const child = node.child(index)
+    if (child) collect(child, out, cap, detailed, childDepth)
+  }
+}
+
+/** Collects declarations; `detailed` adds methods, function-valued variables, depth and end lines. */
+export const collectSymbols = (tree: Tree, cap: number, options?: CollectOptions) => {
   const out: Hit[] = []
-  visit(tree.rootNode, out, cap)
+  collect(tree.rootNode, out, cap, options?.detailed === true, 0)
   return out
 }
 
@@ -153,7 +224,8 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const source = yield* fs.readFileStringSafe(path.resolve(location.directory, file)).pipe(Effect.orDie)
         if (source === undefined) return []
-        const parser = file.endsWith(".ts") ? parsers.typescript : parsers.javascript
+        const parser = selectParser(parsers, file)
+        if (!parser) return []
         const tree = parser.parse(source)
         if (!tree) return []
         return collectSymbols(tree, cap)

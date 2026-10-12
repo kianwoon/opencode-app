@@ -1,0 +1,9 @@
+Outline the declarations in a source file using tree-sitter.
+
+Usage:
+- The filePath parameter should be an absolute path.
+- Supported extensions: .ts, .tsx, .js, .jsx, .mjs, .cjs.
+- Returns one line per declaration, indented by nesting depth, in the form `name  kind  L<startLine>-L<endLine>` (1-indexed lines).
+- Declarations covered: functions, generators, classes, methods, interfaces, type aliases, enums, and variables assigned an arrow/function.
+- Use this to locate a symbol before reading it with the read tool's `symbol` parameter.
+- Unsupported extensions return "no symbol parser for <ext>" rather than failing.

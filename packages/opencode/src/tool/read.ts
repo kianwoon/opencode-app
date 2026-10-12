@@ -9,6 +9,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { Instruction } from "../session/instruction"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import { noSymbolParserMessage, parseSymbols } from "./symbols"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -32,6 +33,9 @@ export const Parameters = Schema.Struct({
   }),
   limit: Schema.optional(NonNegativeInt).annotate({
     description: "The maximum number of lines to read (defaults to 2000)",
+  }),
+  symbol: Schema.optional(Schema.String).annotate({
+    description: "A declaration name to read: resolves to that symbol's line range (mutually exclusive with offset/limit)",
   }),
 })
 
@@ -328,7 +332,30 @@ export const ReadTool = Tool.define<
         return yield* Effect.fail(new Error(`Cannot read binary file: ${filepath}`))
       }
 
-      const file = yield* lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset || 1 })
+      const selection = yield* Effect.gen(function* () {
+        if (!params.symbol) return { offset: params.offset || 1, limit: params.limit ?? DEFAULT_READ_LIMIT }
+        if (params.offset !== undefined || params.limit !== undefined) {
+          return yield* Effect.fail(
+            new Error("The 'symbol' parameter cannot be combined with 'offset' or 'limit'."),
+          )
+        }
+        const symbols = yield* Effect.promise(() => parseSymbols(filepath))
+        if (!symbols) return yield* Effect.fail(new Error(noSymbolParserMessage(filepath)))
+        const hit = symbols.find((symbol) => symbol.name === params.symbol)
+        if (!hit) {
+          const names = symbols.map((symbol) => symbol.name)
+          return yield* Effect.fail(
+            new Error(
+              names.length > 0
+                ? `Symbol '${params.symbol}' not found in ${filepath}. Available symbols: ${names.join(", ")}`
+                : `No declarations found in ${filepath}.`,
+            ),
+          )
+        }
+        return { offset: hit.startLine, limit: hit.endLine - hit.startLine + 1 }
+      })
+
+      const file = yield* lines(filepath, selection)
       if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
         return yield* Effect.fail(
           new Error(`Offset ${file.offset} is out of range for this file (${file.count} lines)`),
