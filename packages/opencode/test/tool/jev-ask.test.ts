@@ -6,7 +6,6 @@ import {
   CHOICE_CRITERIA_REQUIRED_MESSAGE,
   CRITERIA_LENGTH_MESSAGE,
   INSTRUCTIONS_DEFAULTS,
-  NOUL_CRITERIA_MESSAGE,
   ParametersJsonSchema,
   SCORE_CRITERIA_MESSAGE,
   SCORE_CRITERIA_REQUIRED_MESSAGE,
@@ -129,25 +128,32 @@ const criteriaOf = (row: unknown) =>
   typeof row === "object" && row !== null && "criteria" in row ? row.criteria : undefined
 
 describe("Schema rejects the wire-422 shapes at the tool boundary", () => {
-  test("score with record criteria and noul with criteria both fail decode", async () => {
+  test("score with record criteria still fails decode", async () => {
     const decode = Schema.decodeUnknownEffect(Parameters)
     // choice with an array criteria no longer belongs here: it is COERCED to a
     // record at decode (see "choice array criteria decodes to a record").
-    const bad = [
-      { goal: "g", questions: [{ id: "b", type: "score", instructions: "i", criteria: { "0": "x" } }] },
-      { goal: "g", questions: [{ id: "c", type: "noul", instructions: "i", criteria: { x: "y" } }] },
-    ]
-    for (const args of bad) await expect(Effect.runPromise(decode(args as never))).rejects.toThrow()
+    const args = { goal: "g", questions: [{ id: "b", type: "score", instructions: "i", criteria: { "0": "x" } }] }
+    await expect(Effect.runPromise(decode(args as never))).rejects.toThrow()
   })
 
-  test("noul with criteria fails decode with guidance naming `instructions`, not `Expected never`", async () => {
+  test("noul with record criteria decodes and drops the criteria key from the wire payload", async () => {
     const decode = Schema.decodeUnknownEffect(Parameters)
-    const exit = await Effect.runPromiseExit(
+    const params_ = await Effect.runPromise(
       decode({ goal: "g", questions: [{ id: "c", type: "noul", instructions: "i", criteria: { x: "y" } }] } as never),
     )
-    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
-    expect(message).toContain(NOUL_CRITERIA_MESSAGE)
-    expect(message).not.toContain("Expected never")
+    const wire = toQuestions(params_)["c"]
+    expect(criteriaOf(wire)).toBeUndefined()
+    expect(wire).toEqual({ type: "noul", instructions: "i" })
+  })
+
+  test("noul with array criteria also decodes and drops the criteria key", async () => {
+    const decode = Schema.decodeUnknownEffect(Parameters)
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ id: "c", type: "noul", instructions: "i", criteria: ["a", "b"] }] } as never),
+    )
+    const wire = toQuestions(params_)["c"]
+    expect(criteriaOf(wire)).toBeUndefined()
+    expect(wire).toEqual({ type: "noul", instructions: "i" })
   })
 
   test("choice array criteria decodes to a record with derived labels", async () => {

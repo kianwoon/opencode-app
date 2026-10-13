@@ -5,15 +5,6 @@ import { jevKey } from "../jev/controller"
 import { JEV_DEFAULT_TIMEOUT_MS, jevAsk, jevModelFor, parseJevAnswer, type JevTransport } from "../jev/client"
 
 /**
- * Decode-error text for the noul arm's `criteria` field. Effect honors a
- * `message` annotation on the optional(Never) node even inside a
- * discriminated union, so the caller learns the fix instead of reading
- * `Expected never | undefined`.
- */
-export const NOUL_CRITERIA_MESSAGE =
-  'noul questions take NO criteria — encode the outcome semantics in `instructions` (e.g. "1 = premise holds, 0 = it does not")'
-
-/**
  * Decode-error text for the choice arm's `criteria` field. The sibling `score`
  * arm legitimately takes an array, so a bare array for `choice` reads as a
  * near-miss; the raw mismatch (`Expected object, got [...]`) echoes the bad
@@ -160,8 +151,11 @@ export const INSTRUCTIONS_DEFAULTS = {
  * from the tool boundary (jev.md §2): `choice` criteria is a record
  * `label → description`, `score` criteria is an ORDERED string array of level
  * descriptions (the record form is rejected with HTTP 422 `list_type`), and
- * `noul` carries no criteria at all (`Schema.Never`, so passing one fails
- * decode rather than the endpoint).
+ * `noul` carries no criteria on the wire. A typed-noul row that DOES carry a
+ * criteria key is normalized before this union (see `inferQuestionType`): the
+ * key is always spurious metadata, so it is stripped rather than rejected. The
+ * union's `Schema.optional(Schema.Never)` stays as the type-level backstop for
+ * any noul payload that reaches it unnormalized.
  */
 const QuestionArms = Schema.Union([
   Schema.Struct({
@@ -201,7 +195,7 @@ const QuestionArms = Schema.Union([
     id: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(""))),
     type: Schema.Literal("noul"),
     instructions: Schema.String.pipe(Schema.withDecodingDefaultType(Effect.succeed(INSTRUCTIONS_DEFAULTS.noul))),
-    criteria: Schema.optional(Schema.Never).annotate({ message: NOUL_CRITERIA_MESSAGE }),
+    criteria: Schema.optional(Schema.Never),
   }).annotate({
     description:
       'yes/no probability question — carries NO criteria; outcome semantics go in `instructions` (e.g. "1 = premise holds, 0 = it does not")',
@@ -224,19 +218,28 @@ const missingCriteriaMessage = (input: unknown): string | undefined => {
 }
 
 /**
- * Missing-`type` inference, decode-side only. A question object without a
- * `type` key is unambiguous in shape: an array `criteria` is the score arm, a
- * record `criteria` the choice arm (whose own array→record coercion still
- * applies), and NO `criteria` key the noul arm (the instructions default then
- * applies). Objects that carry `type` pass through untouched — they decode
- * exactly as before — and non-objects keep today's failure. Same rule as
- * INSTRUCTIONS_DEFAULTS: normalize what the body already implies, reject only
- * the genuinely uninterpretable.
+ * Missing-`type` inference AND typed-noul criteria stripping, decode-side only.
+ * A question object without a `type` key is unambiguous in shape: an array
+ * `criteria` is the score arm, a record `criteria` the choice arm (whose own
+ * array→record coercion still applies), and NO `criteria` key the noul arm (the
+ * instructions default then applies). A question object WITH `type: "noul"` is
+ * equally unambiguous: the wire noul arm carries no criteria, so a criteria key
+ * on one is always spurious metadata and is dropped before the union decode
+ * (record OR array form alike). Other typed objects pass through untouched —
+ * they decode exactly as before — and non-objects keep today's failure. Same
+ * rule as INSTRUCTIONS_DEFAULTS: normalize what the body already implies, reject
+ * only the genuinely uninterpretable.
  */
 const inferQuestionType = (input: unknown): unknown => {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return input
   const question = input as Record<string, unknown>
-  if ("type" in question) return input
+  if ("type" in question) {
+    if (question["type"] === "noul" && "criteria" in question) {
+      const { criteria: _spurious, ...rest } = question
+      return rest
+    }
+    return input
+  }
   if (!("criteria" in question)) return { ...question, type: "noul" }
   if (Array.isArray(question["criteria"])) return { ...question, type: "score" }
   if (typeof question["criteria"] === "object" && question["criteria"] !== null) return { ...question, type: "choice" }
