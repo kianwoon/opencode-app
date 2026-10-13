@@ -262,14 +262,66 @@ export const Question = Schema.Unknown.pipe(
   }),
 )
 
-export const Parameters = Schema.Struct({
+/**
+ * The raw batch shape: `questions` entries are `unknown` so a NON-OBJECT entry
+ * (string / number / boolean / null / nested array) can be dropped with a stated
+ * marker before per-question decode, instead of failing the whole batch at the
+ * array union and killing every good decision alongside it. Objects that fail
+ * arm guidance (missing criteria, bounds) still fail the batch exactly as before
+ * — this tolerance covers non-objects only.
+ */
+const RawParameters = Schema.Struct({
   goal: Schema.String.annotate({
     description: "What the decision is for — the decision state sent as `state`",
   }),
-  questions: Schema.Array(Question).annotate({
+  questions: Schema.Array(Schema.Unknown).annotate({
     description: "Typed questions to ask in ONE request; answers come back keyed by the same ids",
   }),
 })
+
+const isQuestionObject = (entry: unknown): entry is Record<string, unknown> =>
+  typeof entry === "object" && entry !== null && !Array.isArray(entry)
+
+const malformedSnippet = (entry: unknown) => (JSON.stringify(entry) ?? String(entry)).slice(0, 40)
+
+/** One stated `index <i>: <snippet>` per non-object entry, in question order. */
+const malformedDropsOf = (questions: ReadonlyArray<unknown>): string[] =>
+  questions
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => !isQuestionObject(entry))
+    .map(({ entry, index }) => `index ${index}: ${malformedSnippet(entry)}`)
+
+/**
+ * An all-garbage batch is meaningless — sending an empty question list to the
+ * vendor is never the intent — so it fails with the fix stated rather than
+ * silently asking nothing.
+ */
+export const ALL_MALFORMED_MESSAGE =
+  "every questions entry was malformed (not a question object) — send at least one typed question"
+
+export const Parameters = RawParameters.pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      goal: Schema.String,
+      questions: Schema.Array(Question),
+      // Decode-side only (mirrors `id`/`instructions`): the hand-authored
+      // ParametersJsonSchema never carries it, so the model never sees it.
+      malformedDrops: Schema.optional(Schema.Array(Schema.String)).pipe(
+        Schema.withDecodingDefaultType(Effect.succeed([])),
+      ),
+    }),
+    {
+      decode: SchemaGetter.transformOrFail((raw) => {
+        const questions = raw.questions.filter(isQuestionObject)
+        const malformedDrops = malformedDropsOf(raw.questions)
+        if (questions.length === 0 && malformedDrops.length > 0)
+          return Effect.fail(new SchemaIssue.InvalidValue(Option.some(raw.questions), { message: ALL_MALFORMED_MESSAGE }))
+        return Effect.succeed({ goal: raw.goal, questions, malformedDrops })
+      }),
+      encode: SchemaGetter.passthrough(),
+    },
+  ),
+)
 
 // Hand-authored because `criteria` is deliberately Unknown-encoded above for
 // tolerant, message-carrying decode failures; that makes the GENERATED JSON
@@ -384,6 +436,17 @@ export function truncationMarker(params: Params): string | undefined {
   return `questions truncated from ${params.questions.length} to ${QUESTIONS_MAX}; dropped ids: ${dropped.join(", ")}`
 }
 
+/**
+ * Marker for a batch that carried non-object entries, dropped at decode. The
+ * drop is STATED to the caller in-band (mirrors `truncationMarker`) so a caller
+ * never mistakes a filtered entry for a missing verdict.
+ */
+export function malformedDropsMarker(params: Params): string | undefined {
+  const drops = params.malformedDrops ?? []
+  if (drops.length === 0) return undefined
+  return `${drops.length} malformed ${drops.length === 1 ? "entry" : "entries"} dropped (not questions): ${drops.join(", ")}`
+}
+
 export function toQuestions(params: Params): Record<string, unknown> {
   const ids = wireIds(params)
   return Object.fromEntries(
@@ -425,10 +488,11 @@ function summarize(params: Params, answers: Record<string, unknown>): string[] {
 }
 
 export function formatAsk(params: Params, answers: Record<string, unknown>): { title: string; output: string } {
+  const drops = malformedDropsMarker(params)
   const marker = truncationMarker(params)
   return {
     title: "jev: ask",
-    output: `${marker ? marker + "\n" : ""}${summarize(params, answers).join("\n")}\n${JSON.stringify(answers)}`,
+    output: `${drops ? drops + "\n" : ""}${marker ? marker + "\n" : ""}${summarize(params, answers).join("\n")}\n${JSON.stringify(answers)}`,
   }
 }
 

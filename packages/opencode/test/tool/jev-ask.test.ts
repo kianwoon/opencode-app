@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { Cause, Effect, Exit, Schema } from "effect"
 import {
+  ALL_MALFORMED_MESSAGE,
   CHOICE_CRITERIA_MESSAGE,
   CHOICE_CRITERIA_REQUIRED_MESSAGE,
   CRITERIA_LENGTH_MESSAGE,
@@ -685,5 +686,75 @@ describe("a missing `id` is derived, never rejected", () => {
     const { output } = formatAsk(params_, { q0: { noul: 0.3 } })
     expect(output).toContain("q0: noul=0.3")
     expect(output).not.toContain(": unmeasured")
+  })
+})
+
+// One non-object entry must never fail the WHOLE batch: it is dropped with an
+// explicit in-band marker, so the good decisions survive and the drop is stated.
+describe("a non-object questions entry is dropped with a stated marker", () => {
+  const decode = Schema.decodeUnknownEffect(Parameters)
+
+  test("a trailing string drops while the five valid questions survive, marker naming index 5", async () => {
+    const params_ = await Effect.runPromise(
+      decode({
+        goal: "g",
+        questions: [
+          { id: "q0", type: "choice", instructions: "i", criteria: { keep: "helps", drop: "irrelevant" } },
+          { id: "q1", type: "score", instructions: "i", criteria: ["low", "high"] },
+          { id: "q2", type: "noul", instructions: "i" },
+          { id: "q3", type: "choice", instructions: "i", criteria: { accept: "yes", refire: "no" } },
+          { id: "q4", type: "noul", instructions: "i" },
+          "instructions_note_none",
+        ],
+      } as never),
+    )
+    expect(Object.keys(toQuestions(params_))).toEqual(["q0", "q1", "q2", "q3", "q4"])
+    const { output } = formatAsk(params_, {})
+    expect(output).toContain('1 malformed entry dropped (not questions): index 5: "instructions_note_none"')
+    expect(output).toContain("q0: unmeasured")
+  })
+
+  test.each([
+    ["42", 42],
+    ["true", true],
+    ["null", null],
+  ])("a %s entry drops with its own snippet", async (snippet, entry) => {
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ id: "q0", type: "noul", instructions: "i" }, entry] } as never),
+    )
+    expect(Object.keys(toQuestions(params_))).toEqual(["q0"])
+    const { output } = formatAsk(params_, {})
+    expect(output).toContain(`index 1: ${snippet}`)
+  })
+
+  test("a nested array entry also drops, never decoded as a question", async () => {
+    const params_ = await Effect.runPromise(
+      decode({ goal: "g", questions: [{ id: "q0", type: "noul", instructions: "i" }, ["not", "a", "question"]] } as never),
+    )
+    expect(Object.keys(toQuestions(params_))).toEqual(["q0"])
+    expect(formatAsk(params_, {}).output).toContain('index 1: ["not","a","question"]')
+  })
+
+  test("an all-non-object batch FAILS with the stated fix", async () => {
+    const exit = await Effect.runPromiseExit(decode({ goal: "g", questions: ["a", 42] } as never))
+    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+    expect(message).toContain(ALL_MALFORMED_MESSAGE)
+  })
+
+  test("no malformed entries → no marker, output identical to a clean batch", async () => {
+    const params_ = await Effect.runPromise(decode(params as never))
+    expect(params_.malformedDrops ?? []).toEqual([])
+    const output = formatAsk(params_, {}).output
+    expect(output).not.toContain("malformed")
+    expect(output).toBe(formatAsk(params, {}).output)
+  })
+})
+
+// Tolerance is decode-side only: the hand-authored model contract is unchanged.
+describe("the model-facing schema is untouched by the drop field", () => {
+  test("ParametersJsonSchema carries no malformedDrops property anywhere", () => {
+    expect(ParametersJsonSchema.properties).not.toHaveProperty("malformedDrops")
+    expect(JSON.stringify(ParametersJsonSchema)).not.toContain("malformedDrops")
+    expect(ParametersJsonSchema.required ?? []).toEqual(["goal", "questions"])
   })
 })
