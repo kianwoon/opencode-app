@@ -12,8 +12,17 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Agent } from "@/agent/agent"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
-import { CONTROLS_MAX, LABEL_MAX } from "@/jev/controller"
-import { Parameters, UiRunTool, buildCandidates, decodeObservation, needsForegroundDelivery, normalizeExpect } from "@/tool/ui-run"
+import { CONTROLS_MAX, LABEL_MAX, foldController } from "@/jev/controller"
+import {
+  Parameters,
+  UiRunTool,
+  buildCandidates,
+  decideStep,
+  decodeObservation,
+  isDestructive,
+  needsForegroundDelivery,
+  normalizeExpect,
+} from "@/tool/ui-run"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -75,9 +84,19 @@ describe("ui_run parameters", () => {
 
     expect(decoded._tag).toBe("Some")
     if (decoded._tag !== "Some") return
-    expect(decoded.value.steps.length).toBe(1)
+    expect(decoded.value.steps?.length).toBe(1)
     expect(decoded.value.window.window_id).toBe(7)
     expect(decoded.value.expect).toBeUndefined()
+  })
+
+  test("decodes a goal-driven run with value + maxSteps and no steps", () => {
+    const decoded = Schema.decodeUnknownOption(Parameters)({ goal: "g", window, value: "jev", maxSteps: 40 })
+
+    expect(decoded._tag).toBe("Some")
+    if (decoded._tag !== "Some") return
+    expect(decoded.value.steps).toBeUndefined()
+    expect(decoded.value.value).toBe("jev")
+    expect(decoded.value.maxSteps).toBe(40)
   })
 
   test("decodes a fill step carrying a value", () => {
@@ -89,7 +108,7 @@ describe("ui_run parameters", () => {
 
     expect(decoded._tag).toBe("Some")
     if (decoded._tag !== "Some") return
-    expect(decoded.value.steps[1].value).toBe("jev")
+    expect(decoded.value.steps?.[1].value).toBe("jev")
   })
 
   test("passes verify predicates through unchanged", () => {
@@ -218,6 +237,125 @@ describe("normalizeExpect", () => {
   test("passes unknown keys and non-object values through unchanged", () => {
     const predicates = [{ role: "button", count: 3, label: "OK", list: [1, 2], enabled: "TRUE" }]
     expect(normalizeExpect(predicates)).toEqual(predicates)
+  })
+})
+
+// Shapes mirror live decisions captures (choice + per-label probabilities).
+const ans = (choice: string, probabilities: Record<string, number>) => ({ type: "choice", choice, probabilities })
+
+const index = (elements: Parameters<typeof buildCandidates>[0]) => {
+  const candidates = buildCandidates(elements)
+  return { labels: candidates.labels, byLabel: candidates.byLabel }
+}
+
+const accepted = (answers: Record<string, unknown>) => foldController({ answers }, 0.7)
+
+describe("decideStep", () => {
+  const base = {
+    candidates: index([button(1, "Save"), button(2, "Settings")]),
+    goalMet: false,
+    evidence: false,
+    step: 0,
+    maxSteps: 30,
+    ambiguous: 0,
+    maxAmbiguous: 3,
+  }
+
+  test("a below-gate decision falls to a SAFE action, it does not abort", () => {
+    const outcome = accepted({ action: ans("click", { click: 0.55, wait: 0.45 }) })
+    const v = decideStep({ ...base, outcome })
+    expect(v.kind).toBe("safe")
+    if (v.kind !== "safe") throw new Error("expected safe")
+    expect(v.reason).toBe("below-gate")
+  })
+
+  test("an unmeasured decision falls to a SAFE action", () => {
+    const v = decideStep({ ...base, outcome: foldController({}, 0.7) })
+    expect(v.kind).toBe("safe")
+  })
+
+  test("advisory goal_met true with NO evidence CONTINUES rather than stopping", () => {
+    const outcome = accepted({ action: ans("done", { done: 0.99 }) })
+    const v = decideStep({ ...base, outcome, goalMet: true })
+    expect(v.kind).toBe("safe")
+    if (v.kind !== "safe") throw new Error("expected safe")
+    expect(v.reason).toBe("goal-met-advisory-no-evidence")
+  })
+
+  test("observed evidence stops as verified, over every advisory signal", () => {
+    const outcome = accepted({ action: ans("click", { click: 0.9 }) })
+    const v = decideStep({ ...base, outcome, evidence: true, goalMet: true })
+    expect(v.kind).toBe("stop")
+    if (v.kind !== "stop") throw new Error("expected stop")
+    expect(v.reason).toBe("evidence-satisfied")
+  })
+
+  test("a target validated against the FRESH candidates becomes an act", () => {
+    const outcome = accepted({
+      action: ans("click", { click: 0.9, wait: 0.1 }),
+      target: ans("0:c2 AXButton Settings", { "0:c2 AXButton Settings": 0.95, none: 0.05 }),
+    })
+    const v = decideStep({ ...base, outcome })
+    expect(v.kind).toBe("act")
+    if (v.kind !== "act") throw new Error("expected act")
+    expect(v.element.element_token).toBe("s00000011:2")
+  })
+
+  test("a target absent from THIS iteration's candidates falls safe (never a stale map)", () => {
+    const outcome = accepted({
+      action: ans("click", { click: 0.9 }),
+      target: ans("0:c9 AXButton Gone", { "0:c9 AXButton Gone": 0.95 }),
+    })
+    const v = decideStep({ ...base, outcome, candidates: index([button(1, "Save")]) })
+    expect(v.kind).toBe("safe")
+    if (v.kind !== "safe") throw new Error("expected safe")
+    expect(v.reason).toBe("target-not-in-fresh-candidates")
+  })
+
+  test("a destructive target stops for consent BEFORE acting", () => {
+    const outcome = accepted({
+      action: ans("click", { click: 0.9 }),
+      target: ans("0:c1 AXButton Save", { "0:c1 AXButton Save": 0.95 }),
+    })
+    const v = decideStep({ ...base, outcome, candidates: index([button(1, "Save")]) })
+    expect(v.kind).toBe("checkpoint")
+    if (v.kind !== "checkpoint") throw new Error("expected checkpoint")
+    expect(v.target).toContain("Save")
+  })
+
+  test("budget exhaustion is a hard stop", () => {
+    const v = decideStep({ ...base, outcome: foldController({}, 0.7), step: 30 })
+    expect(v.kind).toBe("stop")
+    if (v.kind !== "stop") throw new Error("expected stop")
+    expect(v.reason).toBe("budget-exhausted")
+  })
+
+  test("the ambiguity bound stops a run that never acts", () => {
+    const v = decideStep({ ...base, outcome: foldController({}, 0.7), ambiguous: 3 })
+    expect(v.kind).toBe("stop")
+    if (v.kind !== "stop") throw new Error("expected stop")
+    expect(v.reason).toBe("ambiguous-limit")
+  })
+
+  test("a type decision without text falls safe instead of typing nothing", () => {
+    const outcome = accepted({
+      action: ans("type", { type: 0.9 }),
+      target: ans("0:c1 AXButton Field", { "0:c1 AXButton Field": 0.95 }),
+    })
+    const v = decideStep({ ...base, outcome, candidates: index([button(1, "Field")]) })
+    expect(v.kind).toBe("safe")
+    if (v.kind !== "safe") throw new Error("expected safe")
+    expect(v.reason).toBe("type-without-text")
+  })
+})
+
+describe("isDestructive", () => {
+  test("flags the consent verbs and passes ordinary controls", () => {
+    expect(isDestructive("c1 AXButton Save")).toBe(true)
+    expect(isDestructive("Submit")).toBe(true)
+    expect(isDestructive("Delete account")).toBe(true)
+    expect(isDestructive("Confirm")).toBe(true)
+    expect(isDestructive("c2 AXButton Settings")).toBe(false)
   })
 })
 

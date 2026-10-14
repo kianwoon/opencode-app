@@ -2,9 +2,12 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import { MCP } from "../mcp"
 import * as Tool from "./tool"
-import { CONTROLS_MAX, LABEL_MAX, jevControl, jevKey } from "../jev/controller"
+import { CONTROLS_MAX, LABEL_MAX, jevControlDetailed, jevKey, type ControllerOutcome } from "../jev/controller"
 
-const MAX_STEPS = 12
+const DEFAULT_MAX_STEPS = 30
+const HARD_MAX_STEPS = 100
+/** Consecutive non-acting (safe) iterations before the loop stops as stuck. */
+const MAX_AMBIGUOUS = 3
 const DEFAULT_TIMEOUT = 30_000
 const MAX_EXPECT = 8
 
@@ -109,21 +112,123 @@ export function normalizeExpect(expect: ReadonlyArray<Record<string, unknown>>):
   return expect.map(normalizePredicate)
 }
 
+/** Destructive verbs: a target label matching one stops the run for consent. */
+const DESTRUCTIVE =
+  /\b(save|submit|delete|remove|erase|confirm|apply|send|discard|reset|overwrite|uninstall|purchase|buy|pay|checkout)\b/i
+
+/**
+ * GENERAL RULE: the loop re-observes and re-decides every iteration and stops
+ * only on observed evidence. The open-loop batch is one INSTANCE of that rule's
+ * failure — it decided once from a snapshot the UI had already invalidated, so
+ * every later step acted on a stale candidate set. `decideStep` is the pure,
+ * instance-independent core, so the rule holds for the reported case and for
+ * unseen flows alike (e.g. a 40-step navigation interrupted by a mid-flow
+ * dialog: each dialog re-observes, re-decides, and either acts or falls safe).
+ */
+export type StepDecision =
+  | {
+      readonly kind: "act"
+      readonly action: "click" | "type"
+      readonly element: Element
+      readonly text?: string
+      readonly reason: string
+    }
+  | { readonly kind: "safe"; readonly action: "scroll" | "wait" | "observe"; readonly reason: string }
+  | { readonly kind: "stop"; readonly reason: string }
+  | { readonly kind: "checkpoint"; readonly target: string; readonly reason: string }
+
+export interface StepInput {
+  /** Controller verdict for THIS iteration (accepted | below_gate | unmeasured). */
+  readonly outcome: ControllerOutcome
+  /** Candidate index rebuilt from THIS iteration's fresh observation. */
+  readonly candidates: { readonly labels: readonly string[]; readonly byLabel: ReadonlyMap<string, Element> }
+  /** Advisory `goal_met` from jev (or a `done` action). Never authoritative. */
+  readonly goalMet: boolean
+  /** Observed proof the goal is met (`cua-driver_verify_state` satisfied). */
+  readonly evidence: boolean
+  /** Text to type when the decided action is `type`. */
+  readonly text?: string
+  /** Zero-based iteration index and its budget. */
+  readonly step: number
+  readonly maxSteps: number
+  /** Consecutive non-acting iterations and its bound. */
+  readonly ambiguous: number
+  readonly maxAmbiguous: number
+}
+
+export const isDestructive = (label: string): boolean => DESTRUCTIVE.test(label)
+
+/**
+ * Pure per-iteration decision. Order is the contract: observed evidence wins
+ * over every advisory signal; budget and the ambiguity bound are hard stops; a
+ * below-gate, unmeasured or stale-target verdict falls to a SAFE action (never
+ * an abort); a destructive target stops the run for consent BEFORE it acts.
+ */
+export function decideStep(input: StepInput): StepDecision {
+  // Evidence is authoritative — the ONLY thing that stops the loop as verified.
+  if (input.evidence) return { kind: "stop", reason: "evidence-satisfied" }
+  if (input.step >= input.maxSteps) return { kind: "stop", reason: "budget-exhausted" }
+  if (input.ambiguous >= input.maxAmbiguous) return { kind: "stop", reason: "ambiguous-limit" }
+
+  // jev believing the goal is met is ADVISORY: with no observed evidence it must
+  // NOT terminate — re-observe instead (continue-don't-abort, bounded above).
+  if (input.goalMet) return { kind: "safe", action: "observe", reason: "goal-met-advisory-no-evidence" }
+
+  if (input.outcome.verdict !== "accepted")
+    return {
+      kind: "safe",
+      action: "wait",
+      reason: input.outcome.verdict === "below_gate" ? "below-gate" : "unmeasured",
+    }
+
+  const decision = input.outcome.decision
+  if (decision.action !== "click" && decision.action !== "type")
+    return {
+      kind: "safe",
+      action: decision.action === "scroll" ? "scroll" : "wait",
+      reason: `action-${decision.action}`,
+    }
+
+  // Validate the target against THIS iteration's fresh candidate set — never a stale map.
+  if (!decision.target) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
+  const element = input.candidates.byLabel.get(decision.target)
+  if (!element?.element_token) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
+  if (isDestructive(decision.target)) return { kind: "checkpoint", target: decision.target, reason: "destructive-boundary" }
+  if (decision.action === "type") {
+    if (!input.text) return { kind: "safe", action: "observe", reason: "type-without-text" }
+    return { kind: "act", action: "type", element, text: input.text, reason: "decided" }
+  }
+  return { kind: "act", action: "click", element, reason: "decided" }
+}
+
 export const Parameters = Schema.Struct({
-  goal: Schema.String.annotate({ description: "Run-level goal, kept as context for every step" }),
+  goal: Schema.String.annotate({
+    description: "Run-level goal the closed loop drives to; re-observed and re-decided every iteration",
+  }),
   window: Schema.Struct({ pid: Schema.Int, window_id: Schema.Int }).annotate({
     description: "Target window, as reported by cua-driver_list_windows",
   }),
-  steps: Schema.Array(
-    Schema.Struct({
-      intent: Schema.String.annotate({ description: "Subgoal for this one step, handed to the decision model" }),
-      value: Schema.optional(Schema.String).annotate({
-        description: "Text to type into the chosen control; when present the step types instead of clicking",
+  steps: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        intent: Schema.String.annotate({ description: "Subgoal for this one step, handed to the decision model" }),
+        value: Schema.optional(Schema.String).annotate({
+          description: "Text to type into the chosen control; when present the step types instead of clicking",
+        }),
       }),
-    }),
-  ).annotate({ description: "Ordered step subgoals, executed in order" }),
+    ),
+  ).annotate({
+    description:
+      "DEPRECATED alias for caller-authored fixed steps. The loop is goal-driven now and treats these only as an advisory hint; prefer `goal` + `value`.",
+  }),
+  value: Schema.optional(Schema.String).annotate({
+    description: "Text to type when the decided action is `type`",
+  }),
   expect: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))).annotate({
     description: "Verify predicates passed straight through to cua-driver_verify_state",
+  }),
+  maxSteps: Schema.optional(Schema.Int).annotate({
+    description: `Max observe→decide→act→verify iterations (default ${DEFAULT_MAX_STEPS}, hard cap ${HARD_MAX_STEPS})`,
   }),
 })
 
@@ -179,7 +284,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
 
     return {
       description:
-        "Run a bounded observe-decide-act-verify loop on one window in ONE call: the window is observed once, then each step's subgoal is decided by jev and executed with no model turn between steps. Fails open at every stage — a missing decision key, an undecodable observation, a sub-threshold decision or a driver error stops the loop and reports back instead of guessing. Actuator effects are unverifiable per step, so pass `expect` to verify the end state with cua-driver_verify_state. Requires the cua-driver MCP server and a configured jev key; returns an unavailable notice otherwise.",
+        "Drive a window to a goal in ONE call with a CLOSED observe-decide-act-verify loop: every iteration re-observes the window afresh, re-decides with jev from that iteration's live controls, validates the target against them and acts, then verifies. It stops only on OBSERVED evidence (cua-driver_verify_state), an exhausted budget, N consecutive ambiguous decisions, a destructive-action boundary (Save/Submit/Delete/confirm — stops for consent), or a driver error. A missing/sub-threshold decision never aborts: it falls to a safe action (scroll/wait/re-observe) up to a small bound. An undecodable observation still stops (targets are never guessed from prose), and jev's `goal_met` is advisory only. Pass `expect` to verify the end state. Requires the cua-driver MCP server and a configured jev key; returns an unavailable notice otherwise.",
       parameters: Parameters,
       execute: (params: Params, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
@@ -191,11 +296,11 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               output: "cua-driver MCP server is not connected",
             }
           }
-          if (params.steps.length > MAX_STEPS) {
+          if (params.steps !== undefined && params.steps.length > HARD_MAX_STEPS) {
             return {
               title: "ui_run (rejected)",
               metadata: {},
-              output: `ui_run accepts at most ${MAX_STEPS} steps per call; received ${params.steps.length}. Split the run across calls.`,
+              output: `ui_run accepts at most ${HARD_MAX_STEPS} deprecated steps per call; received ${params.steps.length}.`,
             }
           }
           if (params.expect !== undefined && (params.expect.length === 0 || params.expect.length > MAX_EXPECT)) {
@@ -214,65 +319,105 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             }
           }
 
-          const observed = yield* callDriver(
-            tools,
-            "cua-driver_get_window_state",
-            { pid: params.window.pid, window_id: params.window.window_id, include_screenshot: false },
-            ctx.abort,
-          )
-          if (!observed.ok) {
-            return {
-              title: "ui_run (unparseable observation)",
-              metadata: {},
-              output: `window state unreadable: ${observed.error}`,
-            }
-          }
-          const observation = decodeObservation(observed.result.structuredContent)
-          if (!observation) {
-            return {
-              title: "ui_run (unparseable observation)",
-              metadata: {},
-              output: "window state carried no decodable structuredContent; the run stopped rather than guess targets from text",
-            }
-          }
+          const maxSteps = Math.min(Math.max(params.maxSteps ?? DEFAULT_MAX_STEPS, 1), HARD_MAX_STEPS)
+          const goal = params.steps?.length
+            ? `${params.goal} (deprecated steps hint: ${params.steps.map((s) => s.intent).join(" > ")})`
+            : params.goal
 
-          const candidates = buildCandidates(observation.elements)
           const lines: string[] = []
           let executed = 0
+          let observations = 0
+          let ambiguous = 0
           let status = "completed"
           let previous: string | undefined
+          let evidence = false
+          let truncated: string | undefined
 
-          for (const [i, step] of params.steps.entries()) {
-            const decision = yield* Effect.promise(() =>
-              jevControl({
-                goal: step.intent,
-                lastAction: `${params.goal} (step ${i + 1}/${params.steps.length})${
-                  previous ? ` | after: ${previous}` : ""
-                }`,
+          for (let step = 0; step < maxSteps; step++) {
+            // OBSERVE fresh EVERY iteration; a candidate map is never reused across steps.
+            const observed = yield* callDriver(
+              tools,
+              "cua-driver_get_window_state",
+              { pid: params.window.pid, window_id: params.window.window_id, include_screenshot: false },
+              ctx.abort,
+            )
+            observations++
+            if (!observed.ok) {
+              status = "driver-error"
+              lines.push(`[observe ${step + 1}] window state unreadable: ${observed.error}`)
+              break
+            }
+            const observation = decodeObservation(observed.result.structuredContent)
+            if (!observation) {
+              status = "unparseable-observation"
+              lines.push(
+                `[observe ${step + 1}] no decodable structuredContent; the run stopped rather than guess targets from text`,
+              )
+              break
+            }
+            const candidates = buildCandidates(observation.elements)
+            // Keep the newest snapshot's marker; it is the one that hid elements.
+            if (candidates.truncated) truncated = candidates.truncated
+
+            const outcome = yield* Effect.promise(() =>
+              jevControlDetailed({
+                goal,
+                lastAction: `iteration ${step + 1}/${maxSteps}${previous ? ` | after: ${previous}` : ""}`,
                 controls: candidates.labels,
                 key,
+                askGoalMet: true,
               }),
             )
-            if (!decision) {
-              status = "escalate"
-              lines.push(`[escalate ${i + 1}/${params.steps.length}] jev returned no usable decision`)
+            const goalMet =
+              outcome.verdict === "accepted" && (outcome.decision.goalMet || outcome.decision.action === "done")
+
+            const verdict = decideStep({
+              outcome,
+              candidates,
+              goalMet,
+              evidence,
+              ...(params.value !== undefined ? { text: params.value } : {}),
+              step,
+              maxSteps,
+              ambiguous,
+              maxAmbiguous: MAX_AMBIGUOUS,
+            })
+
+            if (verdict.kind === "stop") {
+              status = verdict.reason === "evidence-satisfied" ? "verified" : verdict.reason
+              lines.push(`[stop ${step + 1}] ${verdict.reason}`)
               break
             }
-            const element = decision.target ? candidates.byLabel.get(decision.target) : undefined
-            if (!decision.target || !element?.element_token) {
-              status = "escalate"
-              lines.push(`[escalate ${i + 1}/${params.steps.length}] jev target is not an offered control`)
+            if (verdict.kind === "checkpoint") {
+              status = "needs-consent"
+              lines.push(`[checkpoint ${step + 1}] destructive action requires consent before acting: ${verdict.target}`)
               break
             }
+            if (verdict.kind === "safe") {
+              ambiguous++
+              previous = `safe ${verdict.action} (${verdict.reason})`
+              lines.push(`[safe ${step + 1}] ${previous}`)
+              if (verdict.action === "scroll")
+                yield* callDriver(
+                  tools,
+                  "cua-driver_scroll",
+                  { pid: params.window.pid, window_id: params.window.window_id, direction: "down", by: "page", amount: 1 },
+                  ctx.abort,
+                )
+              else if (verdict.action === "wait") yield* Effect.sleep("300 millis")
+              // `observe` needs no driver call: the next iteration re-observes by design.
+              continue
+            }
+
             const actArgs = {
-              element_token: element.element_token,
+              element_token: verdict.element.element_token,
               pid: params.window.pid,
               window_id: params.window.window_id,
-              ...(step.value !== undefined ? { text: step.value } : {}),
+              ...(verdict.action === "type" ? { text: verdict.text } : {}),
             }
             const attempt = yield* callDriver(
               tools,
-              step.value !== undefined ? "cua-driver_type_text" : "cua-driver_click",
+              verdict.action === "type" ? "cua-driver_type_text" : "cua-driver_click",
               actArgs,
               ctx.abort,
             )
@@ -280,55 +425,51 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // owns several eligible windows, and offers foreground delivery as the remedy.
             // click is NEVER escalated — pointer/AXPress is already window-targeted, so the
             // refusal class is keyboard-delivery-specific only.
-            const retried = !attempt.ok && step.value !== undefined && needsForegroundDelivery(attempt.error)
-            const outcome = retried
-              ? yield* callDriver(
-                  tools,
-                  "cua-driver_type_text",
-                  { ...actArgs, delivery_mode: "foreground" },
-                  ctx.abort,
-                )
+            const retried = !attempt.ok && verdict.action === "type" && needsForegroundDelivery(attempt.error)
+            const actResult = retried
+              ? yield* callDriver(tools, "cua-driver_type_text", { ...actArgs, delivery_mode: "foreground" }, ctx.abort)
               : attempt
-            if (!outcome.ok) {
+            const actLabel = verdict.action === "type" ? `type_text "${verdict.text}"` : "click"
+            const target = verdict.element.label ?? verdict.element.element_token
+            if (!actResult.ok) {
               status = "failed"
-              previous = `[fail ${i + 1}/${params.steps.length}] ${step.value !== undefined ? "type_text" : "click"} → ${decision.target}`
-              lines.push(`${previous}: ${outcome.error}`)
+              previous = `[fail ${step + 1}] ${actLabel} → ${target}`
+              lines.push(`${previous}: ${actResult.error}`)
               break
             }
             executed++
-            previous =
-              step.value !== undefined
-                ? `[ok ${i + 1}/${params.steps.length}] type_text "${step.value}" → ${decision.target}`
-                : `[ok ${i + 1}/${params.steps.length}] click → ${decision.target}`
-            lines.push(`${previous} (jev ${decision.strength}${retried ? ", foreground retry" : ""})`)
-          }
+            ambiguous = 0
+            previous = `[ok ${step + 1}] ${actLabel} → ${target}`
+            lines.push(`${previous}${retried ? " (foreground retry)" : ""}`)
 
-          if (status === "completed" && params.expect !== undefined) {
-            const verified = yield* callDriver(
-              tools,
-              "cua-driver_verify_state",
-              { pid: params.window.pid, window_id: params.window.window_id, expect: normalizeExpect(params.expect) },
-              ctx.abort,
-            )
-            if (!verified.ok) {
-              status = "failed"
-              lines.push(`[verify] driver could not verify: ${verified.error}`)
-            } else {
-              const verdict = textOf(verified.result.content).trim()
-              const satisfied = /satisfied|passed|true/i.test(verdict)
-              status = satisfied ? "verified" : "unsatisfied"
-              lines.push(`[verify] ${verdict || "driver returned no verdict"}`)
+            if (params.expect !== undefined) {
+              const verified = yield* callDriver(
+                tools,
+                "cua-driver_verify_state",
+                { pid: params.window.pid, window_id: params.window.window_id, expect: normalizeExpect(params.expect) },
+                ctx.abort,
+              )
+              if (!verified.ok) {
+                status = "failed"
+                lines.push(`[verify ${step + 1}] driver could not verify: ${verified.error}`)
+                break
+              }
+              const verdictText = textOf(verified.result.content).trim()
+              const satisfied = /satisfied|passed|true/i.test(verdictText)
+              lines.push(`[verify ${step + 1}] ${verdictText || "driver returned no verdict"}`)
+              // OBSERVED evidence agrees — this is the only authoritative stop.
+              if (satisfied) {
+                evidence = true
+                status = "verified"
+                break
+              }
             }
           }
 
           return {
-            title: `ui_run (${executed}/${params.steps.length} steps, ${status})`,
+            title: `ui_run (${executed} actions, ${observations} observations, ${status})`,
             metadata: {},
-            output: [
-              ...lines,
-              `observations: 1 snapshot for ${executed} steps`,
-              ...(candidates.truncated ? [candidates.truncated] : []),
-            ].join("\n"),
+            output: [...lines, ...(truncated ? [truncated] : [])].join("\n"),
           }
         }),
     }

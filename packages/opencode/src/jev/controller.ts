@@ -75,6 +75,11 @@ export interface ControllerInput extends ControllerState {
   readonly confidenceFloor?: number
   /** Memo namespace, tied to the batch identity. */
   readonly id?: string
+  /**
+   * Ask the model for the advisory `goal_met` question. Opt-in so the existing
+   * batch (five questions) is unchanged for every other caller.
+   */
+  readonly askGoalMet?: boolean
 }
 
 export interface ControllerDecision {
@@ -85,6 +90,12 @@ export interface ControllerDecision {
   readonly needScreenshot: boolean
   /** Strength (`probabilities[choice]`) of the action verdict. */
   readonly strength: number
+  /**
+   * ADVISORY only: the model's belief that the goal is already met. It is
+   * deliberately NOT a termination condition — the loop stops on observed
+   * evidence, never on this. Only present when the caller asked for it.
+   */
+  readonly goalMet?: boolean
 }
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
@@ -130,6 +141,7 @@ export function jevKey(provider = "typesafe"): string | undefined {
  */
 export function buildControllerQuestions(
   controls: readonly string[],
+  opts?: { readonly goalMet?: boolean },
 ): Record<string, { type: "choice"; instructions: string; criteria: Record<string, string> }> | undefined {
   const visible = controls.slice(0, CONTROLS_MAX)
   const allActions = ACTIONS.reduce<Record<string, string>>((acc, action) => {
@@ -168,6 +180,17 @@ export function buildControllerQuestions(
       instructions: "Is a fresh screenshot needed before acting?",
       criteria: YES_NO,
     },
+    // Additive and opt-in: existing folds ignore this row, so `jev_decide` and
+    // every other caller see the same five-question batch as before.
+    ...(opts?.goalMet
+      ? {
+          goal_met: {
+            type: "choice" as const,
+            instructions: "Is the stated goal already satisfied, as far as you can tell from the control set alone?",
+            criteria: YES_NO,
+          },
+        }
+      : {}),
   }
 }
 
@@ -221,6 +244,7 @@ export const foldController = (
       stuck: jevMeasuredChoice(rows["stuck"])?.choice === "yes",
       needScreenshot: jevMeasuredChoice(rows["need_screenshot"])?.choice === "yes",
       strength: actionRow.strength,
+      goalMet: jevMeasuredChoice(rows["goal_met"])?.choice === "yes",
     },
   }
 }
@@ -237,7 +261,7 @@ export const foldController = (
  * weak verdict never sticks.
  */
 export async function jevControlDetailed(input: ControllerInput): Promise<ControllerOutcome> {
-  const questions = buildControllerQuestions(input.controls)
+  const questions = buildControllerQuestions(input.controls, { goalMet: input.askGoalMet })
   if (!questions) return { verdict: "unmeasured" }
   const transport = jevTransport(input.model)
   if (!transport) return { verdict: "unmeasured" }
@@ -245,7 +269,15 @@ export async function jevControlDetailed(input: ControllerInput): Promise<Contro
   const floor = input.confidenceFloor ?? JEV_DEFAULT_CONFIDENCE_FLOOR
   const timeoutMs = input.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS
   const state = buildState(input)
-  const key = controllerMemoKey(input.id, transport.id, threshold, floor, timeoutMs, controllerHash(state))
+  const key = controllerMemoKey(
+    input.id,
+    transport.id,
+    threshold,
+    floor,
+    timeoutMs,
+    controllerHash(state),
+    input.askGoalMet,
+  )
   const hit = controllerMemo.get(key)
   if (hit && hit.expires > Date.now()) return { verdict: "accepted", decision: hit.decision }
   try {
@@ -297,7 +329,9 @@ export const controllerMemoKey = (
   floor: number,
   timeoutMs: number,
   stateHash: string,
-): string => `${id ?? "ctl"}:${transportId}:${threshold}:${floor}:${timeoutMs}:${stateHash}`
+  goalMet = false,
+): string =>
+  `${id ?? "ctl"}:${transportId}:${threshold}:${floor}:${timeoutMs}:${goalMet ? "gm" : "n"}:${stateHash}`
 
 /** Inline djb2 string hash — no imports, matching the client's memo keying. */
 const controllerHash = (s: string): string => {
