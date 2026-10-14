@@ -1,3 +1,4 @@
+import { spawn, spawnSync } from "child_process"
 import { Effect, Result, Schema } from "effect"
 import * as Tool from "./tool"
 
@@ -448,7 +449,7 @@ const cdpLookup = async (port: string, query: string): Promise<{ raw: unknown; u
 }
 
 const braveRunning = Effect.sync(
-  () => Bun.spawnSync(["pgrep", "-f", `${braveBinary()}`]).exitCode === 0,
+  () => spawnSync("pgrep", ["-f", braveBinary()]).status === 0,
 )
 
 const waitForBraveExit = Effect.gen(function* () {
@@ -466,20 +467,19 @@ const waitForBraveExit = Effect.gen(function* () {
 // NOTE: only the URL/path builder is portable; the quit/relaunch path is macOS.
 const relaunchBrave = (port: string | undefined) =>
   Effect.gen(function* () {
-    yield* Effect.sync(() => Bun.spawnSync(["osascript", "-e", 'tell application "Brave Browser" to quit']))
+    yield* Effect.sync(() => spawnSync("osascript", ["-e", 'tell application "Brave Browser" to quit']))
     yield* waitForBraveExit
     yield* Effect.sync(() => {
       // Chromium 111+ rejects the DevTools WebSocket unless the caller's Origin
       // is allow-listed — without this flag connectOverCDP times out at the ws
       // handshake even though /json/version answers. The port is loopback-only
       // and restored (no flag) after the lookup, so "*" is acceptable here.
-      Bun.spawn(
-        port ? [braveBinary(), `--remote-debugging-port=${port}`, "--remote-allow-origins=*"] : [braveBinary()],
-        {
-          detached: true,
-          stdio: ["ignore", "ignore", "ignore"],
-        },
-      ).unref()
+      // node:child_process, not the Bun global — the desktop server bundles run
+      // under NODE, where Bun is undefined.
+      spawn(braveBinary(), port ? [`--remote-debugging-port=${port}`, "--remote-allow-origins=*"] : [], {
+        detached: true,
+        stdio: ["ignore", "ignore", "ignore"],
+      }).unref()
     })
   })
 
