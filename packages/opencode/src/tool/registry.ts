@@ -36,6 +36,7 @@ import { Plugin } from "../plugin"
 import { Provider } from "@/provider/provider"
 
 import { WebSearchTool } from "./websearch"
+import { BraveLookupTool } from "./bravelookup"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
@@ -118,6 +119,7 @@ const layer = Layer.effect(
     const plan = yield* PlanExitTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
+    const bravelookup = yield* BraveLookupTool
     const shell = yield* ShellTool
     const globtool = yield* GlobTool
     const writetool = yield* WriteTool
@@ -240,6 +242,7 @@ const layer = Layer.effect(
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           search: Tool.init(websearch),
+          bravelookup: Tool.init(bravelookup),
           skill: Tool.init(skilltool),
           session_rename: Tool.init(sessionrename),
           jev_accept: Tool.init(jevaccept),
@@ -273,6 +276,7 @@ const layer = Layer.effect(
             tool.fetch,
             tool.todo,
             tool.search,
+            tool.bravelookup,
             tool.skill,
             tool.session_rename,
             tool.jev_decide,
