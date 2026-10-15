@@ -15,12 +15,14 @@ import { Truncate } from "@/tool/truncate"
 import { LABEL_MAX, buildControllerQuestions, buildState, foldController, type NavMap } from "@/jev/controller"
 import {
   FRONTIER_HARD_MAX,
+  MAX_BELOW_GATE,
   Parameters,
   UiRunTool,
   advanceMap,
   buildCandidates,
   decideStep,
   decodeObservation,
+  extractGoalValue,
   isDestructive,
   isGoalMet,
   needsForegroundDelivery,
@@ -897,5 +899,199 @@ describe("ui-eyes — driver frame vocabulary", () => {
     expect(elementCenter(back!)).toEqual({ x: 4609, y: 334 })
     const plan = actuationPlan(back!, { pid: raw.pid, window_id: raw.window_id })
     expect(plan.map((r) => r.label)).toContain("pixel(4609,334)")
+  })
+})
+
+// GENERALIZATION — three live failures, three invariants:
+//  (1) VALUES come from the GOAL, not the option space (extractGoalValue): a
+//      chooser over enumerated controls cannot choose arbitrary text.
+//  (2) DEGRADATION takes the safest strongest action rather than stalling.
+//  (3) PREREQUISITE focus steps are progress, not no-ops.
+// Each live failure is one instance; unseen cases are named per test.
+// hardcode-guard:allow the captured payload + quoted URL are the live inputs under test
+describe("extractGoalValue", () => {
+  test("takes the quoted token the goal carries", () => {
+    expect(extractGoalValue(`go to "https://www.linkedin.com" and sign in`)).toBe("https://www.linkedin.com")
+    expect(extractGoalValue("search for 'wireless headphones'")).toBe("wireless headphones")
+  })
+
+  test("falls back to a bare URL when nothing is quoted (unseen case: unquoted value)", () => {
+    expect(extractGoalValue("open https://example.com/path now")).toBe("https://example.com/path")
+    expect(extractGoalValue("no value here")).toBeUndefined()
+  })
+})
+
+describe("decideStep — graceful degradation at the below-gate bound", () => {
+  const candidates = index([button(1, "Settings"), button(2, "Save")])
+  const belowGate = accepted({
+    action: ans("click", { click: 0.5, wait: 0.5 }),
+    target: ans("0:c1 AXButton Settings", { "0:c1 AXButton Settings": 0.5, none: 0.5 }),
+  })
+  const base = {
+    candidates,
+    goalMet: false,
+    evidence: false,
+    step: 0,
+    maxSteps: 30,
+    ambiguous: 0,
+    maxAmbiguous: 3,
+  }
+
+  test("before the bound a below-gate step still falls safe", () => {
+    const v = decideStep({ ...base, outcome: belowGate, belowGate: MAX_BELOW_GATE - 1, maxBelowGate: MAX_BELOW_GATE })
+    expect(v.kind).toBe("safe")
+  })
+
+  test("at the bound it takes the strongest option and records strongest-available-fallback", () => {
+    const v = decideStep({
+      ...base,
+      outcome: belowGate,
+      belowGate: MAX_BELOW_GATE,
+      maxBelowGate: MAX_BELOW_GATE,
+      strongestBelowGate: { action: "click", target: "c1 AXButton Settings", strength: 0.66 },
+    })
+    expect(v.kind).toBe("act")
+    if (v.kind !== "act") throw new Error("expected act")
+    expect(v.reason).toBe("strongest-available-fallback")
+    expect(v.element.label).toBe("Settings")
+  })
+
+  test("a destructive strongest option is REFUSED below gate, falling safe (never destructive)", () => {
+    const v = decideStep({
+      ...base,
+      outcome: accepted({
+        action: ans("click", { click: 0.5, wait: 0.5 }),
+        target: ans("0:c2 AXButton Save", { "0:c2 AXButton Save": 0.5, none: 0.5 }),
+      }),
+      belowGate: MAX_BELOW_GATE,
+      maxBelowGate: MAX_BELOW_GATE,
+    })
+    expect(v.kind).toBe("safe")
+  })
+
+  test("a scroll among the options cannot degrade to an act (unseen case: non-click option)", () => {
+    const v = decideStep({
+      ...base,
+      outcome: accepted({ action: ans("scroll", { scroll: 0.5, click: 0.5 }) }),
+      belowGate: MAX_BELOW_GATE,
+      maxBelowGate: MAX_BELOW_GATE,
+    })
+    expect(v.kind).toBe("safe")
+  })
+})
+
+describe("nextAmbiguity — prerequisite focus is not a no-op", () => {
+  test("a content-unchanged focus click followed by type on the SAME target does not advance", () => {
+    expect(
+      nextAmbiguity(0, "n1", "n1", {
+        actedMode: "declared",
+        actedTarget: "c1 AXTextField Search",
+        nextAction: "type",
+        nextTarget: "c1 AXTextField Search",
+      }),
+    ).toBe(0)
+  })
+
+  test("a repeated click on the same target is still a no-op (existing bound preserved)", () => {
+    expect(
+      nextAmbiguity(0, "n1", "n1", {
+        actedMode: "declared",
+        actedTarget: "c1 AXButton X",
+        nextAction: "click",
+        nextTarget: "c1 AXButton X",
+      }),
+    ).toBe(1)
+  })
+
+  test("a changed screen still resets regardless of target", () => {
+    expect(
+      nextAmbiguity(2, "n1", "n2", {
+        actedMode: "declared",
+        actedTarget: "c1 AXTextField Search",
+        nextAction: "type",
+        nextTarget: "c1 AXTextField Search",
+      }),
+    ).toBe(0)
+  })
+})
+
+describe("ui_run chain — decider contract over the captured Brave frontier", () => {
+  const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
+
+  test("click address-bar (focus, unchanged) → type the goal's URL → screen changes", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    expect(observation).not.toBeNull()
+    if (observation === null) return
+    const candidates = buildCandidates(observation.elements)
+    const addressBar = candidates.labels.find((l) => l.includes("Address and search bar"))
+    expect(addressBar).toBeDefined()
+    if (addressBar === undefined) return
+    const index0 = { labels: candidates.labels, byLabel: candidates.byLabel }
+    const goal = `go to "https://www.linkedin.com" and sign in`
+    expect(extractGoalValue(goal)).toBe("https://www.linkedin.com")
+
+    // Step 1 — jev clicks the address bar; the field only gains focus (screen Unchanged).
+    const node = screenSignature(observation.elements)
+    const clickVerdict = decideStep({
+      outcome: accepted({
+        action: ans("click", { click: 0.92, wait: 0.08 }),
+        target: ans(`0:${addressBar}`, { [`0:${addressBar}`]: 0.95, none: 0.05 }),
+      }),
+      candidates: index0,
+      goalMet: false,
+      evidence: false,
+      goal,
+      step: 0,
+      maxSteps: 30,
+      ambiguous: 0,
+      maxAmbiguous: 3,
+    })
+    expect(clickVerdict.kind).toBe("act")
+    // The successor is a type on the SAME target, so the focus click must NOT count.
+    const ambiguousAfterFocus = nextAmbiguity(0, node, node, {
+      actedMode: "declared",
+      actedTarget: addressBar,
+      nextAction: "type",
+      nextTarget: addressBar,
+    })
+    expect(ambiguousAfterFocus).toBe(0)
+
+    // Step 2 — jev types on the same field; the value comes from the GOAL (not the
+    // option space), so the decision carries text rather than dying "type-without-text".
+    const typeVerdict = decideStep({
+      outcome: accepted({
+        action: ans("type", { type: 0.9, click: 0.1 }),
+        target: ans(`0:${addressBar}`, { [`0:${addressBar}`]: 0.95, none: 0.05 }),
+      }),
+      candidates: index0,
+      goalMet: false,
+      evidence: false,
+      goal,
+      step: 1,
+      maxSteps: 30,
+      ambiguous: ambiguousAfterFocus,
+      maxAmbiguous: 3,
+    })
+    expect(typeVerdict.kind).toBe("act")
+    if (typeVerdict.kind !== "act") return
+    expect(typeVerdict.action).toBe("type")
+    expect(typeVerdict.text).toBe("https://www.linkedin.com")
+    expect(typeVerdict.element.label).toBe("Address and search bar")
+
+    // Step 3 — the type changes the screen: the ambiguity count resets (progress).
+    const changed = screenSignature([
+      ...observation.elements,
+      { role: "AXButton", label: "New posts", element_token: "s00000067:99" },
+    ])
+    expect(changed).not.toBe(node)
+    expect(
+      nextAmbiguity(ambiguousAfterFocus, node, changed, {
+        actedMode: "type",
+        actedTarget: addressBar,
+        nextAction: "click",
+        nextTarget: "c1 AXButton New posts",
+      }),
+    ).toBe(0)
   })
 })

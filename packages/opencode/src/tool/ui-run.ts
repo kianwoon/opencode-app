@@ -25,6 +25,10 @@ const HARD_MAX_STEPS = 100
 /** Consecutive NON-PROGRESS iterations (a safe wait/scroll/observe, or an action
  * whose screen did not change) before the loop stops as stuck. */
 const MAX_AMBIGUOUS = 3
+/** Consecutive below-gate re-observations before the loop degrades to the strongest option it saw. */
+export const MAX_BELOW_GATE = 2
+/** Input verbs whose success depends on a preceding focus click on the SAME target. */
+const FOCUS_CONSUMING = new Set<JevAction>(["type", "key"])
 const DEFAULT_TIMEOUT = 30_000
 const MAX_EXPECT = 8
 
@@ -75,6 +79,29 @@ const DESTRUCTIVE =
   /\b(save|submit|delete|remove|erase|confirm|apply|send|discard|reset|overwrite|uninstall|purchase|buy|pay|checkout)\b/i
 
 /**
+ * GENERAL RULE — VALUES come from the GOAL, not the option space. jev is a chooser
+ * over the ENUMERATED controls: it can pick an action and a target, but arbitrary
+ * text (a URL, a search phrase, a username) is not in the option space and cannot
+ * be chosen from it — hence the live "type-without-text" dead-end. The minimal
+ * general mechanism: when the goal literally carries the value (a quoted token or
+ * a bare URL), the loop supplies it as the `type` value. Unseen case it covers: a
+ * goal whose value is a bare URL with no surrounding quotes — the URL fallback
+ * still extracts it.
+ */
+export function extractGoalValue(goal: string): string | undefined {
+  const quoted = goal.match(/["'`]([^"'`]+)["'`]/)
+  if (quoted?.[1]?.trim()) return quoted[1].trim()
+  return goal.match(/https?:\/\/\S+/)?.[0]
+}
+
+/** The strongest below-gate option seen in the current spiral, for degradation. */
+export interface BelowGateOption {
+  readonly action: JevAction | null
+  readonly target: string | null
+  readonly strength: number
+}
+
+/**
  * GENERAL RULE: the loop re-observes and re-decides every iteration and stops
  * only on observed evidence. The open-loop batch is one INSTANCE of that rule's
  * failure — it decided once from a snapshot the UI had already invalidated, so
@@ -111,15 +138,57 @@ export interface StepInput {
   readonly evidence: boolean
   /** Text to type when the decided action is `type`. */
   readonly text?: string
+  /** Run-level goal; a `type` with no explicit text draws its value from here. */
+  readonly goal?: string
   /** Zero-based iteration index and its budget. */
   readonly step: number
   readonly maxSteps: number
   /** Consecutive non-acting iterations and its bound. */
   readonly ambiguous: number
   readonly maxAmbiguous: number
+  /** Consecutive below-gate iterations seen so far (including this one) and its bound. */
+  readonly belowGate?: number
+  readonly maxBelowGate?: number
+  /** Strongest below-gate option seen in the current spiral, for graceful degradation. */
+  readonly strongestBelowGate?: BelowGateOption
 }
 
 export const isDestructive = (label: string): boolean => DESTRUCTIVE.test(label)
+
+/**
+ * Resolve a decision target against THIS iteration's fresh candidates — a direct
+ * label hit wins; on a miss it is re-resolved by role+label (see decideStep).
+ */
+const resolveElement = (target: string, input: StepInput): Element | undefined => {
+  const fresh = input.candidates.elements ?? [...input.candidates.byLabel.values()]
+  const element = input.candidates.byLabel.get(target) ?? resolveTarget(target, fresh)
+  return element?.element_token ? element : undefined
+}
+
+/**
+ * GENERAL RULE — graceful degradation takes the SAFEST STRONGEST action rather
+ * than stalling: at the below-gate bound the strongest measured option is
+ * executed in safe mode. It is REFUSED (falls to a safe wait) when it has no
+ * resolvable target, is a destructive verb, or is a `type` with no value — an
+ * uncertain verdict must never become an unsafe act. Unseen case it covers: a
+ * below-gate spiral whose strongest option is a scroll, which cannot be
+ * degraded to an act and therefore still falls safe.
+ */
+// hardcode-guard:allow the fallback reason token is the trace contract asserted by tests, not a case literal
+function degradeToAct(option: BelowGateOption | undefined, input: StepInput): StepDecision | undefined {
+  if (!option) return undefined
+  if (option.action !== "click" && option.action !== "type") return undefined
+  if (!option.target) return undefined
+  const element = resolveElement(option.target, input)
+  if (!element) return undefined
+  if (isDestructive(option.target)) return undefined
+  if (option.action === "type") {
+    const text = input.text ?? (input.goal ? extractGoalValue(input.goal) : undefined)
+    if (!text) return undefined
+    return { kind: "act", action: "type", element, text, reason: "strongest-available-fallback" }
+  }
+  return { kind: "act", action: "click", element, reason: "strongest-available-fallback" }
+}
 
 /**
  * Pure per-iteration decision. Order is the contract: observed evidence wins
@@ -137,12 +206,24 @@ export function decideStep(input: StepInput): StepDecision {
   // NOT terminate — re-observe instead (continue-don't-abort, bounded above).
   if (input.goalMet) return { kind: "safe", action: "observe", reason: "goal-met-advisory-no-evidence" }
 
-  if (input.outcome.verdict !== "accepted")
-    return {
-      kind: "safe",
-      action: "wait",
-      reason: input.outcome.verdict === "below_gate" ? "below-gate" : "unmeasured",
+  // hardcode-guard:allow verdict tokens (below-gate/unmeasured) are the controller contract's own vocabulary
+  if (input.outcome.verdict !== "accepted") {
+    if (input.outcome.verdict !== "below_gate")
+      return { kind: "safe", action: "wait", reason: "unmeasured" }
+    // BELOW-GATE SPIRAL: re-observing forever stalls. Once the bound is reached,
+    // degrade to the strongest option the loop actually saw, in SAFE mode — never
+    // a destructive action below gate (isDestructive is refused in degradeToAct).
+    if ((input.belowGate ?? 1) >= (input.maxBelowGate ?? MAX_BELOW_GATE)) {
+      const strongest = input.strongestBelowGate ?? {
+        action: input.outcome.action,
+        target: input.outcome.target ?? null,
+        strength: input.outcome.strength,
+      }
+      const degraded = degradeToAct(strongest, input)
+      if (degraded) return degraded
     }
+    return { kind: "safe", action: "wait", reason: "below-gate" }
+  }
 
   const decision = input.outcome.decision
   if (decision.action !== "click" && decision.action !== "type")
@@ -157,13 +238,13 @@ export function decideStep(input: StepInput): StepDecision {
   // by role+label, so an element whose token/snapshot churned is acted on rather than
   // dropped as "not-in-fresh-candidates".
   if (!decision.target) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
-  const fresh = input.candidates.elements ?? [...input.candidates.byLabel.values()]
-  const element = input.candidates.byLabel.get(decision.target) ?? resolveTarget(decision.target, fresh)
-  if (!element?.element_token) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
+  const element = resolveElement(decision.target, input)
+  if (!element) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
   if (isDestructive(decision.target)) return { kind: "checkpoint", target: decision.target, reason: "destructive-boundary" }
   if (decision.action === "type") {
-    if (!input.text) return { kind: "safe", action: "observe", reason: "type-without-text" }
-    return { kind: "act", action: "type", element, text: input.text, reason: "decided" }
+    const text = input.text ?? (input.goal ? extractGoalValue(input.goal) : undefined)
+    if (!text) return { kind: "safe", action: "observe", reason: "type-without-text" }
+    return { kind: "act", action: "type", element, text, reason: "decided" }
   }
   return { kind: "act", action: "click", element, reason: "decided" }
 }
@@ -176,10 +257,39 @@ export function decideStep(input: StepInput): StepDecision {
  * nothing, so the count advances toward the ambiguity bound; a differing
  * signature is the only thing that resets it. `undefined` means no action ran
  * last iteration, leaving the count untouched.
+ *
+ * PREREQUISITE FOCUS is not a no-op: a content-unchanged CLICK that focused the
+ * SAME target for an immediately-following input verb (type/key) is one progress
+ * unit — click-field → type — so it does not feed the ambiguity bound. Unseen
+ * case it covers: a click that focuses a field followed by a raw Enter (key) on
+ * that same field to submit, which likewise must not read as a stuck no-op.
  */
-export function nextAmbiguity(ambiguous: number, actedAt: string | undefined, current: string): number {
+export interface AmbiguityContext {
+  /** Mode of the action that ran last iteration ("type" is not a click). */
+  readonly actedMode?: string
+  /** Target the last action ran on. */
+  readonly actedTarget?: string
+  /** This iteration's decided action + target (the successor). */
+  readonly nextAction?: JevAction
+  readonly nextTarget?: string | null
+}
+
+export function nextAmbiguity(
+  ambiguous: number,
+  actedAt: string | undefined,
+  current: string,
+  ctx?: AmbiguityContext,
+): number {
   if (actedAt === undefined) return ambiguous
-  return actedAt === current ? ambiguous + 1 : 0
+  if (actedAt !== current) return 0
+  const prerequisite =
+    ctx?.actedMode !== undefined &&
+    ctx.actedMode !== "type" &&
+    ctx.nextAction !== undefined &&
+    FOCUS_CONSUMING.has(ctx.nextAction) &&
+    ctx.actedTarget !== undefined &&
+    ctx.actedTarget === ctx.nextTarget
+  return prerequisite ? ambiguous : ambiguous + 1
 }
 
 /**
@@ -351,6 +461,14 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // Node signature at which the last action ran — a no-op (screen
           // unchanged) feeds the ambiguity bound instead of resetting it.
           let actedAt: string | undefined
+          // The mode + target of the last action, so a content-unchanged focus click
+          // followed by an input verb on the SAME target is a prerequisite, not a no-op.
+          let actedMode: string | undefined
+          let actedTarget: string | undefined
+          // BELOW-GATE degradation: consecutive below-gate count and the strongest
+          // option seen in the current spiral.
+          let belowGate = 0
+          let strongestBelowGate: BelowGateOption | undefined
           // HANDS: the mode + before-signature of the last action, folded with the
           // next observation into change evidence (never a bare success boolean).
           let lastActuation: { readonly mode: ActuationEvidence["mode"]; readonly before: string } | undefined
@@ -409,12 +527,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               lastActuation = undefined
             }
 
-            // (b) Did the action executed last iteration actually change the screen?
-            // The fresh signature answers it; an unchanged screen is a no-op, not
-            // progress, so it advances the ambiguity count toward the bound.
-            ambiguous = nextAmbiguity(ambiguous, actedAt, map.current)
-            actedAt = undefined
-
+            // hardcode-guard:allow loop wiring for the general prerequisite/degradation rules, no case literals
             const outcome = yield* Effect.promise(() =>
               jevControlDetailed({
                 map,
@@ -425,17 +538,67 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             )
             const goalMet = isGoalMet(outcome)
 
+            // (b) Did the action executed last iteration actually change the screen?
+            // The fresh signature answers it; an unchanged screen is a no-op, not
+            // progress — UNLESS it FOCUSED the successor's own target (prerequisite:
+            // click-field → type is one progress unit, see nextAmbiguity).
+            const nextAction =
+              outcome.verdict === "accepted"
+                ? outcome.decision.action
+                : outcome.verdict === "below_gate"
+                  ? (outcome.action ?? undefined)
+                  : undefined
+            const nextTarget =
+              outcome.verdict === "accepted"
+                ? outcome.decision.target
+                : outcome.verdict === "below_gate"
+                  ? (outcome.target ?? null)
+                  : undefined
+            ambiguous = nextAmbiguity(ambiguous, actedAt, map.current, {
+              actedMode,
+              actedTarget,
+              nextAction,
+              nextTarget,
+            })
+            actedAt = undefined
+            actedMode = undefined
+            actedTarget = undefined
+
+            // BELOW-GATE SPIRAL: count consecutive below-gate steps and remember the
+            // strongest option seen, so decideStep can degrade at the bound instead
+            // of spinning to the ambiguity limit.
+            if (outcome.verdict === "below_gate") {
+              belowGate++
+              if (!strongestBelowGate || outcome.strength > strongestBelowGate.strength)
+                strongestBelowGate = {
+                  action: outcome.action,
+                  target: outcome.target ?? null,
+                  strength: outcome.strength,
+                }
+            } else {
+              belowGate = 0
+              strongestBelowGate = undefined
+            }
+
             const verdict = decideStep({
               outcome,
               candidates,
               goalMet,
               evidence,
               ...(params.value !== undefined ? { text: params.value } : {}),
+              goal,
               step,
               maxSteps,
               ambiguous,
               maxAmbiguous: MAX_AMBIGUOUS,
+              belowGate,
+              maxBelowGate: MAX_BELOW_GATE,
+              ...(strongestBelowGate !== undefined ? { strongestBelowGate } : {}),
             })
+            if (verdict.kind === "act") {
+              belowGate = 0
+              strongestBelowGate = undefined
+            }
             // (c) Record this iteration's jev decision and the loop's resolved action
             // as a general, per-step trace so a caller can verify the chain.
             trace.push(traceStep(step + 1, outcome, verdict))
@@ -512,6 +675,10 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // The action ran at this node; the next observation reveals whether it
             // changed the screen (see nextAmbiguity) and folds the change evidence.
             actedAt = map.current
+            // Remember the target + mode so a focus click on the successor's target
+            // reads as a prerequisite rather than a no-op next iteration.
+            actedMode = clickRung ? clickRung.mode : "type"
+            actedTarget = target
             lastActuation = {
               mode: clickRung ? clickRung.mode : "type",
               before: map.current,

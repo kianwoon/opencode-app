@@ -291,6 +291,12 @@ export type ControllerOutcome =
       readonly choice: string
       readonly action: JevAction | null
       readonly strength: number
+      /**
+       * The measured target row folded even below gate, so the loop can degrade to
+       * the strongest option it actually saw rather than spin. `null` when the
+       * target row was unmeasured or resolved to `none`.
+       */
+      readonly target?: string | null
     }
   | { readonly verdict: "unmeasured" }
 
@@ -307,8 +313,18 @@ export const foldController = (
   // or unknown action row fails open as unmeasured, never as a below-gate verdict.
   const actionRow = jevMeasuredChoice(rows["action"])
   if (!actionRow || !isAction(actionRow.choice)) return { verdict: "unmeasured" }
-  if (actionRow.strength < floor || actionRow.strength < threshold)
-    return { verdict: "below_gate", choice: actionRow.choice, action: actionRow.choice, strength: actionRow.strength }
+  if (actionRow.strength < floor || actionRow.strength < threshold) {
+    // The target row is folded even below gate so the loop can degrade to the
+    // strongest option it actually saw instead of spinning (see ui-run decideStep).
+    const belowTarget = jevMeasuredChoice(rows["target"])
+    return {
+      verdict: "below_gate",
+      choice: actionRow.choice,
+      action: actionRow.choice,
+      strength: actionRow.strength,
+      target: belowTarget && belowTarget.choice !== "none" ? belowTarget.choice.replace(/^\d+:/, "") : null,
+    }
+  }
   const targetRow = jevMeasuredChoice(rows["target"])
   // Deliberate step-0 asymmetry: a target row is gated by the threshold ONLY,
   // never by the action confidence floor — a floor-gated target would drop a
