@@ -152,6 +152,13 @@ describe("ui-maneuvers — (e) mutation maneuvers (select_option, open_app)", ()
     expect(deriveManeuvers({ kind: "open_app" }, scene([])).options).toHaveLength(0)
   })
 
+  test("(a) SCENE-FIRST: open_app is NOT offered when the named target already exists in the scene", () => {
+    // a target present in the observed tree must be navigated to, never launched
+    expect(deriveManeuvers({ kind: "open_app", value: "About" }, scene([item("About")])).options).toHaveLength(0)
+    // a genuinely absent application is still offered
+    expect(deriveManeuvers({ kind: "open_app", value: "Calculator" }, scene([item("About")])).options).toHaveLength(1)
+  })
+
   test("(a) a label-less selectable row is recovered from its labelled descendant and reachable only as a mutation surface", () => {
     const els: Element[] = []
     const add = (element: Omit<Element, "element_index">): number => {
@@ -185,3 +192,41 @@ describe("ui-maneuvers — (e) mutation maneuvers (select_option, open_app)", ()
     expect(open.options.some((option) => option.name === OPEN_ITEMS)).toBe(true)
   })
 })
+
+// GENERALIZATION — INVARIANT: the reads a settled scene SUPPORTS are offered over its
+// labelled elements even when it exposes no LIST region; a goal-anchored token binds the
+// read to the labelled value. LIVE INSTANCE: the About pane's labelled values (macOS /
+// Chip / Memory) were readable but no read was offered. UNSEEN INPUT: any in-app pane
+// whose values are labelled rows/static texts rather than list rows.
+// hardcode-guard:allow the fixture roles/labels are the enumerable read inputs under test
+describe("ui-maneuvers — (a) reads are offered over observed labelled elements, not only LIST rows", () => {
+  const valueRow = (id: string, label: string, value: string): SceneItem => ({
+    id,
+    role: "AXStaticText",
+    label,
+    affordances: ["readonly"],
+    stateChanging: false,
+    enabled: true,
+    element: { element_token: `t:${id}`, role: "AXStaticText", label, value },
+  })
+  const pane = (): Scene => ({
+    snapshot: "s-pane",
+    regions: [{ id: "p:detail", kind: "detail", itemIds: ["p:macos", "p:chip", "p:memory"], textIds: [] }],
+    items: [valueRow("p:macos", "macOS", "27.2 Beta"), valueRow("p:chip", "Chip", "Apple M3 Max"), valueRow("p:memory", "Memory", "128 GB")],
+    texts: [],
+  })
+
+  test("(a) a goal-anchored read binds the labelled value on a pane with no list region", () => {
+    const set = deriveManeuvers({ kind: "read_items", count: 1, matching: "chip" }, pane())
+    expect(set.reason).toBeUndefined()
+    const option = set.options.find((entry) => entry.name === READ_ITEMS)
+    expect(option).toBeDefined()
+    expect(option?.targets.some((target) => (target.label ?? "").includes("Chip"))).toBe(true)
+  })
+
+  test("(a) with no matching token the pane's labelled elements are still readable", () => {
+    const set = deriveManeuvers({ kind: "read_items", count: 3 }, pane())
+    expect(set.options.some((entry) => entry.name === READ_ITEMS)).toBe(true)
+  })
+})
+

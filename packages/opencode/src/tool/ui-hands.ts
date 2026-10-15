@@ -544,6 +544,29 @@ export function resizeArgs(window: WindowRef, height: number): Record<string, un
 }
 
 /**
+ * The driver's `cua-driver_launch_app` ACCEPTED argument names — its declared
+ * interface, the source of truth quoted from a live refusal:
+ *   "launch_app: unknown argument app; accepted: additional_arguments, bundle_id,
+ *    creates_new_application_instance, name, urls, webkit_inspector_port".
+ * The application NAME rides under `name` (never the live-rejected `app`).
+ */
+export const LAUNCH_APP_ACCEPTED = [
+  "additional_arguments",
+  "bundle_id",
+  "creates_new_application_instance",
+  "name",
+  "urls",
+  "webkit_inspector_port",
+] as const
+/** The accepted argument the application name rides under. */
+export const LAUNCH_APP_NAME_ARG = "name"
+
+/** The driver's `cua-driver_launch_app` args: the app name under its accepted `name` argument. */
+export function launchAppArgs(app: string): Record<string, unknown> {
+  return { [LAUNCH_APP_NAME_ARG]: app }
+}
+
+/**
  * Args to invoke an element's OWN declared scroll action through the driver's
  * per-element action mechanism (`cua-driver_click` with the scroll verb): the
  * reveal route that precedes any computed scroll delta or window resize.

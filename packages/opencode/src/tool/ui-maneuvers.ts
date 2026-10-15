@@ -161,6 +161,27 @@ const regionTarget = (id: string, label?: string): ManeuverTarget => ({
   ...(label !== undefined ? { label } : {}),
 })
 
+/** One readable observed element: its Element plus the label/text a read binds to. */
+interface Readable {
+  readonly element: Element
+  readonly label: string
+}
+
+/**
+ * READABLE OBSERVED ELEMENTS — the labelled rows/values a read may bind to, whether
+ * or not they sit in a LIST region: every non-state-changing item plus every
+ * standalone (region/item-owned) text. A settled pane's labelled values are
+ * readable even when the pane exposes no list.
+ */
+const observedReadables = (scene: Scene): Readable[] => {
+  const itemIds = new Set(scene.items.map((item) => item.id))
+  const out: Readable[] = []
+  for (const item of scene.items) if (!item.stateChanging) out.push({ element: item.element, label: item.label })
+  for (const text of scene.texts) if (!itemIds.has(text.owner)) out.push({ element: text.element, label: text.text })
+  return out
+}
+
+
 type Planner = (subgoal: Subgoal, scene: Scene) => ManeuverOption[]
 
 const planNavigate: Planner = (subgoal, scene) => {
@@ -203,20 +224,38 @@ const planReadItems: Planner = (subgoal, scene) => {
   const listed = listedItems(scene)
   const count = subgoal.count ?? DEFAULT_READ_COUNT
   const matching = subgoal.matching
-  const chosen = (matching ? listed.filter((item) => includesToken(item.label, matching)) : listed).slice(0, count)
+  // The READ targets are the labelled elements the scene supports: list rows when
+  // present (a goal-anchored token still filters them), else every observed labelled
+  // row/value — so a settled pane with no LIST region still offers its readable values.
+  const observed = observedReadables(scene)
+  const pool: readonly Readable[] =
+    matching !== undefined
+      ? observed.filter((entry) => includesToken(entry.label, matching))
+      : listed.length > 0
+        ? listed.map((item) => ({ element: item.element, label: item.label }))
+        : observed
+  const chosen = pool.slice(0, count)
   const options: ManeuverOption[] = []
   if (chosen.length > 0) {
-    const targets = chosen.map((item) => targetOf(item.element, scene))
+    const targets = chosen.map((entry) => targetOf(entry.element, scene))
     options.push({
       name: "read_items",
       label: `read_items: read up to ${count} list item(s)`,
       targets,
       preconditions: [
-        { name: "list-items-present", met: true, detail: `${listed.length} non-state-changing list item(s) available` },
+        { name: "readable-elements-present", met: true, detail: `${observed.length} readable element(s) available` },
       ],
-      success: success("readFound", "at least one listed item's readable text was folded into the trace"),
+      success: success("readFound", "at least one readable element's content was folded into the trace"),
       inputs: [input("count", false, true, String(count))],
     })
+  }
+  // OPEN/ACTIVATE bind only the LIST rows — a value text is never a navigational row.
+  const listedChosen = (matching !== undefined ? listed.filter((item) => includesToken(item.label, matching)) : listed).slice(
+    0,
+    count,
+  )
+  if (listedChosen.length > 0) {
+    const targets = listedChosen.map((item) => targetOf(item.element, scene))
     options.push({
       name: "open_item",
       label: "open_item: open a listed item (a navigational row, never a state-changing control)",
@@ -231,7 +270,7 @@ const planReadItems: Planner = (subgoal, scene) => {
       success: success("screenChanged", "opening the item changed the screen / navigated to it"),
       inputs: [input("matching", false, matching !== undefined, matching)],
     })
-    const activatable = chosen.filter((item) => item.affordances.includes("activatable"))
+    const activatable = listedChosen.filter((item) => item.affordances.includes("activatable"))
     if (activatable.length > 0) {
       options.push({
         name: "activate",
@@ -416,14 +455,47 @@ const planApply: Planner = (subgoal, scene) => {
 }
 
 /**
+ * SCENE-FIRST RESOLUTION — the ITEM that exists in the observed tree for a name,
+ * descending through the scene's items/texts when the named pane is not a
+ * top-level row. Resolution order (case-insensitive): an item whose label IS the
+ * name, then an item whose label carries it, then a text carrying it mapped to its
+ * OWING (hence nesting) item. `undefined` when the name exists nowhere in the scene.
+ * hardcode-guard:allow the named live incident is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: the goal named the "About" pane, which is not a
+ * top-level sidebar row (it sits under "General"); resolving through the scene's
+ * items/texts finds the item that exists instead of launching a non-existent app.
+ * UNSEEN CASE COVERED: a deeply nested row (parent row -> child row) resolves to
+ * the child item by the same descent, never a launch.
+ */
+export function resolveNamedItem(scene: Scene, name: string): SceneItem | undefined {
+  const needle = name.trim().toLowerCase()
+  if (needle.length === 0) return undefined
+  const exact = scene.items.find((item) => item.label.trim().toLowerCase() === needle)
+  if (exact !== undefined) return exact
+  const contains = scene.items.find((item) => {
+    const label = item.label.trim().toLowerCase()
+    return label.length > 0 && (label.includes(needle) || needle.includes(label))
+  })
+  if (contains !== undefined) return contains
+  const text = scene.texts.find((entry) => {
+    const value = entry.text.trim().toLowerCase()
+    return value.length > 0 && (value === needle || value.includes(needle) || needle.includes(value))
+  })
+  return text === undefined ? undefined : scene.items.find((item) => item.id === text.owner)
+}
+
+/**
  * `open_app` — launch or activate an application named by the goal. The app name
  * is supplied by the plan (derived from the goal's own words), never invented
- * here; the option is offered whenever the subgoal carries one. Success = the app
- * is frontmost (its name/window observable in the scene).
+ * here. SCENE-FIRST: a target that already EXISTS in the observed tree is reached
+ * by UI navigation, never by launching an application — so `open_app` is offered
+ * ONLY when the named application is absent from the scene. Success = the app is
+ * frontmost (its name/window observable in the scene).
  */
-const planOpenApp: Planner = (subgoal, _scene) => {
+const planOpenApp: Planner = (subgoal, scene) => {
   const app = subgoal.value
   if (app === undefined || app.length === 0) return []
+  if (resolveNamedItem(scene, app) !== undefined) return []
   return [
     {
       name: "open_app",

@@ -23,6 +23,7 @@
 
 import type { RegionKind, Scene, SceneItem, SceneRegion, SceneText } from "./ui-scene"
 import type { Subgoal, SubgoalKind } from "./ui-maneuvers"
+import { resolveNamedItem } from "./ui-maneuvers"
 
 // ---------------------------------------------------------------------------
 // Predicate vocabulary — the only things progress may be judged by
@@ -43,6 +44,13 @@ export type Predicate =
       readonly anchors?: readonly string[]
     }
   | { readonly op: "dialog_absent" }
+  /**
+   * READ a labelled element's OWN value: an element whose label/text carries the
+   * goal's token is read, and the VALUE it holds (else its label) is cited. This is
+   * the "named attribute value" read — a settled pane's labelled rows/values become
+   * evidence without actuation.
+   */
+  | { readonly op: "read_value"; readonly matching: string }
   /**
    * MUTATION, PROVEN BY OBSERVED STATE: an option whose label matches carries an
    * OBSERVED selected/checked/on state. Never satisfied by text presence — a label
@@ -410,6 +418,19 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
         cited: named,
       }
     }
+    case "read_value": {
+      // The element that carries the goal's token IS the read target; the value it
+      // holds (else its own label) is the citable content.
+      const item = scene.items.find((entry) => includesToken(entry.label, predicate.matching))
+      if (item !== undefined) {
+        const value = (item.element.value ?? "").trim()
+        const cited = value.length > 0 ? value : item.label
+        return { verdict: "true", evidence: `"${item.label}" reads ${cited}`, cited: [cited] }
+      }
+      const text = scene.texts.find((entry) => includesToken(entry.text, predicate.matching))
+      if (text !== undefined) return { verdict: "true", evidence: `read "${text.text}"`, cited: [text.text] }
+      return { verdict: "unknown", evidence: `no labelled element carries "${predicate.matching}"` }
+    }
     case "dialog_absent": {
       const dialog = scene.regions.some((region) => region.kind === DIALOG_KIND)
       return {
@@ -610,6 +631,57 @@ export function goalAnchors(goal: string): readonly string[] {
   return [...out]
 }
 
+/**
+ * REPORTED ATTRIBUTE TOKENS — the distinctive terms the goal asks to REPORT. The
+ * tail after a reporting verb is split into attribute phrases (comma / "and" / "or")
+ * and each phrase contributes its first non-generic token, so a goal naming
+ * labelled values ("… report the macOS version, chip and total memory") yields the
+ * matchable tokens ["macos", "chip", "memory"] — never the full phrase, which a
+ * label would not carry. An EMPTY set means the goal reports nothing named.
+ */
+// hardcode-guard:allow the reporting-verb/generic-token sets are a general goal-reading grammar, not case literals
+const REPORT_VERB = /\b(?:read|report|show|list|tell|describe|state|summari[sz]e|check|view|see|inspect|get|find|return|provide)\b/i
+const REPORT_GENERIC = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "to",
+  "in",
+  "on",
+  "at",
+  "for",
+  "its",
+  "this",
+  "that",
+  "from",
+  "with",
+  "value",
+  "values",
+  "version",
+  "total",
+  "size",
+  "amount",
+  "number",
+  "current",
+  "please",
+])
+
+export function reportedTokens(goal: string): readonly string[] {
+  const match = REPORT_VERB.exec(goal)
+  if (match === null) return []
+  const tail = goal.slice(match.index + match[0].length)
+  const out = new Set<string>()
+  for (const phrase of tail.split(/,|\band\b|\bor\b|;/i)) {
+    const tokens = phrase.toLowerCase().match(/[a-z][a-z0-9]+/g) ?? []
+    const salient = tokens.find((token) => !REPORT_GENERIC.has(token))
+    if (salient !== undefined) out.add(salient)
+  }
+  return [...out]
+}
+
 function hasReadableList(scene: Scene): boolean {
   return scene.regions.some(
     (region) => region.kind === LIST_KIND && scene.items.some((item) => region.itemIds.includes(item.id) && !item.stateChanging),
@@ -635,17 +707,24 @@ function navigateSuccess(value: string): Predicate {
 }
 
 /**
- * MUTATION PLAN SHAPE — reach the target SURFACE (an `open_app` when the goal
- * names an application, else an `open_item` over the surface term), then APPLY the
- * goal's value with a STATE predicate (`option_selected`). A mutation goal NEVER
- * decomposes to a read: the read plan is unreachable from here.
+ * MUTATION PLAN SHAPE — reach the target SURFACE (an `open_app` ONLY when the
+ * goal names an application ABSENT from the scene, else an `open_item` over the
+ * item that exists), then APPLY the goal's value with a STATE predicate
+ * (`option_selected`). A mutation goal NEVER decomposes to a read: the read plan
+ * is unreachable from here.
+ *
+ * SCENE-FIRST: a target that already exists in the observed tree (a pane/row/item
+ * by label, descending through ancestors) is navigated to, never launched — so a
+ * goal naming a pane present in the scene yields `open_item`, and `open_app` is
+ * reserved for an application genuinely absent from the scene.
  */
-function mutationSubgoals(goal: string): PlanSubgoal[] {
+function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
   const app = goalApp(goal)
+  const appInScene = app === undefined ? undefined : resolveNamedItem(scene, app)
   const surface = targetTerm(goal)
   const value = mutationValue(goal)
   const openAppSub =
-    app === undefined
+    app === undefined || appInScene !== undefined
       ? undefined
       : plannedSubgoal(
           "open_app",
@@ -653,11 +732,44 @@ function mutationSubgoals(goal: string): PlanSubgoal[] {
           { op: "text_present", text: app, regionKind: CONTENT_KIND },
           NAVIGATE_BUDGET,
         )
+  // A named target that EXISTS in the scene is reached by UI navigation.
+  const existingSub =
+    app === undefined || appInScene === undefined
+      ? undefined
+      : plannedSubgoal(
+          "open_item",
+          { kind: "open_item", matching: app, selectable: true },
+          { op: "text_present", text: app, regionKind: CONTENT_KIND },
+          DEFAULT_BUDGET,
+        )
   // A pure launch goal ("open the Calculator app") is just the launch.
   if (openAppSub !== undefined && !MUTATE_INTENT.test(goal)) return [openAppSub]
   const subs: PlanSubgoal[] = []
   if (openAppSub !== undefined) subs.push(openAppSub)
-  if (surface !== undefined)
+  if (existingSub !== undefined) subs.push(existingSub)
+  // REPORT OVER A REACHED SURFACE: when the goal names attributes to report and has
+  // NO mutation VALUE to set, the surface reach is followed by one goal-anchored
+  // READ per attribute — never the bogus `open_item`/`apply` pair for a term that is
+  // not an option. The reads become evidence once the surface is settled.
+  const attrs = value === undefined ? reportedTokens(goal) : []
+  if (attrs.length > 0) {
+    if (subs.length === 0)
+      subs.push(plannedSubgoal("read_items", { kind: "read_items" }, { op: "read_count", n: DEFAULT_READ_COUNT }, DEFAULT_BUDGET))
+    for (const token of attrs)
+      subs.push(
+        plannedSubgoal(
+          "read_items",
+          { kind: "read_items", count: 1, matching: token },
+          { op: "read_value", matching: token },
+          DEFAULT_BUDGET,
+        ),
+      )
+    return subs
+  }
+  // The surface term is a second reach when it names a different target.
+  const surfaceDistinct =
+    surface !== undefined && (app === undefined || !surface.toLowerCase().includes(app.toLowerCase()))
+  if (surfaceDistinct)
     subs.push(
       plannedSubgoal(
         "open_item",
@@ -692,7 +804,7 @@ export function plan(goal: string, scene: Scene, prior?: Plan): PlanDecision {
   if (goalIntent(goal) === "mutate") {
     const mutation: PlanCandidate = {
       id: "mutate",
-      plan: { goal, subgoals: mutationSubgoals(goal) },
+      plan: { goal, subgoals: mutationSubgoals(goal, scene) },
       rationale: "a mutation goal: reach the target surface, then apply the value, proven by observed state",
     }
     if (prior !== undefined && prior.goal === goal) {

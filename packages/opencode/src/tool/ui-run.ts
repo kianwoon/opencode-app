@@ -31,6 +31,7 @@ import {
   isUnsupportedAction,
   keyPress,
   keySequence,
+  launchAppArgs,
   observationArgs,
   pixelFrameRetry,
   REVEAL_GROW_PX,
@@ -1051,6 +1052,18 @@ const STATUS_BELOW_GATE = "below-gate"
 const STATUS_NO_MANEUVER = "no-maneuver"
 const STATUS_LOGIN_WALL = "login-wall"
 /**
+ * The decider returned no usable maneuver from a NON-EMPTY offered set. A DISTINCT
+ * outcome from `no-maneuver` (which means nothing was offered) — the offered labels
+ * and the raw returned label are recorded so the two stops can never be confused.
+ */
+export const STATUS_UNUSABLE_CHOICE = "choice-unusable"
+/**
+ * A read subgoal whose goal-named target is genuinely absent from a settled scene:
+ * the elements were observed but none carries the goal's attribute tokens. DISTINCT
+ * from `no-choice`/`no-maneuver` — this names WHY the target could not be read.
+ */
+export const STATUS_UNREADABLE = "target-unreadable"
+/**
  * The scene kept arriving past the settle budget, so the loop withheld judgement
  * rather than deciding on a moving page. A DISTINCT status, never `completed` or
  * `no-maneuver` — a partial render must not satisfy a read or end the run.
@@ -1189,10 +1202,24 @@ export interface PlanLoopResult {
   readonly telemetry: readonly PlanLoopTelemetry[]
   readonly progress: Progress | undefined
   readonly frontier: readonly string[]
+  /** For EVERY subgoal attempt: the maneuver labels offered and the decider's raw choice. */
+  readonly offers?: readonly OfferRecord[]
   /** Present iff a destructive maneuver stopped the loop for consent. */
   readonly consent?: DestructiveConsent
   /** The concrete observed content behind a `completed` report (evidence-bound success). */
   readonly evidence?: readonly string[]
+}
+
+/**
+ * The OFFERED maneuver set for one subgoal attempt. Recorded even when the run
+ * stops, so a future stop can distinguish "nothing was offered" (empty `offered`)
+ * from "the decider chose none" (`offered` non-empty, `chosen` absent/unmatched).
+ */
+export interface OfferRecord {
+  readonly subgoalIndex: number
+  readonly kind: PlanSubgoal["kind"]
+  readonly offered: readonly string[]
+  readonly chosen?: string
 }
 
 // hardcode-guard:allow the mining vocabulary (action/target/progressed) is the plan telemetry's own contract, not case literals
@@ -1218,6 +1245,8 @@ export interface RunSummary {
   readonly planId?: string
   readonly telemetry: readonly PlanLoopTelemetry[]
   readonly promotionCandidates: readonly MinedSequence[]
+  /** Per-subgoal OFFERED maneuver set (and raw choice), so a stop is never ambiguous. */
+  readonly offers?: readonly OfferRecord[]
   /** Present iff the run stopped on a destructive maneuver awaiting consent. */
   readonly consent?: DestructiveConsent
   /** Present iff the run reported completion backed by cited content. */
@@ -1250,6 +1279,7 @@ export function planSummary(planResult: PlanLoopResult): RunSummary {
     ...(planResult.planId !== undefined ? { planId: planResult.planId } : {}),
     telemetry: planResult.telemetry,
     promotionCandidates: minePlan(planResult.telemetry),
+    ...(planResult.offers !== undefined ? { offers: planResult.offers } : {}),
     ...(planResult.consent !== undefined ? { consent: planResult.consent } : {}),
     ...(planResult.evidence !== undefined ? { evidence: planResult.evidence } : {}),
   }
@@ -1328,6 +1358,27 @@ export function destructiveTarget(option: ManeuverOption, scene: Scene): string 
 }
 
 /**
+ * The goal-named attribute a READ subgoal targets, when NO observed element carries
+ * it. `undefined` when the read is satisfiable or the subgoal is not attribute-bound.
+ */
+function readTargetMissing(subgoal: PlanSubgoal, scene: Scene): string | undefined {
+  if (subgoal.kind !== "read_items") return undefined
+  const tokens =
+    subgoal.success.op === "read_value"
+      ? [subgoal.success.matching]
+      : subgoal.success.op === "read_count"
+        ? (subgoal.success.anchors ?? [])
+        : []
+  if (tokens.length === 0) return undefined
+  const hay = [
+    ...scene.items.map((item) => item.label),
+    ...scene.items.map((item) => item.element.value ?? ""),
+    ...scene.texts.map((text) => text.text),
+  ].map((value) => value.toLowerCase())
+  return tokens.find((token) => !hay.some((value) => value.includes(token.toLowerCase())))
+}
+
+/**
  * The plan-driven core: commit a plan, measure progress over the Scene, take the
  * next subgoal, derive maneuvers, choose ONE, execute it, repeat — terminating only
  * on a predicate proved over the Scene. `observe`/`choosePlan`/`chooseManeuver`/
@@ -1340,6 +1391,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
     const settleDelayMs = Math.max(0, deps.settleDelayMs ?? 0)
     const settleMinStableMs = Math.max(0, deps.settleMinStableMs ?? 0)
     const telemetry: PlanLoopTelemetry[] = []
+    const offers: OfferRecord[] = []
     const history: StepRecord[] = []
     let maneuverRepeat: ManeuverRepeatState = initialManeuverRepeat()
     let plan: Plan | undefined
@@ -1358,6 +1410,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       telemetry,
       progress: lastProgress,
       frontier,
+      offers,
       ...(consent !== undefined ? { consent } : {}),
       ...(evidence !== undefined ? { evidence } : {}),
     })
@@ -1442,15 +1495,42 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       }
       const subgoal = plan.subgoals[current.nextSubgoal]
       if (subgoal === undefined) return complete(current)
+      // UNREADABLE TARGET: a read subgoal whose goal-named attribute is absent from
+      // the settled scene ends with a DISTINCT, explanatory status — never the
+      // ambiguous `no-choice` (which cannot be told apart from "nothing was offered").
+      const missing = readTargetMissing(subgoal, scene)
+      if (missing !== undefined)
+        return result(
+          STATUS_UNREADABLE,
+          `target-unreadable: the goal names "${missing}" but no element observed in the settled scene carries it`,
+        )
       const set = deriveManeuvers(subgoal.params, scene)
-      if (set.options.length === 0) return result(STATUS_NO_MANEUVER, set.reason ?? STATUS_NO_MANEUVER)
+      if (set.options.length === 0) {
+        offers.push({ subgoalIndex: current.nextSubgoal, kind: subgoal.kind, offered: [] })
+        return result(STATUS_NO_MANEUVER, set.reason ?? STATUS_NO_MANEUVER)
+      }
       const eligible = deps.readOnly ? set.options.filter((option) => !deps.stateChanging(option, scene)) : set.options
       frontier = eligible.map((option) => option.label)
-      if (eligible.length === 0)
+      if (eligible.length === 0) {
+        offers.push({ subgoalIndex: current.nextSubgoal, kind: subgoal.kind, offered: [] })
         return result(STATUS_READ_ONLY, "read-only goal: every derived maneuver mutates state")
+      }
       const choice = yield* deps.chooseManeuver(subgoal, eligible, scene)
+      offers.push({
+        subgoalIndex: current.nextSubgoal,
+        kind: subgoal.kind,
+        offered: eligible.map((option) => option.label),
+        ...(choice.label !== undefined ? { chosen: choice.label } : {}),
+      })
       const option = eligible.find((entry) => entry.label === choice.label)
-      if (option === undefined) return result("no-choice", "jev chose no maneuver among the offered options")
+      // The decider returned a label that matches no offered maneuver. This is NOT
+      // "nothing was offered" — record the raw choice + the offered set and stop with
+      // a distinct status that names the unusable choice.
+      if (option === undefined)
+        return result(
+          STATUS_UNUSABLE_CHOICE,
+          `choice-unusable: the decider returned ${choice.label === undefined ? "no maneuver" : `"${choice.label}"`} among ${eligible.length} offered option(s)`,
+        )
       // DESTRUCTIVE-CONSENT BOUNDARY: an irreversible maneuver stops for consent
       // BEFORE the gate — even a strong verdict never auto-executes it. The
       // blocking option, its irreversible target and its measured strength are
@@ -2283,11 +2363,21 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               // READ_ITEMS: no actuation — the observation IS the result.
               if (option.name === "read_items") return { deliveryModes: ["read"] }
               // OPEN_APP: launch or activate the application the goal named. The app
-              // name comes from the subgoal (never invented in the executor).
+              // name comes from the subgoal (never invented in the executor). The
+              // driver's launch interface declares these argument names — the source
+              // of truth:
+              //   additional_arguments, bundle_id, creates_new_application_instance,
+              //   name, urls, webkit_inspector_port
+              // The app is passed as `name` (bundle_id when known). A wrong argument
+              // is refused; the live run failed verbatim:
+              //   "launch_app: unknown argument app; accepted: additional_arguments,
+              //    bundle_id, creates_new_application_instance, name, urls,
+              //    webkit_inspector_port".
+              // hardcode-guard:allow the accepted-argument list and error are the driver's declared interface under repair
               if (option.name === "open_app") {
                 const app = subgoal.params.value ?? extractGoalValue(goal)
                 if (app === undefined || app.length === 0) return { deliveryModes: [], failure: "open_app named no application" }
-                const opened = yield* callDriver(tools, "cua-driver_launch_app", { app }, ctx.abort)
+                const opened = yield* callDriver(tools, "cua-driver_launch_app", launchAppArgs(app), ctx.abort)
                 observations++
                 if (!opened.ok) return { deliveryModes: ["declared"], failure: `launch_app failed: ${opened.error}` }
                 return { deliveryModes: ["declared"] }

@@ -22,6 +22,8 @@ import {
   Parameters,
   REVEAL_BUDGET,
   STATUS_UNSETTLED,
+  STATUS_UNREADABLE,
+  STATUS_UNUSABLE_CHOICE,
   UiRunTool,
   actuatorBinding,
   actuatorOf,
@@ -61,7 +63,7 @@ import {
 } from "@/tool/ui-run"
 import type { ManeuverOption } from "@/tool/ui-maneuvers"
 import type { Progress } from "@/tool/ui-progress"
-import type { Scene, SceneItem, SceneRegion } from "@/tool/ui-scene"
+import type { Scene, SceneItem, SceneRegion, SceneText } from "@/tool/ui-scene"
 import { affordancesOf } from "@/tool/ui-scene"
 import { buildCandidates, usableElements, type Element } from "@/tool/ui-eyes"
 import {
@@ -69,6 +71,8 @@ import {
   AUTHORIZATION_REQUIRED,
   CLIPBOARD_REPLACED_NOTE,
   CONTAINER_UNMOVED,
+  LAUNCH_APP_ACCEPTED,
+  LAUNCH_APP_NAME_ARG,
   REFUSED_BY_POLICY,
   UNSUPPORTED_ACTION,
   actuationPlan,
@@ -91,6 +95,7 @@ import {
   isNoFrameError,
   isPolicyRefused,
   isScrollableContainer,
+  launchAppArgs,
   observationArgs,
   pixelFrameRetry,
   scrollContainerOf,
@@ -2874,3 +2879,266 @@ describe("ui-run — item selection before actuator selection", () => {
     expect(weak?.actuator.element_token).toBe("lab")
   })
 })
+
+// GENERALIZATION — INVARIANT: the launch call matches the driver's DECLARED
+// interface; the app name rides under the accepted argument `name`, never the
+// live-rejected `app`. LIVE INSTANCE: the run failed verbatim "launch_app: unknown
+// argument app; accepted: additional_arguments, bundle_id,
+// creates_new_application_instance, name, urls, webkit_inspector_port". UNSEEN
+// CASE: a bundle_id-addressed launch uses the same accepted interface.
+// hardcode-guard:allow the quoted driver error and accepted-argument vocabulary are the interface under test
+describe("ui-hands — open_app launcher matches the driver's declared interface", () => {
+  test("(a) the launch call carries the ACCEPTED argument name (name), never the rejected app", () => {
+    const args = launchAppArgs("Calculator")
+    expect(args[LAUNCH_APP_NAME_ARG]).toBe("Calculator")
+    expect("app" in args).toBe(false)
+    // the accepted-argument list is quoted from the live refusal, the source of truth
+    expect(LAUNCH_APP_ACCEPTED).toContain("name")
+    expect(LAUNCH_APP_ACCEPTED).not.toContain("app")
+    expect(LAUNCH_APP_NAME_ARG).toBe("name")
+  })
+})
+
+// GENERALIZATION — INVARIANT: once the goal's target surface is reached and settled,
+// the attributes the goal NAMES become EVIDENCE — the read subgoals exist and cite the
+// observed labelled values; an empty option space is a REPORTED cause (no-maneuver), a
+// decider that returns an unusable label is DISTINCT (choice-unusable), and a target
+// genuinely absent from a settled scene names WHY (target-unreadable). Each subgoal
+// attempt records the maneuver set it was OFFERED, so "nothing offered" can never be
+// confused with "chose none".
+// LIVE INSTANCE (verbatim): pid 90951 / window 2918 — the goal "open the About pane and
+// report the macOS version, chip and total memory" reached the About pane (chip
+// "Apple M3 Max", memory "128 GB", macOS "27.2 Beta (26B5112a)") and then stopped
+// `{"status":"no-choice","planId":"mutate"}` with only the subgoal-0 step emitted.
+// UNSEEN INPUTS: a Settings pane that exposes its rows with no LIST region (handled by
+// the observed-element read), and a report goal whose surfaces sit behind a first
+// navigation (handled by the ordered per-subgoal offer record).
+// hardcode-guard:allow the live goal, the pane values and the fixture labels are the inputs under repair
+describe("ui_run — a report goal over a reached surface reads its named attributes", () => {
+  const row = (id: string, label: string, element: Element): SceneItem => ({
+    id,
+    role: element.role ?? "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element,
+  })
+  const sidebar = (): Scene => ({
+    snapshot: "s-sidebar",
+    regions: [{ id: "s:list", kind: "list", itemIds: ["About", "Software Update", "Storage"], textIds: [] }],
+    items: [
+      row("About", "About", { element_token: "t:about", role: "AXLink", label: "About" }),
+      row("Software Update", "Software Update", { element_token: "t:sw", role: "AXLink", label: "Software Update" }),
+      row("Storage", "Storage", { element_token: "t:st", role: "AXLink", label: "Storage" }),
+    ],
+    texts: [],
+  })
+  const valueRow = (id: string, label: string, value: string): SceneItem => ({
+    id,
+    role: "AXStaticText",
+    label,
+    affordances: ["readonly"],
+    stateChanging: false,
+    enabled: true,
+    element: { element_token: `t:${id}`, role: "AXStaticText", label, value },
+  })
+  const aboutPane = (): Scene => ({
+    snapshot: "s-about",
+    regions: [
+      { id: "a:content", kind: "content", itemIds: [], textIds: ["a:head"] },
+      { id: "a:detail", kind: "detail", itemIds: ["a:macos", "a:chip", "a:memory"], textIds: [] },
+    ],
+    items: [
+      valueRow("a:macos", "macOS", "27.2 Beta (26B5112a)"),
+      valueRow("a:chip", "Chip", "Apple M3 Max"),
+      valueRow("a:memory", "Memory", "128 GB"),
+    ],
+    texts: [
+      { id: "a:head", role: "AXHeading", text: "About", owner: "a:content", element: { element_token: "t:head", role: "AXHeading", label: "About" } },
+    ],
+  })
+
+  test("(a) the run reaches the About pane and returns THREE evidence-backed reads, not no-choice", async () => {
+    let observed: Scene = sidebar()
+    const executed: string[] = []
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "open the About pane and report the macOS version, chip and total memory",
+        observe: () => Effect.succeed(observed),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: (option) => {
+          executed.push(option.name)
+          if (option.name === "open_item") observed = aboutPane()
+          return Effect.succeed({ deliveryModes: ["read"] })
+        },
+        stateChanging: () => false,
+        readOnly: false,
+        maxSteps: 6,
+      }),
+    )
+    expect(result.status).toBe("completed")
+    expect(result.evidence).toBeDefined()
+    const cited = (result.evidence ?? []).join(" | ")
+    // the three requested VALUES are the evidence (not an unevidenced or absent report)
+    expect(cited).toContain("27.2 Beta (26B5112a)")
+    expect(cited).toContain("Apple M3 Max")
+    expect(cited).toContain("128 GB")
+    // the plan carries the surface reach plus one goal-anchored read per named attribute
+    expect(executed).toContain("open_item")
+  })
+
+  test("(b) each subgoal attempt records the maneuver set it was offered, in order", async () => {
+    const urlText = (text: string): SceneText => ({
+      id: "u",
+      role: "AXStaticText",
+      text,
+      owner: "content",
+      element: { element_token: "t:url", role: "AXStaticText", label: text },
+    })
+    const bar: SceneItem = {
+      id: "bar",
+      role: "AXTextField",
+      label: "Address",
+      affordances: ["typable"],
+      stateChanging: false,
+      enabled: true,
+      element: { element_token: "t:bar", role: "AXTextField", label: "Address", value: "" },
+    }
+    const list = (labels: readonly string[], snapshot: string, texts: readonly SceneText[]): Scene => ({
+      snapshot,
+      regions: [
+        { id: `${snapshot}:content`, kind: "content", itemIds: [], textIds: texts.map((t) => t.id) },
+        { id: `${snapshot}:list`, kind: "list", itemIds: [...labels], textIds: [] },
+      ],
+      items: [bar, ...labels.map((label) => row(label, label, { element_token: `t:${label}`, role: "AXLink", label }))],
+      texts,
+    })
+    const unrelated = list(["Inbox", "Sent", "Drafts"], "s-unrelated", [])
+    const arrivedPartial = list(["m1"], "s-partial", [urlText("https://example.invalid/inbox")])
+    const arrivedFull = list(["m1", "m2", "m3"], "s-full", [urlText("https://example.invalid/inbox")])
+    let observed: Scene = unrelated
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: 'go to "https://example.invalid/inbox" and read the last 3 messages',
+        observe: () => Effect.succeed(observed),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: (option) => {
+          if (option.name === "go_to_url") observed = arrivedPartial
+          if (option.name === "read_items") observed = arrivedFull
+          return Effect.succeed({ deliveryModes: ["read"] })
+        },
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 6,
+      }),
+    )
+    const offers = result.offers ?? []
+    // MORE THAN ONE subgoal was attempted, and the offered maneuver set was recorded
+    // for each attempt, in ascending subgoal order.
+    expect(result.progress?.total ?? 0).toBeGreaterThan(1)
+    expect(offers.map((entry) => entry.subgoalIndex)).toEqual([0, 1])
+    expect(offers[0].offered.length).toBeGreaterThan(0)
+    expect(offers[1].offered.length).toBeGreaterThan(0)
+    expect(offers[1].kind).toBe("read_items")
+  })
+
+  test("(c) a genuinely unreadable target stops with the DISTINCT target-unreadable status, never no-choice", async () => {
+    const readable = (): Scene => {
+      const labels = ["m1", "m2", "m3"]
+      return {
+        snapshot: "s-readable",
+        regions: [{ id: "s:list", kind: "list", itemIds: labels, textIds: [] }],
+        items: labels.map((label) => row(label, label, { element_token: `t:${label}`, role: "AXLink", label })),
+        texts: [],
+      }
+    }
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: 'read the last 3 messages from chartreuse',
+        observe: () => Effect.succeed(readable()),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: () => Effect.succeed({ deliveryModes: ["read"] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 4,
+      }),
+    )
+    expect(result.status).toBe(STATUS_UNREADABLE)
+    expect(result.reason).toContain("chartreuse")
+    expect(result.status).not.toBe("no-choice")
+    expect(result.status).not.toBe("no-maneuver")
+
+    // the SAME distinct outcome is NOT taken when the target IS present
+    // hardcode-guard:allow the synthetic label is the unseen-input target token under test, not a named case
+    const base = readable()
+    const present: Scene = {
+      ...base,
+      regions: [{ id: "s:list", kind: "list", itemIds: [...base.regions[0].itemIds, "chartreuse note"], textIds: [] }],
+      items: [
+        ...base.items,
+        row("chartreuse note", "chartreuse note", { element_token: "t:c", role: "AXLink", label: "chartreuse note" }),
+      ],
+    }
+    const ok = await Effect.runPromise(
+      planLoop({
+        goal: 'read the last 3 messages from chartreuse',
+        observe: () => Effect.succeed(present),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: () => Effect.succeed({ deliveryModes: ["read"] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 4,
+      }),
+    )
+    expect(ok.status).not.toBe(STATUS_UNREADABLE)
+  })
+
+  test("(d) an unusable decider label is DISTINCT from an empty option space; both record what was offered", async () => {
+    const listed = (): Scene => ({
+      snapshot: "s-list",
+      regions: [{ id: "s:list", kind: "list", itemIds: ["m1"], textIds: [] }],
+      items: [row("m1", "m1", { element_token: "t:m1", role: "AXLink", label: "m1" })],
+      texts: [],
+    })
+    const unusable = await Effect.runPromise(
+      planLoop({
+        goal: "read the last 3 messages",
+        observe: () => Effect.succeed(listed()),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: () => Effect.succeed({ label: "not-an-offered-maneuver" }),
+        execute: () => Effect.succeed({ deliveryModes: [] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 4,
+      }),
+    )
+    expect(unusable.status).toBe(STATUS_UNUSABLE_CHOICE)
+    expect((unusable.offers ?? [])[0]?.offered.length).toBeGreaterThan(0)
+    expect((unusable.offers ?? [])[0]?.chosen).toBe("not-an-offered-maneuver")
+
+    const empty: Scene = { snapshot: "s-empty", regions: [], items: [], texts: [] }
+    const nothing = await Effect.runPromise(
+      planLoop({
+        goal: "read the last 3 messages",
+        observe: () => Effect.succeed(empty),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: () => Effect.succeed({ deliveryModes: [] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 4,
+      }),
+    )
+    // genuinely nothing offered → no-maneuver (NOT choice-unusable), and the empty
+    // offered set is still recorded so the two stops are distinguishable.
+    expect(nothing.status).toBe("no-maneuver")
+    expect((nothing.offers ?? [])[0]?.offered).toEqual([])
+  })
+})
+
+

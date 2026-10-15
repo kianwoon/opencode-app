@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { decodeObservation, type Element } from "@/tool/ui-eyes"
 import { buildScene, type Scene, type SceneItem, type SceneRegion, type SceneText } from "@/tool/ui-scene"
-import { evalPredicate, goalApp, goalIntent, mutationValue, plan, replan, targetRegionKind, targetTerm, type Plan, type StepRecord } from "@/tool/ui-plan"
+import { evalPredicate, goalApp, goalIntent, mutationValue, plan, reportedTokens, replan, targetRegionKind, targetTerm, type Plan, type StepRecord } from "@/tool/ui-plan"
+import { resolveNamedItem } from "@/tool/ui-maneuvers"
 
 const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
 
@@ -346,4 +347,115 @@ describe("ui-plan — (e) intent selects the plan shape; mutation proven by stat
     expect(evalPredicate({ op: "option_selected", matching: "black" }, syntheticScene([])).verdict).toBe("unknown")
   })
 })
+
+// GENERALIZATION — INVARIANT: the plan consults the OBSERVED SCENE before choosing
+// a maneuver — a target present in the tree is reached by UI navigation, never by
+// launching an application; a genuinely absent application is launched with its
+// real name. LIVE INSTANCE: the goal "open the About pane and report the macOS
+// version, chip and total memory" classified as open_app "About" (0.88) without
+// consulting the tree, and the launch failed "unknown argument app". The sidebar
+// has no top-level "About" row (it is nested under "General"). UNSEEN CASES: a
+// parent row -> child row target, and a bundle-style absent app.
+// hardcode-guard:allow the live goal/error strings and their scene shapes are the inputs under repair
+describe("ui-plan — (a) scene-first maneuver choice: navigation before launch", () => {
+  const el = (label: string, role = "AXRow", parent?: number): Element => ({
+    element_token: label,
+    role,
+    label,
+    ...(parent !== undefined ? { parent_index: parent } : {}),
+  })
+  const rowItem = (label: string, element: Element): SceneItem => ({
+    id: label,
+    role: element.role ?? "AXRow",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element,
+  })
+  const settingsPaneScene = (): Scene => ({
+    snapshot: "s-settings",
+    regions: [{ id: "r0:list", kind: "list", itemIds: ["General", "Wallpaper", "About"], textIds: [] }],
+    items: [
+      rowItem("General", el("General", "AXRow", 0)),
+      rowItem("Wallpaper", el("Wallpaper", "AXRow", 0)),
+      // "About" is NOT a top-level row: it is nested under "General".
+      rowItem("About", el("About", "AXRow", 1)),
+    ],
+    texts: [],
+  })
+
+  test("(a) a goal naming a pane whose row is PRESENT in the scene yields navigation, never an open_app launch", () => {
+    const decision = plan("open the About pane and report the macOS version, chip and total memory", settingsPaneScene())
+    expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_app")).toBe(false)
+    const surface = decision.commit.subgoals.find((subgoal) => subgoal.kind === "open_item")
+    expect(surface?.params.matching).toBe("About")
+    expect(surface?.params.selectable).toBe(true)
+  })
+
+  test("(b) a NESTED item (parent row -> child row) resolves by descending, not failing or launching", () => {
+    const scene = settingsPaneScene()
+    expect(resolveNamedItem(scene, "About")?.id).toBe("About")
+    const decision = plan("open the About pane", scene)
+    expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_app")).toBe(false)
+    expect(
+      decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_item" && subgoal.params.matching === "About"),
+    ).toBe(true)
+  })
+
+  test("(c) an open_app for a genuinely ABSENT application still works and carries the real name", () => {
+    const decision = plan("open the Calculator app", settingsPaneScene())
+    const app = decision.commit.subgoals.find((subgoal) => subgoal.kind === "open_app")
+    expect(app?.params.value).toBe("Calculator")
+    // a pure launch is just the launch — no bogus navigation step
+    expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_item")).toBe(false)
+  })
+})
+
+// GENERALIZATION — INVARIANT: a goal that NAMES attribute values to report over a
+// reached surface derives one goal-anchored READ per attribute, so the values become
+// evidence once the surface settles — never the bogus open_item/apply pair for a term
+// that is not an option. LIVE INSTANCE: "open the About pane and report the macOS
+// version, chip and total memory" derived a mutate plan with no read subgoal and then
+// stopped no-choice with only subgoal 0 emitted. UNSEEN INPUT: any report goal whose
+// named attributes sit in a pane reached through navigation.
+// hardcode-guard:allow the live goal and its pane values are the inputs under repair
+describe("ui-plan — a report goal derives goal-anchored reads for its named attributes", () => {
+  test("(a) the named attributes are extracted as matchable tokens, not full phrases", () => {
+    expect(reportedTokens("open the About pane and report the macOS version, chip and total memory")).toEqual([
+      "macos",
+      "chip",
+      "memory",
+    ])
+    expect(reportedTokens("change my mac wallpaper to black")).toEqual([])
+  })
+
+  test("(a) the report decomposition carries one read_value subgoal per attribute after the surface reach", () => {
+    const el = (label: string, role = "AXRow", parent?: number): Element => ({
+      element_token: label,
+      role,
+      label,
+      ...(parent !== undefined ? { parent_index: parent } : {}),
+    })
+    const scene: Scene = {
+      snapshot: "s-settings",
+      regions: [{ id: "r0:list", kind: "list", itemIds: ["General", "About"], textIds: [] }],
+      items: [
+        { id: "General", role: "AXRow", label: "General", affordances: ["activatable"], stateChanging: false, enabled: true, element: el("General") },
+        { id: "About", role: "AXRow", label: "About", affordances: ["activatable"], stateChanging: false, enabled: true, element: el("About") },
+      ],
+      texts: [],
+    }
+    const decision = plan("open the About pane and report the macOS version, chip and total memory", scene)
+    expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_item" && subgoal.params.matching === "About")).toBe(true)
+    const reads = decision.commit.subgoals.filter((subgoal) => subgoal.success.op === "read_value")
+    expect(reads.map((subgoal) => (subgoal.success.op === "read_value" ? subgoal.success.matching : ""))).toEqual([
+      "macos",
+      "chip",
+      "memory",
+    ])
+  })
+})
+
+
 
