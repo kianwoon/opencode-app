@@ -5,7 +5,30 @@ import * as Tool from "./tool"
 import { jevControlDetailed, jevKey, type ControllerOutcome, type JevAction, type NavMap } from "../jev/controller"
 import { advanceMap, buildCandidates, decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
 import type { Element } from "./ui-eyes"
-import { actuationPlan, changeEvidence, type ActuationEvidence, type ActuationRung } from "./ui-hands"
+import {
+  actuationPlan,
+  changeEvidence,
+  clickAttempt,
+  clickSignals,
+  clickVerdict,
+  keyPress,
+  type ActuationMode,
+  type ActuationEvidence,
+  type ActuationRung,
+  type ClickAttemptEvidence,
+  type ClickOutcome,
+  type ClickSignals,
+} from "./ui-hands"
+import {
+  foldSubstepEvidence,
+  matchSkills,
+  mineSequences,
+  skillIndex,
+  type MinedSequence,
+  type MiningStep,
+  type SkillMatch,
+  type SkillSubstepEvidence,
+} from "./ui-skills"
 
 // EYES owns observation + world model; HANDS owns actuation. They are
 // re-exported so the loop's public surface (and its tests) reach the organs
@@ -121,6 +144,13 @@ export type StepDecision =
   | { readonly kind: "safe"; readonly action: "scroll" | "wait" | "observe"; readonly reason: string }
   | { readonly kind: "stop"; readonly reason: string }
   | { readonly kind: "checkpoint"; readonly target: string; readonly reason: string }
+
+/** A chosen maneuver: the loop executes a skill's fixed sub-sequence as ONE step. */
+export interface SkillDecision {
+  readonly kind: "skill"
+  readonly name: string
+  readonly reason: string
+}
 
 export interface StepInput {
   /** Controller verdict for THIS iteration (accepted | below_gate | unmeasured). */
@@ -305,13 +335,21 @@ export interface StepTrace {
   readonly action: JevAction | null
   readonly target: string | null
   readonly strength?: number
-  readonly decision: StepDecision["kind"]
+  readonly decision: StepDecision["kind"] | "skill"
   readonly reason: string
   /** HANDS change evidence for the action this step took, once the next screen is observed. */
   readonly actuation?: ActuationEvidence
+  /** AFFIRMATIVE click delivery evidence: rung attempts + verdict over the multi-signal world state. */
+  readonly click?: ClickOutcome
+  /** A chosen skill's folded sub-step telemetry: ONE trace step over N hand actions. */
+  readonly skill?: {
+    readonly name: string
+    readonly succeeded: boolean
+    readonly substeps: readonly SkillSubstepEvidence[]
+  }
 }
 
-export function traceStep(step: number, outcome: ControllerOutcome, verdict: StepDecision): StepTrace {
+export function traceStep(step: number, outcome: ControllerOutcome, verdict: StepDecision | SkillDecision): StepTrace {
   const accepted = "decision" in outcome ? outcome.decision : undefined
   const strength = "strength" in outcome ? outcome.strength : accepted?.strength
   return {
@@ -323,6 +361,22 @@ export function traceStep(step: number, outcome: ControllerOutcome, verdict: Ste
     decision: verdict.kind,
     reason: verdict.reason,
   }
+}
+
+/**
+ * SKILL MINING over the run's trace: map each act/skill step to `{ action, target,
+ * progressed }` (progressed = click delivered / screen changed / skill succeeded)
+ * and return the repeated progressed sub-sequences as promotion CANDIDATES. This
+ * only FLAGS — it never mutates the registry; promotion is a human/brain decision.
+ * hardcode-guard:allow the decision-tag vocabulary is the trace's own contract, not a case literal
+ */
+export function mineTrace(trace: readonly StepTrace[]): MinedSequence[] {
+  const steps: MiningStep[] = trace.flatMap((entry) => {
+    const progressed = entry.click?.worked ?? entry.actuation?.changed ?? entry.skill?.succeeded ?? false
+    const action = entry.decision === "skill" ? "skill" : entry.decision === "act" ? entry.action : null
+    return action === null ? [] : [{ action, target: entry.target, progressed }]
+  })
+  return mineSequences(steps)
 }
 
 export const Parameters = Schema.Struct({
@@ -475,6 +529,157 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // Every iteration's decision, emitted so a caller can verify the chain.
           const trace: StepTrace[] = []
 
+          // SKILLS execution: run a chosen maneuver's FIXED sub-sequence directly
+          // (no per-sub-step jev decisions), re-observing after each sub-step so the
+          // folded evidence carries a real before/after signature per step. Returns
+          // the folded sub-steps + whether the skill's success predicate held.
+          // hardcode-guard:allow generic skill-runner wiring over the registry contract, no case literals
+          const executeSkill = (match: SkillMatch, before: string, elements: readonly Element[]) =>
+            Effect.gen(function* () {
+              const steps = match.skill.steps(match)
+              const signatures: string[] = [before]
+              const modes: { label: string; mode: ActuationMode }[] = []
+              const deliveries: (boolean | undefined)[] = []
+              // Read sub-step results (labels matching the step's token), folded into the trace.
+              const reads: (readonly string[] | undefined)[] = []
+              let observationsUsed = 0
+              let failure: string | undefined
+              for (const sub of steps) {
+                let mode: ActuationMode
+                let result: DriverOutcome
+                // hardcode-guard:allow the refusal token is the loop's internal vocabulary, not a case literal
+                if (sub.kind === "click") {
+                  // AFFIRMATIVE click sub-step: escalate declared→pixel on ABSENT
+                  // delivery; an undelivered click aborts the maneuver.
+                  const plan = actuationPlan(match.element, params.window)
+                  const signalBefore = clickSignals(signatures.at(-1) ?? before, match.element, elements)
+                  mode = "declared"
+                  result = { ok: false, error: "no actuation rung" }
+                  let delivered = false
+                  let afterSignature = signatures.at(-1) ?? before
+                  for (const rung of plan) {
+                    result = yield* callDriver(tools, "cua-driver_click", rung.args, ctx.abort)
+                    mode = rung.mode
+                    const probe = yield* callDriver(
+                      tools,
+                      "cua-driver_get_window_state",
+                      {
+                        pid: params.window.pid,
+                        window_id: params.window.window_id,
+                        include_screenshot: false,
+                        tree_format: "elements",
+                      },
+                      ctx.abort,
+                    )
+                    observationsUsed++
+                    const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
+                    afterSignature = probed ? screenSignature(probed.elements) : (signatures.at(-1) ?? before)
+                    const signalAfter = probed
+                      ? clickSignals(afterSignature, match.element, probed.elements)
+                      : signalBefore
+                    if (
+                      clickAttempt(rung, signalBefore, signalAfter, match.element, result.ok ? undefined : result.error)
+                        .delivered
+                    ) {
+                      delivered = true
+                      break
+                    }
+                  }
+                  signatures.push(afterSignature)
+                  modes.push({ label: sub.label, mode })
+                  deliveries.push(delivered)
+                  reads.push(undefined)
+                  if (!delivered) {
+                    failure = "click undelivered on every rung"
+                    break
+                  }
+                  continue
+                }
+                // hardcode-guard:allow the sub-step verb vocabulary is the skills' own contract, not a case literal
+                if (sub.kind === "read") {
+                  // READ: no actuation — the fresh observation IS the result. Fold
+                  // the labels matching the step's token into the trace.
+                  const observedRead = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    {
+                      pid: params.window.pid,
+                      window_id: params.window.window_id,
+                      include_screenshot: false,
+                      tree_format: "elements",
+                    },
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  const readObs = observedRead.ok ? decodeObservation(observedRead.result.structuredContent) : null
+                  signatures.push(readObs ? screenSignature(readObs.elements) : (signatures.at(-1) ?? before))
+                  modes.push({ label: sub.label, mode: "read" })
+                  deliveries.push(undefined)
+                  reads.push(
+                    readObs
+                      ? readObs.elements.flatMap((element) =>
+                          element.label && element.label.includes(sub.match) ? [element.label] : [],
+                        )
+                      : undefined,
+                  )
+                  continue
+                }
+                const tool =
+                  sub.kind === "key"
+                    ? "cua-driver_press_key"
+                    : sub.kind === "type"
+                      ? "cua-driver_type_text"
+                      : "cua-driver_scroll"
+                const args =
+                  sub.kind === "key"
+                    ? keyPress(sub.key, params.window, sub.modifiers, match.element)
+                    : sub.kind === "type"
+                      ? {
+                          element_token: match.element.element_token,
+                          pid: params.window.pid,
+                          window_id: params.window.window_id,
+                          text: sub.text,
+                        }
+                      : {
+                          pid: params.window.pid,
+                          window_id: params.window.window_id,
+                          direction: sub.direction,
+                          by: sub.by ?? "page",
+                          amount: sub.amount ?? 1,
+                        }
+                mode = sub.kind === "key" ? "key" : sub.kind === "type" ? "type" : "scroll"
+                const attempt = yield* callDriver(tools, tool, args, ctx.abort)
+                result =
+                  !attempt.ok && needsForegroundDelivery(attempt.error)
+                    ? yield* callDriver(tools, tool, { ...args, delivery_mode: "foreground" }, ctx.abort)
+                    : attempt
+                if (!result.ok) {
+                  failure = result.error
+                  break
+                }
+                const observedAfter = yield* callDriver(
+                  tools,
+                  "cua-driver_get_window_state",
+                  {
+                    pid: params.window.pid,
+                    window_id: params.window.window_id,
+                    include_screenshot: false,
+                    tree_format: "elements",
+                  },
+                  ctx.abort,
+                )
+                observationsUsed++
+                const after = observedAfter.ok ? decodeObservation(observedAfter.result.structuredContent) : null
+                signatures.push(after ? screenSignature(after.elements) : (signatures.at(-1) ?? before))
+                modes.push({ label: sub.label, mode })
+                deliveries.push(undefined)
+                reads.push(undefined)
+              }
+              const substeps = foldSubstepEvidence(modes, signatures, deliveries, reads)
+              const succeeded = failure === undefined && match.skill.succeeded(substeps)
+              return { substeps, succeeded, observations: observationsUsed, failure }
+            })
+
           for (let step = 0; step < maxSteps; step++) {
             // OBSERVE fresh EVERY iteration; a candidate map is never reused across steps.
             const observed = yield* callDriver(
@@ -509,10 +714,16 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // Keep the newest snapshot's marker; it is the one that hid elements.
             if (candidates.truncated) truncated = candidates.truncated
 
+            // SKILLS: a maneuver whose precondition holds (and whose goal value is
+            // present) is offered to jev as ONE extra frontier option. The loop never
+            // names a site; adding a skill is adding a registry entry.
+            const skills = skillIndex(matchSkills(observation.elements, extractGoalValue(goal)))
+            const frontier = [...candidates.labels, ...skills.keys()]
+
             // CODE owns the map: re-derive current + the enumerated frontier from
             // this freshness, carry `path` across iterations, then hand the whole
             // map to jev as `state` and let it CHOOSE among the frontier options.
-            map = advanceMap(goal, map, observation.elements, candidates.labels)
+            map = advanceMap(goal, map, observation.elements, frontier)
 
             // HANDS change evidence: the action ran at `lastActuation.before`; the
             // fresh signature is its `after`. State WHAT changed, and attach it to
@@ -580,6 +791,59 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               strongestBelowGate = undefined
             }
 
+            // SKILLS: when jev chooses a maneuver option, execute its FIXED sub-sequence
+            // directly — no per-sub-step decisions — and fold it into ONE trace step.
+            // hardcode-guard:allow generic skill interception over the registry contract, no case literals
+            // hardcode-guard:allow generic skill interception, action-verb gate over the registry contract
+            const chosenTarget =
+              outcome.verdict === "accepted"
+                ? outcome.decision.target
+                : outcome.verdict === "below_gate"
+                  ? (outcome.target ?? null)
+                  : null
+            const chosenAction =
+              outcome.verdict === "accepted"
+                ? outcome.decision.action
+                : outcome.verdict === "below_gate"
+                  ? outcome.action
+                  : null
+            // A maneuver is an ACTION: only a click/type choice of the option executes it,
+            // never a `done`/`wait` that merely named it.
+            const chosen =
+              chosenTarget && (chosenAction === "click" || chosenAction === "type")
+                ? skills.get(chosenTarget)
+                : undefined
+            if (chosen) {
+              const skillVerdict: SkillDecision = { kind: "skill", name: chosen.skill.name, reason: "skill-chosen" }
+              const execution = yield* executeSkill(chosen, map.current, observation.elements)
+              observations += execution.observations
+              const skillTrace = {
+                name: chosen.skill.name,
+                succeeded: execution.succeeded,
+                substeps: execution.substeps,
+              }
+              trace.push({ ...traceStep(step + 1, outcome, skillVerdict), skill: skillTrace })
+              previous = `[skill ${step + 1}] ${chosen.skill.name} (${execution.substeps.length} substeps, succeeded=${execution.succeeded})`
+              lines.push(previous)
+              for (const sub of execution.substeps)
+                lines.push(
+                  `[skill ${step + 1}]   ${sub.label}: ${sub.mode} changed=${sub.changed} (${sub.before}→${sub.after})`,
+                )
+              if (execution.failure !== undefined) {
+                status = "failed"
+                lines.push(`[skill ${step + 1}] ${chosen.skill.name} failed at a sub-step: ${execution.failure}`)
+                break
+              }
+              executed += execution.substeps.length
+              // The maneuver ran at this node; the next observation reveals the change.
+              actedAt = map.current
+              actedMode = "skill"
+              actedTarget = chosen.element.label ?? chosen.element.element_token
+              belowGate = 0
+              strongestBelowGate = undefined
+              continue
+            }
+
             const verdict = decideStep({
               outcome,
               candidates,
@@ -638,6 +902,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             let actLabel: string
             let actResult: DriverOutcome
             let clickRung: ActuationRung | undefined
+            // hardcode-guard:allow a per-step state slot, not a case literal
+            let clickOutcome: ClickOutcome | undefined
             if (verdict.action === "type") {
               const actArgs = {
                 element_token: verdict.element.element_token,
@@ -652,29 +918,84 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 : attempt
               actLabel = `type_text "${verdict.text}"${retried ? " (foreground retry)" : ""}`
             } else {
+              // AFFIRMATIVE CLICK: rung 1 (declared action), rung 2 (pixel frame
+              // centre). After EACH rung the loop re-observes and judges delivery
+              // on WORLD STATE; absent evidence escalates. Two silent rungs →
+              // worked:false with both rungs' evidence — an affirmative failure.
+              // hardcode-guard:allow the refusal token is the loop's internal vocabulary, not a case literal
               const plan = actuationPlan(verdict.element, params.window)
+              const signalBefore = clickSignals(map.current, verdict.element, observation.elements)
               actLabel = plan[0]?.label ?? "click"
               actResult = { ok: false, error: "no actuation rung" }
-              for (const candidate of plan) {
-                actResult = yield* callDriver(tools, "cua-driver_click", candidate.args, ctx.abort)
-                actLabel = candidate.label
-                if (actResult.ok) {
-                  clickRung = candidate
+              const attempts: ClickAttemptEvidence[] = []
+              for (const rung of plan) {
+                actResult = yield* callDriver(tools, "cua-driver_click", rung.args, ctx.abort)
+                actLabel = rung.label
+                const probe = yield* callDriver(
+                  tools,
+                  "cua-driver_get_window_state",
+                  {
+                    pid: params.window.pid,
+                    window_id: params.window.window_id,
+                    include_screenshot: false,
+                    tree_format: "elements",
+                  },
+                  ctx.abort,
+                )
+                observations++
+                const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
+                const signalAfter = probed
+                  ? clickSignals(screenSignature(probed.elements), verdict.element, probed.elements)
+                  : signalBefore
+                const attempt = clickAttempt(
+                  rung,
+                  signalBefore,
+                  signalAfter,
+                  verdict.element,
+                  actResult.ok ? undefined : actResult.error,
+                )
+                attempts.push(attempt)
+                if (attempt.delivered) {
+                  clickRung = rung
                   break
                 }
               }
+              clickOutcome = clickVerdict(attempts)
+              const prior = trace[trace.length - 1]
+              if (prior) trace[trace.length - 1] = { ...prior, click: clickOutcome }
+              if (!clickOutcome.worked) {
+                status = "failed"
+                previous = `[fail ${step + 1}] click undelivered → ${verdict.element.label ?? verdict.element.element_token}`
+                lines.push(previous)
+                for (const attempt of clickOutcome.attempts)
+                  lines.push(
+                    `[fail ${step + 1}]   ${attempt.mode} ${attempt.label} delivered=${attempt.delivered} reasons=[${attempt.reasons.join(",")}] (${attempt.before.screen}→${attempt.after.screen})`,
+                  )
+                // AFFIRMATIVE FAILURE FEEDS THE BOUND: the click ran at this node
+                // and changed nothing observable, so the next iteration's unchanged
+                // screen advances the ambiguity count — it is never retried forever.
+                actedAt = map.current
+                continue
+              }
             }
             const target = verdict.element.label ?? verdict.element.element_token
-            if (!actResult.ok) {
+            if (verdict.action === "type" && !actResult.ok) {
               status = "failed"
               previous = `[fail ${step + 1}] ${actLabel} → ${target}`
               lines.push(`${previous}: ${actResult.error}`)
               break
             }
             executed++
-            // The action ran at this node; the next observation reveals whether it
-            // changed the screen (see nextAmbiguity) and folds the change evidence.
-            actedAt = map.current
+            if (verdict.action === "click") {
+              // A delivered click is progress on ANY signal (screen, target state
+              // or focus), so it resets the count rather than feeding it.
+              ambiguous = 0
+              actedAt = undefined
+            } else {
+              // The action ran at this node; the next observation reveals whether it
+              // changed the screen (see nextAmbiguity) and folds the change evidence.
+              actedAt = map.current
+            }
             // Remember the target + mode so a focus click on the successor's target
             // reads as a prerequisite rather than a no-op next iteration.
             actedMode = clickRung ? clickRung.mode : "type"
@@ -710,13 +1031,22 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             }
           }
 
-          // (c) The run's return carries the map (start/current/frontier/path) and
-          // every step's decision, in metadata and as a JSON trailer on the output,
-          // so an external checker can verify the chain.
+          // SKILL MINING: repeated progressed sub-sequences become promotion
+          // CANDIDATES in metadata; the loop never adds a registry entry.
+          const promotionCandidates = mineTrace(trace)
+
+          // (c) The run's return carries the map (start/current/frontier/path),
+          // every step's decision, and any promotion candidates, in metadata and as
+          // a JSON trailer on the output, so an external checker can verify the chain.
           const navMap = map
             ? { start: map.start, current: map.current, frontier: map.frontier, path: map.path }
             : undefined
-          const summary = { status, steps: trace, ...(navMap ? { map: navMap } : {}) }
+          const summary = {
+            status,
+            steps: trace,
+            promotionCandidates,
+            ...(navMap ? { map: navMap } : {}),
+          }
           return {
             title: `ui_run (${executed} actions, ${observations} observations, ${status})`,
             metadata: { ...summary, goal, executed, observations },

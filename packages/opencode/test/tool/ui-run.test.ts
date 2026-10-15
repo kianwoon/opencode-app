@@ -25,15 +25,28 @@ import {
   extractGoalValue,
   isDestructive,
   isGoalMet,
+  mineTrace,
   needsForegroundDelivery,
   nextAmbiguity,
   normalizeExpect,
   resolveTarget,
   screenSignature,
   traceStep,
+  type StepTrace,
 } from "@/tool/ui-run"
 import { usableElements } from "@/tool/ui-eyes"
-import { actuationPlan, changeEvidence, declaredAction, elementCenter } from "@/tool/ui-hands"
+import {
+  actuationPlan,
+  changeEvidence,
+  clickAttempt,
+  clickSignals,
+  clickVerdict,
+  declaredAction,
+  elementCenter,
+  focusIdentity,
+  targetState,
+  type ClickSignals,
+} from "@/tool/ui-hands"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -841,6 +854,117 @@ describe("hands actuation (declared action + pixel fallback)", () => {
   })
 })
 
+// GENERALIZATION — the invariant: click DELIVERY is measured in OBSERVABLE WORLD
+// STATE across multiple signals (screen signature, the target's own state, focus),
+// never in the driver's success codes; a click that cannot be proven to have
+// worked is reported failed, never silently absorbed. The silent no-op class — a
+// wallpaper swatch that absorbs the click, AXPress on an AXRow returning -25206 —
+// is instances of "driver said ok, world unchanged". UNSEEN CASE COVERED: a click
+// that only moves FOCUS onto its target (screen unchanged) still delivers.
+// hardcode-guard:allow the captured payload IS the artifact under test; the gate requires the exact captured shape.
+describe("affirmative click delivery (multi-signal world state)", () => {
+  const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
+  const win = { pid: 4242, window_id: 7 }
+  const unchanged = (signals: ClickSignals): ClickSignals => ({ ...signals })
+
+  test("the target's OWN state is captured from the fixture's selected/value fields", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const withValue = observation.elements.find((e) => e.value !== undefined)
+    expect(withValue).toBeDefined()
+    if (withValue === undefined) return
+    expect(targetState(withValue)).toContain(withValue.value as string)
+    expect(targetState({ ...withValue, selected: !withValue.selected })).not.toBe(targetState(withValue))
+  })
+
+  test("(a) a rung-1 TARGET-STATE change is delivered on rung 1 — no escalation", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const field = observation.elements.find((e) => e.role === "AXTextField")
+    if (field === undefined) throw new Error("fixture must hold an address field")
+    const plan = actuationPlan(field, win)
+    const before = clickSignals("nA", field, observation.elements)
+    // the field's own value changes; the screen signature does NOT
+    const afterElements = observation.elements.map((e) => (e === field ? { ...e, value: "https://x.test" } : e))
+    const after = clickSignals("nA", field, afterElements)
+
+    const attempt1 = clickAttempt(plan[0], before, after, field)
+    expect(attempt1.delivered).toBe(true)
+    expect(attempt1.reasons).toContain("target-state")
+    expect(attempt1.reasons).not.toContain("screen")
+
+    const verdict = clickVerdict([attempt1])
+    expect(verdict.worked).toBe(true)
+    expect(verdict.attempts).toHaveLength(1)
+    expect(verdict.mode).toBe("declared")
+  })
+
+  test("(b) rung 1 leaves everything unchanged → escalates to pixel, delivers on a signature change", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const button = observation.elements.find((e) => e.role === "AXButton")
+    if (button === undefined) throw new Error("fixture must hold a button")
+    const plan = actuationPlan(button, win)
+    expect(plan.map((r) => r.mode)).toEqual(["declared", "pixel"])
+    const before = clickSignals("nA", button, observation.elements)
+
+    const attempt1 = clickAttempt(plan[0], before, unchanged(before), button)
+    expect(attempt1.delivered).toBe(false)
+    const attempt2 = clickAttempt(plan[1], before, { ...before, screen: "nB" }, button)
+    expect(attempt2.delivered).toBe(true)
+    expect(attempt2.reasons).toContain("screen")
+
+    const verdict = clickVerdict([attempt1, attempt2])
+    expect(verdict.worked).toBe(true)
+    expect(verdict.mode).toBe("pixel")
+    expect(verdict.attempts).toHaveLength(2)
+  })
+
+  test("(c) BOTH rungs change nothing → worked:false with both attempts' evidence, feeding the bound", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const button = observation.elements.find((e) => e.role === "AXButton")
+    if (button === undefined) throw new Error("fixture must hold a button")
+    const plan = actuationPlan(button, win)
+    const before = clickSignals("nA", button, observation.elements)
+
+    const attempt1 = clickAttempt(plan[0], before, unchanged(before), button, "driver reports ok")
+    const attempt2 = clickAttempt(plan[1], before, unchanged(before), button, "driver reports ok")
+    const verdict = clickVerdict([attempt1, attempt2])
+    expect(verdict.worked).toBe(false)
+    expect(verdict.attempts).toHaveLength(2)
+    expect(verdict.attempts.map((a) => a.delivered)).toEqual([false, false])
+    expect(verdict.attempts.every((a) => a.reasons.length === 0)).toBe(true)
+
+    // the loop feeds an undelivered click to the ambiguity bound: it ran at the
+    // node and changed nothing, so the unchanged screen advances the count.
+    expect(nextAmbiguity(0, "nA", "nA")).toBe(1)
+    expect(nextAmbiguity(2, "nA", "nA")).toBe(3)
+  })
+
+  test("focus-only delivery: a click that moves focus ONTO its target is delivered (unseen case)", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const button = observation.elements.find((e) => e.role === "AXButton")
+    if (button === undefined) throw new Error("fixture must hold a button")
+    const plan = actuationPlan(button, win)
+    const before = { screen: "nA", target: targetState(button) } as ClickSignals
+    const afterElements = observation.elements.map((e) => (e === button ? { ...e, focused: true } : e))
+    const after = clickSignals("nA", button, afterElements)
+    expect(after.focus).toBe(focusIdentity(button))
+
+    const attempt = clickAttempt(plan[0], before, after, button)
+    expect(attempt.delivered).toBe(true)
+    expect(attempt.reasons).toContain("focus")
+    expect(attempt.reasons).not.toContain("screen")
+  })
+})
+
 describe("ui_run tool", () => {
   it.instance("reports a graceful not-connected result when cua-driver is absent", () =>
     Effect.gen(function* () {
@@ -1093,5 +1217,48 @@ describe("ui_run chain — decider contract over the captured Brave frontier", (
         nextTarget: "c1 AXButton New posts",
       }),
     ).toBe(0)
+  })
+})
+
+// GENERALIZATION — the invariant: mining FLAGS promotion candidates from the run
+// trace; it never self-promotes into the registry. The per-case-feeding problem is
+// the instance this closes; an unseen case it covers is a repeated key→key chord
+// (e.g. tab→enter) on the same target.
+// hardcode-guard:allow fixture labels/tokens are the enumerable input under test
+describe("ui_run — skill mining hook over the step trace", () => {
+  const act = (step: number, action: "click" | "type", target: string, progressed: boolean): StepTrace => ({
+    step,
+    verdict: "accepted",
+    action,
+    target,
+    decision: "act",
+    reason: "decided",
+    ...(action === "click"
+      ? { click: { worked: progressed, mode: "declared" as const, attempts: [] } }
+      : { actuation: { mode: "type" as const, before: "nA", after: progressed ? "nB" : "nA", changed: progressed } }),
+  })
+
+  test("(c) repeated delivered focus→type steps emit a promotion candidate from the trace", () => {
+    const candidates = mineTrace([
+      act(1, "click", "c1 AXTextField Search", true),
+      act(2, "type", "c1 AXTextField Search", true),
+      act(3, "click", "c1 AXTextField Search", true),
+      act(4, "type", "c1 AXTextField Search", true),
+    ])
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].occurrences).toBe(2)
+    expect(candidates[0].sequence).toEqual(["click c1 AXTextField Search", "type c1 AXTextField Search"])
+  })
+
+  test("(c) a clean trace (no repetition / nothing progressed) emits no candidate", () => {
+    expect(mineTrace([act(1, "click", "X", true), act(2, "type", "Y", true)])).toEqual([])
+    expect(
+      mineTrace([
+        act(1, "click", "X", false),
+        act(2, "type", "X", false),
+        act(3, "click", "X", false),
+        act(4, "type", "X", false),
+      ]),
+    ).toEqual([])
   })
 })

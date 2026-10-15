@@ -88,6 +88,16 @@ const elementFields = {
   role: Schema.optional(Schema.String),
   label: Schema.optional(Schema.String),
   enabled: Schema.optional(Schema.Boolean),
+  /**
+   * The element's OWN observable state. These are the driver's own fields (the
+   * wire fixture ships `selected`/`value`; a focused element ships `focused`);
+   * the hand's affirmative click contract judges delivery on them, so they are
+   * preserved rather than stripped. `screenSignature` still excludes them as
+   * ephemeral — only role+label define node identity.
+   */
+  selected: Schema.optional(Schema.Boolean),
+  value: Schema.optional(Schema.String),
+  focused: Schema.optional(Schema.Boolean),
   /** The element's DECLARED AX actions (e.g. ["AXPress"], ["AXSelect"]); the hand maps these. */
   actions: Schema.optional(Schema.Array(Schema.String)),
   /** Screen-space frame; the hand's pixel fallback clicks its centre. */
