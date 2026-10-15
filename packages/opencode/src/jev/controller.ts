@@ -42,6 +42,31 @@ export const STATE_MAX = 4_000
 export const LABEL_MAX = 80
 export const CONTROLS_MAX = 60
 
+/**
+ * GENERAL RULE — a cap must SAMPLE ACROSS the whole ordered range, never keep a
+ * contiguous prefix. A prefix silently excludes every item past the cap, so a
+ * goal target sitting in a later region (the detail pane behind a long sidebar)
+ * can never be enumerated even though it is on screen. The selection spans the
+ * range with the first and last items always included, so no region is hidden;
+ * the COUNT is still capped at `max` (the state-size guard is unchanged).
+ * Unseen case it covers: a 500-row list whose goal target is the final row.
+ */
+export function sampleWithinCap<T>(items: readonly T[], max: number): T[] {
+  if (items.length <= max) return [...items]
+  if (max <= 1) return items.slice(0, 1)
+  const step = (items.length - 1) / (max - 1)
+  const picked: T[] = []
+  const seen = new Set<number>()
+  for (let i = 0; i < max; i++) {
+    const at = Math.round(i * step)
+    if (seen.has(at)) continue
+    seen.add(at)
+    const item = items[at]
+    if (item !== undefined) picked.push(item)
+  }
+  return picked
+}
+
 export type JevAction = "click" | "type" | "scroll" | "key" | "wait" | "done"
 
 const ACTIONS: JevAction[] = ["click", "type", "scroll", "key", "wait", "done"]

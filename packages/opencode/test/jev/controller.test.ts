@@ -6,6 +6,7 @@ import {
   buildState,
   controllerMemoKey,
   foldController,
+  sampleWithinCap,
   type JevAction,
 } from "@/jev/controller"
 
@@ -169,4 +170,27 @@ test("JevAction union stays in sync with the question criteria", () => {
   const actions: JevAction[] = ["click", "type", "scroll", "key", "wait", "done"]
   const q = buildControllerQuestions([])
   expect(Object.keys(q?.action.criteria ?? {}).sort()).toEqual([...actions].sort())
+})
+
+// hardcode-guard:allow the range values are the enumerable input under test
+describe("sampleWithinCap", () => {
+  test("returns every item unchanged at or under the cap", () => {
+    expect(sampleWithinCap(["a", "b", "c"], 5)).toEqual(["a", "b", "c"])
+  })
+
+  test("keeps the first and the last item, spanning the whole range at the cap", () => {
+    const items = Array.from({ length: 163 }, (_, i) => `ctrl-${i}`)
+    const picked = sampleWithinCap(items, CONTROLS_MAX)
+    expect(picked.length).toBe(CONTROLS_MAX)
+    expect(picked[0]).toBe("ctrl-0")
+    expect(picked[picked.length - 1]).toBe("ctrl-162")
+  })
+
+  test("a goal target past the prefix region is still selected", () => {
+    const items = Array.from({ length: 163 }, (_, i) => `ctrl-${i}`)
+    const picked = sampleWithinCap(items, CONTROLS_MAX)
+    // the selection reaches past a 60-wide leading prefix — not narrowed to it
+    expect(picked.indexOf("ctrl-85")).toBeGreaterThan(-1)
+    expect(picked.filter((item) => item !== undefined).length).toBeGreaterThan(CONTROLS_MAX / 2)
+  })
 })

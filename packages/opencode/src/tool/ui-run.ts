@@ -7,13 +7,16 @@ import {
   LABEL_MAX,
   jevControlDetailed,
   jevKey,
+  sampleWithinCap,
   type ControllerOutcome,
+  type JevAction,
   type NavMap,
 } from "../jev/controller"
 
 const DEFAULT_MAX_STEPS = 30
 const HARD_MAX_STEPS = 100
-/** Consecutive non-acting (safe) iterations before the loop stops as stuck. */
+/** Consecutive NON-PROGRESS iterations (a safe wait/scroll/observe, or an action
+ * whose screen did not change) before the loop stops as stuck. */
 const MAX_AMBIGUOUS = 3
 const DEFAULT_TIMEOUT = 30_000
 const MAX_EXPECT = 8
@@ -72,18 +75,16 @@ export function buildCandidates(elements: readonly Element[]): {
       !NON_INTERACTIVE.has(element.role) &&
       element.enabled !== false,
   )
-  const entries = usable
-    .slice(0, CONTROLS_MAX)
-    .map((element, i) => ({
-      element,
-      label: clip(`c${i + 1} ${element.role} ${element.label ?? ""}`.trim(), LABEL_MAX),
-    }))
+  const entries = sampleWithinCap(usable, CONTROLS_MAX).map((element, i) => ({
+    element,
+    label: clip(`c${i + 1} ${element.role} ${element.label ?? ""}`.trim(), LABEL_MAX),
+  }))
   return {
     labels: entries.map((entry) => entry.label),
     byLabel: new Map(entries.map((entry) => [entry.label, entry.element])),
     truncated:
       usable.length > CONTROLS_MAX
-        ? `controls truncated from ${usable.length} to ${CONTROLS_MAX}; tail elements are invisible to the decision model`
+        ? `controls truncated from ${usable.length} to ${CONTROLS_MAX}; the cap samples the whole range so no region is hidden`
         : undefined,
   }
 }
@@ -257,6 +258,51 @@ export function decideStep(input: StepInput): StepDecision {
   return { kind: "act", action: "click", element, reason: "decided" }
 }
 
+/**
+ * GENERAL RULE — a step makes PROGRESS only when the screen its action ran on
+ * actually CHANGED. Node identity is the stable `screenSignature` of the
+ * observed screen, so `actedAt` (the node an action ran at) can be compared to
+ * the successor node `current`: equal signatures mean the action changed
+ * nothing, so the count advances toward the ambiguity bound; a differing
+ * signature is the only thing that resets it. `undefined` means no action ran
+ * last iteration, leaving the count untouched.
+ */
+export function nextAmbiguity(ambiguous: number, actedAt: string | undefined, current: string): number {
+  if (actedAt === undefined) return ambiguous
+  return actedAt === current ? ambiguous + 1 : 0
+}
+
+/**
+ * One iteration's externally-checkable trace: what jev returned (verdict,
+ * action, target, strength) and what the loop did with it (`decision`,
+ * `reason`). A below_gate/unmeasured step carries its verdict and no action; an
+ * accepted step carries the decided action + target + strength. Emitted for
+ * every iteration so a caller can verify the chain.
+ */
+export interface StepTrace {
+  readonly step: number
+  readonly verdict: ControllerOutcome["verdict"]
+  readonly action: JevAction | null
+  readonly target: string | null
+  readonly strength?: number
+  readonly decision: StepDecision["kind"]
+  readonly reason: string
+}
+
+export function traceStep(step: number, outcome: ControllerOutcome, verdict: StepDecision): StepTrace {
+  const accepted = "decision" in outcome ? outcome.decision : undefined
+  const strength = "strength" in outcome ? outcome.strength : accepted?.strength
+  return {
+    step,
+    verdict: outcome.verdict,
+    action: accepted?.action ?? null,
+    target: accepted?.target ?? null,
+    ...(strength !== undefined ? { strength } : {}),
+    decision: verdict.kind,
+    reason: verdict.reason,
+  }
+}
+
 export const Parameters = Schema.Struct({
   goal: Schema.String.annotate({
     description: "Run-level goal the closed loop drives to; re-observed and re-decided every iteration",
@@ -289,7 +335,7 @@ export const Parameters = Schema.Struct({
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
-type Metadata = {}
+type Metadata = Record<string, unknown>
 type ContentItem = { type: string; text?: string }
 
 /** The two CallToolResult fields this loop reads; the SDK type resolves to `never` here. */
@@ -390,6 +436,11 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           let truncated: string | undefined
           // The navigation map, re-derived from the observed UI EVERY iteration.
           let map: NavMap | undefined
+          // Node signature at which the last action ran — a no-op (screen
+          // unchanged) feeds the ambiguity bound instead of resetting it.
+          let actedAt: string | undefined
+          // Every iteration's decision, emitted so a caller can verify the chain.
+          const trace: StepTrace[] = []
 
           for (let step = 0; step < maxSteps; step++) {
             // OBSERVE fresh EVERY iteration; a candidate map is never reused across steps.
@@ -429,6 +480,13 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // this freshness, carry `path` across iterations, then hand the whole
             // map to jev as `state` and let it CHOOSE among the frontier options.
             map = advanceMap(goal, map, observation.elements, candidates.labels)
+
+            // (b) Did the action executed last iteration actually change the screen?
+            // The fresh signature answers it; an unchanged screen is a no-op, not
+            // progress, so it advances the ambiguity count toward the bound.
+            ambiguous = nextAmbiguity(ambiguous, actedAt, map.current)
+            actedAt = undefined
+
             const outcome = yield* Effect.promise(() =>
               jevControlDetailed({
                 map,
@@ -450,6 +508,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               ambiguous,
               maxAmbiguous: MAX_AMBIGUOUS,
             })
+            // (c) Record this iteration's jev decision and the loop's resolved action
+            // as a general, per-step trace so a caller can verify the chain.
+            trace.push(traceStep(step + 1, outcome, verdict))
 
             if (verdict.kind === "stop") {
               status = verdict.reason === "evidence-satisfied" ? "verified" : verdict.reason
@@ -506,7 +567,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               break
             }
             executed++
-            ambiguous = 0
+            // The action ran at this node; the next observation reveals whether it
+            // changed the screen (see nextAmbiguity).
+            actedAt = map.current
             previous = `[ok ${step + 1}] ${actLabel} → ${target}`
             lines.push(`${previous}${retried ? " (foreground retry)" : ""}`)
 
@@ -534,10 +597,17 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             }
           }
 
+          // (c) The run's return carries the map (start/current/frontier/path) and
+          // every step's decision, in metadata and as a JSON trailer on the output,
+          // so an external checker can verify the chain.
+          const navMap = map
+            ? { start: map.start, current: map.current, frontier: map.frontier, path: map.path }
+            : undefined
+          const summary = { status, steps: trace, ...(navMap ? { map: navMap } : {}) }
           return {
             title: `ui_run (${executed} actions, ${observations} observations, ${status})`,
-            metadata: {},
-            output: [...lines, ...(truncated ? [truncated] : [])].join("\n"),
+            metadata: { ...summary, goal, executed, observations },
+            output: [...lines, ...(truncated ? [truncated] : []), JSON.stringify(summary)].join("\n"),
           }
         }),
     }

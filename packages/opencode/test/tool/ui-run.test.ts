@@ -23,8 +23,10 @@ import {
   isDestructive,
   isGoalMet,
   needsForegroundDelivery,
+  nextAmbiguity,
   normalizeExpect,
   screenSignature,
+  traceStep,
 } from "@/tool/ui-run"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
@@ -216,6 +218,17 @@ describe("buildCandidates", () => {
     expect(labels[0].length).toBe(LABEL_MAX)
     expect(byLabel.get(labels[0])?.element_token).toBe("s00000011:1")
   })
+
+  // hardcode-guard:allow fixture labels are the enumerable input under test
+  test("a screen over the cap still enumerates a goal target beyond the prefix", () => {
+    const sidebar = Array.from({ length: CONTROLS_MAX + 20 }, (_, i) => button(i + 1, `sidebar-${i}`))
+    const goalTarget = button(CONTROLS_MAX + 30, "AppRow Toggle")
+    const { labels, byLabel } = buildCandidates([...sidebar, goalTarget])
+
+    expect(labels.length).toBe(CONTROLS_MAX)
+    // the target past a contiguous prefix is still an enumerated frontier option
+    expect([...byLabel.values()].some((e) => e.element_token === goalTarget.element_token)).toBe(true)
+  })
 })
 
 describe("needsForegroundDelivery", () => {
@@ -372,6 +385,110 @@ describe("decideStep", () => {
     expect(v.kind).toBe("safe")
     if (v.kind !== "safe") throw new Error("expected safe")
     expect(v.reason).toBe("type-without-text")
+  })
+})
+
+// hardcode-guard:allow fixture labels and answers are the enumerable input under test
+describe("nextAmbiguity", () => {
+  test("an action whose screen is unchanged advances the count", () => {
+    expect(nextAmbiguity(0, "n1", "n1")).toBe(1)
+    expect(nextAmbiguity(2, "n1", "n1")).toBe(3)
+  })
+
+  test("an action that changes the screen resets the count", () => {
+    expect(nextAmbiguity(2, "n1", "n2")).toBe(0)
+  })
+
+  test("no action last iteration leaves the count untouched", () => {
+    expect(nextAmbiguity(1, undefined, "n9")).toBe(1)
+  })
+
+  test("a repeated no-op click terminates via the ambiguity bound, not the budget", () => {
+    const elements = [button(1, "Notifications"), button(2, "Do Not Disturb")]
+    const candidates = buildCandidates(elements)
+    const target = candidates.labels[0]
+    let ambiguous = 0
+    let actedAt: string | undefined
+    let status = "budget-exhausted"
+
+    for (let step = 0; step < 30; step++) {
+      // the SAME screen is observed every iteration — the click never moves it
+      const map = advanceMap("open the app's notification settings", undefined, elements, candidates.labels)
+      ambiguous = nextAmbiguity(ambiguous, actedAt, map.current)
+      const outcome = accepted({
+        action: ans("click", { click: 0.95, wait: 0.05 }),
+        target: ans(`0:${target}`, { [`0:${target}`]: 0.95, none: 0.05 }),
+      })
+      const verdict = decideStep({
+        outcome,
+        candidates: { labels: candidates.labels, byLabel: candidates.byLabel },
+        goalMet: false,
+        evidence: false,
+        step,
+        maxSteps: 30,
+        ambiguous,
+        maxAmbiguous: 3,
+      })
+      if (verdict.kind !== "act") {
+        status = verdict.reason
+        break
+      }
+      actedAt = map.current
+    }
+
+    expect(status).toBe("ambiguous-limit")
+  })
+})
+
+// hardcode-guard:allow fixture labels and answers are the enumerable input under test
+describe("traceStep", () => {
+  const base = {
+    candidates: index([button(1, "Save"), button(2, "Settings")]),
+    goalMet: false,
+    evidence: false,
+    step: 0,
+    maxSteps: 30,
+    ambiguous: 0,
+    maxAmbiguous: 3,
+  }
+
+  test("an accepted decision carries action + target + strength", () => {
+    const outcome = accepted({
+      action: ans("click", { click: 0.9, wait: 0.1 }),
+      target: ans("0:c2 AXButton Settings", { "0:c2 AXButton Settings": 0.95, none: 0.05 }),
+    })
+    const verdict = decideStep({ ...base, outcome })
+    expect(traceStep(1, outcome, verdict)).toEqual({
+      step: 1,
+      verdict: "accepted",
+      action: "click",
+      target: "c2 AXButton Settings",
+      strength: 0.9,
+      decision: "act",
+      reason: "decided",
+    })
+  })
+
+  test("a below_gate verdict carries its strength and no action", () => {
+    const outcome = foldController({ answers: { action: ans("click", { click: 0.55, wait: 0.45 }) } }, 0.7)
+    const verdict = decideStep({ ...base, outcome })
+    const t = traceStep(1, outcome, verdict)
+    expect(t.verdict).toBe("below_gate")
+    expect(t.action).toBeNull()
+    expect(t.target).toBeNull()
+    expect(t.strength).toBeCloseTo(0.55)
+    expect(t.decision).toBe("safe")
+    expect(t.reason).toBe("below-gate")
+  })
+
+  test("an unmeasured verdict carries no action and no strength", () => {
+    const outcome = foldController({}, 0.7)
+    const verdict = decideStep({ ...base, outcome })
+    const t = traceStep(1, outcome, verdict)
+    expect(t.verdict).toBe("unmeasured")
+    expect(t.action).toBeNull()
+    expect("strength" in t).toBe(false)
+    expect(t.reason).toBe("unmeasured")
   })
 })
 
