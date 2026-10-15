@@ -27,6 +27,8 @@ export interface SubgoalProgress {
   readonly success: boolean
   readonly verdict: PredicateVerdict
   readonly evidence: string
+  /** The concrete observed content that satisfied the predicate (empty when unevidenced). */
+  readonly cited: readonly string[]
 }
 
 export interface Progress {
@@ -103,6 +105,7 @@ export function progress(plan: Plan, scene: Scene, history: readonly StepRecord[
     success: result.verdict === "true",
     verdict: result.verdict,
     evidence: result.evidence,
+    cited: result.cited ?? [],
   }))
   const done = results.reduce(
     (sum, result) => sum + (result.verdict === "true" ? (result.target ?? 1) : (result.satisfied ?? 0)),

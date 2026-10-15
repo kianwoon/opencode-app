@@ -547,6 +547,8 @@ const STATUS_NO_MANEUVER = "no-maneuver"
 const STATUS_LOGIN_WALL = "login-wall"
 /** A destructive maneuver stops here for consent — distinct from the gate stops. */
 export const STATUS_DESTRUCTIVE = "destructive-consent-required"
+/** Every predicate is satisfied but no satisfied subgoal cites observable content. */
+export const STATUS_UNEVIDENCED = "completion-without-evidence"
 /** The loop's existing maneuver-repeat bound status, mirrored into the plan loop. */
 const REASON_MANEUVER_REPEAT = "maneuver-repeat-limit"
 
@@ -609,6 +611,8 @@ export interface PlanLoopResult {
   readonly frontier: readonly string[]
   /** Present iff a destructive maneuver stopped the loop for consent. */
   readonly consent?: DestructiveConsent
+  /** The concrete observed content behind a `completed` report (evidence-bound success). */
+  readonly evidence?: readonly string[]
 }
 
 // hardcode-guard:allow the mining vocabulary (action/target/progressed) is the plan telemetry's own contract, not case literals
@@ -636,6 +640,22 @@ export interface RunSummary {
   readonly promotionCandidates: readonly MinedSequence[]
   /** Present iff the run stopped on a destructive maneuver awaiting consent. */
   readonly consent?: DestructiveConsent
+  /** Present iff the run reported completion backed by cited content. */
+  readonly evidence?: readonly string[]
+}
+
+/**
+ * EVIDENCE-BOUND COMPLETION — the citable content behind a COMPLETED report.
+ * Returns the concrete content (labels/texts/urls) every satisfied subgoal cites,
+ * or `undefined` when any satisfied subgoal cannot cite observable content — a run
+ * may not claim success without evidence. An `unknown`/unsatisfied subgoal is not
+ * part of completion (an unsatisfied predicate means the run is not complete).
+ */
+export function completionEvidence(progress: Progress): readonly string[] | undefined {
+  const satisfied = progress.perSubgoal.filter((entry) => entry.success)
+  if (satisfied.length === 0) return undefined
+  if (satisfied.some((entry) => entry.cited.every((c) => c.trim().length === 0))) return undefined
+  return [...new Set(satisfied.flatMap((entry) => entry.cited).filter((c) => c.trim().length > 0))]
 }
 
 /**
@@ -651,6 +671,7 @@ export function planSummary(planResult: PlanLoopResult): RunSummary {
     telemetry: planResult.telemetry,
     promotionCandidates: minePlan(planResult.telemetry),
     ...(planResult.consent !== undefined ? { consent: planResult.consent } : {}),
+    ...(planResult.evidence !== undefined ? { evidence: planResult.evidence } : {}),
   }
 }
 
@@ -738,7 +759,12 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
     let planId: string | undefined
     let lastProgress: Progress | undefined
     let frontier: readonly string[] = []
-    const result = (status: string, reason: string, consent?: DestructiveConsent): PlanLoopResult => ({
+    const result = (
+      status: string,
+      reason: string,
+      consent?: DestructiveConsent,
+      evidence?: readonly string[],
+    ): PlanLoopResult => ({
       status,
       reason,
       ...(planId !== undefined ? { planId } : {}),
@@ -746,7 +772,21 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       progress: lastProgress,
       frontier,
       ...(consent !== undefined ? { consent } : {}),
+      ...(evidence !== undefined ? { evidence } : {}),
     })
+
+    // EVIDENCE-BOUND COMPLETION: completion is only reported when every satisfied
+    // subgoal cites the observed content behind it. A completion that cannot cite
+    // evidence is refused with a distinct status rather than reported as success.
+    const complete = (current: Progress): PlanLoopResult => {
+      const evidence = completionEvidence(current)
+      return evidence === undefined
+        ? result(
+            STATUS_UNEVIDENCED,
+            "every predicate is satisfied but no satisfied subgoal cites observable content; refusing to report success",
+          )
+        : result("completed", "predicate-satisfied", undefined, evidence)
+    }
 
     for (let iteration = 0; iteration < deps.maxSteps; iteration++) {
       const scene = yield* deps.observe()
@@ -767,7 +807,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       }
       const current = measureProgress(plan, scene, history)
       lastProgress = current
-      if (current.nextSubgoal === undefined) return result("completed", "predicate-satisfied")
+      if (current.nextSubgoal === undefined) return complete(current)
       if (current.exhausted) return result("budget-exhausted", current.reason ?? "budget-exhausted")
       if (current.shouldReplan) {
         const revised = revisePlan(plan, scene, history)
@@ -776,7 +816,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
         continue
       }
       const subgoal = plan.subgoals[current.nextSubgoal]
-      if (subgoal === undefined) return result("completed", "predicate-satisfied")
+      if (subgoal === undefined) return complete(current)
       const set = deriveManeuvers(subgoal.params, scene)
       if (set.options.length === 0) return result(STATUS_NO_MANEUVER, set.reason ?? STATUS_NO_MANEUVER)
       const eligible = deps.readOnly ? set.options.filter((option) => !deps.stateChanging(option, scene)) : set.options
@@ -855,7 +895,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
 
     return {
       description:
-        "Drive a window to a goal in ONE call with a CLOSED observe-decide-act-verify loop: every iteration re-observes the window afresh, re-decides with jev from that iteration's live controls, validates the target against them and acts, then verifies. It stops only on OBSERVED evidence (cua-driver_verify_state), an exhausted budget, N consecutive ambiguous decisions, a destructive-action (irreversible write) boundary — a Delete/Remove/Submit/Send/Confirm/Purchase/Save-type affordance stops the run for consent with status `destructive-consent-required`, even above the gate — or a driver error. A missing/sub-threshold decision never aborts: it falls to a safe action (scroll/wait/re-observe) up to a small bound. An undecodable observation still stops (targets are never guessed from prose), and jev's `goal_met` is advisory only. Pass `expect` to verify the end state. Requires the cua-driver MCP server and a configured jev key; returns an unavailable notice otherwise.",
+        "Drive a window to a goal in ONE call with a CLOSED observe-decide-act-verify loop: every iteration re-observes the window afresh, re-decides with jev from that iteration's live controls, validates the target against them and acts, then verifies. It stops only on OBSERVED evidence (cua-driver_verify_state), an exhausted budget, N consecutive ambiguous decisions, a destructive-action (irreversible write) boundary — a Delete/Remove/Submit/Send/Confirm/Purchase/Save-type affordance stops the run for consent with status `destructive-consent-required`, even above the gate — or a driver error. A missing/sub-threshold decision never aborts: it falls to a safe action (scroll/wait/re-observe) up to a small bound. An undecodable observation still stops (targets are never guessed from prose), and jev's `goal_met` is advisory only. Pass `expect` to verify the end state. A `completed` report is EVIDENCE-BOUND: every satisfied predicate must cite the observed content behind it, and a completion that cannot cite evidence stops with status `completion-without-evidence` instead of reporting success. Requires the cua-driver MCP server and a configured jev key; returns an unavailable notice otherwise.",
       parameters: Parameters,
       execute: (params: Params, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {

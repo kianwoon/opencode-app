@@ -20,6 +20,7 @@ import {
   Parameters,
   UiRunTool,
   advanceMap,
+  completionEvidence,
   decodeObservation,
   destructiveManeuver,
   extractGoalValue,
@@ -47,6 +48,7 @@ import {
   type StepTrace,
 } from "@/tool/ui-run"
 import type { ManeuverOption } from "@/tool/ui-maneuvers"
+import type { Progress } from "@/tool/ui-progress"
 import type { Scene, SceneItem, SceneRegion } from "@/tool/ui-scene"
 import { buildCandidates, usableElements, type Element } from "@/tool/ui-eyes"
 import {
@@ -1297,6 +1299,82 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
     expect(destructiveManeuver(option("read_items", unsubscribe), scene)).toBe(false)
     // a non-destructive activating maneuver is not blocked
     expect(destructiveManeuver(option("open_item", details), scene)).toBe(false)
+  })
+
+  // hardcode-guard:allow the file-URL/target URL and the synthetic labels are the enumerable inputs under test (goal + scene), not named one-off cases
+  test("(a) a file-URL + 3-messages goal over an unrelated page does NOT complete at step 0", async () => {
+    let executed = false
+    const unrelated = listScene(["Inbox", "Sent", "Drafts", "Archive"], "s-unrelated")
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          goal: 'go to "file:///tmp/messages.html" and read the last 3 messages',
+          observe: () => Effect.succeed(unrelated),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+          execute: () => {
+            executed = true
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => false,
+          readOnly: true,
+          maxSteps: 1,
+        }),
+      ),
+    )
+    // NOT "completed", NOT "predicate-satisfied": the navigate subgoal is unsatisfied
+    expect(result.status).not.toBe("completed")
+    expect(result.reason).not.toBe("predicate-satisfied")
+    expect(result.progress?.perSubgoal[0].success).toBe(false)
+    // nothing was executed on the unrelated page (no navigable target there)
+    expect(executed).toBe(false)
+  })
+
+  test("(b) a zero-step completion is legitimate ONLY when the initial scene honestly satisfies it — and it cites its evidence", async () => {
+    const arrived: Scene = {
+      snapshot: "s-arrived",
+      regions: [],
+      items: [],
+      texts: [
+        {
+          id: "u",
+          role: "AXStaticText",
+          text: "https://example.invalid/inbox",
+          owner: "scene",
+          element: el("https://example.invalid/inbox", "AXStaticText"),
+        },
+      ],
+    }
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          goal: 'navigate to "https://example.invalid/inbox"',
+          observe: () => Effect.succeed(arrived),
+          maxSteps: 1,
+        }),
+      ),
+    )
+    expect(result.status).toBe("completed")
+    expect(result.telemetry).toHaveLength(0)
+    expect(result.evidence?.length).toBeGreaterThan(0)
+    expect(result.evidence?.join(" ")).toContain("example.invalid")
+  })
+
+  test("(b) zero-step completion is REFUSED when a satisfied subgoal cites no content", () => {
+    const unevidenced: Progress = {
+      perSubgoal: [{ success: true, verdict: "true", evidence: "region present", cited: [] }],
+      done: 1,
+      total: 1,
+      nextSubgoal: undefined,
+      shouldReplan: false,
+      exhausted: false,
+      reason: undefined,
+    }
+    expect(completionEvidence(unevidenced)).toBeUndefined()
+    const evidenced: Progress = {
+      ...unevidenced,
+      perSubgoal: [{ success: true, verdict: "true", evidence: "text present", cited: ["alpha"] }],
+    }
+    expect(completionEvidence(evidenced)).toEqual(["alpha"])
   })
 
   test("(c) a login/credential wall stops the run with its reason, typing nothing", async () => {

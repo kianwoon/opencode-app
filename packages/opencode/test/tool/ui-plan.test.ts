@@ -197,3 +197,72 @@ describe("ui-plan — (e) predicate region-scoping (chrome is never content)", (
   })
 })
 
+// GENERALIZATION — INVARIANT: success is evidence-bound; read predicates are
+// goal-anchored; URL identity is NEVER compared vacuously (scheme+path, never an
+// empty host). LIVE INSTANCES: (i) a file-URL + 3-messages goal completed at step 0
+// on an unrelated page; (ii) a dense unrelated page satisfied a read with no goal
+// content. UNSEEN CASES: any no-host scheme (about:, data:) and any goal anchor
+// absent from a dense page.
+// hardcode-guard:allow the fixture labels/tokens are the enumerable input under test
+describe("ui-plan — (a)/(c)/(e) honest arrival identity + goal-anchored reads", () => {
+  const el = (label: string, role = "AXLink"): Element => ({ element_token: label, role, label })
+  const row = (label: string): SceneItem => ({
+    id: label,
+    role: "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+  })
+  const denseUnrelated = (labels: readonly string[]): Scene => ({
+    snapshot: "s-dense",
+    regions: [{ id: "r0:list", kind: "list", itemIds: [...labels], textIds: [] }],
+    items: labels.map(row),
+    texts: [],
+  })
+  const urlText = (text: string): Scene => ({
+    snapshot: "s-url",
+    regions: [],
+    items: [],
+    texts: [{ id: "u", role: "AXStaticText", text, owner: "scene", element: el(text, "AXStaticText") }],
+  })
+
+  test("(a) a file-URL + 3-messages goal over an unrelated page commits navigate-first, never read-here", () => {
+    const scene = denseUnrelated(["Inbox", "Sent", "Drafts", "Archive"])
+    const decision = plan('go to "file:///tmp/messages.html" and read the last 3 messages', scene)
+    expect(decision.commitId).not.toBe("read-here")
+    expect(decision.commit.subgoals[0].kind).toBe(NAVIGATE)
+    expect(decision.commit.subgoals[0].success.op).toBe("url_identity")
+    // the unrelated page is NOT the file destination — honest non-arrival
+    expect(evalPredicate(decision.commit.subgoals[0].success, scene).verdict).not.toBe("true")
+  })
+
+  test("(a/c) a no-host URL identity is never a vacuous empty-host compare", () => {
+    const target = { op: "url_identity", scheme: "file", path: "/tmp/messages.html" } as const
+    // a different path on the SAME scheme is not arrived
+    expect(evalPredicate(target, urlText("file:///tmp/other.html")).verdict).toBe("false")
+    // a different no-host scheme is not arrived
+    expect(evalPredicate(target, urlText("about:blank")).verdict).toBe("false")
+    // the exact identity IS arrived, and the evidence cites it
+    const hit = evalPredicate(target, urlText("file:///tmp/messages.html"))
+    expect(hit.verdict).toBe("true")
+    expect(hit.cited?.[0]).toContain("file:///tmp/messages.html")
+  })
+
+  test("(c) a dense unrelated page cannot satisfy a read whose goal anchors are absent", () => {
+    const scene = denseUnrelated(["alpha", "beta", "gamma", "delta", "epsilon"])
+    const decision = plan("read the 3 messages from zeta", scene)
+    const read = decision.commit.subgoals.find((subgoal) => subgoal.success.op === READ_COUNT)
+    expect(read?.success).toMatchObject({ anchors: ["zeta"] })
+    // five unrelated readable units do NOT satisfy the anchored read
+    expect(evalPredicate(read!.success, scene).verdict).toBe("false")
+    // when the anchors ARE present it holds, and the evidence names them
+    const withAnchor = denseUnrelated(["zeta-1", "zeta-2", "zeta-3", "other"])
+    const hit = evalPredicate(read!.success, withAnchor)
+    expect(hit.verdict).toBe("true")
+    expect(hit.evidence).toContain("zeta")
+    expect(hit.cited?.join(" ")).toContain("zeta-1")
+  })
+})
+

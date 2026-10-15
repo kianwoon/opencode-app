@@ -30,10 +30,18 @@ import type { Subgoal, SubgoalKind } from "./ui-maneuvers"
 
 export type Predicate =
   | { readonly op: "url_host"; readonly host: string; readonly pathPrefix?: string }
+  /** No-host URL identity (file:, about:, data:): scheme+path, never an empty host. */
+  | { readonly op: "url_identity"; readonly scheme: string; readonly path: string }
   | { readonly op: "text_present"; readonly text: string; readonly regionKind?: RegionKind }
   | { readonly op: "item_present"; readonly matching: string }
   | { readonly op: "region_present"; readonly kind: RegionKind; readonly label?: string }
-  | { readonly op: "read_count"; readonly n: number; readonly regionKind?: RegionKind }
+  | {
+      readonly op: "read_count"
+      readonly n: number
+      readonly regionKind?: RegionKind
+      /** Goal-anchor tokens; when present only anchored units count (never any readable unit). */
+      readonly anchors?: readonly string[]
+    }
   | { readonly op: "dialog_absent" }
 
 export type PredicateKind = Predicate["op"]
@@ -48,6 +56,12 @@ export interface PredicateResult {
   readonly satisfied?: number
   /** For a counting predicate: the target count. Absent for boolean predicates. */
   readonly target?: number
+  /**
+   * The concrete observed content that MADE the predicate true (labels/texts/url).
+   * Success is evidence-bound: a satisfied predicate with no cited content cannot
+   * back a `completed` report.
+   */
+  readonly cited?: readonly string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -113,19 +127,41 @@ const includesToken = (haystack: string, token: string): boolean =>
 
 const normalizeHost = (host: string): string => host.toLowerCase().replace(/^www\./, "")
 
+/**
+ * A parsed URL identity. `host` is empty for scheme-only URLs (file:, about:,
+ * data:) — those carry their identity in `scheme`+`path` and must NEVER be
+ * compared host-vs-host (an empty host equals every empty host).
+ */
 interface UrlParts {
+  readonly scheme: string
   readonly host: string
   readonly path: string
 }
 
 // Optionally-schemed host with at least one dot, optional port and path. A
 // regex (not `new URL`) so an unparseable string is a non-match, never a throw.
-const URL_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(:\d+)?(\/[^\s]*)?$/i
+const URL_RE = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(:\d+)?(\/[^\s]*)?$/i
+// A scheme-qualified URL with NO host (file:///x, about:blank, data:…). Anything
+// with whitespace is prose, not a URL.
+const NO_HOST_URL_RE = /^([a-z][a-z0-9+.-]*):(\/{0,2}[^\s]*)$/i
 
 function urlParts(value: string): UrlParts | undefined {
-  const match = URL_RE.exec(value.trim())
-  if (!match) return undefined
-  return { host: normalizeHost(match[1]), path: match[3] ?? "" }
+  const trimmed = value.trim()
+  const hostMatch = URL_RE.exec(trimmed)
+  if (hostMatch)
+    return { scheme: (hostMatch[1] ?? "").toLowerCase(), host: normalizeHost(hostMatch[2]), path: hostMatch[4] ?? "" }
+  const noHost = NO_HOST_URL_RE.exec(trimmed)
+  if (noHost === null) return undefined
+  // Collapse the authority slashes (file:///x → /x) so scheme+path compare stably.
+  const raw = noHost[2]
+  return { scheme: noHost[1].toLowerCase(), host: "", path: raw.startsWith("/") ? `/${raw.replace(/^\/+/, "")}` : raw }
+}
+
+/** A URL rendered for evidence — the identity that actually exists. */
+const urlText = (parts: UrlParts): string => {
+  if (parts.host.length > 0) return parts.scheme.length > 0 ? `${parts.scheme}://${parts.host}${parts.path}` : `${parts.host}${parts.path}`
+  // No host: file:///abs/path keeps its authority slashes; about:blank stays bare.
+  return parts.path.startsWith("/") ? `${parts.scheme}://${parts.path}` : `${parts.scheme}:${parts.path}`
 }
 
 /** Every string the Scene exposes to a text/host predicate. */
@@ -137,25 +173,31 @@ function observables(scene: Scene): readonly string[] {
   ]
 }
 
-/** A readable unit is a non-state-changing row item or a standalone (region-owned) text. */
-function readableCount(scene: Scene, regionKind?: RegionKind): number {
+/**
+ * The READABLE UNIT labels in the goal-relevant region — the concrete content a
+ * read predicate can cite as evidence. A readable unit is a non-state-changing
+ * row item or a standalone (region-owned) text.
+ */
+function readableUnits(scene: Scene, regionKind?: RegionKind): readonly string[] {
   const itemIds = new Set(scene.items.map((item) => item.id))
   if (regionKind === undefined) {
     // No content region is derivable: a region-less scene counts every readable unit;
     // a scene of ONLY chrome/toolbar/dialog contributes NONE (chrome is never content).
-    if (scene.regions.length > 0) return 0
-    const items = scene.items.filter((item) => !item.stateChanging).length
-    const texts = scene.texts.filter((text) => !itemIds.has(text.owner)).length
-    return items + texts
+    if (scene.regions.length > 0) return []
+    const items = scene.items.filter((item) => !item.stateChanging).map((item) => item.label)
+    const texts = scene.texts.filter((text) => !itemIds.has(text.owner)).map((text) => text.text)
+    return [...items, ...texts]
   }
   const inRegion = textIdsInRegionKind(scene, regionKind)
-  const items = scene.items.filter(
-    (item) =>
-      !item.stateChanging &&
-      scene.regions.some((region) => region.kind === regionKind && region.itemIds.includes(item.id)),
-  ).length
-  const texts = scene.texts.filter((text) => inRegion.has(text.id) && !itemIds.has(text.owner)).length
-  return items + texts
+  const items = scene.items
+    .filter(
+      (item) =>
+        !item.stateChanging &&
+        scene.regions.some((region) => region.kind === regionKind && region.itemIds.includes(item.id)),
+    )
+    .map((item) => item.label)
+  const texts = scene.texts.filter((text) => inRegion.has(text.id) && !itemIds.has(text.owner)).map((text) => text.text)
+  return [...items, ...texts]
 }
 
 /**
@@ -213,9 +255,11 @@ function textIdsInRegionKind(scene: Scene, regionKind: RegionKind): Set<string> 
 export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResult {
   switch (predicate.op) {
     case "url_host": {
+      // Only host-bearing URLs participate: an empty host must never match (never
+      // compare empty-to-empty). No-host URLs are handled by `url_identity`.
       const found = observables(scene)
         .map(urlParts)
-        .filter((parts): parts is UrlParts => parts !== undefined)
+        .filter((parts): parts is UrlParts => parts !== undefined && parts.host.length > 0)
       if (found.length === 0) return { verdict: "unknown", evidence: "no url/host is observable in the scene" }
       const host = normalizeHost(predicate.host)
       const hit = found.find(
@@ -225,6 +269,23 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
       return {
         verdict: hit ? "true" : "false",
         evidence: hit ? `reached ${hit.host}${hit.path}` : `observed hosts: ${seen}`,
+        ...(hit !== undefined ? { cited: [urlText(hit)] } : {}),
+      }
+    }
+    case "url_identity": {
+      // No-host URL identity: compare the scheme+path that actually exists.
+      const found = observables(scene)
+        .map(urlParts)
+        .filter((parts): parts is UrlParts => parts !== undefined)
+      if (found.length === 0) return { verdict: "unknown", evidence: "no url is observable in the scene" }
+      const hit = found.find(
+        (parts) => parts.scheme === predicate.scheme.toLowerCase() && parts.path.startsWith(predicate.path),
+      )
+      const seen = [...new Set(found.map(urlText))].join(", ")
+      return {
+        verdict: hit ? "true" : "false",
+        evidence: hit ? `reached ${urlText(hit)}` : `observed urls: ${seen}`,
+        ...(hit !== undefined ? { cited: [urlText(hit)] } : {}),
       }
     }
     case "text_present": {
@@ -242,6 +303,7 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
       return {
         verdict: hit ? "true" : "false",
         evidence: hit ? `text "${predicate.text}" present` : `text "${predicate.text}" absent`,
+        ...(hit !== undefined ? { cited: [hit.text] } : {}),
       }
     }
     case "item_present": {
@@ -249,6 +311,7 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
       return {
         verdict: hit ? "true" : "false",
         evidence: hit ? `item matching "${predicate.matching}" present` : `item matching "${predicate.matching}" absent`,
+        ...(hit !== undefined ? { cited: [hit.label] } : {}),
       }
     }
     case "region_present": {
@@ -260,22 +323,36 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
       return {
         verdict: hit ? "true" : "false",
         evidence: hit ? `${predicate.kind} region present` : `${predicate.kind} region absent`,
+        // only the region's own label is citable content; an unlabelled region cites nothing
+        ...(hit !== undefined && hit.label !== undefined ? { cited: [hit.label] } : {}),
       }
     }
     case "read_count": {
       // hardcode-guard:allow the goal-relevant-region scoping is this module's own predicate contract, not a case literal
       const kind = predicate.regionKind ?? targetRegionKind(scene)
-      const seen = readableCount(scene, kind)
+      const units = readableUnits(scene, kind)
+      const anchors = predicate.anchors ?? []
+      // GOAL-ANCHORED: a goal that names anchors may only be satisfied by units
+      // carrying them — a dense page of unrelated items can never satisfy it.
+      const matched = anchors.length > 0 ? units.filter((unit) => anchors.some((a) => includesToken(unit, a))) : units
+      const satisfied = Math.min(matched.length, predicate.n)
+      const named = matched.slice(0, predicate.n)
+      const qualifier = anchors.length > 0 ? ` matching [${anchors.join(", ")}]` : ""
       return {
-        verdict: seen >= predicate.n ? "true" : "false",
-        evidence: `${seen}/${predicate.n} readable unit(s)`,
-        satisfied: Math.min(seen, predicate.n),
+        verdict: matched.length >= predicate.n ? "true" : "false",
+        evidence: `${satisfied}/${predicate.n} readable unit(s)${qualifier}: ${named.length > 0 ? named.join(", ") : "none"}`,
+        satisfied,
         target: predicate.n,
+        cited: named,
       }
     }
     case "dialog_absent": {
       const dialog = scene.regions.some((region) => region.kind === DIALOG_KIND)
-      return { verdict: dialog ? "false" : "true", evidence: dialog ? "a dialog region is present" : "no dialog region" }
+      return {
+        verdict: dialog ? "false" : "true",
+        evidence: dialog ? "a dialog region is present" : "no dialog region",
+        ...(dialog ? {} : { cited: ["no dialog region"] }),
+      }
     }
   }
 }
@@ -306,11 +383,36 @@ function firstInteger(goal: string): number | undefined {
   return match ? Number(match[0]) : undefined
 }
 
-/** The goal's own value: a quoted token, else a bare URL. Never invented. */
+/** The goal's own value: a quoted token, else a bare URL (any scheme, incl. file:). */
 function goalValue(goal: string): string | undefined {
   const quoted = goal.match(/["'`]([^"'`]+)["'`]/)?.[1]?.trim()
   if (quoted) return quoted
-  return goal.match(/https?:\/\/\S+/)?.[0]
+  return goal.match(/\b[a-z][a-z0-9+.-]*:\/\/\S+/i)?.[0] ?? goal.match(/\b(?:about|data):[^\s]+/i)?.[0]
+}
+
+// hardcode-guard:allow the connector vocabulary is a general goal-reading grammar (an anchor input), not a case literal
+const ANCHOR_CONNECTOR = /\b(?:from|about|containing|matching|match|titled|named|subject|sender)\s+([^\s"']+)/gi
+// hardcode-guard:allow the scheme prefix is the URL grammar itself, not a case literal
+const SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * GOAL ANCHORS — the distinctive terms the goal names: quoted strings (excluding
+ * URLs) and tokens following a connector (from/about/containing/matching/subject/
+ * sender). Generic verbs, nouns and counts are not anchors. An EMPTY set means the
+ * goal names no anchor, so the read stays region-scoped and cites the OBSERVED
+ * content; a non-empty set binds the read to those terms alone.
+ */
+export function goalAnchors(goal: string): readonly string[] {
+  const out = new Set<string>()
+  for (const match of goal.matchAll(/["'`]([^"'`]+)["'`]/g)) {
+    const token = match[1].trim()
+    if (token.length > 0 && !SCHEME_PREFIX.test(token)) out.add(token)
+  }
+  for (const match of goal.matchAll(ANCHOR_CONNECTOR)) {
+    const token = match[1].replace(/[^\p{L}\p{N}_.-]+/gu, "")
+    if (token.length > 0 && !/^\d+$/.test(token)) out.add(token)
+  }
+  return [...out]
 }
 
 function hasReadableList(scene: Scene): boolean {
@@ -329,9 +431,12 @@ function plannedSubgoal(kind: SubgoalKind, params: Subgoal, success: Predicate, 
 
 function navigateSuccess(value: string): Predicate {
   const parts = urlParts(value)
-  return parts === undefined
-    ? { op: "text_present", text: value }
-    : { op: "url_host", host: parts.host, ...(parts.path.length > 0 ? { pathPrefix: parts.path } : {}) }
+  if (parts === undefined) return { op: "text_present", text: value }
+  if (parts.host.length > 0)
+    return { op: "url_host", host: parts.host, ...(parts.path.length > 0 ? { pathPrefix: parts.path } : {}) }
+  // No host (file:, about:, data:): compare the identity that actually exists.
+  // Never a host-vs-host compare — an empty host must not count as "arrived".
+  return { op: "url_identity", scheme: parts.scheme, path: parts.path }
 }
 
 /**
@@ -354,8 +459,16 @@ export function plan(goal: string, scene: Scene, prior?: Plan): PlanDecision {
       : plannedSubgoal("navigate", { kind: "navigate", value }, navigateSuccess(value), NAVIGATE_BUDGET)
   // The read predicate stays region-agnostic: `read_count` derives the
   // goal-relevant region from the Scene AT EVAL TIME (see targetRegionKind), so a
-  // plan carries no stale region binding when evaluated against another Scene.
-  const readSub = plannedSubgoal("read_items", { kind: "read_items", count }, { op: "read_count", n: count }, DEFAULT_BUDGET)
+  // plan carries no stale region binding when evaluated against another Scene. When
+  // the goal names ANCHORS the read is bound to them, so a dense page of unrelated
+  // items can never satisfy it.
+  const anchors = goalAnchors(goal)
+  const readSub = plannedSubgoal(
+    "read_items",
+    { kind: "read_items", count },
+    { op: "read_count", n: count, ...(anchors.length > 0 ? { anchors } : {}) },
+    DEFAULT_BUDGET,
+  )
   const dismissSub = plannedSubgoal("dismiss", { kind: "dismiss" }, { op: "dialog_absent" }, CORRECTIVE_BUDGET)
   const arrived = navigateSub !== undefined && evalPredicate(navigateSub.success, scene).verdict === "true"
 
