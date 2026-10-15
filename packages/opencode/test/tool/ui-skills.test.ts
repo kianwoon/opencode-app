@@ -2,11 +2,15 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { LABEL_MAX } from "@/jev/controller"
 import { advanceMap, decodeObservation, extractGoalValue, screenSignature } from "@/tool/ui-run"
+// hardcode-guard:allow the driver's browser tool/status vocabulary is the contract under test
+import { clickAttempt, clickSignals, foldFocusConsumer, keySequence } from "@/tool/ui-hands"
 import {
   SKILLS,
+  decodeBrowserBinding,
   dismissDialog,
   foldSubstepEvidence,
   goToUrl,
+  goToUrlRoute,
   matchSkills,
   mineSequences,
   readText,
@@ -27,9 +31,7 @@ const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.jso
 // hardcode-guard:allow the captured payload + quoted URL are the live inputs under test
 const GOAL = `go to "https://www.linkedin.com" and sign in`
 const VALUE = "https://www.linkedin.com"
-
-const modesOf = (steps: readonly { label: string; kind: string }[]) =>
-  steps.map((s) => ({ label: s.label, mode: s.kind === "click" ? ("declared" as const) : (s.kind as "key" | "type") }))
+// hardcode-guard:allow the quoted URL is the live goal value under test
 
 describe("ui-skills — contract + registry", () => {
   test("go_to_url declares the contract shape (name, option, precondition, select, steps, success)", () => {
@@ -50,7 +52,8 @@ describe("ui-skills — contract + registry", () => {
 })
 
 describe("ui-skills — go_to_url over the captured Brave frontier", () => {
-  test("(a) jev is offered go_to_url; choosing it yields the four sub-steps in order", async () => {
+  // hardcode-guard:allow the captured payload's role/label are the live inputs under test
+  test("(a) jev is offered go_to_url; its steps are a bind plus a browser/fallback branch", async () => {
     const raw = await Bun.file(CAPTURE).json()
     const observation = decodeObservation(raw)
     expect(observation).not.toBeNull()
@@ -65,42 +68,57 @@ describe("ui-skills — go_to_url over the captured Brave frontier", () => {
     expect(match.skill.name).toBe("go_to_url")
     expect(match.value).toBe(VALUE)
     expect(match.element.role).toBe("AXTextField")
-    expect(match.element.label).toBe("Address and search bar")
 
     const labels = ["c1 AXButton Back", ...skillIndex(matches).keys()]
     expect(labels).toContain(goToUrl.option)
 
-    // Choosing it executes the FIXED sub-sequence directly — four actions, one decision.
+    // ONE decision executes: a bind, then the arm the bind classification picks.
     const steps = match.skill.steps(match)
-    expect(steps.map((s) => s.kind)).toEqual(["click", "key", "type", "key"])
-    expect(steps.map((s) => s.label)).toEqual([
-      "focus Address and search bar",
-      "select all",
-      "type url",
-      "enter",
-    ])
-    expect(steps[1]).toMatchObject({ key: "a", modifiers: ["cmd"] })
-    expect(steps[2]).toMatchObject({ kind: "type", text: VALUE }) // value drawn from the GOAL
-    expect(steps[3]).toMatchObject({ key: "return", modifiers: [] })
+    expect(steps.map((s) => s.kind)).toEqual(["bind", "branch"])
+    const branch = steps[1]
+    if (branch.kind !== "branch") throw new Error("expected a branch")
+    expect(branch.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
+    expect(branch.browser[0]).toMatchObject({ kind: "navigate", url: VALUE }) // value from the GOAL
+    // hardcode-guard:allow the prepare/rebind route shape is the registry contract under test
+    // bind failed → prepare the browser endpoint, re-bind, then retry the browser arm.
+    expect(branch.fallback.map((s) => s.kind)).toEqual(["prepare", "bind", "branch"])
+    const afterPrepare = branch.fallback[2]
+    if (afterPrepare.kind !== "branch") throw new Error("expected a post-prepare branch")
+    expect(afterPrepare.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
+    expect(afterPrepare.browser[0]).toMatchObject({ kind: "navigate", url: VALUE })
+    // keystroke route demoted to the LAST resort
+    expect(afterPrepare.fallback.map((s) => s.kind)).toEqual(["click", "key", "keys", "key", "verifyScreen"])
+    expect(afterPrepare.fallback[2]).toMatchObject({ kind: "keys", text: VALUE })
+    expect(afterPrepare.fallback[3]).toMatchObject({ key: "return", modifiers: [] })
   })
 
-  test("(a) the sub-steps fold into ONE trace step with per-step before/after evidence", async () => {
-    const raw = await Bun.file(CAPTURE).json()
-    const observation = decodeObservation(raw)
-    if (observation === null) throw new Error("fixture must decode")
-    const match = matchSkills(observation.elements, VALUE)[0]
-    const steps = match.skill.steps(match)
-
-    // Focus + select-all + type change no role/label signature; Enter does.
-    const signatures = ["nA", "nA", "nA", "nA", "nB"]
-    const evidence = foldSubstepEvidence(modesOf(steps), signatures)
-    expect(evidence).toHaveLength(4)
-    expect(evidence.map((e) => e.mode)).toEqual(["declared", "key", "type", "key"])
-    expect(evidence.map((e) => e.changed)).toEqual([false, false, false, true])
-    expect(evidence[3].before).toBe("nA")
-    expect(evidence[3].after).toBe("nB")
+  test("(a) the route's sub-steps fold into ONE trace step with per-step evidence", () => {
+    // The address-bar fallback: focus/select/keys change no role-label signature; the verify reads the page.
+    // hardcode-guard:allow the route's sub-step labels/modes are the trace inputs under test
+    const modes = [
+      { label: "focus address bar", mode: "declared" as const },
+      { label: "select all", mode: "key" as const },
+      { label: "type url", mode: "key" as const },
+      { label: "enter", mode: "key" as const },
+      { label: "verify page changed", mode: "read" as const },
+    ]
+    // hardcode-guard:allow synthetic signatures are the trace inputs under test
+    const signatures = ["nA", "nA", "nA", "nA", "nA", "nB"]
+    const evidence = foldSubstepEvidence(modes, signatures, undefined, undefined, [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    ])
+    expect(evidence).toHaveLength(5)
+    expect(evidence.map((e) => e.changed)).toEqual([false, false, false, false, true])
+    expect(evidence[4].before).toBe("nA")
+    expect(evidence[4].after).toBe("nB")
+    expect(evidence[4].urlChanged).toBe(true)
     expect(goToUrl.succeeded(evidence)).toBe(true)
-    expect(goToUrl.succeeded(evidence.slice(0, 3))).toBe(false)
+    // No verify result yet → not yet a success.
+    expect(goToUrl.succeeded(evidence.slice(0, 4))).toBe(false)
   })
 
   test("(a) the post-skill observation advances the map (new node, appended path)", async () => {
@@ -119,24 +137,72 @@ describe("ui-skills — go_to_url over the captured Brave frontier", () => {
     expect(map1.path).toEqual([map0.current, map1.current])
   })
 
-  // hardcode-guard:allow the captured payload + quoted URL are the live inputs under test
-  test("(c) an undelivered click sub-step aborts the maneuver, even if a later step changed the screen", async () => {
-    const raw = await Bun.file(CAPTURE).json()
-    const observation = decodeObservation(raw)
-    if (observation === null) throw new Error("fixture must decode")
-    const match = matchSkills(observation.elements, VALUE)[0]
-    const steps = match.skill.steps(match)
+  test("(a) an undelivered focus click whose consumer type lands is DELIVERED (focus-consumer)", () => {
+    const field = { element_token: "t1", role: "AXTextField", label: "Field", actions: ["AXPress"], value: "" }
+    const elements = [field]
+    const before = clickSignals("nA", field, elements)
+    const rung = { mode: "declared" as const, label: "press", args: {} }
+    const attempt = clickAttempt(rung, before, before, field) // the click changes no signal
+    expect(attempt.delivered).toBe(false)
+    expect(attempt.reasons).toEqual([])
 
-    // Focus + select-all + type change no role/label signature; Enter does.
-    const signatures = ["nA", "nA", "nA", "nA", "nB"]
-    // The focus click (step 0) is NOT delivered → the maneuver must abort.
-    const undelivered = foldSubstepEvidence(modesOf(steps), signatures, [false, undefined, undefined, undefined])
-    expect(undelivered[0].delivered).toBe(false)
-    expect(goToUrl.succeeded(undelivered)).toBe(false)
+    // The consumer (a type on the SAME target) lands: the target's value changes.
+    const afterConsumer = clickSignals("nA", field, [{ ...field, value: "typed" }])
+    const folded = foldFocusConsumer(attempt, afterConsumer, field)
+    expect(folded.delivered).toBe(true)
+    expect(folded.reasons).toContain("focus-consumer")
+  })
 
-    // When the focus click IS delivered (focus moved), success follows the final change.
-    const delivered = foldSubstepEvidence(modesOf(steps), signatures, [true, undefined, undefined, undefined])
-    expect(goToUrl.succeeded(delivered)).toBe(true)
+  // hardcode-guard:allow the driver's refusal token is the live error under test
+  test("(b) a pixel refusal surfaces as refused-by-policy, not a bare undelivered", () => {
+    const target = { element_token: "t1", role: "AXButton", label: "B", actions: ["AXPress"] }
+    const before = clickSignals("nA", target, [target])
+    const rung = { mode: "pixel" as const, label: "pixel(1,2)", args: {} }
+    const attempt = clickAttempt(
+      rung,
+      before,
+      before,
+      target,
+      "Raw coordinate click blocked: the px path is reserved for canvas/WebGL targets",
+    )
+    expect(attempt.delivered).toBe(false)
+    expect(attempt.reasons).toContain("refused-by-policy")
+  })
+
+  // hardcode-guard:allow the driver's browser status vocabulary is the contract under test
+  test("(c) a browser-classified bind selects the navigate arm; a non-browser the prepare-rebind arm", () => {
+    expect(goToUrlRoute(true, VALUE).map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
+    // hardcode-guard:allow the route's sub-step kinds are the registry contract under test
+    expect(goToUrlRoute(false, VALUE).map((s) => s.kind)).toEqual(["prepare", "bind", "branch"])
+    const bound = decodeBrowserBinding({
+      status: "ok",
+      mutation_allowed: true,
+      target_id: "t",
+      tab_id: "0",
+      url: "https://example.test",
+      title: "Example",
+    })
+    expect(bound.browser).toBe(true)
+    expect(bound.target_id).toBe("t")
+    expect(bound.tab_id).toBe("0")
+    expect(decodeBrowserBinding({ status: "error" }).browser).toBe(false)
+    expect(decodeBrowserBinding(null).browser).toBe(false)
+  })
+
+  test("(c) go_to_url success is the URL/title change, never an intermediate signal", () => {
+    const navigated = [
+      { label: "bind browser", mode: "bind" as const, before: "nA", after: "nA", changed: false },
+      { label: "navigate to url", mode: "navigate" as const, before: "nA", after: "nA", changed: false },
+      { label: "verify url changed", mode: "read" as const, before: "nA", after: "nA", changed: false, urlChanged: true },
+    ]
+    expect(goToUrl.succeeded(navigated)).toBe(true)
+    // A screen change with NO url/title change is an intermediate, not success.
+    const intermediate = [
+      { label: "bind browser", mode: "bind" as const, before: "nA", after: "nA", changed: false },
+      { label: "navigate to url", mode: "navigate" as const, before: "nA", after: "nB", changed: true },
+      { label: "verify url changed", mode: "read" as const, before: "nA", after: "nB", changed: true },
+    ]
+    expect(goToUrl.succeeded(intermediate)).toBe(false)
   })
 
   test("(b) no address-bar precondition → the skill is absent from the frontier", () => {
@@ -144,6 +210,116 @@ describe("ui-skills — go_to_url over the captured Brave frontier", () => {
     expect(matchSkills(noBar, VALUE)).toHaveLength(0)
     // An address bar with no goal value the skill can consume is also absent.
     expect(matchSkills(noBar, undefined)).toHaveLength(0)
+  })
+})
+
+// GENERALIZATION — INVARIANT: sanctioned REAL-input delivery outranks
+// accessibility insertion where the target surface is known to drop it. The
+// Chromium address-bar AX-insert no-submit is ONE instance; an unseen second
+// surface (an Electron field whose AXSetAttribute write is a no-op) is covered by
+// the SAME per-character key sequence, no loop change.
+// hardcode-guard:allow the per-character key args are the hand contract under test
+describe("ui-skills — keystroke route (real key events over accessibility insertion)", () => {
+  const win = { pid: 4242, window_id: 7 }
+
+  test("(a) keySequence delivers ONE real key press per character, never an inserted value", () => {
+    const field = { element_token: "t1", role: "AXTextField", label: "Address and search bar" }
+    const seq = keySequence("a/b", win, field)
+    expect(seq).toHaveLength(3)
+    expect(seq.map((args) => args.key)).toEqual(["a", "/", "b"])
+    // real key events: every arg carries the key, none carries an inserted `text` value
+    expect(seq.every((args) => args.text === undefined && args.pid === win.pid)).toBe(true)
+    expect(seq.every((args) => args.element_token === "t1")).toBe(true)
+  })
+
+  // hardcode-guard:allow the route's sub-step kinds + the keystroke verb are the registry contract under test
+  test("(a) the keystroke route is demoted to the LAST-resort fallback, not the primary arm", () => {
+    const route = goToUrlRoute(false, VALUE)
+    // the non-browser arm PREPARES and RE-BINDS before any keystroke happens
+    expect(route.map((s) => s.kind)).toEqual(["prepare", "bind", "branch"])
+    const branch = route[2]
+    if (branch.kind !== "branch") throw new Error("expected a post-prepare branch")
+    // re-bind classified as a browser → the SANCTIONED typed navigate, no keys
+    expect(branch.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
+    // only a still-unclassifiable window reaches the keystroke address-bar route
+    expect(branch.fallback.map((s) => s.kind)).toEqual(["click", "key", "keys", "key", "verifyScreen"])
+    // the URL sub-step is the REAL-input verb; no `type` (insertion) sub-step remains
+    expect(branch.fallback.some((s) => s.kind === "type")).toBe(false)
+    expect(branch.fallback[2]).toMatchObject({ kind: "keys", text: VALUE })
+  })
+
+  test("(b)/(d) the keystroke route succeeds only on a real URL change; no navigation is honest failure", () => {
+    // hardcode-guard:allow the trace labels/signatures are the folded-evidence inputs under test
+    const modes = [
+      { label: "focus address bar", mode: "declared" as const },
+      { label: "select all", mode: "key" as const },
+      { label: "type url", mode: "key" as const },
+      { label: "enter", mode: "key" as const },
+      { label: "verify page changed", mode: "read" as const },
+    ]
+    const navigated = foldSubstepEvidence(modes, ["nA", "nA", "nA", "nA", "nA", "nB"], undefined, undefined, [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    ])
+    expect(goToUrl.succeeded(navigated)).toBe(true)
+    // delivered keys + Return landing but NO url change → honest failure, never success
+    const noNav = foldSubstepEvidence(modes, ["nA", "nA", "nA", "nA", "nA", "nA"], undefined, undefined, [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    ])
+    expect(goToUrl.succeeded(noNav)).toBe(false)
+  })
+})
+
+// GENERALIZATION — INVARIANT: prefer the target's TYPED, SANCTIONED API over
+// synthesized input sequences. Instances: a raw-coordinate click refused where the
+// AX action exists; Chromium's AX-insert-no-submit where the browser tool exists;
+// absurd per-character typing where browser_navigate exists. One unseen case: any
+// future typed route (a URL-scheme/AppleScript verb) slots in as the browser arm
+// and demotes the synthesized fallback identically.
+// hardcode-guard:allow the driver browser-tool vocabulary is the route contract under test
+describe("go_to_url — prepare → rebind → navigate is the primary route", () => {
+  test("(a) a bind failure emits prepare → rebind → navigate (value from the goal)", () => {
+    const route = goToUrlRoute(false, VALUE)
+    expect(route.map((s) => s.kind)).toEqual(["prepare", "bind", "branch"])
+    const branch = route[2]
+    if (branch.kind !== "branch") throw new Error("expected a post-prepare branch")
+    expect(branch.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
+    expect(branch.browser[0]).toMatchObject({ kind: "navigate", url: VALUE })
+  })
+
+  test("(a) a successful navigate sets urlChanged for the whole route", () => {
+    const evidence = [
+      { label: "bind browser", mode: "bind" as const, before: "nA", after: "nA", changed: false },
+      { label: "prepare browser", mode: "prepare" as const, before: "nA", after: "nA", changed: false },
+      { label: "rebind browser", mode: "bind" as const, before: "nA", after: "nA", changed: false },
+      { label: "navigate to url", mode: "navigate" as const, before: "nA", after: "nA", changed: false },
+      { label: "verify url changed", mode: "read" as const, before: "nA", after: "nA", changed: false, urlChanged: true },
+    ]
+    expect(goToUrl.succeeded(evidence)).toBe(true)
+  })
+
+  test("(a) a failed prepare is honest failure with its evidence, never success", () => {
+    // prepare failed → executeSkill stops; the folded evidence still carries the prepare sub-step.
+    const evidence = foldSubstepEvidence(
+      [
+        { label: "bind browser", mode: "bind" as const },
+        { label: "prepare browser", mode: "prepare" as const },
+      ],
+      ["nA", "nA", "nA"],
+      undefined,
+      undefined,
+      [undefined, undefined],
+    )
+    expect(evidence.map((e) => e.label)).toContain("prepare browser")
+    expect(evidence.every((e) => e.changed === false)).toBe(true)
+    expect(goToUrl.succeeded(evidence)).toBe(false)
   })
 })
 

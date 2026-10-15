@@ -11,8 +11,12 @@ import {
   clickAttempt,
   clickSignals,
   clickVerdict,
+  foldFocusConsumer,
+  foldFocusOutcome,
   frameEstablishingRead,
+  isFocusTarget,
   keyPress,
+  keySequence,
   observationArgs,
   pixelFrameRetry,
   type ActuationMode,
@@ -24,13 +28,16 @@ import {
   type WindowRef,
 } from "./ui-hands"
 import {
+  decodeBrowserBinding,
   foldSubstepEvidence,
   matchSkills,
   mineSequences,
   skillIndex,
+  type BrowserBinding,
   type MinedSequence,
   type MiningStep,
   type SkillMatch,
+  type SkillStep,
   type SkillSubstepEvidence,
 } from "./ui-skills"
 
@@ -598,6 +605,12 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // HANDS: the mode + before-signature of the last action, folded with the
           // next observation into change evidence (never a bare success boolean).
           let lastActuation: { readonly mode: ActuationEvidence["mode"]; readonly before: string } | undefined
+          // FUNCTIONAL DELIVERY: a FOCUS click in the main loop whose delivery is
+          // deferred until its consumer sub-step (a later type/key on the SAME
+          // target) lands — resolved against a later observation's target state.
+          let pendingMainFocus:
+            | { readonly traceIndex: number; readonly attempt: ClickAttemptEvidence; readonly target: Element }
+            | undefined
           // Every iteration's decision, emitted so a caller can verify the chain.
           const trace: StepTrace[] = []
 
@@ -608,41 +621,160 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // hardcode-guard:allow generic skill-runner wiring over the registry contract, no case literals
           const executeSkill = (match: SkillMatch, before: string, elements: readonly Element[]) =>
             Effect.gen(function* () {
-              const steps = match.skill.steps(match)
               const signatures: string[] = [before]
               const modes: { label: string; mode: ActuationMode }[] = []
               const deliveries: (boolean | undefined)[] = []
               // Read sub-step results (labels matching the step's token), folded into the trace.
               const reads: (readonly string[] | undefined)[] = []
+              // Verify sub-step results (the page URL/title actually changed).
+              const urlChanges: (boolean | undefined)[] = []
               let observationsUsed = 0
               let failure: string | undefined
-              for (const sub of steps) {
-                let mode: ActuationMode
-                let result: DriverOutcome
+              // BIND classification, carried to the branch step.
+              let binding: BrowserBinding | undefined
+              // A FOCUS click whose delivery is deferred to its consumer sub-step.
+              let pendingFocus: { readonly index: number; readonly attempt: ClickAttemptEvidence } | undefined
+              const queue: SkillStep[] = [...match.skill.steps(match)]
+              while (queue.length > 0) {
+                const sub = queue.shift()
+                if (sub === undefined) break
+                // DECLARATIVE BRANCH: the bind classification picks the arm.
+                if (sub.kind === "branch") {
+                  queue.unshift(...(binding?.browser ? sub.browser : sub.fallback))
+                  continue
+                }
+                // hardcode-guard:allow the browser tool/verb vocabulary is the registry's own contract, not a case literal
+                if (sub.kind === "prepare") {
+                  // PREPARE the browser endpoint (`browser_prepare`) — attaches/owns
+                  // the DevTools endpoint, the precondition for a bind to succeed on
+                  // a Chromium window. Its failure is an honest skill failure.
+                  const prepared = yield* callDriver(
+                    tools,
+                    "cua-driver_browser_prepare",
+                    { pid: params.window.pid },
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  signatures.push(signatures.at(-1) ?? before)
+                  modes.push({ label: sub.label, mode: "prepare" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  if (!prepared.ok) {
+                    failure = prepared.error
+                    break
+                  }
+                  continue
+                }
+                // hardcode-guard:allow the browser tool/branch vocabulary is the registry's own contract, not a case literal
+                if (sub.kind === "bind") {
+                  // SANCTIONED BIND (mode 1): pid+window_id classifies the window.
+                  const bound = yield* callDriver(
+                    tools,
+                    "cua-driver_get_browser_state",
+                    { pid: params.window.pid, window_id: params.window.window_id },
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  binding = bound.ok ? decodeBrowserBinding(bound.result.structuredContent) : { browser: false }
+                  signatures.push(signatures.at(-1) ?? before)
+                  modes.push({ label: sub.label, mode: "bind" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  continue
+                }
+                if (sub.kind === "navigate") {
+                  if (binding?.browser !== true || binding.target_id === undefined || binding.tab_id === undefined) {
+                    failure = "browser_navigate without a usable browser binding"
+                    break
+                  }
+                  const nav = yield* callDriver(
+                    tools,
+                    "cua-driver_browser_navigate",
+                    { target_id: binding.target_id, tab_id: binding.tab_id, url: sub.url },
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  signatures.push(signatures.at(-1) ?? before)
+                  modes.push({ label: sub.label, mode: "navigate" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  if (!nav.ok) {
+                    failure = nav.error
+                    break
+                  }
+                  continue
+                }
+                if (sub.kind === "verifyUrl") {
+                  const bound = binding
+                  const state =
+                    bound?.target_id !== undefined && bound.tab_id !== undefined
+                      ? yield* callDriver(
+                          tools,
+                          "cua-driver_get_browser_state",
+                          { target_id: bound.target_id, tab_id: bound.tab_id, snapshot_format: "semantic_v2" },
+                          ctx.abort,
+                        )
+                      : undefined
+                  if (state !== undefined) observationsUsed++
+                  const after = state?.ok ? decodeBrowserBinding(state.result.structuredContent) : undefined
+                  urlChanges.push(after !== undefined && (after.url !== bound?.url || after.title !== bound?.title))
+                  signatures.push(signatures.at(-1) ?? before)
+                  modes.push({ label: sub.label, mode: "read" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  continue
+                }
+                if (sub.kind === "verifyScreen") {
+                  const observedVerify = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    observationArgs(params.window),
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  const vObs = observedVerify.ok ? decodeObservation(observedVerify.result.structuredContent) : null
+                  const priorSignature = signatures.at(-1) ?? before
+                  const verifiedSignature = vObs ? screenSignature(vObs.elements) : priorSignature
+                  urlChanges.push(verifiedSignature !== priorSignature)
+                  signatures.push(verifiedSignature)
+                  modes.push({ label: sub.label, mode: "read" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  continue
+                }
                 // hardcode-guard:allow the refusal token is the loop's internal vocabulary, not a case literal
                 if (sub.kind === "click") {
                   // AFFIRMATIVE click sub-step: escalate declared→pixel on ABSENT
                   // delivery through the shared rung runner (which also establishes
                   // a screenshot frame on demand for the sensor-dependent pixel
-                  // rung); an undelivered click aborts the maneuver.
-                  // hardcode-guard:allow the failure token is the skill runner's own internal vocabulary, not a case literal
+                  // rung). A FOCUS click is NOT aborted on absent delivery: its
+                  // delivery is deferred to its consumer sub-step.
                   const plan = actuationPlan(match.element, params.window)
                   const fallback = signatures.at(-1) ?? before
+                  const signalBefore = clickSignals(fallback, match.element, elements)
                   const run = yield* runClickRungs(
                     (name, args) => callDriver(tools, name, args, ctx.abort),
                     params.window,
                     match.element,
                     plan,
-                    clickSignals(fallback, match.element, elements),
+                    signalBefore,
                     fallback,
                   )
                   observationsUsed += run.observations
-                  mode = run.outcome.mode
-                  result = run.result
                   signatures.push(run.signature)
-                  modes.push({ label: sub.label, mode })
-                  deliveries.push(run.outcome.worked)
+                  modes.push({ label: sub.label, mode: run.outcome.mode })
                   reads.push(undefined)
+                  urlChanges.push(undefined)
+                  const first = run.attempts[0]
+                  if (!run.outcome.worked && first !== undefined && isFocusTarget(match.element)) {
+                    pendingFocus = { index: modes.length - 1, attempt: first }
+                    deliveries.push(false)
+                    continue
+                  }
+                  deliveries.push(run.outcome.worked)
                   if (!run.outcome.worked) {
                     failure = "click undelivered on every rung"
                     break
@@ -671,6 +803,56 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                         )
                       : undefined,
                   )
+                  urlChanges.push(undefined)
+                  continue
+                }
+                // hardcode-guard:allow the keystroke verb + driver tool name are the registry/hand contract, not a case literal
+                if (sub.kind === "keys") {
+                  // KEYSTROKE ROUTE — real per-character key events, never
+                  // accessibility insertion: a surface that accepts an inserted
+                  // value but never commits it (Chromium's address bar shows a
+                  // type_text URL yet does NOT submit on Return) commits only on
+                  // real key events. One press_key per code point, the foreground
+                  // remedy for `same_pid_keyboard_ambiguity` applied exactly as for
+                  // a single key, then ONE observation of the sub-step's effect.
+                  for (const keyArgs of keySequence(sub.text, params.window, match.element)) {
+                    const pressed = yield* callDriver(tools, "cua-driver_press_key", keyArgs, ctx.abort)
+                    observationsUsed++
+                    const result =
+                      !pressed.ok && needsForegroundDelivery(pressed.error)
+                        ? yield* callDriver(
+                            tools,
+                            "cua-driver_press_key",
+                            { ...keyArgs, delivery_mode: "foreground" },
+                            ctx.abort,
+                          )
+                        : pressed
+                    if (!result.ok) {
+                      failure = result.error
+                      break
+                    }
+                  }
+                  if (failure !== undefined) break
+                  const keysAfter = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    observationArgs(params.window),
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  const keysObs = keysAfter.ok ? decodeObservation(keysAfter.result.structuredContent) : null
+                  signatures.push(keysObs ? screenSignature(keysObs.elements) : (signatures.at(-1) ?? before))
+                  modes.push({ label: sub.label, mode: "key" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  if (pendingFocus !== undefined && keysObs) {
+                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, match.element, keysObs.elements)
+                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, match.element).delivered) {
+                      deliveries[pendingFocus.index] = true
+                      pendingFocus = undefined
+                    }
+                  }
                   continue
                 }
                 const tool =
@@ -696,9 +878,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                           by: sub.by ?? "page",
                           amount: sub.amount ?? 1,
                         }
-                mode = sub.kind === "key" ? "key" : sub.kind === "type" ? "type" : "scroll"
+                const mode: ActuationMode = sub.kind === "key" ? "key" : sub.kind === "type" ? "type" : "scroll"
                 const attempt = yield* callDriver(tools, tool, args, ctx.abort)
-                result =
+                const result =
                   !attempt.ok && needsForegroundDelivery(attempt.error)
                     ? yield* callDriver(tools, tool, { ...args, delivery_mode: "foreground" }, ctx.abort)
                     : attempt
@@ -718,8 +900,19 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 modes.push({ label: sub.label, mode })
                 deliveries.push(undefined)
                 reads.push(undefined)
+                urlChanges.push(undefined)
+                // FUNCTIONAL DELIVERY: a pending FOCUS click is delivered when a
+                // consumer (type/key on the SAME target) lands in the target's state.
+                if (pendingFocus !== undefined && (sub.kind === "type" || sub.kind === "key") && after) {
+                  const consumerSignals = clickSignals(signatures.at(-1) ?? before, match.element, after.elements)
+                  if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, match.element).delivered) {
+                    deliveries[pendingFocus.index] = true
+                    pendingFocus = undefined
+                  }
+                }
               }
-              const substeps = foldSubstepEvidence(modes, signatures, deliveries, reads)
+              const substeps = foldSubstepEvidence(modes, signatures, deliveries, reads, urlChanges)
+              if (failure === undefined && pendingFocus !== undefined) failure = "focus click undelivered (no consumer landed)"
               const succeeded = failure === undefined && match.skill.succeeded(substeps)
               return { substeps, succeeded, observations: observationsUsed, failure }
             })
@@ -749,6 +942,24 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 `[observe ${step + 1}] no decodable structuredContent; the run stopped rather than guess targets from text`,
               )
               break
+            }
+            // FUNCTIONAL DELIVERY: a deferred FOCUS click is delivered once a later
+            // observation shows its target's own state changed (the consumer landed).
+            if (pendingMainFocus !== undefined) {
+              const afterConsumer = clickSignals(
+                screenSignature(observation.elements),
+                pendingMainFocus.target,
+                observation.elements,
+              )
+              if (foldFocusConsumer(pendingMainFocus.attempt, afterConsumer, pendingMainFocus.target).delivered) {
+                const entry = trace[pendingMainFocus.traceIndex]
+                if (entry?.click)
+                  trace[pendingMainFocus.traceIndex] = {
+                    ...entry,
+                    click: foldFocusOutcome(entry.click, afterConsumer, pendingMainFocus.target),
+                  }
+                pendingMainFocus = undefined
+              }
             }
             const candidates = buildCandidates(observation.elements)
             // Keep the newest snapshot's marker; it is the one that hid elements.
@@ -979,18 +1190,26 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               const prior = trace[trace.length - 1]
               if (prior) trace[trace.length - 1] = { ...prior, click: clickOutcome }
               if (!clickOutcome.worked) {
-                status = "failed"
-                previous = `[fail ${step + 1}] click undelivered → ${verdict.element.label ?? verdict.element.element_token}`
-                lines.push(previous)
-                for (const attempt of clickOutcome.attempts)
-                  lines.push(
-                    `[fail ${step + 1}]   ${attempt.mode} ${attempt.label} delivered=${attempt.delivered} reasons=[${attempt.reasons.join(",")}] (${attempt.before.screen}→${attempt.after.screen})`,
-                  )
-                // AFFIRMATIVE FAILURE FEEDS THE BOUND: the click ran at this node
-                // and changed nothing observable, so the next iteration's unchanged
-                // screen advances the ambiguity count — it is never retried forever.
-                actedAt = map.current
-                continue
+                const first = clickOutcome.attempts[0]
+                if (first !== undefined && isFocusTarget(verdict.element)) {
+                  // FUNCTIONAL DELIVERY: a focus click is NOT failed here — its
+                  // delivery is deferred until its consumer (a later type/key on
+                  // this SAME target) lands, resolved against a later observation.
+                  pendingMainFocus = { traceIndex: trace.length - 1, attempt: first, target: verdict.element }
+                } else {
+                  status = "failed"
+                  previous = `[fail ${step + 1}] click undelivered → ${verdict.element.label ?? verdict.element.element_token}`
+                  lines.push(previous)
+                  for (const attempt of clickOutcome.attempts)
+                    lines.push(
+                      `[fail ${step + 1}]   ${attempt.mode} ${attempt.label} delivered=${attempt.delivered} reasons=[${attempt.reasons.join(",")}] (${attempt.before.screen}→${attempt.after.screen})`,
+                    )
+                  // AFFIRMATIVE FAILURE FEEDS THE BOUND: the click ran at this node
+                  // and changed nothing observable, so the next iteration's unchanged
+                  // screen advances the ambiguity count — it is never retried forever.
+                  actedAt = map.current
+                  continue
+                }
               }
             }
             const target = verdict.element.label ?? verdict.element.element_token

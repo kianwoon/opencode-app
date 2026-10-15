@@ -1141,6 +1141,31 @@ describe("runClickRungs — the shared click rung runner", () => {
   })
 })
 
+// GENERALIZATION — INVARIANT: sanctioned REAL-input delivery outranks accessibility
+// insertion where the target surface is known to drop it. executeSkill's keystroke
+// sub-step delivers the text as real per-character key events, never type_text —
+// Chromium's address bar is the one live instance; an unseen surface that drops
+// insertion is delivered the same way. The source scan confirms the wiring.
+// hardcode-guard:allow the driver tool names are the wiring contract under test
+describe("executeSkill — keystroke route wiring", () => {
+  test("(a)/(d) the keys sub-step drives cua-driver_press_key per character, not accessibility insertion", async () => {
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    const skillRegion = src.slice(src.indexOf("const executeSkill"), src.indexOf("for (let step = 0"))
+    expect(skillRegion.includes('sub.kind === "keys"')).toBe(true)
+    expect(skillRegion.includes("keySequence(")).toBe(true)
+  })
+
+  // hardcode-guard:allow the prepare verb + driver tool name are the wiring contract under test
+  test("(a) the prepare sub-step drives cua-driver_browser_prepare and stops honestly on failure", async () => {
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    const skillRegion = src.slice(src.indexOf("const executeSkill"), src.indexOf("for (let step = 0"))
+    expect(skillRegion.includes('sub.kind === "prepare"')).toBe(true)
+    expect(skillRegion.includes("cua-driver_browser_prepare")).toBe(true)
+    // a failed prepare records the driver error as the skill's failure (honest stop)
+    expect(skillRegion.includes("failure = prepared.error")).toBe(true)
+  })
+})
+
 describe("ui_run tool", () => {
   it.instance("reports a graceful not-connected result when cua-driver is absent", () =>
     Effect.gen(function* () {

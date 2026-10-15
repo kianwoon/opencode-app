@@ -169,10 +169,92 @@ export function pixelFrameRetry(rung: ActuationRung, error: string | undefined, 
 }
 
 /**
- * How an actuation was carried out: a click rung, a key press, a typed text
- * entry, a scroll, or a read (no actuation — the observation IS the result).
+ * FUNCTIONAL DELIVERY — delivery is measured by the EFFECT a click exists to
+ * produce, when no immediate signal can show it.
+ * INVARIANT OWNED: when a click's whole job is to FOCUS a text-bearing target so a
+ * consuming sub-step can land, the achievement is the consumer landing — not a
+ * signal on the click itself. A raw-command policy that refuses a whole class of
+ * gestures is a REFUSAL, reported as such, never a silent no-op.
+ * hardcode-guard:allow the named live refusals are instances cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: live probes proved an element-token AXPress on a
+ * text field focuses it (a typed char lands in the value) while screen signature,
+ * target state, and the focus signal ALL stay unchanged — so the affirmative
+ * contract wrongly called a delivered click undelivered. A second instance: the
+ * driver REFUSES raw coordinate clicks for any element with an AX node (the pixel
+ * path is reserved for canvas/WebGL targets); that refusal is not an undelivered
+ * click but a policy refusal.
+ * UNSEEN CASE COVERED: a focus click whose consumer is a key command (e.g. a
+ * select-all then paste) rather than a type — the consumer landing on the target
+ * still proves the click's focus landed.
  */
-export type ActuationMode = ActuationRung["mode"] | "type" | "key" | "scroll" | "read"
+/** The driver's live refusal of a raw coordinate click on an AX-backed element. */
+export const REFUSED_BY_POLICY = "Raw coordinate click blocked"
+
+export function isPolicyRefused(error: string | undefined): boolean {
+  return error !== undefined && error.includes(REFUSED_BY_POLICY)
+}
+
+/**
+ * A click whose target DECLARES an AXPress — its job is to FOCUS the target, not
+ * to change its state. Such a click's delivery can only be shown by its consumer.
+ */
+export function isFocusTarget(element: Element): boolean {
+  return (element.actions ?? []).includes("AXPress")
+}
+
+/**
+ * FUNCTIONAL delivery reasons for a focus click: the target's own value/label
+ * changed AFTER its consumer sub-step landed, so the click's focus landed. Pure —
+ * the caller measures the target state in the consumer's own observation.
+ */
+export function focusConsumerDelivery(
+  before: ClickSignals,
+  afterConsumer: ClickSignals,
+  _target: Element,
+): ClickDeliveryReason[] {
+  return before.target !== afterConsumer.target ? ["focus-consumer"] : []
+}
+
+/** Re-judge an UNDELIVERED attempt as DELIVERED when its consumer landed. */
+export function foldFocusConsumer(
+  attempt: ClickAttemptEvidence,
+  afterConsumer: ClickSignals,
+  target: Element,
+): ClickAttemptEvidence {
+  if (attempt.delivered) return attempt
+  const reasons = focusConsumerDelivery(attempt.before, afterConsumer, target)
+  return reasons.length === 0 ? attempt : { ...attempt, delivered: true, reasons: [...attempt.reasons, ...reasons] }
+}
+
+/**
+ * Re-judge an undelivered click OUTCOME as delivered when its consumer landed:
+ * fold only the FIRST rung (the declared/focus rung) — the consumer proves that
+ * rung's focus — then re-evaluate the verdict.
+ */
+export function foldFocusOutcome(
+  outcome: ClickOutcome,
+  afterConsumer: ClickSignals,
+  target: Element,
+): ClickOutcome {
+  if (outcome.worked) return outcome
+  const [first, ...rest] = outcome.attempts
+  if (first === undefined) return outcome
+  return clickVerdict([foldFocusConsumer(first, afterConsumer, target), ...rest])
+}
+
+/**
+ * How an actuation was carried out: a click rung, a key press, a typed text
+ * entry, a scroll, a browser bind/navigate, or a read (the observation IS the result).
+ */
+export type ActuationMode =
+  | ActuationRung["mode"]
+  | "type"
+  | "key"
+  | "scroll"
+  | "read"
+  | "prepare"
+  | "bind"
+  | "navigate"
 
 /**
  * Args for the driver's key-press verb (`cua-driver_press_key`): a fixed key plus
@@ -194,6 +276,29 @@ export function keyPress(
     key,
     ...(modifiers.length > 0 ? { modifiers: [...modifiers] } : {}),
   }
+}
+
+/**
+ * KEYSTROKE ROUTE — the sanctioned real-input verb for a target surface that
+ * DROPS accessibility insertion.
+ * INVARIANT OWNED: where a surface is known to discard accessibility-inserted
+ * text, sanctioned REAL key events outrank the accessibility insertion route.
+ * `type_text` writes by set-value/AXSetAttribute and only falls back to synthetic
+ * keys; a surface that accepts the write but never commits it must be driven by
+ * per-character key presses instead. `keySequence` is that verb: one
+ * `cua-driver_press_key` arg per code point — exactly the delivery such a surface
+ * commits on. Pure; the caller issues the calls and folds the before/after
+ * signature.
+ * hardcode-guard:allow the named live incident is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: Chromium's address bar shows an accessibility-
+ * inserted URL (AXSetAttribute) but does NOT submit it on Return — the driver's
+ * own warning; the value appears yet no navigation happens.
+ * UNSEEN CASE COVERED: any second surface that drops accessibility insertion —
+ * an Electron/WebGL field whose AXSetAttribute write is a no-op — is delivered by
+ * the SAME per-character sequence, with no loop change.
+ */
+export function keySequence(text: string, window: WindowRef, element?: Element): readonly Record<string, unknown>[] {
+  return Array.from(text).map((key) => keyPress(key, window, [], element))
 }
 
 export interface ActuationEvidence {
@@ -278,7 +383,11 @@ export function clickSignals(screen: string, element: Element, elements: readonl
 }
 
 /** Which signal established delivery. */
-export type ClickDeliveryReason = "screen" | "target-state" | "focus"
+/**
+ * Which signal established delivery, plus the DIAGNOSTIC reason a rung was
+ * refused by driver policy (a refusal is recorded, never a bare undelivered).
+ */
+export type ClickDeliveryReason = "screen" | "target-state" | "focus" | "focus-consumer" | "refused-by-policy"
 
 /**
  * Evaluate delivery on OBSERVABLE world state: a click is delivered when the
@@ -306,7 +415,11 @@ export interface ClickAttemptEvidence {
   readonly error?: string
 }
 
-/** Build one rung's evidence from its before/after signals. */
+/**
+ * Build one rung's evidence from its before/after signals. A driver POLICY
+ * refusal (a raw coordinate click blocked on an AX-backed element) is appended as
+ * the diagnostic reason `refused-by-policy` — it is NEVER counted as delivery.
+ */
 export function clickAttempt(
   rung: ActuationRung,
   before: ClickSignals,
@@ -315,13 +428,14 @@ export function clickAttempt(
   error?: string,
 ): ClickAttemptEvidence {
   const reasons = deliveryReasons(before, after, target)
+  const delivered = reasons.length > 0
   return {
     mode: rung.mode,
     label: rung.label,
     before,
     after,
-    delivered: reasons.length > 0,
-    reasons,
+    delivered,
+    reasons: isPolicyRefused(error) ? [...reasons, "refused-by-policy"] : reasons,
     ...(error !== undefined ? { error } : {}),
   }
 }

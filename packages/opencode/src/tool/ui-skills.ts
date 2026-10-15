@@ -46,6 +46,12 @@ export type SkillStep =
   | { readonly kind: "click"; readonly label: string }
   | { readonly kind: "key"; readonly label: string; readonly key: string; readonly modifiers: readonly string[] }
   | { readonly kind: "type"; readonly label: string; readonly text: string }
+  /**
+   * The SANCTIONED KEYSTROKE verb: deliver `text` as REAL per-character key
+   * events (never accessibility insertion), for a surface known to drop an
+   * inserted value without committing it.
+   */
+  | { readonly kind: "keys"; readonly label: string; readonly text: string }
   | {
       readonly kind: "scroll"
       readonly label: string
@@ -55,6 +61,27 @@ export type SkillStep =
     }
   /** No actuation: the observation is the result. `match` selects the labels to fold. */
   | { readonly kind: "read"; readonly label: string; readonly match: string }
+  /**
+   * SANCTIONED TYPED ROUTES. `prepare` attaches/owns the browser DevTools endpoint
+   * for the window's pid (`browser_prepare`), the precondition for a bind to
+   * succeed on a Chromium window; `bind` binds the window to a browser target
+   * (mode 1: pid+window_id) and CLASSIFIES it; `navigate` drives the bound tab to
+   * a URL through the browser tool; `verifyUrl`/`verifyScreen` RE-READ the world and
+   * set `urlChanged` to the URL/title/page actually changing — never an
+   * intermediate.
+   */
+  | { readonly kind: "prepare"; readonly label: string }
+  | { readonly kind: "bind"; readonly label: string }
+  | { readonly kind: "navigate"; readonly label: string; readonly url: string }
+  | { readonly kind: "verifyUrl"; readonly label: string }
+  | { readonly kind: "verifyScreen"; readonly label: string }
+  /** A runtime branch: a browser-classified bind takes `browser`, else `fallback`. */
+  | {
+      readonly kind: "branch"
+      readonly label: string
+      readonly browser: readonly SkillStep[]
+      readonly fallback: readonly SkillStep[]
+    }
 
 /** A skill matched against one observation: the skill, its target element, and the goal's value. */
 export interface SkillMatch {
@@ -78,6 +105,14 @@ export interface SkillSubstepEvidence {
   readonly delivered?: boolean
   /** A read sub-step's result: the observed labels matching the step's `match` token. */
   readonly read?: readonly string[]
+  /**
+   * A verify sub-step's result: the browser page URL/title (or the window's page
+   * signature on the native fallback) actually CHANGED. The only success signal a
+   * `go_to_url` route may rely on — Chromium does not submit an
+   * accessibility-inserted address-bar entry on Return, so intermediate signals
+   * (the typed value, the key press landing) must never be read as success.
+   */
+  readonly urlChanged?: boolean
 }
 
 export interface Skill {
@@ -126,6 +161,97 @@ const labelled = (element: Element, re: RegExp): boolean => re.test(element.labe
 /** Actuation modes that are CLICKS (a click sub-step must show affirmative delivery). */
 const CLICK_MODES = new Set<ActuationMode>(["declared", "pixel"])
 
+// hardcode-guard:allow the driver's browser tool/status vocabulary is driver naming, not a case literal
+/** A browser bind result: whether the window classifies as a browser, plus the bound page. */
+export interface BrowserBinding {
+  readonly browser: boolean
+  readonly url?: string
+  readonly title?: string
+  readonly target_id?: string
+  readonly tab_id?: string
+}
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
+
+/**
+ * Classify a `get_browser_state` BIND result (mode 1: pid+window_id). A browser is
+ * a result reporting a usable binding (`status:"ok"`, and `mutation_allowed` not
+ * false); a non-browser window or a failed bind yields `browser:false` and the
+ * caller falls back to the address-bar route. Fields the wire omits stay
+ * undefined; the first tab is preferred when a `tabs` array is present.
+ */
+export function decodeBrowserBinding(input: unknown): BrowserBinding {
+  const raw = asRecord(input)
+  if (raw === undefined) return { browser: false }
+  const status = asString(raw.status)
+  const browser = status === "ok" && raw.mutation_allowed !== false
+  const tabs = Array.isArray(raw.tabs) ? raw.tabs : []
+  const active = tabs.map(asRecord).find((tab) => tab?.active === true) ?? asRecord(tabs[0])
+  const scope = active ?? raw
+  return {
+    browser,
+    url: asString(scope?.url) ?? asString(raw.url),
+    title: asString(scope?.title) ?? asString(raw.title),
+    target_id: asString(raw.target_id),
+    tab_id: asString(scope?.tab_id) ?? asString(raw.tab_id),
+  }
+}
+
+/**
+ * The address-bar route: focus the bar, select-all, deliver the goal's URL as
+ * REAL per-character key events, submit, then VERIFY the page changed. The URL is
+ * NOT typed via accessibility insertion (`type_text`), which Chromium's address
+ * bar accepts but never submits on Return; the verify is the only success signal —
+ * the delivered value and the Return landing are intermediate. A no-navigation
+ * outcome is honest failure, not success.
+ */
+const addressBarRoute = (value: string): readonly SkillStep[] => [
+  { kind: "click", label: "focus address bar" },
+  { kind: "key", label: "select all", key: "a", modifiers: ["cmd"] },
+  { kind: "keys", label: "type url", text: value },
+  { kind: "key", label: "enter", key: "return", modifiers: [] },
+  { kind: "verifyScreen", label: "verify page changed" },
+]
+
+/**
+ * The SANCTIONED browser route: drive the bound tab to the URL through the typed
+ * browser tool (no synthesized key sequence), then verify the page URL/title
+ * changed.
+ */
+const browserRoute = (value: string): readonly SkillStep[] => [
+  { kind: "navigate", label: `navigate to ${value}`, url: value },
+  { kind: "verifyUrl", label: "verify url changed" },
+]
+
+/**
+ * The non-browser fallback, in two rungs. A Chromium window's bind FAILS until the
+ * DevTools endpoint is attached, so the first rung PREPARES the browser endpoint
+ * (`browser_prepare`) and re-binds; when the window now classifies as a browser the
+ * typed `browser_navigate` route runs, and only a window that is still not
+ * browser-classifiable falls to the LAST-resort keystroke address-bar route.
+ */
+const preparedFallback = (value: string): readonly SkillStep[] => [
+  { kind: "prepare", label: "prepare browser" },
+  { kind: "bind", label: "rebind browser" },
+  {
+    kind: "branch",
+    label: "route after prepare",
+    browser: browserRoute(value),
+    fallback: addressBarRoute(value),
+  },
+]
+
+/**
+ * Resolve the `go_to_url` arm: the sanctioned typed `browser_navigate` when the
+ * window already classifies as a browser, else the prepare-then-rebind fallback.
+ * Pure — the loop supplies the bind classification.
+ */
+export const goToUrlRoute = (isBrowser: boolean, value: string): readonly SkillStep[] =>
+  isBrowser ? browserRoute(value) : preparedFallback(value)
+
 /** Success = the LAST sub-step changed the screen AND every click sub-step was DELIVERED. */
 const clickDrivenSuccess = (evidence: readonly SkillSubstepEvidence[]): boolean =>
   evidence.length > 0 &&
@@ -137,23 +263,48 @@ const readFound = (evidence: readonly SkillSubstepEvidence[]): boolean =>
   evidence.some((sub) => (sub.read?.length ?? 0) > 0)
 
 /**
- * `go_to_url` — focus the address bar, select-all (`Cmd+A`), type the goal's URL,
- * press Enter. One maneuver for a navigation intent that otherwise costs four
- * fragile decisions. Success = the final Enter changed the screen.
+ * Success = the page URL/title ACTUALLY changed (a verify sub-step marked it).
+ * This is the only honest success signal for a navigation route: neither the
+ * typed value nor the Return key landing proves the page moved (Chromium does not
+ * submit an accessibility-inserted address-bar entry on Return).
+ */
+const urlChanged = (evidence: readonly SkillSubstepEvidence[]): boolean =>
+  evidence.some((sub) => sub.urlChanged === true)
+
+/**
+ * `go_to_url` — navigate to the goal's URL by the SANCTIONED route. First BIND the
+ * window to a browser target (`get_browser_state`, mode 1); when it classifies as a
+ * browser, drive the bound tab with `browser_navigate` — no synthesized key
+ * sequence. When the bind fails, PREPARE the browser endpoint (`browser_prepare`),
+ * re-bind, and again prefer `browser_navigate`; only a window that is still not
+ * browser-classifiable falls to the LAST-resort keystroke address-bar sequence.
+ * EVERY arm ends with a VERIFY sub-step and success is the page URL/title ACTUALLY
+ * changing, never an intermediate. A prepare, bind, or navigate that fails, or a
+ * delivery that does not submit, reports honest failure with its evidence chain.
+ *
+ * INVARIANT (gate c): PREFER THE TARGET'S TYPED, SANCTIONED API over synthesized
+ * input sequences. Instances: a raw-coordinate click refused where the AX action
+ * exists; Chromium's AX-insert-no-submit where the browser tool exists; absurd
+ * per-character typing where `browser_navigate` exists. UNSEEN CASE COVERED: any
+ * future typed route (e.g. a native app's AppleScript/URL-scheme verb) slots in as
+ * the browser arm and demotes the synthesized fallback identically.
  */
 export const goToUrl: Skill = {
   name: "go_to_url",
-  option: "go_to_url: navigate the address bar to the goal's URL",
+  option: "go_to_url: navigate to the goal's URL (browser route, else the address bar)",
   applies: (elements, value) => value !== undefined && value.length > 0 && goToUrl.select(elements) !== undefined,
   select: (elements) =>
     elements.find((element) => usable(element) && URL_BAR_ROLES.has(element.role ?? "") && labelled(element, URL_BAR_LABEL)),
   steps: (match) => [
-    { kind: "click", label: `focus ${match.element.label ?? "address bar"}` },
-    { kind: "key", label: "select all", key: "a", modifiers: ["cmd"] },
-    { kind: "type", label: "type url", text: match.value },
-    { kind: "key", label: "enter", key: "return", modifiers: [] },
+    { kind: "bind", label: "bind browser" },
+    {
+      kind: "branch",
+      label: "route",
+      browser: goToUrlRoute(true, match.value),
+      fallback: goToUrlRoute(false, match.value),
+    },
   ],
-  succeeded: clickDrivenSuccess,
+  succeeded: urlChanged,
 }
 
 /**
@@ -324,12 +475,14 @@ export function foldSubstepEvidence(
   signatures: readonly string[],
   delivered?: readonly (boolean | undefined)[],
   reads?: readonly (readonly string[] | undefined)[],
+  urlChanges?: readonly (boolean | undefined)[],
 ): SkillSubstepEvidence[] {
   return steps.map((step, i) => {
     const before = signatures[i] ?? ""
     const after = signatures[i + 1] ?? before
     const delivery = delivered?.[i]
     const read = reads?.[i]
+    const urlChanged = urlChanges?.[i]
     return {
       label: step.label,
       mode: step.mode,
@@ -338,6 +491,7 @@ export function foldSubstepEvidence(
       changed: before !== after,
       ...(delivery !== undefined ? { delivered: delivery } : {}),
       ...(read !== undefined ? { read } : {}),
+      ...(urlChanged !== undefined ? { urlChanged } : {}),
     }
   })
 }
