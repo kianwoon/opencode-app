@@ -103,6 +103,16 @@ const elementFields = {
   /** Screen-space frame; the hand's pixel fallback clicks its centre. */
   frame: Schema.optional(Rect),
   bounds: Schema.optional(Rect),
+  /**
+   * Containment metadata the SCENE organ reads to derive regions and item
+   * identity (depth, parent link, and the driver's own in-page flag). Optional
+   * and additive: presence never changes node identity (`screenSignature` still
+   * excludes them), so widening the decoder here is behavior-preserving for the
+   * loop and hands, while giving perception its containment signal.
+   */
+  depth: Schema.optional(Schema.Int),
+  parent_index: Schema.optional(Schema.Int),
+  in_web_content: Schema.optional(Schema.Boolean),
 } as const
 
 /** The canonical element the rest of the organ speaks: the token is `element_token`. */

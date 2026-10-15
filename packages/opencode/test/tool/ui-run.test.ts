@@ -12,37 +12,43 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Agent } from "@/agent/agent"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
-import { LABEL_MAX, buildControllerQuestions, buildState, foldController, type NavMap } from "@/jev/controller"
+import { LABEL_MAX } from "@/jev/controller"
 import {
   FRONTIER_HARD_MAX,
-  MAX_BELOW_GATE,
+  GATE_FLOOR,
   MAX_MANEUVER_REPEATS,
   Parameters,
   UiRunTool,
   advanceMap,
-  buildCandidates,
-  decideStep,
   decodeObservation,
+  destructiveManeuver,
   extractGoalValue,
   initialManeuverRepeat,
   isDestructive,
-  isGoalMet,
+  loginWall,
   maneuverRepeatStep,
+  minePlan,
   mineTrace,
   needsForegroundDelivery,
   nextAmbiguity,
   normalizeExpect,
+  planLoop,
+  planSummary,
   resolveTarget,
   runClickRungs,
   runTypeDelivery,
   runUrlEntry,
   screenSignature,
-  traceStep,
+  stateChangingManeuver,
   type DriverCall,
   type DriverOutcome,
+  type PlanLoopDeps,
+  type PlanLoopTelemetry,
   type StepTrace,
 } from "@/tool/ui-run"
-import { usableElements } from "@/tool/ui-eyes"
+import type { ManeuverOption } from "@/tool/ui-maneuvers"
+import type { Scene, SceneItem, SceneRegion } from "@/tool/ui-scene"
+import { buildCandidates, usableElements, type Element } from "@/tool/ui-eyes"
 import {
   CLIPBOARD_REPLACED_NOTE,
   actuationPlan,
@@ -353,140 +359,6 @@ describe("normalizeExpect", () => {
   })
 })
 
-// Shapes mirror live decisions captures (choice + per-label probabilities).
-const ans = (choice: string, probabilities: Record<string, number>) => ({ type: "choice", choice, probabilities })
-
-const index = (elements: Parameters<typeof buildCandidates>[0]) => {
-  const candidates = buildCandidates(elements)
-  return { labels: candidates.labels, byLabel: candidates.byLabel }
-}
-
-const accepted = (answers: Record<string, unknown>) => foldController({ answers }, 0.7)
-
-describe("decideStep", () => {
-  const base = {
-    candidates: index([button(1, "Save"), button(2, "Settings")]),
-    goalMet: false,
-    evidence: false,
-    step: 0,
-    maxSteps: 30,
-    ambiguous: 0,
-    maxAmbiguous: 3,
-  }
-
-  test("a below-gate decision falls to a SAFE action, it does not abort", () => {
-    const outcome = accepted({ action: ans("click", { click: 0.55, wait: 0.45 }) })
-    const v = decideStep({ ...base, outcome })
-    expect(v.kind).toBe("safe")
-    if (v.kind !== "safe") throw new Error("expected safe")
-    expect(v.reason).toBe("below-gate")
-  })
-
-  test("an unmeasured decision falls to a SAFE action", () => {
-    const v = decideStep({ ...base, outcome: foldController({}, 0.7) })
-    expect(v.kind).toBe("safe")
-  })
-
-  test("advisory goal_met true with NO evidence CONTINUES rather than stopping", () => {
-    const outcome = accepted({ action: ans("done", { done: 0.99 }) })
-    const v = decideStep({ ...base, outcome, goalMet: true })
-    expect(v.kind).toBe("safe")
-    if (v.kind !== "safe") throw new Error("expected safe")
-    expect(v.reason).toBe("goal-met-advisory-no-evidence")
-  })
-
-  test("observed evidence stops as verified, over every advisory signal", () => {
-    const outcome = accepted({ action: ans("click", { click: 0.9 }) })
-    const v = decideStep({ ...base, outcome, evidence: true, goalMet: true })
-    expect(v.kind).toBe("stop")
-    if (v.kind !== "stop") throw new Error("expected stop")
-    expect(v.reason).toBe("evidence-satisfied")
-  })
-
-  test("a target validated against the FRESH candidates becomes an act", () => {
-    const outcome = accepted({
-      action: ans("click", { click: 0.9, wait: 0.1 }),
-      target: ans("0:c2 AXButton Settings", { "0:c2 AXButton Settings": 0.95, none: 0.05 }),
-    })
-    const v = decideStep({ ...base, outcome })
-    expect(v.kind).toBe("act")
-    if (v.kind !== "act") throw new Error("expected act")
-    expect(v.element.element_token).toBe("s00000011:2")
-  })
-
-  test("a target absent from THIS iteration's candidates falls safe (never a stale map)", () => {
-    const outcome = accepted({
-      action: ans("click", { click: 0.9 }),
-      target: ans("0:c9 AXButton Gone", { "0:c9 AXButton Gone": 0.95 }),
-    })
-    const v = decideStep({ ...base, outcome, candidates: index([button(1, "Save")]) })
-    expect(v.kind).toBe("safe")
-    if (v.kind !== "safe") throw new Error("expected safe")
-    expect(v.reason).toBe("target-not-in-fresh-candidates")
-  })
-
-  // hardcode-guard:allow fixture labels/tokens are the churned identity input under test
-  test("a target whose element token churned is re-resolved by role+label, not dropped", () => {
-    const before = buildCandidates([button(1, "Save"), button(2, "Settings")])
-    const chosen = before.labels[1] // "c2 AXButton Settings"
-    const fresh = buildCandidates([button(9, "New"), button(1, "Save"), button(2, "Settings")])
-    expect(fresh.byLabel.get(chosen)).toBeUndefined()
-
-    const outcome = accepted({
-      action: ans("click", { click: 0.9, wait: 0.1 }),
-      target: ans(`0:${chosen}`, { [`0:${chosen}`]: 0.95, none: 0.05 }),
-    })
-    const v = decideStep({ ...base, outcome, candidates: fresh })
-    expect(v.kind).toBe("act")
-    if (v.kind !== "act") throw new Error("expected act")
-    expect(v.element.label).toBe("Settings")
-    expect(v.element.element_token).toBe("s00000011:2")
-  })
-
-  // hardcode-guard:allow fixture labels/tokens are the churned identity input under test
-  test("resolveTarget ignores the churned cN prefix and matches on role+label", () => {
-    const elements = [button(9, "New"), button(2, "Settings")]
-    expect(resolveTarget("c2 AXButton Settings", elements)?.element_token).toBe("s00000011:2")
-    expect(resolveTarget("c7 AXButton Settings", elements)?.element_token).toBe("s00000011:2")
-    expect(resolveTarget("c1 AXButton Missing", elements)).toBeUndefined()
-  })
-
-  test("a destructive target stops for consent BEFORE acting", () => {
-    const outcome = accepted({
-      action: ans("click", { click: 0.9 }),
-      target: ans("0:c1 AXButton Save", { "0:c1 AXButton Save": 0.95 }),
-    })
-    const v = decideStep({ ...base, outcome, candidates: index([button(1, "Save")]) })
-    expect(v.kind).toBe("checkpoint")
-    if (v.kind !== "checkpoint") throw new Error("expected checkpoint")
-    expect(v.target).toContain("Save")
-  })
-
-  test("budget exhaustion is a hard stop", () => {
-    const v = decideStep({ ...base, outcome: foldController({}, 0.7), step: 30 })
-    expect(v.kind).toBe("stop")
-    if (v.kind !== "stop") throw new Error("expected stop")
-    expect(v.reason).toBe("budget-exhausted")
-  })
-
-  test("the ambiguity bound stops a run that never acts", () => {
-    const v = decideStep({ ...base, outcome: foldController({}, 0.7), ambiguous: 3 })
-    expect(v.kind).toBe("stop")
-    if (v.kind !== "stop") throw new Error("expected stop")
-    expect(v.reason).toBe("ambiguous-limit")
-  })
-
-  test("a type decision without text falls safe instead of typing nothing", () => {
-    const outcome = accepted({
-      action: ans("type", { type: 0.9 }),
-      target: ans("0:c1 AXButton Field", { "0:c1 AXButton Field": 0.95 }),
-    })
-    const v = decideStep({ ...base, outcome, candidates: index([button(1, "Field")]) })
-    expect(v.kind).toBe("safe")
-    if (v.kind !== "safe") throw new Error("expected safe")
-    expect(v.reason).toBe("type-without-text")
-  })
-})
 
 // hardcode-guard:allow fixture labels and answers are the enumerable input under test
 describe("nextAmbiguity", () => {
@@ -502,311 +374,40 @@ describe("nextAmbiguity", () => {
   test("no action last iteration leaves the count untouched", () => {
     expect(nextAmbiguity(1, undefined, "n9")).toBe(1)
   })
-
-  test("a repeated no-op click terminates via the ambiguity bound, not the budget", () => {
-    const elements = [button(1, "Notifications"), button(2, "Do Not Disturb")]
-    const candidates = buildCandidates(elements)
-    const target = candidates.labels[0]
-    let ambiguous = 0
-    let actedAt: string | undefined
-    let status = "budget-exhausted"
-
-    for (let step = 0; step < 30; step++) {
-      // the SAME screen is observed every iteration — the click never moves it
-      const map = advanceMap("open the app's notification settings", undefined, elements, candidates.labels)
-      ambiguous = nextAmbiguity(ambiguous, actedAt, map.current)
-      const outcome = accepted({
-        action: ans("click", { click: 0.95, wait: 0.05 }),
-        target: ans(`0:${target}`, { [`0:${target}`]: 0.95, none: 0.05 }),
-      })
-      const verdict = decideStep({
-        outcome,
-        candidates: { labels: candidates.labels, byLabel: candidates.byLabel },
-        goalMet: false,
-        evidence: false,
-        step,
-        maxSteps: 30,
-        ambiguous,
-        maxAmbiguous: 3,
-      })
-      if (verdict.kind !== "act") {
-        status = verdict.reason
-        break
-      }
-      actedAt = map.current
-    }
-
-    expect(status).toBe("ambiguous-limit")
-  })
 })
 
-// hardcode-guard:allow fixture labels and answers are the enumerable input under test
-describe("traceStep", () => {
-  const base = {
-    candidates: index([button(1, "Save"), button(2, "Settings")]),
-    goalMet: false,
-    evidence: false,
-    step: 0,
-    maxSteps: 30,
-    ambiguous: 0,
-    maxAmbiguous: 3,
-  }
-
-  test("an accepted decision carries action + target + strength", () => {
-    const outcome = accepted({
-      action: ans("click", { click: 0.9, wait: 0.1 }),
-      target: ans("0:c2 AXButton Settings", { "0:c2 AXButton Settings": 0.95, none: 0.05 }),
-    })
-    const verdict = decideStep({ ...base, outcome })
-    expect(traceStep(1, outcome, verdict)).toEqual({
-      step: 1,
-      verdict: "accepted",
-      action: "click",
-      target: "c2 AXButton Settings",
-      strength: 0.9,
-      decision: "act",
-      reason: "decided",
-    })
+describe("nextAmbiguity — prerequisite focus is not a no-op", () => {
+  test("a content-unchanged focus click followed by type on the SAME target does not advance", () => {
+    expect(
+      nextAmbiguity(0, "n1", "n1", {
+        actedMode: "declared",
+        actedTarget: "c1 AXTextField Search",
+        nextAction: "type",
+        nextTarget: "c1 AXTextField Search",
+      }),
+    ).toBe(0)
   })
 
-  test("a below_gate verdict carries its strength and no action", () => {
-    const outcome = foldController({ answers: { action: ans("click", { click: 0.55, wait: 0.45 }) } }, 0.7)
-    const verdict = decideStep({ ...base, outcome })
-    const t = traceStep(1, outcome, verdict)
-    expect(t.verdict).toBe("below_gate")
-    expect(t.action).toBeNull()
-    expect(t.target).toBeNull()
-    expect(t.strength).toBeCloseTo(0.55)
-    expect(t.decision).toBe("safe")
-    expect(t.reason).toBe("below-gate")
+  test("a repeated click on the same target is still a no-op (existing bound preserved)", () => {
+    expect(
+      nextAmbiguity(0, "n1", "n1", {
+        actedMode: "declared",
+        actedTarget: "c1 AXButton X",
+        nextAction: "click",
+        nextTarget: "c1 AXButton X",
+      }),
+    ).toBe(1)
   })
 
-  test("an unmeasured verdict carries no action and no strength", () => {
-    const outcome = foldController({}, 0.7)
-    const verdict = decideStep({ ...base, outcome })
-    const t = traceStep(1, outcome, verdict)
-    expect(t.verdict).toBe("unmeasured")
-    expect(t.action).toBeNull()
-    expect("strength" in t).toBe(false)
-    expect(t.reason).toBe("unmeasured")
-  })
-})
-
-describe("isDestructive", () => {
-  test("flags the consent verbs and passes ordinary controls", () => {
-    expect(isDestructive("c1 AXButton Save")).toBe(true)
-    expect(isDestructive("Submit")).toBe(true)
-    expect(isDestructive("Delete account")).toBe(true)
-    expect(isDestructive("Confirm")).toBe(true)
-    expect(isDestructive("c2 AXButton Settings")).toBe(false)
-  })
-})
-
-// hardcode-guard:allow fixture node ids, labels and per-step answers are the enumerable input under test
-describe("navigation map chaining", () => {
-  const GOAL = "buy the widget"
-
-  // A screen is defined by its role+label structure ONLY. Every observation gets
-  // a FRESH snapshot id (and therefore fresh element tokens/indices) — exactly
-  // what the driver does live — so the node identity must not depend on them.
-  const screenAt = (snapshot: string, shape: ReadonlyArray<readonly [string, string]>) =>
-    shape.map(([role, label], i) => ({
-      element_index: i + 1,
-      element_token: `${snapshot}:${i + 1}`,
-      role,
-      label,
-    }))
-
-  const observe = (snapshot: string, shape: ReadonlyArray<readonly [string, string]>) => {
-    const decoded = decodeObservation({ snapshot_id: snapshot, elements: screenAt(snapshot, shape) })
-    if (!decoded) throw new Error("fixture observation failed to decode")
-    return decoded
-  }
-
-  const ansOf = (target: string) => ({
-    action: ans("click", { click: 0.9, wait: 0.1 }),
-    target: ans(target, { [target]: 0.95, none: 0.05 }),
-  })
-
-  // The chain the loop runs: observe -> enumerate frontier -> build map -> ask
-  // jev over the frontier -> decide -> act -> repeat. `advanceMap` is the only
-  // stateful piece; the decider is the real foldController over jev-shaped answers.
-  const decideAt = (
-    step: number,
-    evidence: boolean,
-    elements: Parameters<typeof buildCandidates>[0],
-    answers: Record<string, unknown>,
-  ) => {
-    const candidates = buildCandidates(elements)
-    const outcome = foldController({ answers }, 0.7)
-    const verdict = decideStep({
-      outcome,
-      candidates: { labels: candidates.labels, byLabel: candidates.byLabel },
-      goalMet: isGoalMet(outcome),
-      evidence,
-      step,
-      maxSteps: 8,
-      ambiguous: 0,
-      maxAmbiguous: 3,
-    })
-    return { candidates, verdict }
-  }
-
-  // hardcode-guard:allow fixture shapes/labels are the enumerable input under test
-  const shapes: Record<string, ReadonlyArray<readonly [string, string]>> = {
-    home: [["AXButton", "Products"]],
-    products: [["AXButton", "Widget"], ["AXButton", "Gift"]],
-    widget: [["AXButton", "Proceed"], ["AXButton", "Back"]],
-    gift: [["AXButton", "Add to cart"]],
-    cart: [["AXButton", "Confirm order"]],
-  }
-  const next: Record<string, Record<string, string>> = {
-    home: { Products: "products" },
-    products: { Widget: "widget", Gift: "gift" },
-    widget: { Proceed: "cart" },
-    gift: { "Add to cart": "cart" },
-    cart: {},
-  }
-  const nodeId = (id: string) => screenSignature(screenAt("any", shapes[id]))
-
-  test("screenSignature is stable across changing snapshot ids, tokens and indices", () => {
-    const a = screenAt("snap-a", shapes.products)
-    const b = screenAt("snap-b", shapes.products)
-    expect(a[0].element_token).not.toBe(b[0].element_token)
-    expect(screenSignature(a)).toBe(screenSignature(b))
-    expect(screenSignature(a)).toBe(nodeId("products"))
-  })
-
-  test("the same screen observed twice with fresh snapshot ids is ONE visit", () => {
-    const a = observe("snap-a", shapes.products)
-    const b = observe("snap-b", shapes.products)
-    expect(b.snapshot_id).not.toBe(a.snapshot_id)
-    const first = advanceMap(GOAL, undefined, a.elements, buildCandidates(a.elements).labels)
-    const second = advanceMap(GOAL, first, b.elements, buildCandidates(b.elements).labels)
-    // Different observation, same screen: path records VISITS, not observations.
-    expect(second.current).toBe(first.current)
-    expect(second.path).toEqual([first.current])
-  })
-
-  test("signature distinguishes a modal dialog from the screen behind it", () => {
-    // Same shared control ("Cancel"), different body: an unseen screen the
-    // structure still separates from the base window.
-    const base = screenAt("s1", [["AXButton", "Cancel"], ["AXStaticText", "Untitled document"]])
-    const dialog = screenAt("s2", [["AXButton", "Cancel"], ["AXStaticText", "Save changes before quitting?"]])
-    expect(screenSignature(base)).not.toBe(screenSignature(dialog))
-  })
-
-  // hardcode-guard:allow the differing frame/actions are the ephemeral fields under test
-  test("signature ignores ephemeral frame and declared actions, not just snapshot/token", () => {
-    const a = [
-      { element_token: "s1:1", role: "AXButton", label: "Go", actions: ["AXPress"], frame: { x: 0, y: 0, width: 1, height: 1 } },
-    ]
-    const b = [
-      { element_token: "s2:9", role: "AXButton", label: "Go", actions: ["AXSelect"], frame: { x: 5, y: 5, width: 9, height: 9 } },
-    ]
-    expect(screenSignature(a)).toBe(screenSignature(b))
-  })
-
-  test("a four-screen dependent chain reaches the goal, driven by jev — not one step", () => {
-    const target: Record<string, string> = {
-      home: "0:c1 AXButton Products",
-      products: "0:c1 AXButton Widget",
-      // hardcode-guard:allow fixture option labels are the enumerable input under test
-      widget: "0:c1 AXButton Proceed",
-    }
-
-    let map: NavMap | undefined
-    let id = "home"
-    const frontiers: string[][] = []
-    const states: Record<string, unknown>[] = []
-    const chosen: string[] = []
-    const snapshotIds: string[] = []
-    let status = "budget-exhausted"
-
-    for (let step = 0; step < 8; step++) {
-      const snapshot = `snap-${step}` // a FRESH snapshot id every observation
-      snapshotIds.push(snapshot)
-      const observation = observe(snapshot, shapes[id])
-      const candidates = buildCandidates(observation.elements)
-      map = advanceMap(GOAL, map, observation.elements, candidates.labels)
-      frontiers.push([...candidates.labels])
-      states.push(JSON.parse(buildState({ map })))
-
-      // (c) CODE enumerates the option set BEFORE jev is asked; jev's answer is
-      // keyed to exactly one enumerated option (never a choice jev invented).
-      const q = buildControllerQuestions(map.frontier)
-      const optionKeys = Object.keys(q?.target.criteria ?? {}).filter((k) => k !== "none")
-      expect(optionKeys).toEqual(map.frontier.map((label, i) => `${i}:${label}`))
-
-      const answers = id === "cart" ? { action: ans("done", { done: 0.99 }) } : ansOf(target[id])
-      const { verdict } = decideAt(step, id === "cart", observation.elements, answers)
-      if (verdict.kind === "stop") {
-        status = verdict.reason
-        break
-      }
-      if (verdict.kind !== "act") {
-        status = verdict.kind
-        break
-      }
-      chosen.push(verdict.element.label ?? "")
-      const nextId = next[id][verdict.element.label ?? ""]
-      if (!nextId) {
-        status = "no-transition"
-        break
-      }
-      id = nextId
-    }
-
-    // hardcode-guard:allow the expected jev-chosen labels are the fixture under test
-    expect(chosen).toEqual(["Products", "Widget", "Proceed"])
-    expect(status).toBe("evidence-satisfied")
-    // Snapshot ids changed every observation, yet the path is SCREEN visits.
-    expect(new Set(snapshotIds).size).toBe(snapshotIds.length)
-    expect(map?.start).toBe(nodeId("home"))
-    expect(map?.current).toBe(nodeId("cart"))
-    expect(map?.path).toEqual(["home", "products", "widget", "cart"].map(nodeId))
-    // every step changed the candidate set.
-    expect(new Set(frontiers.map((f) => f.join("|"))).size).toBe(frontiers.length)
-    // the state sent to jev carried the map, updated each step.
-    expect(states.map((s) => s.current)).toEqual(["home", "products", "widget", "cart"].map(nodeId))
-    expect(states[2].goal).toBe(GOAL)
-    // hardcode-guard:allow the enumerated frontier is the fixture under test
-    expect(states[2].frontier).toEqual(["c1 AXButton Proceed", "c2 AXButton Back"])
-    expect(states[2].path).toEqual(["home", "products", "widget"].map(nodeId))
-  })
-
-  test("a branch that requires backtracking returns to the SAME node id", () => {
-    // home -> products -> widget (dead end) -> Back -> products -> Gift -> gift -> cart,
-    // with a fresh snapshot id on every observation.
-    const script: ReadonlyArray<{ id: string; target?: string }> = [
-      { id: "home", target: "0:c1 AXButton Products" },
-      { id: "products", target: "0:c1 AXButton Widget" },
-      { id: "widget", target: "1:c2 AXButton Back" },
-      { id: "products", target: "1:c2 AXButton Gift" },
-      { id: "gift", target: "0:c1 AXButton Add to cart" },
-      { id: "cart" },
-    ]
-
-    let map: NavMap | undefined
-    for (const [step, visit] of script.entries()) {
-      const observation = observe(`bk-${step}`, shapes[visit.id])
-      const candidates = buildCandidates(observation.elements)
-      map = advanceMap(GOAL, map, observation.elements, candidates.labels)
-      if (!visit.target) break
-      const { verdict } = decideAt(step, false, observation.elements, ansOf(visit.target))
-      expect(verdict.kind).toBe("act")
-      if (verdict.kind !== "act") break
-      // `Back` is legal only because code enumerated it in this node's frontier:
-      // the chosen element is one of the enumerated candidates.
-      // hardcode-guard:allow the identity assertion is the invariant, not a literal
-      expect([...candidates.byLabel.values()].some((e) => e.element_token === verdict.element.element_token)).toBe(true)
-    }
-
-    expect(map?.path).toEqual(["home", "products", "widget", "products", "gift", "cart"].map(nodeId))
-    // Backtracking returned to the SAME node id — a real revisit, not a new node.
-    expect(map?.path[1]).toBe(map?.path[3])
-    expect(map?.path[1]).toBe(nodeId("products"))
-    expect(map?.path.filter((node) => node === nodeId("products")).length).toBe(2)
+  test("a changed screen still resets regardless of target", () => {
+    expect(
+      nextAmbiguity(2, "n1", "n2", {
+        actedMode: "declared",
+        actedTarget: "c1 AXTextField Search",
+        nextAction: "type",
+        nextTarget: "c1 AXTextField Search",
+      }),
+    ).toBe(0)
   })
 })
 
@@ -1435,180 +1036,8 @@ describe("extractGoalValue", () => {
   })
 })
 
-describe("decideStep — graceful degradation at the below-gate bound", () => {
-  const candidates = index([button(1, "Settings"), button(2, "Save")])
-  const belowGate = accepted({
-    action: ans("click", { click: 0.5, wait: 0.5 }),
-    target: ans("0:c1 AXButton Settings", { "0:c1 AXButton Settings": 0.5, none: 0.5 }),
-  })
-  const base = {
-    candidates,
-    goalMet: false,
-    evidence: false,
-    step: 0,
-    maxSteps: 30,
-    ambiguous: 0,
-    maxAmbiguous: 3,
-  }
 
-  test("before the bound a below-gate step still falls safe", () => {
-    const v = decideStep({ ...base, outcome: belowGate, belowGate: MAX_BELOW_GATE - 1, maxBelowGate: MAX_BELOW_GATE })
-    expect(v.kind).toBe("safe")
-  })
 
-  test("at the bound it takes the strongest option and records strongest-available-fallback", () => {
-    const v = decideStep({
-      ...base,
-      outcome: belowGate,
-      belowGate: MAX_BELOW_GATE,
-      maxBelowGate: MAX_BELOW_GATE,
-      strongestBelowGate: { action: "click", target: "c1 AXButton Settings", strength: 0.66 },
-    })
-    expect(v.kind).toBe("act")
-    if (v.kind !== "act") throw new Error("expected act")
-    expect(v.reason).toBe("strongest-available-fallback")
-    expect(v.element.label).toBe("Settings")
-  })
-
-  test("a destructive strongest option is REFUSED below gate, falling safe (never destructive)", () => {
-    const v = decideStep({
-      ...base,
-      outcome: accepted({
-        action: ans("click", { click: 0.5, wait: 0.5 }),
-        target: ans("0:c2 AXButton Save", { "0:c2 AXButton Save": 0.5, none: 0.5 }),
-      }),
-      belowGate: MAX_BELOW_GATE,
-      maxBelowGate: MAX_BELOW_GATE,
-    })
-    expect(v.kind).toBe("safe")
-  })
-
-  test("a scroll among the options cannot degrade to an act (unseen case: non-click option)", () => {
-    const v = decideStep({
-      ...base,
-      outcome: accepted({ action: ans("scroll", { scroll: 0.5, click: 0.5 }) }),
-      belowGate: MAX_BELOW_GATE,
-      maxBelowGate: MAX_BELOW_GATE,
-    })
-    expect(v.kind).toBe("safe")
-  })
-})
-
-describe("nextAmbiguity — prerequisite focus is not a no-op", () => {
-  test("a content-unchanged focus click followed by type on the SAME target does not advance", () => {
-    expect(
-      nextAmbiguity(0, "n1", "n1", {
-        actedMode: "declared",
-        actedTarget: "c1 AXTextField Search",
-        nextAction: "type",
-        nextTarget: "c1 AXTextField Search",
-      }),
-    ).toBe(0)
-  })
-
-  test("a repeated click on the same target is still a no-op (existing bound preserved)", () => {
-    expect(
-      nextAmbiguity(0, "n1", "n1", {
-        actedMode: "declared",
-        actedTarget: "c1 AXButton X",
-        nextAction: "click",
-        nextTarget: "c1 AXButton X",
-      }),
-    ).toBe(1)
-  })
-
-  test("a changed screen still resets regardless of target", () => {
-    expect(
-      nextAmbiguity(2, "n1", "n2", {
-        actedMode: "declared",
-        actedTarget: "c1 AXTextField Search",
-        nextAction: "type",
-        nextTarget: "c1 AXTextField Search",
-      }),
-    ).toBe(0)
-  })
-})
-
-describe("ui_run chain — decider contract over the captured Brave frontier", () => {
-  const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
-
-  test("click address-bar (focus, unchanged) → type the goal's URL → screen changes", async () => {
-    const raw = await Bun.file(CAPTURE).json()
-    const observation = decodeObservation(raw)
-    expect(observation).not.toBeNull()
-    if (observation === null) return
-    const candidates = buildCandidates(observation.elements)
-    const addressBar = candidates.labels.find((l) => l.includes("Address and search bar"))
-    expect(addressBar).toBeDefined()
-    if (addressBar === undefined) return
-    const index0 = { labels: candidates.labels, byLabel: candidates.byLabel }
-    const goal = `go to "https://www.linkedin.com" and sign in`
-    expect(extractGoalValue(goal)).toBe("https://www.linkedin.com")
-
-    // Step 1 — jev clicks the address bar; the field only gains focus (screen Unchanged).
-    const node = screenSignature(observation.elements)
-    const clickVerdict = decideStep({
-      outcome: accepted({
-        action: ans("click", { click: 0.92, wait: 0.08 }),
-        target: ans(`0:${addressBar}`, { [`0:${addressBar}`]: 0.95, none: 0.05 }),
-      }),
-      candidates: index0,
-      goalMet: false,
-      evidence: false,
-      goal,
-      step: 0,
-      maxSteps: 30,
-      ambiguous: 0,
-      maxAmbiguous: 3,
-    })
-    expect(clickVerdict.kind).toBe("act")
-    // The successor is a type on the SAME target, so the focus click must NOT count.
-    const ambiguousAfterFocus = nextAmbiguity(0, node, node, {
-      actedMode: "declared",
-      actedTarget: addressBar,
-      nextAction: "type",
-      nextTarget: addressBar,
-    })
-    expect(ambiguousAfterFocus).toBe(0)
-
-    // Step 2 — jev types on the same field; the value comes from the GOAL (not the
-    // option space), so the decision carries text rather than dying "type-without-text".
-    const typeVerdict = decideStep({
-      outcome: accepted({
-        action: ans("type", { type: 0.9, click: 0.1 }),
-        target: ans(`0:${addressBar}`, { [`0:${addressBar}`]: 0.95, none: 0.05 }),
-      }),
-      candidates: index0,
-      goalMet: false,
-      evidence: false,
-      goal,
-      step: 1,
-      maxSteps: 30,
-      ambiguous: ambiguousAfterFocus,
-      maxAmbiguous: 3,
-    })
-    expect(typeVerdict.kind).toBe("act")
-    if (typeVerdict.kind !== "act") return
-    expect(typeVerdict.action).toBe("type")
-    expect(typeVerdict.text).toBe("https://www.linkedin.com")
-    expect(typeVerdict.element.label).toBe("Address and search bar")
-
-    // Step 3 — the type changes the screen: the ambiguity count resets (progress).
-    const changed = screenSignature([
-      ...observation.elements,
-      { role: "AXButton", label: "New posts", element_token: "s00000067:99" },
-    ])
-    expect(changed).not.toBe(node)
-    expect(
-      nextAmbiguity(ambiguousAfterFocus, node, changed, {
-        actedMode: "type",
-        actedTarget: addressBar,
-        nextAction: "click",
-        nextTarget: "c1 AXButton New posts",
-      }),
-    ).toBe(0)
-  })
-})
 
 // GENERALIZATION — the invariant: mining FLAGS promotion candidates from the run
 // trace; it never self-promotes into the registry. The per-case-feeding problem is
@@ -1648,6 +1077,398 @@ describe("ui_run — skill mining hook over the step trace", () => {
         act(2, "type", "X", false),
         act(3, "click", "X", false),
         act(4, "type", "X", false),
+      ]),
+    ).toEqual([])
+  })
+})
+
+// GENERALIZATION — INVARIANT: ui_run is PLAN-DRIVEN — it commits a plan, offers
+// ONLY maneuver options to jev (never raw control ids), executes the chosen
+// maneuver through the executor, and terminates on a predicate PROVED OVER THE
+// SCENE (never jev's say-so). Live instances: checkboxes clicked / the flat
+// aimless frontier; unseen case: any scene whose goal-relevant region differs
+// from chrome takes the same region-scoped predicates, no loop change.
+// hardcode-guard:allow the synthetic list/login scenes are the general plan-loop shapes under test
+describe("ui_run — plan loop (plan-driven execution over one executor)", () => {
+  const el = (label: string, role = "AXLink"): Element => ({ element_token: label, role, label })
+  const row = (label: string): SceneItem => ({
+    id: label,
+    role: "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+  })
+  const listScene = (labels: readonly string[], snapshot: string, extra: readonly SceneRegion[] = []): Scene => ({
+    snapshot,
+    regions: [{ id: `${snapshot}:list`, kind: "list", itemIds: labels.map((label) => label), textIds: [] }, ...extra],
+    items: labels.map(row),
+    texts: [],
+  })
+
+  const base = (over: Partial<PlanLoopDeps>): PlanLoopDeps => ({
+    goal: "read the last 3 messages",
+    observe: () => Effect.succeed(listScene(["m1", "m2", "m3"], "s-satisfied")),
+    choosePlan: () => Effect.succeed(undefined),
+    chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+    execute: () => Effect.succeed({ deliveryModes: [] }),
+    stateChanging: () => false,
+    readOnly: true,
+    maxSteps: 8,
+    ...over,
+  })
+
+  test("(a) commits a plan, offers ONLY maneuver options, executes them, terminates on read_count", async () => {
+    const scenes = [listScene(["m1"], "s-partial"), listScene(["m1", "m2", "m3"], "s-satisfied")]
+    let observed = scenes[0]
+    let executed: ManeuverOption | undefined
+    const offered: string[] = []
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(observed),
+          chooseManeuver: (_subgoal, options) => {
+            offered.push(...options.map((option) => option.label))
+            return Effect.succeed({ label: options[0]?.label })
+          },
+          execute: (option) => {
+            executed = option
+            observed = scenes[1]
+            return Effect.succeed({ deliveryModes: ["read"] })
+          },
+        }),
+      ),
+    )
+    // the chosen maneuver came from the maneuver option space — never a raw control id
+    expect(executed?.name).toBe("read_items")
+    expect(offered.length).toBeGreaterThan(0)
+    expect(offered.every((label) => /^(read_items|open_item|activate|go_to_url|scroll_to|dismiss|back)\b/.test(label))).toBe(
+      true,
+    )
+    // termination is the read_count predicate PROVED over the Scene, not jev's say-so
+    expect(result.status).toBe("completed")
+    expect(result.reason).toBe("predicate-satisfied")
+    expect(result.progress?.done).toBe(3)
+    expect(result.telemetry).toHaveLength(1)
+    expect(result.telemetry[0].maneuver).toBe("read_items")
+    expect(result.telemetry[0].progress.done).toBe(3)
+  })
+
+  test("(b) a state-changing maneuver below the gate NEVER executes — the run stops with the distinct status", async () => {
+    let executed = false
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(listScene(["m1"], "s-partial")),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label, strength: 0.4 }),
+          execute: () => {
+            executed = true
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => true,
+          readOnly: false,
+        }),
+      ),
+    )
+    expect(result.status).toBe("below-gate")
+    expect(executed).toBe(false)
+    expect(result.frontier.length).toBeGreaterThan(0)
+  })
+
+  test("(b) a read-only goal with only a state-changing candidate stops read-only-blocked", async () => {
+    let executed = false
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(listScene(["m1"], "s-partial")),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label, strength: 0.99 }),
+          execute: () => {
+            executed = true
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => true,
+          readOnly: true,
+        }),
+      ),
+    )
+    expect(result.status).toBe("read-only-blocked")
+    expect(executed).toBe(false)
+  })
+
+  test("(b) at the gate a state-changing maneuver does execute", async () => {
+    let executed = false
+    const partial = listScene(["m1"], "s-partial")
+    const satisfied = listScene(["m1", "m2", "m3"], "s-satisfied")
+    let observed = partial
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(observed),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label, strength: GATE_FLOOR }),
+          execute: () => {
+            executed = true
+            observed = satisfied
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => true,
+          readOnly: false,
+        }),
+      ),
+    )
+    expect(executed).toBe(true)
+    expect(result.status).toBe("completed")
+  })
+
+  test("(a) a destructive maneuver ABOVE the gate stops for consent — distinct status, option + strength, executes nothing", async () => {
+    let executed = false
+    const scene = listScene(["Delete account"], "s-partial")
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          goal: "read the last 3 messages",
+          observe: () => Effect.succeed(scene),
+          chooseManeuver: (_subgoal, options) => {
+            const open = options.find((option) => option.name === "open_item")
+            return Effect.succeed({ label: open?.label, strength: 0.99 })
+          },
+          execute: () => {
+            executed = true
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: (option) => option.name === "open_item",
+          readOnly: false,
+        }),
+      ),
+    )
+    // above the gate (0.99 > GATE_FLOOR) yet nothing executes: the distinct status
+    expect(result.status).toBe("destructive-consent-required")
+    expect(executed).toBe(false)
+    expect(result.telemetry).toHaveLength(0)
+    // the blocking option and its measured strength are reported for consent
+    expect(result.consent?.option).toContain("open_item")
+    expect(result.consent?.target).toBe("Delete account")
+    expect(result.consent?.strength).toBe(0.99)
+    expect(result.reason).toContain("Delete account")
+  })
+
+  test("(b) a NON-destructive state-changing maneuver ABOVE the gate still executes (no over-blocking)", async () => {
+    let executed = false
+    const partial = listScene(["Inbox"], "s-partial")
+    const satisfied = listScene(["Inbox", "m2", "m3"], "s-satisfied")
+    let observed = partial
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          goal: "read the last 3 messages",
+          observe: () => Effect.succeed(observed),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label, strength: 0.99 }),
+          execute: () => {
+            executed = true
+            observed = satisfied
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => true,
+          readOnly: false,
+        }),
+      ),
+    )
+    expect(executed).toBe(true)
+    expect(result.status).toBe("completed")
+    expect(result.consent).toBeUndefined()
+  })
+
+  test("(e) the boundary generalises: an activating maneuver over an unseen irreversible label stops, a read over it does not", () => {
+    const scene: Scene = { snapshot: "s", regions: [], items: [row("Unsubscribe"), row("Details")], texts: [] }
+    const option = (name: string, target: SceneItem): ManeuverOption => ({
+      name,
+      label: `${name}: x`,
+      targets: [{ kind: "item", id: target.id, role: target.role, label: target.label }],
+      preconditions: [],
+      success: { predicate: "screenChanged", detail: "" },
+      inputs: [],
+    })
+    const unsubscribe = row("Unsubscribe")
+    const details = row("Details")
+    // unseen irreversible affordance under an ACTIVATING maneuver → blocked
+    expect(isDestructive("Unsubscribe")).toBe(true)
+    expect(destructiveManeuver(option("open_item", unsubscribe), scene)).toBe(true)
+    // the SAME destructive target under a READ maneuver is inert — reads are never blocked
+    expect(destructiveManeuver(option("read_items", unsubscribe), scene)).toBe(false)
+    // a non-destructive activating maneuver is not blocked
+    expect(destructiveManeuver(option("open_item", details), scene)).toBe(false)
+  })
+
+  test("(c) a login/credential wall stops the run with its reason, typing nothing", async () => {
+    let executed = false
+    const scene: Scene = {
+      snapshot: "s-login",
+      regions: [],
+      items: [],
+      texts: [
+        { id: "pw", role: "AXSecureTextField", text: "Password", owner: "scene", element: el("Password", "AXSecureTextField") },
+      ],
+    }
+    expect(loginWall(scene)).toContain("credential")
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(scene),
+          execute: () => {
+            executed = true
+            return Effect.succeed({ deliveryModes: [] })
+          },
+        }),
+      ),
+    )
+    expect(result.status).toBe("login-wall")
+    expect(result.reason).toContain("credential")
+    expect(executed).toBe(false)
+  })
+
+  test("(d) oscillation drives a bounded replan to a distinct stop reason", async () => {
+    const toolbar = (snapshot: string): SceneRegion => ({ id: `${snapshot}:toolbar`, kind: "toolbar", itemIds: [], textIds: [] })
+    const a = listScene(["m1"], "s-a", [toolbar("s-a")])
+    const b = listScene(["m1"], "s-b", [toolbar("s-b")])
+    const views = [a, b]
+    let index = 0
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(views[index % 2]),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+          execute: () => {
+            index++
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => false,
+          readOnly: true,
+          maxSteps: 12,
+        }),
+      ),
+    )
+    // bounded replan: the run never reports the goal completed and stops on a
+    // distinct no-progress reason, not on jev's say-so.
+    expect(result.status).not.toBe("completed")
+    expect(["scene-oscillation", "maneuver-repeat-limit", "no-maneuver"]).toContain(result.status)
+    expect(result.telemetry.length).toBeGreaterThan(0)
+  })
+
+  // hardcode-guard:allow fixture labels/tokens are the enumerable input under test
+  test("(d) oscillation drives the REPLAN bound to a scene-oscillation stop, never the repeat bound", async () => {
+    // The two views differ in a TEXT (not the list), so the scene diff sees an A↔B
+    // oscillation while read_count makes no predicate progress.
+    const view = (snapshot: string, text: string): Scene => ({
+      snapshot,
+      regions: [{ id: `${snapshot}:list`, kind: "list", itemIds: ["m1"], textIds: [] }],
+      items: [row("m1")],
+      texts: [{ id: "body", role: "AXStaticText", text, owner: "scene", element: el(text) }],
+    })
+    const views: Scene[] = [view("s-a", "alpha"), view("s-b", "beta")]
+    let index = 0
+    let picks = 0
+    const offered = new Set<string>()
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(views[index % 2]),
+          // rotate through the distinct maneuver NAMES so the identical-maneuver
+          // repeat bound can never fire — the only bound left is the replan bound.
+          chooseManeuver: (_subgoal, options) => {
+            for (const option of options) offered.add(option.name)
+            return Effect.succeed({ label: options[picks++ % options.length]?.label })
+          },
+          execute: () => {
+            index++
+            return Effect.succeed({ deliveryModes: [] })
+          },
+          stateChanging: () => false,
+          readOnly: true,
+          maxSteps: 12,
+        }),
+      ),
+    )
+    expect(result.status).toBe("scene-oscillation")
+    expect(result.reason).toBe("scene-oscillation")
+    expect(result.telemetry.length).toBeGreaterThan(0)
+    // more than one maneuver name was offered, so the stop is the replan bound.
+    expect(offered.size).toBeGreaterThan(1)
+  })
+
+  // hardcode-guard:allow the empty scene is the unadvanceable shape under test
+  test("(d) a subgoal whose option space is empty stops with the distinct no-maneuver status + reason", async () => {
+    const empty: Scene = { snapshot: "s-empty", regions: [], items: [], texts: [] }
+    const result = await Effect.runPromise(planLoop(base({ observe: () => Effect.succeed(empty) })))
+    expect(result.status).toBe("no-maneuver")
+    expect(result.reason).toContain("no maneuver can advance subgoal")
+    expect(result.telemetry).toHaveLength(0)
+  })
+})
+
+// GENERALIZATION — the invariant: the run's returned metadata carries the plan
+// telemetry (every decision and its evidence), and MINING runs over that plan
+// trace, never the empty flat-loop trace; repetition is flagged, never
+// self-promoted into the registry.
+// hardcode-guard:allow fixture labels/tokens are the enumerable input under test
+describe("ui_run — plan telemetry in the returned summary, and mining over it", () => {
+  const step = (over: Partial<PlanLoopTelemetry> & { subgoalIndex: number; maneuver: string }): PlanLoopTelemetry => ({
+    planId: "read-here",
+    label: `${over.maneuver}: a maneuver`,
+    deliveryModes: ["read"],
+    progress: { done: 1, total: 3, reasons: [] },
+    reason: "executed",
+    ...over,
+  })
+
+  test("(a) the returned summary carries the plan id, per-step telemetry and candidates", () => {
+    const telemetry: PlanLoopTelemetry[] = [
+      step({
+        subgoalIndex: 0,
+        maneuver: "read_items",
+        label: "read_items: read up to 3 list item(s)",
+        strength: 0.91,
+        progress: { done: 3, total: 3, reasons: ["predicate-satisfied"] },
+      }),
+    ]
+    const summary = planSummary({
+      status: "completed",
+      reason: "predicate-satisfied",
+      planId: "read-here",
+      telemetry,
+      progress: undefined,
+      frontier: [],
+    })
+    expect(summary.planId).toBe("read-here")
+    expect(summary.telemetry[0].subgoalIndex).toBe(0)
+    expect(summary.telemetry[0].maneuver).toBe("read_items")
+    expect(summary.telemetry[0].strength).toBe(0.91)
+    expect(summary.telemetry[0].deliveryModes).toEqual(["read"])
+    expect(summary.telemetry[0].progress).toEqual({ done: 3, total: 3, reasons: ["predicate-satisfied"] })
+    expect(summary.promotionCandidates).toEqual([])
+  })
+
+  test("(b) repeated delivered plan maneuvers emit a promotion candidate from the plan telemetry", () => {
+    const candidates = minePlan([
+      step({ subgoalIndex: 0, maneuver: "read_items" }),
+      step({ subgoalIndex: 1, maneuver: "open_item" }),
+      step({ subgoalIndex: 2, maneuver: "read_items" }),
+      step({ subgoalIndex: 3, maneuver: "open_item" }),
+    ])
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].occurrences).toBe(2)
+    expect(candidates[0].sequence).toEqual(["read_items read_items: a maneuver", "open_item open_item: a maneuver"])
+  })
+
+  test("(b) a clean plan trace (no repetition / nothing delivered) emits no candidate", () => {
+    expect(
+      minePlan([step({ subgoalIndex: 0, maneuver: "read_items" }), step({ subgoalIndex: 1, maneuver: "open_item" })]),
+    ).toEqual([])
+    expect(
+      minePlan([
+        step({ subgoalIndex: 0, maneuver: "read_items", reason: "failed: click undelivered" }),
+        step({ subgoalIndex: 1, maneuver: "read_items", reason: "failed: click undelivered" }),
+        step({ subgoalIndex: 2, maneuver: "read_items", reason: "failed: click undelivered" }),
+        step({ subgoalIndex: 3, maneuver: "read_items", reason: "failed: click undelivered" }),
       ]),
     ).toEqual([])
   })

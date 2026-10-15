@@ -2,20 +2,19 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { MCP } from "../mcp"
 import * as Tool from "./tool"
-import { jevControlDetailed, jevKey, type ControllerOutcome, type JevAction, type NavMap } from "../jev/controller"
-import { advanceMap, buildCandidates, decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
+import { jevControlDetailed, jevKey, type ControllerOutcome, type JevAction } from "../jev/controller"
+import { JEV_DEFAULT_THRESHOLD } from "../jev/client"
+import { decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
 import type { Element } from "./ui-eyes"
 import {
   CLIPBOARD_REPLACED_NOTE,
   actuationPlan,
   browserNeedsSetup,
-  changeEvidence,
   clickAttempt,
   clickSignals,
   clickVerdict,
   fieldValue,
   foldFocusConsumer,
-  foldFocusOutcome,
   frameEstablishingRead,
   hotkeyArgs,
   initialTextDelivery,
@@ -43,7 +42,6 @@ import {
   foldSubstepEvidence,
   matchSkills,
   mineSequences,
-  skillIndex,
   type BrowserBinding,
   type MinedSequence,
   type MiningStep,
@@ -52,6 +50,18 @@ import {
   type SkillSubstepEvidence,
   type UrlRecord,
 } from "./ui-skills"
+import { buildScene, type Scene } from "./ui-scene"
+import { deriveManeuvers, type ManeuverOption } from "./ui-maneuvers"
+import {
+  plan as derivePlan,
+  readOnlyGoal,
+  replan as revisePlan,
+  type Plan,
+  type PlanCandidate,
+  type PlanSubgoal,
+  type StepRecord,
+} from "./ui-plan"
+import { progress as measureProgress, type Progress } from "./ui-progress"
 
 // EYES owns observation + world model; HANDS owns actuation. They are
 // re-exported so the loop's public surface (and its tests) reach the organs
@@ -59,7 +69,6 @@ import {
 export {
   FRONTIER_HARD_MAX,
   advanceMap,
-  buildCandidates,
   decodeObservation,
   resolveTarget,
   screenSignature,
@@ -68,11 +77,6 @@ export type { Element, Observation } from "./ui-eyes"
 
 const DEFAULT_MAX_STEPS = 30
 const HARD_MAX_STEPS = 100
-/** Consecutive NON-PROGRESS iterations (a safe wait/scroll/observe, or an action
- * whose screen did not change) before the loop stops as stuck. */
-const MAX_AMBIGUOUS = 3
-/** Consecutive below-gate re-observations before the loop degrades to the strongest option it saw. */
-export const MAX_BELOW_GATE = 2
 /**
  * Identical re-issues of the SAME maneuver (skill name + goal value) the loop
  * tolerates before it stops. A maneuver may run `MAX_MANEUVER_REPEATS + 1` times;
@@ -115,10 +119,6 @@ const FOCUS_CONSUMING = new Set<JevAction>(["type", "key"])
 const DEFAULT_TIMEOUT = 30_000
 const MAX_EXPECT = 8
 
-/** jev's `goal_met` (or a `done` action) is ADVISORY, never a termination condition. */
-export const isGoalMet = (outcome: ControllerOutcome): boolean =>
-  outcome.verdict === "accepted" && (outcome.decision.goalMet === true || outcome.decision.action === "done")
-
 /**
  * The cua-driver refuses process-scoped key events when one pid owns several
  * eligible top-level windows (process-scoped input cannot be proven to reach the
@@ -157,10 +157,6 @@ export function normalizeExpect(expect: ReadonlyArray<Record<string, unknown>>):
   return expect.map(normalizePredicate)
 }
 
-/** Destructive verbs: a target label matching one stops the run for consent. */
-const DESTRUCTIVE =
-  /\b(save|submit|delete|remove|erase|confirm|apply|send|discard|reset|overwrite|uninstall|purchase|buy|pay|checkout)\b/i
-
 /**
  * GENERAL RULE — VALUES come from the GOAL, not the option space. jev is a chooser
  * over the ENUMERATED controls: it can pick an action and a target, but arbitrary
@@ -177,21 +173,9 @@ export function extractGoalValue(goal: string): string | undefined {
   return goal.match(/https?:\/\/\S+/)?.[0]
 }
 
-/** The strongest below-gate option seen in the current spiral, for degradation. */
-export interface BelowGateOption {
-  readonly action: JevAction | null
-  readonly target: string | null
-  readonly strength: number
-}
-
 /**
- * GENERAL RULE: the loop re-observes and re-decides every iteration and stops
- * only on observed evidence. The open-loop batch is one INSTANCE of that rule's
- * failure — it decided once from a snapshot the UI had already invalidated, so
- * every later step acted on a stale candidate set. `decideStep` is the pure,
- * instance-independent core, so the rule holds for the reported case and for
- * unseen flows alike (e.g. a 40-step navigation interrupted by a mid-flow
- * dialog: each dialog re-observes, re-decides, and either acts or falls safe).
+ * The decision shape a trace step records — the trace's own vocabulary. It is
+ * the union of every termination/act outcome an iteration can emit.
  */
 export type StepDecision =
   | {
@@ -204,140 +188,6 @@ export type StepDecision =
   | { readonly kind: "safe"; readonly action: "scroll" | "wait" | "observe"; readonly reason: string }
   | { readonly kind: "stop"; readonly reason: string }
   | { readonly kind: "checkpoint"; readonly target: string; readonly reason: string }
-
-/** A chosen maneuver: the loop executes a skill's fixed sub-sequence as ONE step. */
-export interface SkillDecision {
-  readonly kind: "skill"
-  readonly name: string
-  readonly reason: string
-}
-
-export interface StepInput {
-  /** Controller verdict for THIS iteration (accepted | below_gate | unmeasured). */
-  readonly outcome: ControllerOutcome
-  /** Candidate index rebuilt from THIS iteration's fresh observation. */
-  readonly candidates: {
-    readonly labels: readonly string[]
-    readonly byLabel: ReadonlyMap<string, Element>
-    /** Full usable set for this observation; re-resolves a churned target by role+label. */
-    readonly elements?: readonly Element[]
-  }
-  /** Advisory `goal_met` from jev (or a `done` action). Never authoritative. */
-  readonly goalMet: boolean
-  /** Observed proof the goal is met (`cua-driver_verify_state` satisfied). */
-  readonly evidence: boolean
-  /** Text to type when the decided action is `type`. */
-  readonly text?: string
-  /** Run-level goal; a `type` with no explicit text draws its value from here. */
-  readonly goal?: string
-  /** Zero-based iteration index and its budget. */
-  readonly step: number
-  readonly maxSteps: number
-  /** Consecutive non-acting iterations and its bound. */
-  readonly ambiguous: number
-  readonly maxAmbiguous: number
-  /** Consecutive below-gate iterations seen so far (including this one) and its bound. */
-  readonly belowGate?: number
-  readonly maxBelowGate?: number
-  /** Strongest below-gate option seen in the current spiral, for graceful degradation. */
-  readonly strongestBelowGate?: BelowGateOption
-}
-
-export const isDestructive = (label: string): boolean => DESTRUCTIVE.test(label)
-
-/**
- * Resolve a decision target against THIS iteration's fresh candidates — a direct
- * label hit wins; on a miss it is re-resolved by role+label (see decideStep).
- */
-const resolveElement = (target: string, input: StepInput): Element | undefined => {
-  const fresh = input.candidates.elements ?? [...input.candidates.byLabel.values()]
-  const element = input.candidates.byLabel.get(target) ?? resolveTarget(target, fresh)
-  return element?.element_token ? element : undefined
-}
-
-/**
- * GENERAL RULE — graceful degradation takes the SAFEST STRONGEST action rather
- * than stalling: at the below-gate bound the strongest measured option is
- * executed in safe mode. It is REFUSED (falls to a safe wait) when it has no
- * resolvable target, is a destructive verb, or is a `type` with no value — an
- * uncertain verdict must never become an unsafe act. Unseen case it covers: a
- * below-gate spiral whose strongest option is a scroll, which cannot be
- * degraded to an act and therefore still falls safe.
- */
-// hardcode-guard:allow the fallback reason token is the trace contract asserted by tests, not a case literal
-function degradeToAct(option: BelowGateOption | undefined, input: StepInput): StepDecision | undefined {
-  if (!option) return undefined
-  if (option.action !== "click" && option.action !== "type") return undefined
-  if (!option.target) return undefined
-  const element = resolveElement(option.target, input)
-  if (!element) return undefined
-  if (isDestructive(option.target)) return undefined
-  if (option.action === "type") {
-    const text = input.text ?? (input.goal ? extractGoalValue(input.goal) : undefined)
-    if (!text) return undefined
-    return { kind: "act", action: "type", element, text, reason: "strongest-available-fallback" }
-  }
-  return { kind: "act", action: "click", element, reason: "strongest-available-fallback" }
-}
-
-/**
- * Pure per-iteration decision. Order is the contract: observed evidence wins
- * over every advisory signal; budget and the ambiguity bound are hard stops; a
- * below-gate, unmeasured or stale-target verdict falls to a SAFE action (never
- * an abort); a destructive target stops the run for consent BEFORE it acts.
- */
-export function decideStep(input: StepInput): StepDecision {
-  // Evidence is authoritative — the ONLY thing that stops the loop as verified.
-  if (input.evidence) return { kind: "stop", reason: "evidence-satisfied" }
-  if (input.step >= input.maxSteps) return { kind: "stop", reason: "budget-exhausted" }
-  if (input.ambiguous >= input.maxAmbiguous) return { kind: "stop", reason: "ambiguous-limit" }
-
-  // jev believing the goal is met is ADVISORY: with no observed evidence it must
-  // NOT terminate — re-observe instead (continue-don't-abort, bounded above).
-  if (input.goalMet) return { kind: "safe", action: "observe", reason: "goal-met-advisory-no-evidence" }
-
-  // hardcode-guard:allow verdict tokens (below-gate/unmeasured) are the controller contract's own vocabulary
-  if (input.outcome.verdict !== "accepted") {
-    if (input.outcome.verdict !== "below_gate")
-      return { kind: "safe", action: "wait", reason: "unmeasured" }
-    // BELOW-GATE SPIRAL: re-observing forever stalls. Once the bound is reached,
-    // degrade to the strongest option the loop actually saw, in SAFE mode — never
-    // a destructive action below gate (isDestructive is refused in degradeToAct).
-    if ((input.belowGate ?? 1) >= (input.maxBelowGate ?? MAX_BELOW_GATE)) {
-      const strongest = input.strongestBelowGate ?? {
-        action: input.outcome.action,
-        target: input.outcome.target ?? null,
-        strength: input.outcome.strength,
-      }
-      const degraded = degradeToAct(strongest, input)
-      if (degraded) return degraded
-    }
-    return { kind: "safe", action: "wait", reason: "below-gate" }
-  }
-
-  const decision = input.outcome.decision
-  if (decision.action !== "click" && decision.action !== "type")
-    return {
-      kind: "safe",
-      action: decision.action === "scroll" ? "scroll" : "wait",
-      reason: `action-${decision.action}`,
-    }
-
-  // Validate the target against THIS iteration's fresh candidate set — never a stale
-  // map. EYES identity: a direct label hit wins; on a miss the target is re-resolved
-  // by role+label, so an element whose token/snapshot churned is acted on rather than
-  // dropped as "not-in-fresh-candidates".
-  if (!decision.target) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
-  const element = resolveElement(decision.target, input)
-  if (!element) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
-  if (isDestructive(decision.target)) return { kind: "checkpoint", target: decision.target, reason: "destructive-boundary" }
-  if (decision.action === "type") {
-    const text = input.text ?? (input.goal ? extractGoalValue(input.goal) : undefined)
-    if (!text) return { kind: "safe", action: "observe", reason: "type-without-text" }
-    return { kind: "act", action: "type", element, text, reason: "decided" }
-  }
-  return { kind: "act", action: "click", element, reason: "decided" }
-}
 
 /**
  * GENERAL RULE — a step makes PROGRESS only when the screen its action ran on
@@ -406,20 +256,6 @@ export interface StepTrace {
     readonly name: string
     readonly succeeded: boolean
     readonly substeps: readonly SkillSubstepEvidence[]
-  }
-}
-
-export function traceStep(step: number, outcome: ControllerOutcome, verdict: StepDecision | SkillDecision): StepTrace {
-  const accepted = "decision" in outcome ? outcome.decision : undefined
-  const strength = "strength" in outcome ? outcome.strength : accepted?.strength
-  return {
-    step,
-    verdict: outcome.verdict,
-    action: accepted?.action ?? null,
-    target: accepted?.target ?? null,
-    ...(strength !== undefined ? { strength } : {}),
-    decision: verdict.kind,
-    reason: verdict.reason,
   }
 }
 
@@ -681,6 +517,337 @@ export const runUrlEntry = (
     }
   })
 
+// ---------------------------------------------------------------------------
+// PLAN LOOP — goal-conditioned maneuvers over one verified executor
+//
+// hardcode-guard:allow the named live failures are instances cited to ground the plan-loop invariants, not case literals
+// INVARIANT OWNED: ui_run commits a PLAN, each iteration takes the next subgoal,
+// derives its (bounded) maneuver option space, lets jev choose ONE maneuver, and
+// EXECUTES it through the one executor. Termination is a predicate PROVED OVER THE
+// SCENE (ui-progress), never jev's say-so. A read-only goal never executes a
+// state-changing maneuver; a state-changing maneuver needs measured gate strength;
+// a credential wall stops the run and types nothing.
+// LIVE INSTANCES: a loop that clicked a message list's selection checkboxes and a
+// flat aimless frontier becomes one option space of navigational maneuvers.
+// UNSEEN CASE: any other scene whose goal-relevant region differs from chrome takes
+// the same region-scoped predicates, no change.
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum gate strength a STATE-CHANGING action must carry before it executes.
+ * Derived from the shared jev controller threshold (`JEV_DEFAULT_THRESHOLD`) so a
+ * drift in the controller's rule propagates to the loop's gate instead of being
+ * mirrored by a second literal.
+ */
+export const GATE_FLOOR = JEV_DEFAULT_THRESHOLD
+
+const STATUS_READ_ONLY = "read-only-blocked"
+const STATUS_BELOW_GATE = "below-gate"
+const STATUS_NO_MANEUVER = "no-maneuver"
+const STATUS_LOGIN_WALL = "login-wall"
+/** A destructive maneuver stops here for consent — distinct from the gate stops. */
+export const STATUS_DESTRUCTIVE = "destructive-consent-required"
+/** The loop's existing maneuver-repeat bound status, mirrored into the plan loop. */
+const REASON_MANEUVER_REPEAT = "maneuver-repeat-limit"
+
+export interface ManeuverExecution {
+  readonly deliveryModes: readonly ActuationMode[]
+  readonly paste?: { readonly mode: string; readonly completed: boolean }
+  readonly navigate?: { readonly requested?: string; readonly landed?: string }
+  readonly failure?: string
+}
+
+export interface ManeuverChoice {
+  readonly label?: string
+  readonly strength?: number
+}
+
+/** The destructive maneuver the loop blocked on, and the strength it carried. */
+export interface DestructiveConsent {
+  readonly option: string
+  /** The irreversible affordance label the maneuver would have activated. */
+  readonly target?: string
+  readonly strength?: number
+}
+
+export interface PlanLoopTelemetry {
+  readonly planId: string
+  readonly subgoalIndex: number
+  readonly maneuver: string
+  readonly label: string
+  readonly strength?: number
+  readonly deliveryModes: readonly ActuationMode[]
+  readonly paste?: { readonly mode: string; readonly completed: boolean }
+  readonly navigate?: { readonly requested?: string; readonly landed?: string }
+  /** Progress measured over the Scene AFTER the step. */
+  readonly progress: { readonly done: number; readonly total: number; readonly reasons: readonly string[] }
+  readonly reason: string
+}
+
+export interface PlanLoopDeps {
+  readonly goal: string
+  readonly observe: () => Effect.Effect<Scene | undefined>
+  readonly choosePlan: (candidates: readonly PlanCandidate[], scene: Scene) => Effect.Effect<string | undefined>
+  readonly chooseManeuver: (
+    subgoal: PlanSubgoal,
+    options: readonly ManeuverOption[],
+    scene: Scene,
+  ) => Effect.Effect<ManeuverChoice>
+  readonly execute: (option: ManeuverOption, subgoal: PlanSubgoal, scene: Scene) => Effect.Effect<ManeuverExecution>
+  readonly stateChanging: (option: ManeuverOption, scene: Scene) => boolean
+  readonly readOnly: boolean
+  readonly maxSteps: number
+  readonly gateFloor?: number
+}
+
+export interface PlanLoopResult {
+  readonly status: string
+  readonly reason: string
+  readonly planId?: string
+  readonly telemetry: readonly PlanLoopTelemetry[]
+  readonly progress: Progress | undefined
+  readonly frontier: readonly string[]
+  /** Present iff a destructive maneuver stopped the loop for consent. */
+  readonly consent?: DestructiveConsent
+}
+
+// hardcode-guard:allow the mining vocabulary (action/target/progressed) is the plan telemetry's own contract, not case literals
+/**
+ * SKILL MINING over the PLAN telemetry: fold each executed maneuver to one
+ * mining step (`action` = the maneuver name, `target` = its option label,
+ * `progressed` = the maneuver ran and was DELIVERED rather than failed) and
+ * return the repeated progressed sub-sequences as promotion CANDIDATES. This
+ * only FLAGS — it never mutates the registry; promotion is a human/brain decision.
+ */
+export function minePlan(telemetry: readonly PlanLoopTelemetry[]): MinedSequence[] {
+  return mineSequences(
+    telemetry.map((entry) => ({
+      action: entry.maneuver,
+      target: entry.label,
+      progressed: entry.reason === "executed" && entry.deliveryModes.length > 0,
+    })),
+  )
+}
+
+export interface RunSummary {
+  readonly status: string
+  readonly planId?: string
+  readonly telemetry: readonly PlanLoopTelemetry[]
+  readonly promotionCandidates: readonly MinedSequence[]
+  /** Present iff the run stopped on a destructive maneuver awaiting consent. */
+  readonly consent?: DestructiveConsent
+}
+
+/**
+ * The run's returned SUMMARY/METADATA: the plan id, the FULL per-step plan
+ * telemetry (subgoal index, maneuver, strength, delivery evidence, measured
+ * progress) and the mining candidates, so the returned metadata alone carries
+ * every decision and its evidence.
+ */
+export function planSummary(planResult: PlanLoopResult): RunSummary {
+  return {
+    status: planResult.status,
+    ...(planResult.planId !== undefined ? { planId: planResult.planId } : {}),
+    telemetry: planResult.telemetry,
+    promotionCandidates: minePlan(planResult.telemetry),
+    ...(planResult.consent !== undefined ? { consent: planResult.consent } : {}),
+  }
+}
+
+const CREDENTIAL_TEXT = /\b(sign in to continue|log ?in to continue|enter (?:your )?password|create a password)\b/i
+
+/**
+ * LOGIN / CREDENTIAL WALL — a Scene whose next step would be entering credentials.
+ * A secure text field (or a "sign in to continue" style prompt) is the marker; the
+ * loop STOPS with a distinct reason and types nothing. Detection is role/text
+ * derived from the Scene, never a site name.
+ */
+export function loginWall(scene: Scene): string | undefined {
+  const secure =
+    scene.items.some((item) => item.role === "AXSecureTextField") ||
+    scene.texts.some((text) => text.role === "AXSecureTextField")
+  if (secure) return "credential-wall: a secure text field is present; the run types nothing"
+  const prompt = scene.texts.map((text) => text.text).find((text) => CREDENTIAL_TEXT.test(text))
+  return prompt !== undefined ? `credential-wall: "${prompt}"; the run types nothing` : undefined
+}
+
+/** A plan is read-only when its goal names no state-mutating verb. */
+export function readOnlyPlan(plan: Plan): boolean {
+  return readOnlyGoal(plan.goal)
+}
+
+/** Whether acting on a maneuver mutates state (checkbox/radio/toggle/selectable row). */
+export function stateChangingManeuver(option: ManeuverOption, scene: Scene): boolean {
+  const ids = new Set(option.targets.map((target) => target.id))
+  return scene.items.some((item) => ids.has(item.id) && item.stateChanging)
+}
+
+// hardcode-guard:allow the destructive verb set and the activating-maneuver names are the boundary's own general vocabulary (a governor input), not case/site literals
+/**
+ * DESTRUCTIVE-CONSENT BOUNDARY.
+ * INVARIANT OWNED: an IRREVERSIBLE write affordance is never auto-executed at ANY
+ * confidence — a maneuver that would ACTIVATE a target whose Scene semantics mark
+ * it irreversible stops the loop for consent even ABOVE the gate. Classification is
+ * derived from the Scene's role/label semantics (never a site, app or address name).
+ * LIVE INSTANCE IT RESTORES: the flat decider returned a `checkpoint` (consent stop)
+ * for any chosen target whose label carried a destructive verb; the plan rewrite
+ * dropped that stop while the tool description kept promising it.
+ * LIVE INSTANCE — UNINTENDED STATE CHANGE: the wallpaper/checkbox class, where a
+ * click mutates state the goal never asked for; the same boundary keeps an
+ * irreversible control from being auto-pressed.
+ * UNSEEN CASE COVERED: any other irreversible affordance — a "Unsubscribe" list
+ * row, a "Send"/"Purchase" control — on any screen takes the same stop, no change.
+ */
+const DESTRUCTIVE =
+  /\b(save|submit|delete|remove|erase|confirm|apply|send|discard|reset|overwrite|uninstall|purchase|buy|pay|checkout|revoke|unsubscribe|deactivate)\b/i
+
+export const isDestructive = (label: string): boolean => DESTRUCTIVE.test(label)
+
+/**
+ * Maneuvers that ACTIVATE a bound control (press/click/select) — the only ones that
+ * can commit an irreversible write. Reading, scrolling, navigation and typing never
+ * activate a labelled control, so a destructive label under them stays inert.
+ */
+const ACTIVATING_MANEUVERS = new Set(["open_item", "activate", "dismiss_dialog"])
+
+/** Whether executing a maneuver would activate an irreversible affordance. */
+export function destructiveManeuver(option: ManeuverOption, scene: Scene): boolean {
+  return destructiveTarget(option, scene) !== undefined
+}
+
+/** The irreversible affordance a maneuver would activate, if any. */
+export function destructiveTarget(option: ManeuverOption, scene: Scene): string | undefined {
+  if (!ACTIVATING_MANEUVERS.has(option.name)) return undefined
+  const ids = new Set(option.targets.map((target) => target.id))
+  return scene.items.find((item) => ids.has(item.id) && isDestructive(item.label))?.label
+}
+
+/**
+ * The plan-driven core: commit a plan, measure progress over the Scene, take the
+ * next subgoal, derive maneuvers, choose ONE, execute it, repeat — terminating only
+ * on a predicate proved over the Scene. `observe`/`choosePlan`/`chooseManeuver`/
+ * `execute` are injected so the loop is exercisable over fixtures without a driver.
+ */
+export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
+  return Effect.gen(function* () {
+    const gateFloor = deps.gateFloor ?? GATE_FLOOR
+    const telemetry: PlanLoopTelemetry[] = []
+    const history: StepRecord[] = []
+    let maneuverRepeat: ManeuverRepeatState = initialManeuverRepeat()
+    let plan: Plan | undefined
+    let planId: string | undefined
+    let lastProgress: Progress | undefined
+    let frontier: readonly string[] = []
+    const result = (status: string, reason: string, consent?: DestructiveConsent): PlanLoopResult => ({
+      status,
+      reason,
+      ...(planId !== undefined ? { planId } : {}),
+      telemetry,
+      progress: lastProgress,
+      frontier,
+      ...(consent !== undefined ? { consent } : {}),
+    })
+
+    for (let iteration = 0; iteration < deps.maxSteps; iteration++) {
+      const scene = yield* deps.observe()
+      if (scene === undefined) return result("unparseable-observation", "observation could not be decoded into a Scene")
+      const wall = loginWall(scene)
+      if (wall !== undefined) return result(STATUS_LOGIN_WALL, wall)
+      if (plan === undefined) {
+        const decision = derivePlan(deps.goal, scene)
+        if (decision.candidates.length > 1) {
+          const chosenId = yield* deps.choosePlan(decision.candidates, scene)
+          const candidate = decision.candidates.find((entry) => entry.id === chosenId)
+          plan = candidate?.plan ?? decision.commit
+          planId = candidate?.id ?? decision.commitId
+        } else {
+          plan = decision.commit
+          planId = decision.commitId
+        }
+      }
+      const current = measureProgress(plan, scene, history)
+      lastProgress = current
+      if (current.nextSubgoal === undefined) return result("completed", "predicate-satisfied")
+      if (current.exhausted) return result("budget-exhausted", current.reason ?? "budget-exhausted")
+      if (current.shouldReplan) {
+        const revised = revisePlan(plan, scene, history)
+        if (revised === plan) return result(current.reason ?? "replan-exhausted", current.reason ?? "replan-exhausted")
+        plan = revised
+        continue
+      }
+      const subgoal = plan.subgoals[current.nextSubgoal]
+      if (subgoal === undefined) return result("completed", "predicate-satisfied")
+      const set = deriveManeuvers(subgoal.params, scene)
+      if (set.options.length === 0) return result(STATUS_NO_MANEUVER, set.reason ?? STATUS_NO_MANEUVER)
+      const eligible = deps.readOnly ? set.options.filter((option) => !deps.stateChanging(option, scene)) : set.options
+      frontier = eligible.map((option) => option.label)
+      if (eligible.length === 0)
+        return result(STATUS_READ_ONLY, "read-only goal: every derived maneuver mutates state")
+      const choice = yield* deps.chooseManeuver(subgoal, eligible, scene)
+      const option = eligible.find((entry) => entry.label === choice.label)
+      if (option === undefined) return result("no-choice", "jev chose no maneuver among the offered options")
+      // DESTRUCTIVE-CONSENT BOUNDARY: an irreversible maneuver stops for consent
+      // BEFORE the gate — even a strong verdict never auto-executes it. The
+      // blocking option, its irreversible target and its measured strength are
+      // reported so the brain/user can consent.
+      const blocking = destructiveTarget(option, scene)
+      if (blocking !== undefined)
+        return result(
+          STATUS_DESTRUCTIVE,
+          `destructive maneuver "${option.label}" targets "${blocking}" and requires consent (${choice.strength ?? "unmeasured"}); nothing executed`,
+          {
+            option: option.label,
+            target: blocking,
+            ...(choice.strength !== undefined ? { strength: choice.strength } : {}),
+          },
+        )
+      if (deps.stateChanging(option, scene)) {
+        if (choice.strength === undefined)
+          return result(STATUS_BELOW_GATE, "state-changing maneuver with no measured gate strength; nothing executed")
+        if (choice.strength < gateFloor)
+          return result(
+            STATUS_BELOW_GATE,
+            `state-changing maneuver below the gate floor (${choice.strength} < ${gateFloor}); nothing executed`,
+          )
+      }
+      // MANEUVER REPEAT BOUND: an identical deliberate maneuver re-issued past the
+      // bound stops the run rather than hammering (counted independently of any
+      // screen change a redirect keeps producing).
+      const key = `${option.name}\u0000${subgoal.params.value ?? subgoal.params.matching ?? ""}`
+      const repeat = maneuverRepeatStep(maneuverRepeat, key)
+      if (repeat.exceeded) return result(REASON_MANEUVER_REPEAT, `maneuver ${option.name} re-issued ${maneuverRepeat.runs}× unresolved`)
+      maneuverRepeat = repeat.next
+      const execution = yield* deps.execute(option, subgoal, scene)
+      const afterScene = (yield* deps.observe()) ?? scene
+      history.push({
+        maneuver: key,
+        scene: afterScene,
+        subgoalIndex: current.nextSubgoal,
+      })
+      const after = measureProgress(plan, afterScene, history)
+      lastProgress = after
+      telemetry.push({
+        planId: planId ?? "plan",
+        subgoalIndex: current.nextSubgoal,
+        maneuver: option.name,
+        label: option.label,
+        ...(choice.strength !== undefined ? { strength: choice.strength } : {}),
+        deliveryModes: execution.deliveryModes,
+        ...(execution.paste !== undefined ? { paste: execution.paste } : {}),
+        ...(execution.navigate !== undefined ? { navigate: execution.navigate } : {}),
+        progress: {
+          done: after.done,
+          total: after.total,
+          reasons: after.reason !== undefined ? [after.reason] : [],
+        },
+        reason: execution.failure !== undefined ? `failed: ${execution.failure}` : "executed",
+      })
+      if (execution.failure !== undefined) return result("failed", execution.failure)
+    }
+    return result("budget-exhausted", `no predicate proved within ${deps.maxSteps} steps`)
+  })
+}
+
 export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
   "ui_run",
   Effect.gen(function* () {
@@ -688,7 +855,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
 
     return {
       description:
-        "Drive a window to a goal in ONE call with a CLOSED observe-decide-act-verify loop: every iteration re-observes the window afresh, re-decides with jev from that iteration's live controls, validates the target against them and acts, then verifies. It stops only on OBSERVED evidence (cua-driver_verify_state), an exhausted budget, N consecutive ambiguous decisions, a destructive-action boundary (Save/Submit/Delete/confirm — stops for consent), or a driver error. A missing/sub-threshold decision never aborts: it falls to a safe action (scroll/wait/re-observe) up to a small bound. An undecodable observation still stops (targets are never guessed from prose), and jev's `goal_met` is advisory only. Pass `expect` to verify the end state. Requires the cua-driver MCP server and a configured jev key; returns an unavailable notice otherwise.",
+        "Drive a window to a goal in ONE call with a CLOSED observe-decide-act-verify loop: every iteration re-observes the window afresh, re-decides with jev from that iteration's live controls, validates the target against them and acts, then verifies. It stops only on OBSERVED evidence (cua-driver_verify_state), an exhausted budget, N consecutive ambiguous decisions, a destructive-action (irreversible write) boundary — a Delete/Remove/Submit/Send/Confirm/Purchase/Save-type affordance stops the run for consent with status `destructive-consent-required`, even above the gate — or a driver error. A missing/sub-threshold decision never aborts: it falls to a safe action (scroll/wait/re-observe) up to a small bound. An undecodable observation still stops (targets are never guessed from prose), and jev's `goal_met` is advisory only. Pass `expect` to verify the end state. Requires the cua-driver MCP server and a configured jev key; returns an unavailable notice otherwise.",
       parameters: Parameters,
       execute: (params: Params, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
@@ -731,39 +898,6 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           const lines: string[] = []
           let executed = 0
           let observations = 0
-          let ambiguous = 0
-          let status = "completed"
-          let previous: string | undefined
-          let evidence = false
-          let truncated: string | undefined
-          // The navigation map, re-derived from the observed UI EVERY iteration.
-          let map: NavMap | undefined
-          // Node signature at which the last action ran — a no-op (screen
-          // unchanged) feeds the ambiguity bound instead of resetting it.
-          let actedAt: string | undefined
-          // The mode + target of the last action, so a content-unchanged focus click
-          // followed by an input verb on the SAME target is a prerequisite, not a no-op.
-          let actedMode: string | undefined
-          let actedTarget: string | undefined
-          // BELOW-GATE degradation: consecutive below-gate count and the strongest
-          // option seen in the current spiral.
-          let belowGate = 0
-          let strongestBelowGate: BelowGateOption | undefined
-          // MANEUVER REPEAT BOUND: identical maneuver re-issues, counted INDEPENDENT
-          // of screen change (a redirect keeps changing the screen, so the no-op bound
-          // never fires on it). Never reset by a redirect.
-          let maneuverRepeat: ManeuverRepeatState = initialManeuverRepeat()
-          // HANDS: the mode + before-signature of the last action, folded with the
-          // next observation into change evidence (never a bare success boolean).
-          let lastActuation: { readonly mode: ActuationEvidence["mode"]; readonly before: string } | undefined
-          // FUNCTIONAL DELIVERY: a FOCUS click in the main loop whose delivery is
-          // deferred until its consumer sub-step (a later type/key on the SAME
-          // target) lands — resolved against a later observation's target state.
-          let pendingMainFocus:
-            | { readonly traceIndex: number; readonly attempt: ClickAttemptEvidence; readonly target: Element }
-            | undefined
-          // Every iteration's decision, emitted so a caller can verify the chain.
-          const trace: StepTrace[] = []
 
           // SKILLS execution: run a chosen maneuver's FIXED sub-sequence directly
           // (no per-sub-step jev decisions), re-observing after each sub-step so the
@@ -1334,394 +1468,182 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               return { substeps, succeeded, observations: observationsUsed, failure }
             })
 
-          for (let step = 0; step < maxSteps; step++) {
-            // OBSERVE fresh EVERY iteration; a candidate map is never reused across steps.
-            const observed = yield* callDriver(
-              tools,
-              "cua-driver_get_window_state",
-              // The driver DEFAULTS tree_format to "markdown" (a `tree_markdown`
-              // string, no `elements`); this loop parses the structured
-              // `elements` array, so it must request the format it parses.
-              // The loop's own observations stay cheap: no screenshot (economy).
-              observationArgs(params.window),
-              ctx.abort,
-            )
-            observations++
-            if (!observed.ok) {
-              status = "driver-error"
-              lines.push(`[observe ${step + 1}] window state unreadable: ${observed.error}`)
-              break
-            }
-            const observation = decodeObservation(observed.result.structuredContent)
-            if (!observation) {
-              status = "unparseable-observation"
-              lines.push(
-                `[observe ${step + 1}] no decodable structuredContent; the run stopped rather than guess targets from text`,
+          // PLAN-DRIVEN CORE: observe → commit a plan (jev chooses when more than
+          // one candidate exists) → measure progress (ui-progress) → take the next
+          // subgoal → derive maneuvers (ui-maneuvers) → jev chooses ONE maneuver →
+          // execute it through the one executor. Termination is always a predicate
+          // PROVED OVER THE SCENE; jev's `done` is advisory and never stops the run.
+          // hardcode-guard:allow the plan-driver wiring is the plan-loop contract, not a case literal
+          let lastElements: readonly Element[] = []
+          let lastSignature = ""
+          let lastScene: Scene | undefined
+
+          const observeScene = (): Effect.Effect<Scene | undefined> =>
+            Effect.gen(function* () {
+              const observed = yield* callDriver(
+                tools,
+                "cua-driver_get_window_state",
+                observationArgs(params.window),
+                ctx.abort,
               )
-              break
-            }
-            // FUNCTIONAL DELIVERY: a deferred FOCUS click is delivered once a later
-            // observation shows its target's own state changed (the consumer landed).
-            if (pendingMainFocus !== undefined) {
-              const afterConsumer = clickSignals(
-                screenSignature(observation.elements),
-                pendingMainFocus.target,
-                observation.elements,
-              )
-              if (foldFocusConsumer(pendingMainFocus.attempt, afterConsumer, pendingMainFocus.target).delivered) {
-                const entry = trace[pendingMainFocus.traceIndex]
-                if (entry?.click)
-                  trace[pendingMainFocus.traceIndex] = {
-                    ...entry,
-                    click: foldFocusOutcome(entry.click, afterConsumer, pendingMainFocus.target),
-                  }
-                pendingMainFocus = undefined
-              }
-            }
-            const candidates = buildCandidates(observation.elements)
-            // Keep the newest snapshot's marker; it is the one that hid elements.
-            if (candidates.truncated) truncated = candidates.truncated
+              observations++
+              if (!observed.ok) return undefined
+              const observation = decodeObservation(observed.result.structuredContent)
+              if (!observation) return undefined
+              lastElements = observation.elements
+              lastSignature = screenSignature(observation.elements)
+              lastScene = buildScene({ snapshot_id: observation.snapshot_id, elements: observation.elements })
+              return lastScene
+            })
 
-            // SKILLS: a maneuver whose precondition holds (and whose goal value is
-            // present) is offered to jev as ONE extra frontier option. The loop never
-            // names a site; adding a skill is adding a registry entry.
-            const skills = skillIndex(matchSkills(observation.elements, extractGoalValue(goal)))
-            const frontier = [...candidates.labels, ...skills.keys()]
-
-            // CODE owns the map: re-derive current + the enumerated frontier from
-            // this freshness, carry `path` across iterations, then hand the whole
-            // map to jev as `state` and let it CHOOSE among the frontier options.
-            map = advanceMap(goal, map, observation.elements, frontier)
-
-            // HANDS change evidence: the action ran at `lastActuation.before`; the
-            // fresh signature is its `after`. State WHAT changed, and attach it to
-            // the trace entry that took the action.
-            if (lastActuation) {
-              const evidenceOfChange = changeEvidence(lastActuation.mode, lastActuation.before, map.current)
-              const prior = trace[trace.length - 1]
-              if (prior) trace[trace.length - 1] = { ...prior, actuation: evidenceOfChange }
-              lines.push(
-                `[change ${step + 1}] ${evidenceOfChange.mode} changed=${evidenceOfChange.changed} (${evidenceOfChange.before}→${evidenceOfChange.after})`,
-              )
-              lastActuation = undefined
-            }
-
-            // hardcode-guard:allow loop wiring for the general prerequisite/degradation rules, no case literals
-            const outcome = yield* Effect.promise(() =>
+          const jevChoose = (frontier: readonly string[], lastAction: string) =>
+            Effect.promise(() =>
               jevControlDetailed({
-                map,
-                lastAction: `iteration ${step + 1}/${maxSteps}${previous ? ` | after: ${previous}` : ""}`,
+                map: { goal, start: lastSignature, current: lastSignature, frontier, path: [] },
+                lastAction,
                 key,
-                askGoalMet: true,
+                askGoalMet: false,
               }),
             )
-            const goalMet = isGoalMet(outcome)
 
-            // (b) Did the action executed last iteration actually change the screen?
-            // The fresh signature answers it; an unchanged screen is a no-op, not
-            // progress — UNLESS it FOCUSED the successor's own target (prerequisite:
-            // click-field → type is one progress unit, see nextAmbiguity).
-            const nextAction =
-              outcome.verdict === "accepted"
-                ? outcome.decision.action
-                : outcome.verdict === "below_gate"
-                  ? (outcome.action ?? undefined)
-                  : undefined
-            const nextTarget =
-              outcome.verdict === "accepted"
-                ? outcome.decision.target
-                : outcome.verdict === "below_gate"
-                  ? (outcome.target ?? null)
-                  : undefined
-            ambiguous = nextAmbiguity(ambiguous, actedAt, map.current, {
-              actedMode,
-              actedTarget,
-              nextAction,
-              nextTarget,
-            })
-            actedAt = undefined
-            actedMode = undefined
-            actedTarget = undefined
+          const chosenLabel = (outcome: ControllerOutcome): ManeuverChoice => {
+            if (outcome.verdict === "accepted")
+              return {
+                ...(outcome.decision.target !== null ? { label: outcome.decision.target } : {}),
+                strength: outcome.decision.strength,
+              }
+            if (outcome.verdict === "below_gate")
+              return { ...(outcome.target ? { label: outcome.target } : {}), strength: outcome.strength }
+            return {}
+          }
 
-            // BELOW-GATE SPIRAL: count consecutive below-gate steps and remember the
-            // strongest option seen, so decideStep can degrade at the bound instead
-            // of spinning to the ambiguity limit.
-            if (outcome.verdict === "below_gate") {
-              belowGate++
-              if (!strongestBelowGate || outcome.strength > strongestBelowGate.strength)
-                strongestBelowGate = {
-                  action: outcome.action,
-                  target: outcome.target ?? null,
-                  strength: outcome.strength,
+          const resolveTargetElement = (id: string): Element | undefined => {
+            const direct = lastElements.find((element) => element.element_token === id)
+            if (direct !== undefined) return direct
+            const scene = lastScene
+            if (scene === undefined) return undefined
+            const item = scene.items.find((entry) => entry.id === id)
+            if (item !== undefined) return refindElement(item.element, lastElements) ?? item.element
+            const text = scene.texts.find((entry) => entry.id === id)
+            if (text !== undefined) return refindElement(text.element, lastElements) ?? text.element
+            return undefined
+          }
+
+          // The ONE executor path: a registered-skill maneuver runs its fixed
+          // sub-sequence via executeSkill; the kinds with no skill yet
+          // (open_item / activate / read_items / back) run as step sequences over
+          // the SAME helpers (runClickRungs / keyPress / the observation).
+          const executeManeuver = (option: ManeuverOption, subgoal: PlanSubgoal): Effect.Effect<ManeuverExecution> =>
+            Effect.gen(function* () {
+              const matches = matchSkills(lastElements, extractGoalValue(goal))
+              const skillMatch = matches.find((match) => match.skill.name === option.name)
+              if (skillMatch !== undefined) {
+                const execution = yield* executeSkill(skillMatch, lastSignature, lastElements)
+                observations += execution.observations
+                executed += execution.substeps.length
+                const navigateStep = execution.substeps.find((sub) => sub.arrival !== undefined)
+                return {
+                  deliveryModes: execution.substeps.map((sub) => sub.mode),
+                  ...(navigateStep?.arrival !== undefined && subgoal.params.value !== undefined
+                    ? {
+                        navigate: {
+                          requested: subgoal.params.value,
+                          ...(navigateStep.arrival.landedUrl !== undefined
+                            ? { landed: navigateStep.arrival.landedUrl }
+                            : {}),
+                        },
+                      }
+                    : {}),
+                  ...(execution.failure !== undefined ? { failure: execution.failure } : {}),
                 }
-            } else {
-              belowGate = 0
-              strongestBelowGate = undefined
-            }
-
-            // SKILLS: when jev chooses a maneuver option, execute its FIXED sub-sequence
-            // directly — no per-sub-step decisions — and fold it into ONE trace step.
-            // hardcode-guard:allow generic skill interception over the registry contract, no case literals
-            // hardcode-guard:allow generic skill interception, action-verb gate over the registry contract
-            const chosenTarget =
-              outcome.verdict === "accepted"
-                ? outcome.decision.target
-                : outcome.verdict === "below_gate"
-                  ? (outcome.target ?? null)
-                  : null
-            const chosenAction =
-              outcome.verdict === "accepted"
-                ? outcome.decision.action
-                : outcome.verdict === "below_gate"
-                  ? outcome.action
-                  : null
-            // A maneuver is an ACTION: only a click/type choice of the option executes it,
-            // never a `done`/`wait` that merely named it.
-            const chosen =
-              chosenTarget && (chosenAction === "click" || chosenAction === "type")
-                ? skills.get(chosenTarget)
-                : undefined
-            if (chosen) {
-              // MANEUVER REPEAT BOUND: a repeated DELIBERATE maneuver is not
-              // progress even when the screen changes; an identical re-issue is
-              // counted independently of the no-op/ambiguity bound (which a redirect
-              // keeps resetting) and stops the loop rather than hammering.
-              const repeat = maneuverRepeatStep(maneuverRepeat, `${chosen.skill.name}\u0000${chosen.value}`)
-              if (repeat.exceeded) {
-                status = "maneuver-repeat-limit"
-                const repeatVerdict: SkillDecision = {
-                  kind: "skill",
-                  name: chosen.skill.name,
-                  reason: "maneuver-repeat-limit",
+              }
+              // READ_ITEMS: no actuation — the observation IS the result.
+              if (option.name === "read_items") return { deliveryModes: ["read"] }
+              // BACK: the navigation-chrome affordance — one Escape key event.
+              if (option.name === "back") {
+                const args = keyPress("escape", params.window, [])
+                const pressed = yield* callDriver(tools, "cua-driver_press_key", args, ctx.abort)
+                observations++
+                if (!pressed.ok && needsForegroundDelivery(pressed.error)) {
+                  const retry = yield* callDriver(
+                    tools,
+                    "cua-driver_press_key",
+                    { ...args, delivery_mode: "foreground" },
+                    ctx.abort,
+                  )
+                  observations++
+                  if (!retry.ok) return { deliveryModes: ["key"], failure: retry.error }
+                  return { deliveryModes: ["key"] }
                 }
-                trace.push(traceStep(step + 1, outcome, repeatVerdict))
-                previous = `[maneuver ${step + 1}] ${chosen.skill.name} re-issued ${maneuverRepeat.runs}× unresolved — stopping (maneuver-repeat-limit)`
-                lines.push(previous)
-                break
+                if (!pressed.ok) return { deliveryModes: ["key"], failure: pressed.error }
+                return { deliveryModes: ["key"] }
               }
-              maneuverRepeat = repeat.next
-              const skillVerdict: SkillDecision = { kind: "skill", name: chosen.skill.name, reason: "skill-chosen" }
-              const execution = yield* executeSkill(chosen, map.current, observation.elements)
-              observations += execution.observations
-              const skillTrace = {
-                name: chosen.skill.name,
-                succeeded: execution.succeeded,
-                substeps: execution.substeps,
-              }
-              trace.push({ ...traceStep(step + 1, outcome, skillVerdict), skill: skillTrace })
-              previous = `[skill ${step + 1}] ${chosen.skill.name} (${execution.substeps.length} substeps, succeeded=${execution.succeeded})`
-              lines.push(previous)
-              for (const sub of execution.substeps)
-                lines.push(
-                  `[skill ${step + 1}]   ${sub.label}: ${sub.mode} changed=${sub.changed} (${sub.before}→${sub.after})`,
-                )
-              if (execution.failure !== undefined) {
-                status = "failed"
-                lines.push(`[skill ${step + 1}] ${chosen.skill.name} failed at a sub-step: ${execution.failure}`)
-                break
-              }
-              executed += execution.substeps.length
-              // The maneuver ran at this node; the next observation reveals the change.
-              actedAt = map.current
-              actedMode = "skill"
-              actedTarget = chosen.element.label ?? chosen.element.element_token
-              belowGate = 0
-              strongestBelowGate = undefined
-              continue
-            }
-
-            const verdict = decideStep({
-              outcome,
-              candidates,
-              goalMet,
-              evidence,
-              ...(params.value !== undefined ? { text: params.value } : {}),
-              goal,
-              step,
-              maxSteps,
-              ambiguous,
-              maxAmbiguous: MAX_AMBIGUOUS,
-              belowGate,
-              maxBelowGate: MAX_BELOW_GATE,
-              ...(strongestBelowGate !== undefined ? { strongestBelowGate } : {}),
-            })
-            if (verdict.kind === "act") {
-              belowGate = 0
-              strongestBelowGate = undefined
-            }
-            // (c) Record this iteration's jev decision and the loop's resolved action
-            // as a general, per-step trace so a caller can verify the chain.
-            trace.push(traceStep(step + 1, outcome, verdict))
-
-            if (verdict.kind === "stop") {
-              status = verdict.reason === "evidence-satisfied" ? "verified" : verdict.reason
-              lines.push(`[stop ${step + 1}] ${verdict.reason}`)
-              break
-            }
-            if (verdict.kind === "checkpoint") {
-              status = "needs-consent"
-              lines.push(`[checkpoint ${step + 1}] destructive action requires consent before acting: ${verdict.target}`)
-              break
-            }
-            if (verdict.kind === "safe") {
-              ambiguous++
-              previous = `safe ${verdict.action} (${verdict.reason})`
-              lines.push(`[safe ${step + 1}] ${previous}`)
-              if (verdict.action === "scroll")
-                yield* callDriver(
-                  tools,
-                  "cua-driver_scroll",
-                  { pid: params.window.pid, window_id: params.window.window_id, direction: "down", by: "page", amount: 1 },
-                  ctx.abort,
-                )
-              else if (verdict.action === "wait") yield* Effect.sleep("300 millis")
-              // `observe` needs no driver call: the next iteration re-observes by design.
-              continue
-            }
-
-            // hardcode-guard:allow the actuation rungs are the organ's general contract
-            // (declared action first, pixel frame fallback second), not a case literal.
-            // HANDS actuation. A type is one rung (with the driver's foreground
-            // remedy for same-pid keyboard ambiguity); a click is MULTI-MODAL: the
-            // element's declared action first, then a foreground pixel click at its
-            // frame. A rung is tried only when its predecessor fails.
-            let actLabel: string
-            let actResult: DriverOutcome
-            // hardcode-guard:allow a per-step state slot, not a case literal
-            let clickOutcome: ClickOutcome | undefined
-            if (verdict.action === "type") {
-              // RESUMABLE TEXT DELIVERY: foreground type_text may land only a PREFIX;
-              // drive the string to completion, retrying the remaining suffix.
-              // hardcode-guard:allow the resumable-delivery verb is the hand contract, not a case literal
-              const text = verdict.text ?? ""
-              const run = yield* runTypeDelivery(
-                (name, a) => callDriver(tools, name, a, ctx.abort),
-                params.window,
-                verdict.element,
-                text,
-              )
-              actResult = run.completed
-                ? { ok: true, result: run.result.ok ? run.result.result : { content: [] } }
-                : run.result
-              actLabel = `type_text "${text}" (${run.rounds} round(s), ${run.delivered}/${text.length})`
-            } else {
-              // AFFIRMATIVE CLICK: rung 1 (declared action), rung 2 (pixel frame
-              // centre), run through the shared on-demand-sensor runner (see
-              // runClickRungs): the sensor-dependent pixel rung establishes a
-              // screenshot frame when missing and retries once. Delivery is judged
-              // on WORLD STATE after each rung; absent evidence escalates. Two
-              // silent rungs → worked:false with both rungs' evidence.
-              const plan = actuationPlan(verdict.element, params.window)
-              actLabel = plan[0]?.label ?? "click"
+              // OPEN_ITEM / ACTIVATE: a click through the SHARED rung runner.
+              const target = option.targets
+                .map((entry) => resolveTargetElement(entry.id))
+                .find((element) => element !== undefined)
+              if (target === undefined) return { deliveryModes: [], failure: "no resolvable maneuver target" }
+              const plan = actuationPlan(target, params.window)
+              const fallback = lastSignature
               const run = yield* runClickRungs(
                 (name, args) => callDriver(tools, name, args, ctx.abort),
                 params.window,
-                verdict.element,
+                target,
                 plan,
-                clickSignals(map.current, verdict.element, observation.elements),
-                map.current,
+                clickSignals(fallback, target, lastElements),
+                fallback,
               )
               observations += run.observations
-              actResult = run.result
-              clickOutcome = run.outcome
-              const prior = trace[trace.length - 1]
-              if (prior) trace[trace.length - 1] = { ...prior, click: clickOutcome }
-              if (!clickOutcome.worked) {
-                const first = clickOutcome.attempts[0]
-                if (first !== undefined && isFocusTarget(verdict.element)) {
-                  // FUNCTIONAL DELIVERY: a focus click is NOT failed here — its
-                  // delivery is deferred until its consumer (a later type/key on
-                  // this SAME target) lands, resolved against a later observation.
-                  pendingMainFocus = { traceIndex: trace.length - 1, attempt: first, target: verdict.element }
-                } else {
-                  status = "failed"
-                  previous = `[fail ${step + 1}] click undelivered → ${verdict.element.label ?? verdict.element.element_token}`
-                  lines.push(previous)
-                  for (const attempt of clickOutcome.attempts)
-                    lines.push(
-                      `[fail ${step + 1}]   ${attempt.mode} ${attempt.label} delivered=${attempt.delivered} reasons=[${attempt.reasons.join(",")}] (${attempt.before.screen}→${attempt.after.screen})`,
-                    )
-                  // AFFIRMATIVE FAILURE FEEDS THE BOUND: the click ran at this node
-                  // and changed nothing observable, so the next iteration's unchanged
-                  // screen advances the ambiguity count — it is never retried forever.
-                  actedAt = map.current
-                  continue
-                }
+              executed++
+              return {
+                deliveryModes: [run.outcome.mode],
+                ...(run.outcome.worked ? {} : { failure: "click undelivered on every rung" }),
               }
-            }
-            const target = verdict.element.label ?? verdict.element.element_token
-            if (verdict.action === "type" && !actResult.ok) {
-              status = "failed"
-              previous = `[fail ${step + 1}] ${actLabel} → ${target}`
-              lines.push(`${previous}: ${actResult.error}`)
-              break
-            }
-            executed++
-            if (verdict.action === "click") {
-              // A delivered click is progress on ANY signal (screen, target state
-              // or focus), so it resets the count rather than feeding it.
-              ambiguous = 0
-              actedAt = undefined
-            } else {
-              // The action ran at this node; the next observation reveals whether it
-              // changed the screen (see nextAmbiguity) and folds the change evidence.
-              actedAt = map.current
-            }
-            // Remember the target + mode so a focus click on the successor's target
-            // reads as a prerequisite rather than a no-op next iteration.
-            actedMode = clickOutcome ? clickOutcome.mode : "type"
-            actedTarget = target
-            lastActuation = {
-              mode: clickOutcome ? clickOutcome.mode : "type",
-              before: map.current,
-            }
-            previous = `[ok ${step + 1}] ${actLabel} → ${target}`
-            lines.push(`${previous}`)
+            })
 
-            if (params.expect !== undefined) {
-              const verified = yield* callDriver(
-                tools,
-                "cua-driver_verify_state",
-                { pid: params.window.pid, window_id: params.window.window_id, expect: normalizeExpect(params.expect) },
-                ctx.abort,
-              )
-              if (!verified.ok) {
-                status = "failed"
-                lines.push(`[verify ${step + 1}] driver could not verify: ${verified.error}`)
-                break
-              }
-              const verdictText = textOf(verified.result.content).trim()
-              const satisfied = /satisfied|passed|true/i.test(verdictText)
-              lines.push(`[verify ${step + 1}] ${verdictText || "driver returned no verdict"}`)
-              // OBSERVED evidence agrees — this is the only authoritative stop.
-              if (satisfied) {
-                evidence = true
-                status = "verified"
-                break
-              }
-            }
-          }
+          const planResult = yield* planLoop({
+            goal,
+            observe: observeScene,
+            choosePlan: (candidates) =>
+              Effect.gen(function* () {
+                const outcome = yield* jevChoose(
+                  candidates.map((candidate) => candidate.id),
+                  "choose the plan",
+                )
+                const choice = chosenLabel(outcome)
+                return choice.label !== undefined && candidates.some((candidate) => candidate.id === choice.label)
+                  ? choice.label
+                  : candidates[0]?.id
+              }),
+            chooseManeuver: (_subgoal, options) =>
+              Effect.gen(function* () {
+                const outcome = yield* jevChoose(
+                  options.map((option) => option.label),
+                  "choose the maneuver",
+                )
+                return chosenLabel(outcome)
+              }),
+            execute: (option, subgoal) => executeManeuver(option, subgoal),
+            stateChanging: stateChangingManeuver,
+            readOnly: readOnlyGoal(goal),
+            maxSteps,
+          })
 
-          // SKILL MINING: repeated progressed sub-sequences become promotion
-          // CANDIDATES in metadata; the loop never adds a registry entry.
-          const promotionCandidates = mineTrace(trace)
+          lines.push(`[plan ${planResult.planId ?? "?"}] ${planResult.status}: ${planResult.reason}`)
+          for (const entry of planResult.telemetry)
+            lines.push(
+              `[plan step] subgoal ${entry.subgoalIndex} ${entry.maneuver} (${entry.label}) strength=${entry.strength ?? "n/a"} modes=[${entry.deliveryModes.join(",")}] ${entry.reason} → ${entry.progress.done}/${entry.progress.total}`,
+            )
 
-          // (c) The run's return carries the map (start/current/frontier/path),
-          // every step's decision, and any promotion candidates, in metadata and as
-          // a JSON trailer on the output, so an external checker can verify the chain.
-          const navMap = map
-            ? { start: map.start, current: map.current, frontier: map.frontier, path: map.path }
-            : undefined
-          const summary = {
-            status,
-            steps: trace,
-            promotionCandidates,
-            ...(navMap ? { map: navMap } : {}),
-          }
+          // The run's return carries the plan telemetry (plan id, subgoal index,
+          // maneuver, strength, delivery evidence, measured progress) and the mined
+          // promotion CANDIDATES in metadata and as a JSON trailer on the output, so
+          // an external checker can verify every decision and its evidence.
+          const summary = planSummary(planResult)
           return {
-            title: `ui_run (${executed} actions, ${observations} observations, ${status})`,
+            title: `ui_run (${executed} actions, ${observations} observations, ${summary.status})`,
             metadata: { ...summary, goal, executed, observations },
-            output: [...lines, ...(truncated ? [truncated] : []), JSON.stringify(summary)].join("\n"),
+            output: [...lines, JSON.stringify(summary)].join("\n"),
           }
         }),
     }
