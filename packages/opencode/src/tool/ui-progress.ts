@@ -56,12 +56,24 @@ const sameScene = (a: Scene, b: Scene): boolean => {
   return diff.appeared.length === 0 && diff.disappeared.length === 0 && diff.changed.length === 0
 }
 
-/** Satisfied predicate units for one scene: full when true, the partial read otherwise. */
+/**
+ * ARRIVAL GATE — satisfied predicate units for one scene, but a subgoal's units
+ * count ONLY once every PRECEDING subgoal holds. INVARIANT OWNED: a predicate is
+ * satisfied only by content the goal identifies, and a read can never be credited
+ * before the plan's arrival/target predicate holds — so an unrelated page (readable
+ * content the goal never named) counts nothing toward the reads. Units are still
+ * the measured world model (full when true, the partial read otherwise).
+ */
 function doneOf(plan: Plan, scene: Scene): number {
-  return plan.subgoals.reduce((sum, subgoal) => {
+  let reachable = true
+  let sum = 0
+  for (const subgoal of plan.subgoals) {
+    if (!reachable) break
     const result = evalPredicate(subgoal.success, scene)
-    return sum + (result.verdict === "true" ? (result.target ?? 1) : (result.satisfied ?? 0))
-  }, 0)
+    sum += result.verdict === "true" ? (result.target ?? 1) : (result.satisfied ?? 0)
+    if (result.verdict !== "true") reachable = false
+  }
+  return sum
 }
 
 /**
@@ -101,16 +113,21 @@ function budgetExceeded(plan: Plan, history: readonly StepRecord[]): boolean {
  */
 export function progress(plan: Plan, scene: Scene, history: readonly StepRecord[]): Progress {
   const results = plan.subgoals.map((subgoal) => evalPredicate(subgoal.success, scene))
-  const perSubgoal: SubgoalProgress[] = results.map((result) => ({
-    success: result.verdict === "true",
-    verdict: result.verdict,
-    evidence: result.evidence,
-    cited: result.cited ?? [],
-  }))
-  const done = results.reduce(
-    (sum, result) => sum + (result.verdict === "true" ? (result.target ?? 1) : (result.satisfied ?? 0)),
-    0,
-  )
+  // ARRIVAL GATE: a subgoal behind an unsatisfied predecessor is not a satisfied
+  // step — its verdict is still reported honestly, but it is never credited while
+  // the arrival/target predicate it depends on is unmet.
+  let reachable = true
+  const perSubgoal: SubgoalProgress[] = results.map((result) => {
+    const entry = {
+      success: reachable && result.verdict === "true",
+      verdict: result.verdict,
+      evidence: result.evidence,
+      cited: result.cited ?? [],
+    }
+    if (result.verdict !== "true") reachable = false
+    return entry
+  })
+  const done = doneOf(plan, scene)
   const total = plan.subgoals.reduce((sum, subgoal) => sum + (subgoal.success.op === "read_count" ? subgoal.success.n : 1), 0)
   const index = results.findIndex((result) => result.verdict !== "true")
   const nextSubgoal = index === -1 ? undefined : index

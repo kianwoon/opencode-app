@@ -250,6 +250,16 @@ describe("ui-plan — (a)/(c)/(e) honest arrival identity + goal-anchored reads"
     expect(hit.cited?.[0]).toContain("file:///tmp/messages.html")
   })
 
+  test("(a) a browser-displayed file path WITHOUT its scheme is arrival for the same file: goal", () => {
+    const target = { op: "url_identity", scheme: "file", path: "/tmp/messages.html" } as const
+    // Chromium's omnibox shows only the path — the LIVE arrived-page shape.
+    const hit = evalPredicate(target, urlText("/tmp/messages.html"))
+    expect(hit.verdict).toBe("true")
+    expect(hit.cited?.[0]).toContain("/tmp/messages.html")
+    // a different displayed path is still honest non-arrival
+    expect(evalPredicate(target, urlText("/tmp/other.html")).verdict).toBe("false")
+  })
+
   test("(c) a dense unrelated page cannot satisfy a read whose goal anchors are absent", () => {
     const scene = denseUnrelated(["alpha", "beta", "gamma", "delta", "epsilon"])
     const decision = plan("read the 3 messages from zeta", scene)

@@ -2,8 +2,8 @@
 import { describe, expect, test } from "bun:test"
 import path from "path"
 import { decodeObservation, type Element } from "@/tool/ui-eyes"
-import { buildScene, type Scene, type SceneItem } from "@/tool/ui-scene"
-import { plan, type Plan, type StepRecord } from "@/tool/ui-plan"
+import { buildScene, type Scene, type SceneItem, type SceneRegion, type SceneText } from "@/tool/ui-scene"
+import { evalPredicate, plan, type Plan, type StepRecord } from "@/tool/ui-plan"
 import { MANEUVER_REPEAT_LIMIT, progress } from "@/tool/ui-progress"
 
 const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
@@ -114,10 +114,73 @@ describe("ui-progress — (b) measured progress over the world model", () => {
   })
 })
 
-// GENERALIZATION — the invariant: progress is measured by predicates over the
-// world model, never inferred from having acted; and oscillation is not progress.
-// The live instance is a loop re-issuing maneuvers while the screen flips between
-// two views; the unseen case is ANY other structurally different A≠B pair.
+// GENERALIZATION — INVARIANT: a predicate is satisfied only by content the goal
+// IDENTIFIES, and a read is never credited before the plan's arrival/target
+// predicate holds. LIVE INSTANCE: the harness goal (navigate to a file:// page and
+// read its last 3 messages) reached 4/5 with ZERO actions on an unrelated browser
+// page — the reads counted that page's rows. UNSEEN CASE COVERED: any goal whose
+// target is not yet reached cannot have its reads satisfied by whatever page is
+// on screen (a bare list, a dense page), because the gate is on the plan's own
+// preceding predicate, not on the page's shape.
+describe("ui-progress — (b) a non-target page cannot satisfy the goal's read predicates", () => {
+  const el = (label: string, role = "AXLink"): Element => ({ element_token: label, role, label })
+  const row = (label: string): SceneItem => ({
+    id: label,
+    role: "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+  })
+  const rowScene = (labels: readonly string[]): Scene => ({
+    snapshot: "s-rows",
+    regions: [{ id: "r0:list", kind: "list", itemIds: [...labels], textIds: [] }],
+    items: labels.map(row),
+    texts: [],
+  })
+  const fileUrl = "file:///tmp/messages.html"
+  const urlText: SceneText = {
+    id: "u",
+    role: "AXStaticText",
+    text: fileUrl,
+    owner: "scene",
+    element: el(fileUrl, "AXStaticText"),
+  }
+  const arrivedRowScene = (labels: readonly string[]): Scene => ({
+    snapshot: "s-arrived",
+    regions: [
+      { id: "r0:content", kind: "content", itemIds: [], textIds: ["u"] },
+      { id: "r1:list", kind: "list", itemIds: [...labels], textIds: [] },
+    ] as readonly SceneRegion[],
+    items: labels.map(row),
+    texts: [urlText],
+  })
+  const GOAL = `go to "${fileUrl}" and read the last 3 messages`
+
+  test("(b) reads count nothing until the arrival/target predicate holds", () => {
+    const unrelated = rowScene(["Inbox", "Sent", "Drafts", "Archive"])
+    const decision = plan(GOAL, unrelated)
+    expect(decision.commit.subgoals[0].kind).toBe("navigate")
+    const before = progress(decision.commit, unrelated, [])
+    // the dense unrelated page satisfies the read predicate ALONE, but the read is
+    // not credited before arrival — progress stays 0 (and names the navigate next).
+    expect(evalPredicate(decision.commit.subgoals[1].success, unrelated).verdict).toBe("true")
+    expect(before.done).toBe(0)
+    expect(before.nextSubgoal).toBe(0)
+    expect(before.perSubgoal[1].success).toBe(false)
+  })
+
+  test("(b) arrival — then the reads count the arrived page's content", () => {
+    const arrived = arrivedRowScene(["m1", "m2", "m3", "m4"])
+    const decision = plan(GOAL, arrived)
+    const full = progress(decision.commit, arrived, [])
+    expect(full.perSubgoal[0].success).toBe(true)
+    expect(full.done).toBe(full.total)
+    expect(full.nextSubgoal).toBeUndefined()
+  })
+})
+
 describe("ui-progress — (e) generalization invariants", () => {
   test("done depends only on the Scene, not on how many maneuvers ran", async () => {
     const satisfied = await readFixture()

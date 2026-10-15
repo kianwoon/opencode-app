@@ -203,16 +203,20 @@ export function isFocusTarget(element: Element): boolean {
 }
 
 /**
- * FUNCTIONAL delivery reasons for a focus click: the target's own value/label
- * changed AFTER its consumer sub-step landed, so the click's focus landed. Pure —
- * the caller measures the target state in the consumer's own observation.
+ * FUNCTIONAL delivery reasons for a focus click: the consumer sub-step LANDED —
+ * either by its OWN success signal (`landed`: a verified value, a completed paste,
+ * an arrival) or by the target's own value/label moving in the consumer's
+ * observation. Pure — the caller measures both. INVARIANT: a click's delivery is
+ * the EFFECT it exists to produce, so the consumer landing is the proof; a
+ * consumer that neither lands nor moves a signal is NOT delivery.
  */
 export function focusConsumerDelivery(
   before: ClickSignals,
   afterConsumer: ClickSignals,
   _target: Element,
+  landed = false,
 ): ClickDeliveryReason[] {
-  return before.target !== afterConsumer.target ? ["focus-consumer"] : []
+  return landed || before.target !== afterConsumer.target ? ["focus-consumer"] : []
 }
 
 /** Re-judge an UNDELIVERED attempt as DELIVERED when its consumer landed. */
@@ -220,9 +224,10 @@ export function foldFocusConsumer(
   attempt: ClickAttemptEvidence,
   afterConsumer: ClickSignals,
   target: Element,
+  landed = false,
 ): ClickAttemptEvidence {
   if (attempt.delivered) return attempt
-  const reasons = focusConsumerDelivery(attempt.before, afterConsumer, target)
+  const reasons = focusConsumerDelivery(attempt.before, afterConsumer, target, landed)
   return reasons.length === 0 ? attempt : { ...attempt, delivered: true, reasons: [...attempt.reasons, ...reasons] }
 }
 

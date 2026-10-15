@@ -14,6 +14,7 @@ import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { LABEL_MAX } from "@/jev/controller"
 import {
+  FOCUS_CONSUMER_KINDS,
   FRONTIER_HARD_MAX,
   GATE_FLOOR,
   MAX_MANEUVER_REPEATS,
@@ -24,6 +25,7 @@ import {
   decodeObservation,
   destructiveManeuver,
   extractGoalValue,
+  focusConsumerAhead,
   initialManeuverRepeat,
   isDestructive,
   loginWall,
@@ -61,14 +63,18 @@ import {
   declaredAction,
   elementCenter,
   focusIdentity,
+  foldFocusConsumer,
   frameEstablishingRead,
   hotkeyArgs,
+  isFocusTarget,
   isNoFrameError,
+  isPolicyRefused,
   observationArgs,
   pixelFrameRetry,
   targetState,
   type ClickSignals,
 } from "@/tool/ui-hands"
+import { goToUrl, matchSkills, type SkillStep } from "@/tool/ui-skills"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -1549,5 +1555,141 @@ describe("ui_run — plan telemetry in the returned summary, and mining over it"
         step({ subgoalIndex: 3, maneuver: "read_items", reason: "failed: click undelivered" }),
       ]),
     ).toEqual([])
+  })
+})
+
+// GENERALIZATION — INVARIANT: a click's delivery is judged by the EFFECT it
+// exists to produce, tracked across EVERY consumer class that can follow it on
+// the SAME target (type / keys / key / paste / clipboard / a hotkey chord), and a
+// refusal is reported as a refusal, never as silence. The committed `go_to_url`
+// address-bar route is the LIVE INSTANCE: its focus click on the address bar is
+// followed by a clipboard write and a single `cmd+v` paste, and the click is
+// delivered the moment that paste lands even though the click itself changed no
+// signal. UNSEEN CASE COVERED: a route whose consumer is a HOTKEY chord rather
+// than a typed key (a Cmd-based menu command consuming the focus) folds the same
+// way, because deferral is keyed on the route's consumer classes, not the click.
+describe("focus-click delivery — every consumer class (functional delivery)", () => {
+  const win = { pid: 4242, window_id: 7 }
+  // hardcode-guard:allow the captured address-bar role/label are the live inputs under test
+  const URL = "https://www.linkedin.com"
+  const bar = {
+    element_token: "s1:6",
+    role: "AXTextField",
+    label: "Address and search bar",
+    value: "x.com/home",
+    actions: ["AXPress", "AXShowMenu"],
+    frame: { x: 10, y: 20, width: 200, height: 30 },
+  }
+  const clickBefore = clickSignals("nA", bar, [bar])
+  // hardcode-guard:allow the driver's refusal text is the live error under test
+  const REFUSAL = "Raw coordinate click blocked: the px path is reserved for canvas/WebGL targets"
+  const refusedPixel = clickAttempt(
+    { mode: "pixel", label: "pixel(110,35)", args: {} },
+    clickBefore,
+    clickBefore,
+    bar,
+    REFUSAL,
+  )
+  const barValue = (value: string) => clickSignals("nA", { ...bar, value }, [{ ...bar, value }])
+
+  test("(c) a file:// goal value matches go_to_url — the loop binds the route, never a bare address-bar click", () => {
+    // hardcode-guard:allow the scheme-general goal value is the live input under test
+    const fileValue = "file:///tmp/messages.html"
+    // the LIVE goal form is UNQUOTED: the goal-value extractor falls back to an
+    // http(s)-only match, so an unquoted file:// value returns undefined and the
+    // loop fell through to a bare click with no consumer to defer to. The plan's
+    // navigate subgoal carries the value scheme-generally; binding the skill to
+    // THAT value is what makes the address-bar route run.
+    const liveGoal = `navigate to ${fileValue} and read the last 3 messages`
+    expect(extractGoalValue(liveGoal)).toBeUndefined()
+    expect(matchSkills([bar], fileValue).map((match) => match.skill.name)).toContain("go_to_url")
+    // hardcode-guard:allow the scheme-general goal value is the live input under test
+    const match = matchSkills([bar], fileValue).find((entry) => entry.skill.name === "go_to_url")
+    expect(match?.element.label).toBe(bar.label)
+    // and its every arm ends in a verify, so arrival — not the click — is success
+    const branch = match !== undefined ? goToUrl.steps(match).find((step) => step.kind === "branch") : undefined
+    expect(branch !== undefined && branch.kind === "branch").toBe(true)
+  })
+
+  test("(a) the committed address-bar route's focus click resolves DELIVERED at its paste, never click-undelivered", () => {
+    const outer = goToUrl.steps({ skill: goToUrl, element: bar, value: URL }).find((step) => step.kind === "branch")
+    const prepared = outer !== undefined && outer.kind === "branch" ? outer.fallback : []
+    const inner = prepared.find((step) => step.kind === "branch")
+    const route: readonly SkillStep[] = inner !== undefined && inner.kind === "branch" ? inner.fallback : []
+    // the live shape: focus → clipboard → select-all → paste → verify → Return → verify
+    expect(route.map((step) => step.kind)).toEqual([
+      "click",
+      "clipboard",
+      "key",
+      "paste",
+      "verifyValue",
+      "key",
+      "verifyScreen",
+    ])
+    // the click defers because a focus consumer is still AHEAD on the same target
+    expect(focusConsumerAhead(route.slice(1))).toBe(true)
+    // the click really is undelivered on its own (its pixel rung was policy-refused)
+    expect(refusedPixel.delivered).toBe(false)
+    expect(refusedPixel.reasons).toContain("refused-by-policy")
+    // consumers BEFORE the paste land nothing and move no signal → still pending
+    let folded = foldFocusConsumer(refusedPixel, barValue("x.com/home"), bar, false)
+    folded = foldFocusConsumer(folded, barValue("x.com/home"), bar, false)
+    expect(folded.delivered).toBe(false)
+    // the paste lands → the click is delivered, so the loop proceeds (no abort)
+    folded = foldFocusConsumer(folded, barValue(URL), bar, true)
+    expect(folded.delivered).toBe(true)
+    expect(folded.reasons).toContain("focus-consumer")
+    // and the sub-step immediately AFTER the paste is the Return submit
+    expect(route[5]).toMatchObject({ kind: "key", key: "return" })
+  })
+
+  test("(a) route-based deferral covers a click whose element declares no AXPress (the generalization)", () => {
+    const bare = { element_token: "s1:7", role: "AXTextField", label: "Search field", value: "" }
+    expect(isFocusTarget(bare)).toBe(false) // no declared press — deferral must come from the route
+    const route: readonly SkillStep[] = [
+      { kind: "click", label: "focus" },
+      { kind: "type", label: "type value", text: "q" },
+    ]
+    expect(focusConsumerAhead(route.slice(1))).toBe(true)
+    const before = clickSignals("nA", bare, [bare])
+    const attempt = clickAttempt({ mode: "declared", label: "click", args: {} }, before, before, bare)
+    expect(attempt.delivered).toBe(false)
+    expect(foldFocusConsumer(attempt, clickSignals("nA", bare, [{ ...bare, value: "q" }]), bare).delivered).toBe(true)
+  })
+
+  test("(b) HONEST NEGATIVE: no consumer landing and no signal change stays undelivered", () => {
+    let folded = refusedPixel
+    for (const _kind of ["clipboard", "key", "paste"]) {
+      folded = foldFocusConsumer(folded, barValue("x.com/home"), bar, false)
+    }
+    expect(folded.delivered).toBe(false)
+    expect(folded.reasons).not.toContain("focus-consumer")
+  })
+
+  test("(c) the declared press rung is attempted FIRST, and a pixel refusal is recorded as refused-by-policy", () => {
+    const plan = actuationPlan(bar, win)
+    expect(plan.map((rung) => rung.mode)).toEqual(["declared", "pixel"])
+    expect(plan[0]).toMatchObject({ mode: "declared", label: "press", args: { action: "press" } })
+    expect(isPolicyRefused(REFUSAL)).toBe(true)
+    expect(refusedPixel.mode).toBe("pixel")
+    expect(refusedPixel.reasons).toContain("refused-by-policy")
+    expect(refusedPixel.error).toBe(REFUSAL)
+  })
+
+  test("(c) the consumer vocabulary is single-sourced and the loop resolves it at ONE site", async () => {
+    for (const kind of ["type", "keys", "key", "paste", "clipboard"] as const) {
+      expect(FOCUS_CONSUMER_KINDS.has(kind)).toBe(true)
+    }
+    for (const kind of ["verifyValue", "verifyScreen", "navigate", "read"] as const) {
+      expect(FOCUS_CONSUMER_KINDS.has(kind)).toBe(false)
+    }
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    // ONE definition, invoked at every consumer site (paste / keys / key / type)
+    // hardcode-guard:allow the assertion counts the loop's contract sites (one resolver), not a case literal
+    expect(src.match(/const settleFocus =/g) ?? []).toHaveLength(1)
+    expect(src.match(/settleFocus\(/g) ?? []).toHaveLength(4)
+    expect(src.includes("focusConsumerAhead(queue)")).toBe(true)
+    // the deferral is never silently absorbed: an unresolved focus click still fails
+    expect(src.includes('"focus click undelivered (no consumer landed)"')).toBe(true)
   })
 })

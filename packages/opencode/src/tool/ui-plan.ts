@@ -144,6 +144,18 @@ const URL_RE = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-
 // A scheme-qualified URL with NO host (file:///x, about:blank, data:…). Anything
 // with whitespace is prose, not a URL.
 const NO_HOST_URL_RE = /^([a-z][a-z0-9+.-]*):(\/{0,2}[^\s]*)$/i
+// hardcode-guard:allow the named live incident is one instance cited to ground the invariant
+/**
+ * A browser DISPLAYS a `file:` URL WITHOUT its scheme — Chromium's omnibox shows
+ * only `/…/page.html` — so that bare absolute path carries the SAME `file:`
+ * identity and must parse as one.
+ * LIVE FAILURE AS ONE INSTANCE: a `file:` goal's arrival was UNOBSERVABLE even on
+ * the arrived page, because the omnibox value parsed as no URL, so the loop
+ * re-navigated to the repeat bound forever.
+ * UNSEEN CASE COVERED: any file-path display (Finder-style, a scheme that hides
+ * its scheme) reads as the same `file:` identity, no loop change.
+ */
+const BARE_FILE_PATH_RE = /^(\/[^\s]+)$/
 
 function urlParts(value: string): UrlParts | undefined {
   const trimmed = value.trim()
@@ -151,10 +163,14 @@ function urlParts(value: string): UrlParts | undefined {
   if (hostMatch)
     return { scheme: (hostMatch[1] ?? "").toLowerCase(), host: normalizeHost(hostMatch[2]), path: hostMatch[4] ?? "" }
   const noHost = NO_HOST_URL_RE.exec(trimmed)
-  if (noHost === null) return undefined
-  // Collapse the authority slashes (file:///x → /x) so scheme+path compare stably.
-  const raw = noHost[2]
-  return { scheme: noHost[1].toLowerCase(), host: "", path: raw.startsWith("/") ? `/${raw.replace(/^\/+/, "")}` : raw }
+  if (noHost !== null) {
+    // Collapse the authority slashes (file:///x → /x) so scheme+path compare stably.
+    const raw = noHost[2]
+    return { scheme: noHost[1].toLowerCase(), host: "", path: raw.startsWith("/") ? `/${raw.replace(/^\/+/, "")}` : raw }
+  }
+  const bare = BARE_FILE_PATH_RE.exec(trimmed)
+  if (bare === null) return undefined
+  return { scheme: "file", host: "", path: bare[1] }
 }
 
 /** A URL rendered for evidence — the identity that actually exists. */
@@ -379,7 +395,11 @@ export function readOnlyGoal(goal: string): boolean {
 }
 
 function firstInteger(goal: string): number | undefined {
-  const match = goal.match(/\d+/)
+  // A COUNT is a bare integer in the goal's PROSE. Digits inside a goal VALUE (a
+  // URL path/port, a quoted token) are part of the destination, never a count —
+  // otherwise `file:///var/folders/m4/…` reads "4" and a 3-message goal counts 4.
+  const prose = goal.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, " ").replace(/["'`][^"'`]*["'`]/g, " ")
+  const match = prose.match(/\d+/)
   return match ? Number(match[0]) : undefined
 }
 

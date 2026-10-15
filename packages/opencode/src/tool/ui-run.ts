@@ -116,6 +116,30 @@ export function maneuverRepeatStep(
 }
 /** Input verbs whose success depends on a preceding focus click on the SAME target. */
 const FOCUS_CONSUMING = new Set<JevAction>(["type", "key"])
+/**
+ * FOCUS-CONSUMER CLASSES — every sub-step kind whose SUCCESS consumes a preceding
+ * focus click on the SAME target: a typed entry (`type`/`keys`), the atomic paste
+ * and the clipboard write that carries it (`paste`/`clipboard`), and a key/hotkey
+ * press (`key`). This is the ONE vocabulary the focus-click delivery resolution
+ * tracks, so a route's consumer can never be missed and a new class is added here.
+ * hardcode-guard:allow the sub-step verb vocabulary is the registry's own contract, not a case literal
+ */
+export const FOCUS_CONSUMER_KINDS: ReadonlySet<SkillStep["kind"]> = new Set<SkillStep["kind"]>([
+  "type",
+  "keys",
+  "key",
+  "paste",
+  "clipboard",
+])
+
+/**
+ * Whether a click is a FOCUS click by its ROUTE: a consumer that can follow it on
+ * the SAME target is still ahead. A click's delivery is then deferred to that
+ * consumer instead of judged on the click alone.
+ */
+export function focusConsumerAhead(steps: readonly SkillStep[]): boolean {
+  return steps.some((step) => FOCUS_CONSUMER_KINDS.has(step.kind))
+}
 const DEFAULT_TIMEOUT = 30_000
 const MAX_EXPECT = 8
 
@@ -996,6 +1020,20 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 target = refindElement(target, newest) ?? target
                 return target
               })
+              // FUNCTIONAL DELIVERY — ONE site resolves a pending FOCUS click's
+              // delivery from ANY consumer that followed it on the SAME target, so
+              // every consumer class (type/key/keys/paste/clipboard/hotkey) is
+              // covered and no class can be left latent. `landed` is the consumer's
+              // OWN success signal (a verified value / a completed paste); a
+              // consumer that neither lands nor moves a signal leaves it pending.
+              const settleFocus = (consumerElements: readonly Element[] | undefined, landed: boolean): void => {
+                if (pendingFocus === undefined || consumerElements === undefined) return
+                const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, consumerElements)
+                if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target, landed).delivered) {
+                  deliveries[pendingFocus.index] = true
+                  pendingFocus = undefined
+                }
+              }
               const queue: SkillStep[] = [...match.skill.steps(match)]
               while (queue.length > 0) {
                 const sub = queue.shift()
@@ -1152,15 +1190,26 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   observationsUsed += run.observations
                   staleSnapshot = true
                   signatures.push(run.signature)
-                  modes.push({ label: sub.label, mode: run.outcome.mode })
-                  reads.push(undefined)
-                  urlChanges.push(undefined)
                   const first = run.attempts[0]
-                  if (!run.outcome.worked && first !== undefined && isFocusTarget(target)) {
+                  // A FOCUS click defers its delivery to its consumer: either the
+                  // element DECLARES a press (isFocusTarget), or a focus-consuming
+                  // sub-step (type/key/paste/clipboard/hotkey) still follows on the
+                  // SAME target. The final honesty check rejects the deferral when
+                  // no consumer ever lands.
+                  if (!run.outcome.worked && first !== undefined && (isFocusTarget(target) || focusConsumerAhead(queue))) {
+                    // The FIRST (declared) rung is the one a focus click's consumer
+                    // proves, so a deferring click records that rung's mode — never
+                    // the last-tried pixel rung, which is only the undelivered tail.
+                    modes.push({ label: sub.label, mode: first.mode })
+                    reads.push(undefined)
+                    urlChanges.push(undefined)
                     pendingFocus = { index: modes.length - 1, attempt: first }
                     deliveries.push(false)
                     continue
                   }
+                  modes.push({ label: sub.label, mode: run.outcome.mode })
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
                   deliveries.push(run.outcome.worked)
                   if (!run.outcome.worked) {
                     failure = "click undelivered on every rung"
@@ -1239,13 +1288,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   deliveries.push(undefined)
                   reads.push(undefined)
                   urlChanges.push(undefined)
-                  if (pendingFocus !== undefined && keysObs) {
-                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, keysObs.elements)
-                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
-                      deliveries[pendingFocus.index] = true
-                      pendingFocus = undefined
-                    }
-                  }
+                  // keystroke consumer (e.g. select-all): a screen/state move proves
+                  // the click's focus; the keys themselves carry no landed signal.
+                  settleFocus(keysObs?.elements, false)
                   continue
                 }
                 // hardcode-guard:allow the clipboard verb + driver tool name are the registry/hand contract, not a case literal
@@ -1321,13 +1366,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                     failure = run.failure
                     break
                   }
-                  if (pendingFocus !== undefined && after) {
-                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, after.elements)
-                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
-                      deliveries[pendingFocus.index] = true
-                      pendingFocus = undefined
-                    }
-                  }
+                  // atomic-paste consumer: the runner landing (clipboard written,
+                  // paste chord delivered) is the consumer's own success signal.
+                  settleFocus(after?.elements, run.completed)
                   continue
                 }
                 // hardcode-guard:allow the value-gate verb is the registry's own contract, not a case literal
@@ -1436,13 +1477,13 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                     failure = "typed value did not match the goal after one repair"
                     break
                   }
-                  if (pendingFocus !== undefined && after) {
-                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, after.elements)
-                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
-                      deliveries[pendingFocus.index] = true
-                      pendingFocus = undefined
-                    }
-                  }
+                  // typed-entry consumer: when the route VERIFIES the value, a match
+                  // is the consumer's own success signal; else its value move alone
+                  // proves the focus (a route with no check never claims one).
+                  settleFocus(
+                    after?.elements,
+                    sub.verify === true && after !== null && valueMatches(fieldValue(target, after.elements), sub.text),
+                  )
                   continue
                 }
                 if (sub.kind === "key") target = yield* freshTarget
@@ -1483,14 +1524,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 reads.push(undefined)
                 urlChanges.push(undefined)
                 // FUNCTIONAL DELIVERY: a pending FOCUS click is delivered when a
-                // consumer (key on the SAME target) lands in the target's state.
-                if (pendingFocus !== undefined && sub.kind === "key" && after) {
-                  const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, after.elements)
-                  if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
-                    deliveries[pendingFocus.index] = true
-                    pendingFocus = undefined
-                  }
-                }
+                // key/hotkey consumer on the SAME target lands (a state move here).
+                if (sub.kind === "key") settleFocus(after?.elements, false)
               }
               const substeps = foldSubstepEvidence(
                 modes,
@@ -1575,7 +1610,12 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // the SAME helpers (runClickRungs / keyPress / the observation).
           const executeManeuver = (option: ManeuverOption, subgoal: PlanSubgoal): Effect.Effect<ManeuverExecution> =>
             Effect.gen(function* () {
-              const matches = matchSkills(lastElements, extractGoalValue(goal))
+              // The maneuver was DERIVED from the subgoal's own value; the skill
+              // must be matched with that SAME value, never a re-extraction that
+              // can disagree (the goal-value extraction is scheme-limited, so a
+              // `file://` destination matched no `go_to_url` skill and fell to a
+              // bare address-bar CLICK with no consumer to defer to).
+              const matches = matchSkills(lastElements, subgoal.params.value ?? extractGoalValue(goal))
               const skillMatch = matches.find((match) => match.skill.name === option.name)
               if (skillMatch !== undefined) {
                 const execution = yield* executeSkill(skillMatch, lastSignature, lastElements)
