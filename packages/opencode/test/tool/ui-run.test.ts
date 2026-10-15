@@ -12,8 +12,9 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Agent } from "@/agent/agent"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
-import { CONTROLS_MAX, LABEL_MAX, buildControllerQuestions, buildState, foldController, type NavMap } from "@/jev/controller"
+import { LABEL_MAX, buildControllerQuestions, buildState, foldController, type NavMap } from "@/jev/controller"
 import {
+  FRONTIER_HARD_MAX,
   Parameters,
   UiRunTool,
   advanceMap,
@@ -25,9 +26,11 @@ import {
   needsForegroundDelivery,
   nextAmbiguity,
   normalizeExpect,
+  resolveTarget,
   screenSignature,
   traceStep,
 } from "@/tool/ui-run"
+import { actuationPlan, changeEvidence, declaredAction } from "@/tool/ui-hands"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -200,16 +203,18 @@ describe("buildCandidates", () => {
     expect(labels).toEqual(["c1 AXButton Keep"])
   })
 
-  test("caps at CONTROLS_MAX and marks the truncation", () => {
-    const many = Array.from({ length: CONTROLS_MAX + 5 }, (_, i) => button(i + 1, `label-${i}`))
-    const capped = buildCandidates(many.slice(0, CONTROLS_MAX))
-    const oversize = buildCandidates(many)
+  // hardcode-guard:allow the control-count literals are the enumerable screen size under test
+  test("enumerates a real screen in full; only a pathological oversize is sampled and marked", () => {
+    const realScreen = Array.from({ length: 159 }, (_, i) => button(i + 1, `control-${i}`))
+    const full = buildCandidates(realScreen)
+    expect(full.labels.length).toBe(159)
+    expect(full.truncated).toBeUndefined()
 
-    expect(capped.labels.length).toBe(CONTROLS_MAX)
-    expect(capped.truncated).toBeUndefined()
-    expect(oversize.labels.length).toBe(CONTROLS_MAX)
-    expect(oversize.truncated).toContain("truncated")
-    expect(oversize.truncated).toContain(String(CONTROLS_MAX + 5))
+    const oversize = Array.from({ length: FRONTIER_HARD_MAX + 5 }, (_, i) => button(i + 1, `label-${i}`))
+    const sampled = buildCandidates(oversize)
+    expect(sampled.labels.length).toBe(FRONTIER_HARD_MAX)
+    expect(sampled.truncated).toContain("truncated")
+    expect(sampled.truncated).toContain(String(FRONTIER_HARD_MAX + 5))
   })
 
   test("clips each label to LABEL_MAX and round-trips it to its element", () => {
@@ -220,13 +225,14 @@ describe("buildCandidates", () => {
   })
 
   // hardcode-guard:allow fixture labels are the enumerable input under test
-  test("a screen over the cap still enumerates a goal target beyond the prefix", () => {
-    const sidebar = Array.from({ length: CONTROLS_MAX + 20 }, (_, i) => button(i + 1, `sidebar-${i}`))
-    const goalTarget = button(CONTROLS_MAX + 30, "AppRow Toggle")
+  test("a dense screen enumerates a goal target that sits past the old prefix", () => {
+    const sidebar = Array.from({ length: 158 }, (_, i) => button(i + 1, `sidebar-${i}`))
+    const goalTarget = button(200, "AppRow Toggle")
     const { labels, byLabel } = buildCandidates([...sidebar, goalTarget])
 
-    expect(labels.length).toBe(CONTROLS_MAX)
-    // the target past a contiguous prefix is still an enumerated frontier option
+    expect(labels.length).toBe(159)
+    // the target past the old contiguous prefix is a fully enumerated frontier option
+    expect(labels.some((label) => label.includes("AppRow Toggle"))).toBe(true)
     expect([...byLabel.values()].some((e) => e.element_token === goalTarget.element_token)).toBe(true)
   })
 })
@@ -349,6 +355,32 @@ describe("decideStep", () => {
     expect(v.kind).toBe("safe")
     if (v.kind !== "safe") throw new Error("expected safe")
     expect(v.reason).toBe("target-not-in-fresh-candidates")
+  })
+
+  // hardcode-guard:allow fixture labels/tokens are the churned identity input under test
+  test("a target whose element token churned is re-resolved by role+label, not dropped", () => {
+    const before = buildCandidates([button(1, "Save"), button(2, "Settings")])
+    const chosen = before.labels[1] // "c2 AXButton Settings"
+    const fresh = buildCandidates([button(9, "New"), button(1, "Save"), button(2, "Settings")])
+    expect(fresh.byLabel.get(chosen)).toBeUndefined()
+
+    const outcome = accepted({
+      action: ans("click", { click: 0.9, wait: 0.1 }),
+      target: ans(`0:${chosen}`, { [`0:${chosen}`]: 0.95, none: 0.05 }),
+    })
+    const v = decideStep({ ...base, outcome, candidates: fresh })
+    expect(v.kind).toBe("act")
+    if (v.kind !== "act") throw new Error("expected act")
+    expect(v.element.label).toBe("Settings")
+    expect(v.element.element_token).toBe("s00000011:2")
+  })
+
+  // hardcode-guard:allow fixture labels/tokens are the churned identity input under test
+  test("resolveTarget ignores the churned cN prefix and matches on role+label", () => {
+    const elements = [button(9, "New"), button(2, "Settings")]
+    expect(resolveTarget("c2 AXButton Settings", elements)?.element_token).toBe("s00000011:2")
+    expect(resolveTarget("c7 AXButton Settings", elements)?.element_token).toBe("s00000011:2")
+    expect(resolveTarget("c1 AXButton Missing", elements)).toBeUndefined()
   })
 
   test("a destructive target stops for consent BEFORE acting", () => {
@@ -596,6 +628,17 @@ describe("navigation map chaining", () => {
     expect(screenSignature(base)).not.toBe(screenSignature(dialog))
   })
 
+  // hardcode-guard:allow the differing frame/actions are the ephemeral fields under test
+  test("signature ignores ephemeral frame and declared actions, not just snapshot/token", () => {
+    const a = [
+      { element_token: "s1:1", role: "AXButton", label: "Go", actions: ["AXPress"], frame: { x: 0, y: 0, width: 1, height: 1 } },
+    ]
+    const b = [
+      { element_token: "s2:9", role: "AXButton", label: "Go", actions: ["AXSelect"], frame: { x: 5, y: 5, width: 9, height: 9 } },
+    ]
+    expect(screenSignature(a)).toBe(screenSignature(b))
+  })
+
   test("a four-screen dependent chain reaches the goal, driven by jev — not one step", () => {
     const target: Record<string, string> = {
       home: "0:c1 AXButton Products",
@@ -696,6 +739,64 @@ describe("navigation map chaining", () => {
     expect(map?.path[1]).toBe(map?.path[3])
     expect(map?.path[1]).toBe(nodeId("products"))
     expect(map?.path.filter((node) => node === nodeId("products")).length).toBe(2)
+  })
+})
+
+// hardcode-guard:allow fixture frames/actions are the declared-actuation input under test
+describe("hands actuation (declared action + pixel fallback)", () => {
+  const win = { pid: 4242, window_id: 7 }
+
+  test("an AXRow maps to a declared select/pick and still offers the pixel fallback", () => {
+    const row = {
+      element_token: "s1:1",
+      role: "AXRow",
+      label: "Wallpaper",
+      actions: ["AXSelect"],
+      frame: { x: 100, y: 200, width: 40, height: 20 },
+    }
+    expect(declaredAction(row)).toBe("pick")
+    const plan = actuationPlan(row, win)
+    expect(plan.map((r) => r.mode)).toEqual(["declared", "pixel"])
+    expect(plan[0].args).toMatchObject({ element_token: "s1:1", action: "pick" })
+    expect(plan[1].args).toMatchObject({ x: 120, y: 210, delivery_mode: "foreground" })
+  })
+
+  test("a declared AXPress is the first rung; the pixel rung follows at the frame centre", () => {
+    const pressable = {
+      element_token: "s1:2",
+      role: "AXButton",
+      label: "Apply",
+      actions: ["AXPress"],
+      frame: { x: 10, y: 10, width: 100, height: 40 },
+    }
+    expect(declaredAction(pressable)).toBe("press")
+    const plan = actuationPlan(pressable, win)
+    expect(plan[0]).toMatchObject({ mode: "declared", label: "press" })
+    expect(plan[0].args).toMatchObject({ action: "press" })
+    expect(plan[1]).toMatchObject({ mode: "pixel", label: "pixel(60,30)" })
+  })
+
+  test("no frame means no pixel rung — the declared action is the only rung", () => {
+    const pressable = { element_token: "s1:3", role: "AXButton", label: "OK", actions: ["AXPress"] }
+    expect(actuationPlan(pressable, win).map((r) => r.mode)).toEqual(["declared"])
+  })
+
+  test("an element with no declared action and no role default falls to a plain element click", () => {
+    const mystery = { element_token: "s1:4", role: "AXGroup", label: "canvas" }
+    expect(declaredAction(mystery)).toBeUndefined()
+    const plan = actuationPlan(mystery, win)
+    expect(plan).toHaveLength(1)
+    expect(plan[0]).toMatchObject({ mode: "declared", label: "click", args: { element_token: "s1:4" } })
+  })
+
+  test("changeEvidence reports the before/after screen delta, never a bare boolean", () => {
+    expect(changeEvidence("declared", "n1", "n2")).toEqual({
+      mode: "declared",
+      before: "n1",
+      after: "n2",
+      changed: true,
+    })
+    expect(changeEvidence("pixel", "n1", "n1").changed).toBe(false)
   })
 })
 

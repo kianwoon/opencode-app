@@ -14,15 +14,16 @@
  *   stuck           yes | no
  *   need_screenshot yes | no
  *
- * ENFORCED contract — the control table is CAPPED, not lossless: the tool
- * boundary (src/tool/jev-decide.ts) slices to CONTROLS_MAX (60) and
- * buildState/buildControllerQuestions re-slice defensively, so controls beyond
- * 60 are DROPPED. The cap exists because buildState clips the whole state JSON
- * to STATE_MAX: an oversize table would clip the state mid-JSON and corrupt it.
- * Truncation is therefore always marked explicitly — the marker reaches both the
- * controller state and the tool output — so a hidden tail target is never
- * mistaken for an absent one. Per-label descriptions are shrunk to LABEL_MAX and
- * the surrounding prose to STATE_MAX; the cap is never raised silently.
+ * ENFORCED contract — the decider's OPTION SPACE equals the EYES' enumerated
+ * world: a chooser cannot choose what it is not offered. buildControllerQuestions
+ * offers the whole frontier the eyes enumerated, bounded only by the shared
+ * content-adaptive hard max CHOICE_HARD_MAX (600, == ui-eyes FRONTIER_HARD_MAX),
+ * never a fixed 60 prefix — a 159-label frontier is choosable in full, so a
+ * target at position 150+ is not silently unchoosable. The STATE context string
+ * is separately bounded (STATE_FRONTIER_MAX, sampled across the range, first and
+ * last always kept) so its text stays under STATE_MAX; that bound never limits
+ * the choice set. Per-label descriptions are shrunk to LABEL_MAX and the prose
+ * to STATE_MAX.
  */
 
 import { readFileSync } from "node:fs"
@@ -41,6 +42,25 @@ import {
 export const STATE_MAX = 4_000
 export const LABEL_MAX = 80
 export const CONTROLS_MAX = 60
+
+/**
+ * GENERAL RULE — the decider's OPTION SPACE must equal the EYES' enumerated
+ * world: a chooser cannot choose what it is not offered. The choice set is
+ * bounded only by the SAME content-adaptive hard max the eyes enumerate to
+ * (ui-eyes.ts FRONTIER_HARD_MAX), never a fixed 60 prefix — a 159-label frontier
+ * is offered in full, so a target at position 150+ is choosable. A drift-guard
+ * test asserts this equals the eyes' bound. Unseen case it covers: an 800-option
+ * list whose goal target is the final option — sampled across the range, the
+ * last option is still offered.
+ */
+export const CHOICE_HARD_MAX = 600
+
+/**
+ * The frontier a STATE string carries before the STATE_MAX guard bites. This
+ * bounds the CONTEXT prose ONLY; it never bounds the choice set. Sampling spans
+ * the whole range, so no region is hidden from the context either.
+ */
+export const STATE_FRONTIER_MAX = Math.max(1, Math.floor((STATE_MAX - 800) / (LABEL_MAX + 16)))
 
 /**
  * GENERAL RULE — a cap must SAMPLE ACROSS the whole ordered range, never keep a
@@ -142,9 +162,11 @@ export interface ControllerDecision {
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
 
 /**
- * Assemble the `state` text. The goal/action prose is clipped to STATE_MAX;
- * control labels are clipped individually to LABEL_MAX but the control COUNT is
- * never reduced here (the same full list is supplied separately as criteria).
+ * Assemble the `state` text. The goal/action prose is clipped to STATE_MAX.
+ * The frontier/path here carry a SAMPLED view bounded by STATE_FRONTIER_MAX so
+ * the text stays valid under STATE_MAX; the FULL list is supplied separately as
+ * the target criteria (buildControllerQuestions), which is the choice set — this
+ * bound never limits what jev can choose.
  */
 export function buildState(input: ControllerState): string {
   const lastAction = clip(input.lastAction ?? "(none — first step)", 400)
@@ -158,15 +180,15 @@ export function buildState(input: ControllerState): string {
         goal: clip(map.goal, 2_000),
         start: clip(map.start, LABEL_MAX),
         current: clip(map.current, LABEL_MAX),
-        frontier: map.frontier.slice(0, CONTROLS_MAX).map((label) => clip(label, LABEL_MAX)),
-        path: map.path.slice(0, CONTROLS_MAX).map((node) => clip(node, LABEL_MAX)),
+        frontier: sampleWithinCap(map.frontier, STATE_FRONTIER_MAX).map((label) => clip(label, LABEL_MAX)),
+        path: sampleWithinCap(map.path, STATE_FRONTIER_MAX).map((node) => clip(node, LABEL_MAX)),
         lastAction,
       }),
       STATE_MAX,
     )
   }
   const goal = clip(input.goal ?? "", 2_000)
-  const controls = (input.controls ?? []).slice(0, CONTROLS_MAX).map((label) => clip(label, LABEL_MAX))
+  const controls = sampleWithinCap(input.controls ?? [], STATE_FRONTIER_MAX).map((label) => clip(label, LABEL_MAX))
   return clip(JSON.stringify({ goal, lastAction, controls }), STATE_MAX)
 }
 
@@ -193,15 +215,17 @@ export function jevKey(provider = "typesafe"): string | undefined {
 }
 
 /**
- * Build the one-batch question record. Target options come from the FULL control
- * set (order preserved, count intact); each label description is clipped to
- * LABEL_MAX. Returns `undefined` when there is no usable action to gate on.
+ * Build the one-batch question record. THE CHOICE SET: target options come from
+ * the FULL frontier the eyes enumerated (order preserved), bounded only by
+ * CHOICE_HARD_MAX — never a 60 prefix, so every label the eyes can see is one
+ * jev can choose. Each label description is clipped to LABEL_MAX. Returns
+ * `undefined` when there is no usable action to gate on.
  */
 export function buildControllerQuestions(
   controls: readonly string[],
   opts?: { readonly goalMet?: boolean },
 ): Record<string, { type: "choice"; instructions: string; criteria: Record<string, string> }> | undefined {
-  const visible = controls.slice(0, CONTROLS_MAX)
+  const visible = sampleWithinCap(controls, CHOICE_HARD_MAX)
   const allActions = ACTIONS.reduce<Record<string, string>>((acc, action) => {
     acc[action] = ACTION_CRITERIA[action] ?? action
     return acc

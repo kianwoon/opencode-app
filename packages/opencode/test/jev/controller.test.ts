@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  CHOICE_HARD_MAX,
   CONTROLS_MAX,
   LABEL_MAX,
   buildControllerQuestions,
@@ -9,6 +10,7 @@ import {
   sampleWithinCap,
   type JevAction,
 } from "@/jev/controller"
+import { FRONTIER_HARD_MAX } from "@/tool/ui-eyes"
 
 // Shapes below mirror live decisions captures (choice + per-label probabilities).
 const ans = (choice: string, probabilities: Record<string, number>) => ({ type: "choice", choice, probabilities })
@@ -192,5 +194,41 @@ describe("sampleWithinCap", () => {
     // the selection reaches past a 60-wide leading prefix — not narrowed to it
     expect(picked.indexOf("ctrl-85")).toBeGreaterThan(-1)
     expect(picked.filter((item) => item !== undefined).length).toBeGreaterThan(CONTROLS_MAX / 2)
+  })
+})
+
+// hardcode-guard:allow the frontier literals are the enumerable input under test
+describe("choice set completeness — options == eyes world", () => {
+  const dense = Array.from({ length: 159 }, (_, i) => `c${i + 1} AXButton control-${i}`)
+
+  test("offers EVERY frontier label past the old 60 cap; a position-150 target is selectable", () => {
+    const q = buildControllerQuestions(dense)
+    const keys = Object.keys(q?.target.criteria ?? {}).filter((key) => key !== "none")
+    // all 159 offered, in order — nothing at positions 61+ is dropped
+    expect(keys.length).toBe(159)
+    expect(keys).toEqual(dense.map((label, i) => `${i}:${label}`))
+    // the label at position 150 is a live choice criterion
+    expect(keys[150]).toBe(`150:${dense[150]}`)
+    expect(keys.some((key) => key.includes("control-158"))).toBe(true)
+  })
+
+  test("no production path still slices the choice set to CONTROLS_MAX", () => {
+    const oversize = Array.from({ length: CONTROLS_MAX + 50 }, (_, i) => `x${i}`)
+    const q = buildControllerQuestions(oversize)
+    // CONTROLS_MAX(60)+50 options survive, plus the `none` sentinel
+    expect(Object.keys(q?.target.criteria ?? {}).length).toBe(CONTROLS_MAX + 50 + 1)
+  })
+
+  test("the decider's hard max is aligned with the eyes' frontier bound", () => {
+    expect(CHOICE_HARD_MAX).toBe(FRONTIER_HARD_MAX)
+  })
+
+  test("the state context stays bounded and valid on the dense screen", () => {
+    const state = buildState({
+      goal: "reach the last control",
+      map: { goal: "reach the last control", start: "n0", current: "n1", frontier: dense, path: ["n0", "n1"] },
+    })
+    expect(state.length).toBeLessThanOrEqual(4000)
+    expect(() => JSON.parse(state)).not.toThrow()
   })
 })

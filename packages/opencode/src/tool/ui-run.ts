@@ -1,17 +1,24 @@
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
-import { Cause, Effect, Exit, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Schema } from "effect"
 import { MCP } from "../mcp"
 import * as Tool from "./tool"
-import {
-  CONTROLS_MAX,
-  LABEL_MAX,
-  jevControlDetailed,
-  jevKey,
-  sampleWithinCap,
-  type ControllerOutcome,
-  type JevAction,
-  type NavMap,
-} from "../jev/controller"
+import { jevControlDetailed, jevKey, type ControllerOutcome, type JevAction, type NavMap } from "../jev/controller"
+import { advanceMap, buildCandidates, decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
+import type { Element } from "./ui-eyes"
+import { actuationPlan, changeEvidence, type ActuationEvidence, type ActuationRung } from "./ui-hands"
+
+// EYES owns observation + world model; HANDS owns actuation. They are
+// re-exported so the loop's public surface (and its tests) reach the organs
+// through one entry point.
+export {
+  FRONTIER_HARD_MAX,
+  advanceMap,
+  buildCandidates,
+  decodeObservation,
+  resolveTarget,
+  screenSignature,
+} from "./ui-eyes"
+export type { Element, Observation } from "./ui-eyes"
 
 const DEFAULT_MAX_STEPS = 30
 const HARD_MAX_STEPS = 100
@@ -20,112 +27,6 @@ const HARD_MAX_STEPS = 100
 const MAX_AMBIGUOUS = 3
 const DEFAULT_TIMEOUT = 30_000
 const MAX_EXPECT = 8
-
-/** AXStaticText/AXImage carry no actions, so offering them as click targets emits blind clicks. */
-const NON_INTERACTIVE = new Set(["AXStaticText", "AXImage"])
-
-const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
-
-export const Element = Schema.Struct({
-  element_index: Schema.optional(Schema.Int),
-  element_token: Schema.optional(Schema.String),
-  role: Schema.optional(Schema.String),
-  label: Schema.optional(Schema.String),
-  enabled: Schema.optional(Schema.Boolean),
-})
-export type Element = Schema.Schema.Type<typeof Element>
-
-const Observation = Schema.Struct({
-  snapshot_id: Schema.String,
-  /**
-   * `tree_format:"elements"` (the format this loop requests) delivers the array.
-   * The driver's default `tree_format:"markdown"` omits it and ships a
-   * `tree_markdown` string instead; a missing array defaults to empty so the
-   * loop proceeds on zero candidates rather than stopping — parse the format
-   * asked for, tolerate the ones it is not.
-   */
-  elements: Schema.Array(Element).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-})
-export type Observation = Schema.Schema.Type<typeof Observation>
-
-/**
- * Decode a `cua-driver_get_window_state` `structuredContent`. A missing or
- * undecodable payload is never guessed from the text channel: it returns `null`
- * and the run stops, because a target invented from prose would be a blind click.
- */
-export function decodeObservation(input: unknown): Observation | null {
-  const decoded = Schema.decodeUnknownOption(Observation)(input)
-  return Option.isSome(decoded) ? decoded.value : null
-}
-
-/**
- * Turn observed elements into the capped label set the controller chooses from.
- * Labels are the round-trip handle: `foldController` returns exactly the clipped
- * string it was offered, so `byLabel` maps a decision back to a live element_token.
- */
-export function buildCandidates(elements: readonly Element[]): {
-  labels: string[]
-  byLabel: Map<string, Element>
-  truncated: string | undefined
-} {
-  const usable = elements.filter(
-    (element) =>
-      element.element_token !== undefined &&
-      element.role !== undefined &&
-      !NON_INTERACTIVE.has(element.role) &&
-      element.enabled !== false,
-  )
-  const entries = sampleWithinCap(usable, CONTROLS_MAX).map((element, i) => ({
-    element,
-    label: clip(`c${i + 1} ${element.role} ${element.label ?? ""}`.trim(), LABEL_MAX),
-  }))
-  return {
-    labels: entries.map((entry) => entry.label),
-    byLabel: new Map(entries.map((entry) => [entry.label, entry.element])),
-    truncated:
-      usable.length > CONTROLS_MAX
-        ? `controls truncated from ${usable.length} to ${CONTROLS_MAX}; the cap samples the whole range so no region is hidden`
-        : undefined,
-  }
-}
-
-/**
- * GENERAL RULE — node identity is a STABLE signature of what the screen IS, not
- * of the observation that captured it. The driver invalidates `snapshot_id` on
- * every fresh read, so keying nodes on it makes each observation look like a new
- * screen: `advanceMap` then never dedups and `path` records observations, not
- * visits. The signature is the ordered role+label of every observed element;
- * ephemeral fields (snapshot_id, element_token, element_index, enabled) are
- * deliberately excluded. The same screen therefore yields the same node across
- * successive observations whose snapshot ids change.
- */
-export function screenSignature(elements: readonly Element[]): string {
-  const shape = elements.map((element) => `${element.role ?? ""}\u0000${element.label ?? ""}`).join("\u0001")
-  let h = 5381
-  for (let i = 0; i < shape.length; i++) h = ((h << 5) + h + shape.charCodeAt(i)) | 0
-  return `n${(h >>> 0).toString(36)}`
-}
-
-/**
- * Update the navigation map from THIS iteration's fresh observation. Code owns
- * the map: `current` becomes the STABLE screen node (see `screenSignature`), the
- * `frontier` the code-enumerated next-level option set at that node, and `path`
- * gains the node only when it differs from the last visited one, so a
- * backtracking revisit is recorded rather than erased. `start` is pinned on the
- * first observation. This is the map the loop carries across observe, enumerate,
- * decide, act, verify, observe.
- */
-export function advanceMap(
-  goal: string,
-  previous: NavMap | undefined,
-  elements: readonly Element[],
-  frontier: readonly string[],
-): NavMap {
-  const node = screenSignature(elements)
-  const start = previous?.start ?? node
-  const path = previous && previous.current === node ? previous.path : [...(previous?.path ?? []), node]
-  return { goal, start, current: node, frontier, path }
-}
 
 /** jev's `goal_met` (or a `done` action) is ADVISORY, never a termination condition. */
 export const isGoalMet = (outcome: ControllerOutcome): boolean =>
@@ -198,7 +99,12 @@ export interface StepInput {
   /** Controller verdict for THIS iteration (accepted | below_gate | unmeasured). */
   readonly outcome: ControllerOutcome
   /** Candidate index rebuilt from THIS iteration's fresh observation. */
-  readonly candidates: { readonly labels: readonly string[]; readonly byLabel: ReadonlyMap<string, Element> }
+  readonly candidates: {
+    readonly labels: readonly string[]
+    readonly byLabel: ReadonlyMap<string, Element>
+    /** Full usable set for this observation; re-resolves a churned target by role+label. */
+    readonly elements?: readonly Element[]
+  }
   /** Advisory `goal_met` from jev (or a `done` action). Never authoritative. */
   readonly goalMet: boolean
   /** Observed proof the goal is met (`cua-driver_verify_state` satisfied). */
@@ -246,9 +152,13 @@ export function decideStep(input: StepInput): StepDecision {
       reason: `action-${decision.action}`,
     }
 
-  // Validate the target against THIS iteration's fresh candidate set — never a stale map.
+  // Validate the target against THIS iteration's fresh candidate set — never a stale
+  // map. EYES identity: a direct label hit wins; on a miss the target is re-resolved
+  // by role+label, so an element whose token/snapshot churned is acted on rather than
+  // dropped as "not-in-fresh-candidates".
   if (!decision.target) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
-  const element = input.candidates.byLabel.get(decision.target)
+  const fresh = input.candidates.elements ?? [...input.candidates.byLabel.values()]
+  const element = input.candidates.byLabel.get(decision.target) ?? resolveTarget(decision.target, fresh)
   if (!element?.element_token) return { kind: "safe", action: "observe", reason: "target-not-in-fresh-candidates" }
   if (isDestructive(decision.target)) return { kind: "checkpoint", target: decision.target, reason: "destructive-boundary" }
   if (decision.action === "type") {
@@ -287,6 +197,8 @@ export interface StepTrace {
   readonly strength?: number
   readonly decision: StepDecision["kind"]
   readonly reason: string
+  /** HANDS change evidence for the action this step took, once the next screen is observed. */
+  readonly actuation?: ActuationEvidence
 }
 
 export function traceStep(step: number, outcome: ControllerOutcome, verdict: StepDecision): StepTrace {
@@ -439,6 +351,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // Node signature at which the last action ran — a no-op (screen
           // unchanged) feeds the ambiguity bound instead of resetting it.
           let actedAt: string | undefined
+          // HANDS: the mode + before-signature of the last action, folded with the
+          // next observation into change evidence (never a bare success boolean).
+          let lastActuation: { readonly mode: ActuationEvidence["mode"]; readonly before: string } | undefined
           // Every iteration's decision, emitted so a caller can verify the chain.
           const trace: StepTrace[] = []
 
@@ -480,6 +395,19 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // this freshness, carry `path` across iterations, then hand the whole
             // map to jev as `state` and let it CHOOSE among the frontier options.
             map = advanceMap(goal, map, observation.elements, candidates.labels)
+
+            // HANDS change evidence: the action ran at `lastActuation.before`; the
+            // fresh signature is its `after`. State WHAT changed, and attach it to
+            // the trace entry that took the action.
+            if (lastActuation) {
+              const evidenceOfChange = changeEvidence(lastActuation.mode, lastActuation.before, map.current)
+              const prior = trace[trace.length - 1]
+              if (prior) trace[trace.length - 1] = { ...prior, actuation: evidenceOfChange }
+              lines.push(
+                `[change ${step + 1}] ${evidenceOfChange.mode} changed=${evidenceOfChange.changed} (${evidenceOfChange.before}→${evidenceOfChange.after})`,
+              )
+              lastActuation = undefined
+            }
 
             // (b) Did the action executed last iteration actually change the screen?
             // The fresh signature answers it; an unchanged screen is a no-op, not
@@ -538,27 +466,41 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               continue
             }
 
-            const actArgs = {
-              element_token: verdict.element.element_token,
-              pid: params.window.pid,
-              window_id: params.window.window_id,
-              ...(verdict.action === "type" ? { text: verdict.text } : {}),
+            // hardcode-guard:allow the actuation rungs are the organ's general contract
+            // (declared action first, pixel frame fallback second), not a case literal.
+            // HANDS actuation. A type is one rung (with the driver's foreground
+            // remedy for same-pid keyboard ambiguity); a click is MULTI-MODAL: the
+            // element's declared action first, then a foreground pixel click at its
+            // frame. A rung is tried only when its predecessor fails.
+            let actLabel: string
+            let actResult: DriverOutcome
+            let clickRung: ActuationRung | undefined
+            if (verdict.action === "type") {
+              const actArgs = {
+                element_token: verdict.element.element_token,
+                pid: params.window.pid,
+                window_id: params.window.window_id,
+                text: verdict.text,
+              }
+              const attempt = yield* callDriver(tools, "cua-driver_type_text", actArgs, ctx.abort)
+              const retried = !attempt.ok && needsForegroundDelivery(attempt.error)
+              actResult = retried
+                ? yield* callDriver(tools, "cua-driver_type_text", { ...actArgs, delivery_mode: "foreground" }, ctx.abort)
+                : attempt
+              actLabel = `type_text "${verdict.text}"${retried ? " (foreground retry)" : ""}`
+            } else {
+              const plan = actuationPlan(verdict.element, params.window)
+              actLabel = plan[0]?.label ?? "click"
+              actResult = { ok: false, error: "no actuation rung" }
+              for (const candidate of plan) {
+                actResult = yield* callDriver(tools, "cua-driver_click", candidate.args, ctx.abort)
+                actLabel = candidate.label
+                if (actResult.ok) {
+                  clickRung = candidate
+                  break
+                }
+              }
             }
-            const attempt = yield* callDriver(
-              tools,
-              verdict.action === "type" ? "cua-driver_type_text" : "cua-driver_click",
-              actArgs,
-              ctx.abort,
-            )
-            // Exactly one rung: the driver refuses process-scoped key events when one pid
-            // owns several eligible windows, and offers foreground delivery as the remedy.
-            // click is NEVER escalated — pointer/AXPress is already window-targeted, so the
-            // refusal class is keyboard-delivery-specific only.
-            const retried = !attempt.ok && verdict.action === "type" && needsForegroundDelivery(attempt.error)
-            const actResult = retried
-              ? yield* callDriver(tools, "cua-driver_type_text", { ...actArgs, delivery_mode: "foreground" }, ctx.abort)
-              : attempt
-            const actLabel = verdict.action === "type" ? `type_text "${verdict.text}"` : "click"
             const target = verdict.element.label ?? verdict.element.element_token
             if (!actResult.ok) {
               status = "failed"
@@ -568,10 +510,14 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             }
             executed++
             // The action ran at this node; the next observation reveals whether it
-            // changed the screen (see nextAmbiguity).
+            // changed the screen (see nextAmbiguity) and folds the change evidence.
             actedAt = map.current
+            lastActuation = {
+              mode: clickRung ? clickRung.mode : "type",
+              before: map.current,
+            }
             previous = `[ok ${step + 1}] ${actLabel} → ${target}`
-            lines.push(`${previous}${retried ? " (foreground retry)" : ""}`)
+            lines.push(`${previous}`)
 
             if (params.expect !== undefined) {
               const verified = yield* callDriver(
