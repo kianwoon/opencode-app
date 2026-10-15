@@ -122,6 +122,32 @@ describe("buildState", () => {
   })
 })
 
+// hardcode-guard:allow fixture node ids and labels are the enumerable input under test
+describe("navigation map state", () => {
+  const map = {
+    goal: "buy the widget",
+    start: "s1",
+    current: "s3",
+    frontier: ["c1 AXButton Buy", "c2 AXButton Back"],
+    path: ["s1", "s2", "s3"],
+  }
+
+  test("the state sent to jev carries goal + start + current + frontier + path", () => {
+    const parsed = JSON.parse(buildState({ map, lastAction: "clicked Widget" }))
+    expect(parsed.goal).toBe("buy the widget")
+    expect(parsed.start).toBe("s1")
+    expect(parsed.current).toBe("s3")
+    expect(parsed.frontier).toEqual(["c1 AXButton Buy", "c2 AXButton Back"])
+    expect(parsed.path).toEqual(["s1", "s2", "s3"])
+    expect(parsed.lastAction).toBe("clicked Widget")
+  })
+
+  test("the code-enumerated frontier is exactly the target option set (+ none)", () => {
+    const q = buildControllerQuestions(map.frontier)
+    expect(Object.keys(q?.target.criteria ?? {})).toEqual(["0:c1 AXButton Buy", "1:c2 AXButton Back", "none"])
+  })
+})
+
 describe("controllerMemoKey", () => {
   const base = ["ctl", "jev-latest", 0.7, 0.5, 30_000, "h1"] as const
 

@@ -2,7 +2,14 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import { MCP } from "../mcp"
 import * as Tool from "./tool"
-import { CONTROLS_MAX, LABEL_MAX, jevControlDetailed, jevKey, type ControllerOutcome } from "../jev/controller"
+import {
+  CONTROLS_MAX,
+  LABEL_MAX,
+  jevControlDetailed,
+  jevKey,
+  type ControllerOutcome,
+  type NavMap,
+} from "../jev/controller"
 
 const DEFAULT_MAX_STEPS = 30
 const HARD_MAX_STEPS = 100
@@ -80,6 +87,48 @@ export function buildCandidates(elements: readonly Element[]): {
         : undefined,
   }
 }
+
+/**
+ * GENERAL RULE — node identity is a STABLE signature of what the screen IS, not
+ * of the observation that captured it. The driver invalidates `snapshot_id` on
+ * every fresh read, so keying nodes on it makes each observation look like a new
+ * screen: `advanceMap` then never dedups and `path` records observations, not
+ * visits. The signature is the ordered role+label of every observed element;
+ * ephemeral fields (snapshot_id, element_token, element_index, enabled) are
+ * deliberately excluded. The same screen therefore yields the same node across
+ * successive observations whose snapshot ids change.
+ */
+export function screenSignature(elements: readonly Element[]): string {
+  const shape = elements.map((element) => `${element.role ?? ""}\u0000${element.label ?? ""}`).join("\u0001")
+  let h = 5381
+  for (let i = 0; i < shape.length; i++) h = ((h << 5) + h + shape.charCodeAt(i)) | 0
+  return `n${(h >>> 0).toString(36)}`
+}
+
+/**
+ * Update the navigation map from THIS iteration's fresh observation. Code owns
+ * the map: `current` becomes the STABLE screen node (see `screenSignature`), the
+ * `frontier` the code-enumerated next-level option set at that node, and `path`
+ * gains the node only when it differs from the last visited one, so a
+ * backtracking revisit is recorded rather than erased. `start` is pinned on the
+ * first observation. This is the map the loop carries across observe, enumerate,
+ * decide, act, verify, observe.
+ */
+export function advanceMap(
+  goal: string,
+  previous: NavMap | undefined,
+  elements: readonly Element[],
+  frontier: readonly string[],
+): NavMap {
+  const node = screenSignature(elements)
+  const start = previous?.start ?? node
+  const path = previous && previous.current === node ? previous.path : [...(previous?.path ?? []), node]
+  return { goal, start, current: node, frontier, path }
+}
+
+/** jev's `goal_met` (or a `done` action) is ADVISORY, never a termination condition. */
+export const isGoalMet = (outcome: ControllerOutcome): boolean =>
+  outcome.verdict === "accepted" && (outcome.decision.goalMet === true || outcome.decision.action === "done")
 
 /**
  * The cua-driver refuses process-scoped key events when one pid owns several
@@ -339,6 +388,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           let previous: string | undefined
           let evidence = false
           let truncated: string | undefined
+          // The navigation map, re-derived from the observed UI EVERY iteration.
+          let map: NavMap | undefined
 
           for (let step = 0; step < maxSteps; step++) {
             // OBSERVE fresh EVERY iteration; a candidate map is never reused across steps.
@@ -374,17 +425,19 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // Keep the newest snapshot's marker; it is the one that hid elements.
             if (candidates.truncated) truncated = candidates.truncated
 
+            // CODE owns the map: re-derive current + the enumerated frontier from
+            // this freshness, carry `path` across iterations, then hand the whole
+            // map to jev as `state` and let it CHOOSE among the frontier options.
+            map = advanceMap(goal, map, observation.elements, candidates.labels)
             const outcome = yield* Effect.promise(() =>
               jevControlDetailed({
-                goal,
+                map,
                 lastAction: `iteration ${step + 1}/${maxSteps}${previous ? ` | after: ${previous}` : ""}`,
-                controls: candidates.labels,
                 key,
                 askGoalMet: true,
               }),
             )
-            const goalMet =
-              outcome.verdict === "accepted" && (outcome.decision.goalMet || outcome.decision.action === "done")
+            const goalMet = isGoalMet(outcome)
 
             const verdict = decideStep({
               outcome,

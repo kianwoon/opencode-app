@@ -57,13 +57,29 @@ const ACTION_CRITERIA: Record<string, string> = {
 
 const YES_NO: Record<string, string> = { yes: "Yes", no: "No" }
 
-export interface ControllerState {
-  /** What the agent is trying to accomplish. */
+/**
+ * NAVIGATION MAP — the loop's input model, owned by CODE. `current` is the node
+ * the agent is on; `frontier` is the code-enumerated next-level option set at
+ * that node; `path` is the node ids visited in order; `start` is where the run
+ * began. jev is a decider: it is handed this map and chooses ONE frontier option.
+ */
+export interface NavMap {
   readonly goal: string
+  readonly start: string
+  readonly current: string
+  readonly frontier: readonly string[]
+  readonly path: readonly string[]
+}
+
+export interface ControllerState {
+  /** NAVIGATION MAP — the loop's input model; preferred over the flat list. */
+  readonly map?: NavMap
+  /** Goal text: carried inside `map`; standalone only for the legacy flat list. */
+  readonly goal?: string
   /** Human-readable last action taken (empty on the first step). */
   readonly lastAction?: string
-  /** On-screen control labels (fixed order; sliced to CONTROLS_MAX). */
-  readonly controls: readonly string[]
+  /** Legacy flat on-screen control labels (the `jev_decide` tool's input). */
+  readonly controls?: readonly string[]
 }
 
 export interface ControllerInput extends ControllerState {
@@ -106,9 +122,26 @@ const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(
  * never reduced here (the same full list is supplied separately as criteria).
  */
 export function buildState(input: ControllerState): string {
-  const goal = clip(input.goal ?? "", 2_000)
   const lastAction = clip(input.lastAction ?? "(none — first step)", 400)
-  const controls = input.controls.slice(0, CONTROLS_MAX).map((label) => clip(label, LABEL_MAX))
+  // Map branch: the state IS the navigation map (goal + start + current +
+  // frontier + path), so jev sees where it is, the enumerated options at that
+  // node, and how it got there — not just a flat one-screen control list.
+  if (input.map) {
+    const map = input.map
+    return clip(
+      JSON.stringify({
+        goal: clip(map.goal, 2_000),
+        start: clip(map.start, LABEL_MAX),
+        current: clip(map.current, LABEL_MAX),
+        frontier: map.frontier.slice(0, CONTROLS_MAX).map((label) => clip(label, LABEL_MAX)),
+        path: map.path.slice(0, CONTROLS_MAX).map((node) => clip(node, LABEL_MAX)),
+        lastAction,
+      }),
+      STATE_MAX,
+    )
+  }
+  const goal = clip(input.goal ?? "", 2_000)
+  const controls = (input.controls ?? []).slice(0, CONTROLS_MAX).map((label) => clip(label, LABEL_MAX))
   return clip(JSON.stringify({ goal, lastAction, controls }), STATE_MAX)
 }
 
@@ -261,7 +294,11 @@ export const foldController = (
  * weak verdict never sticks.
  */
 export async function jevControlDetailed(input: ControllerInput): Promise<ControllerOutcome> {
-  const questions = buildControllerQuestions(input.controls, { goalMet: input.askGoalMet })
+  // The controller's target options are the CODE-ENUMERATED frontier at the
+  // current node (map input model), or the legacy flat list — never its own guess.
+  const questions = buildControllerQuestions(input.map ? input.map.frontier : (input.controls ?? []), {
+    goalMet: input.askGoalMet,
+  })
   if (!questions) return { verdict: "unmeasured" }
   const transport = jevTransport(input.model)
   if (!transport) return { verdict: "unmeasured" }
