@@ -21,7 +21,7 @@
  * with a `back` corrective (no dialog to dismiss) rather than a `dismiss`.
  */
 
-import type { RegionKind, Scene, SceneRegion, SceneText } from "./ui-scene"
+import type { RegionKind, Scene, SceneItem, SceneRegion, SceneText } from "./ui-scene"
 import type { Subgoal, SubgoalKind } from "./ui-maneuvers"
 
 // ---------------------------------------------------------------------------
@@ -43,6 +43,14 @@ export type Predicate =
       readonly anchors?: readonly string[]
     }
   | { readonly op: "dialog_absent" }
+  /**
+   * MUTATION, PROVEN BY OBSERVED STATE: an option whose label matches carries an
+   * OBSERVED selected/checked/on state. Never satisfied by text presence — a label
+   * that merely says "black" is not a selection.
+   */
+  | { readonly op: "option_selected"; readonly matching: string }
+  /** MUTATION: a matching target's observable state (selected/value) is explicitly set. */
+  | { readonly op: "state_changed"; readonly matching: string }
 
 export type PredicateKind = Predicate["op"]
 
@@ -286,6 +294,24 @@ function textIdsInRegionKind(scene: Scene, regionKind: RegionKind): Set<string> 
 }
 
 /**
+ * OBSERVED STATE of a scene item — the affirmative "on" of a control, read from
+ * the element's OWN selected flag or value (never from its label text). `undefined`
+ * means the scene exposes no state for it (e.g. an AX button that under-declares
+ * selection), so a state predicate over it stays unproven rather than guessed.
+ */
+const STATE_ON = new Set(["1", "true", "on", "yes", "selected", "checked", "enabled"])
+function observedState(item: SceneItem): "on" | "off" | undefined {
+  if (item.selected === true) return "on"
+  if (item.selected === false) return "off"
+  const value = (item.element.value ?? "").trim().toLowerCase()
+  if (value.length === 0) return undefined
+  return STATE_ON.has(value) ? "on" : "off"
+}
+
+const stateLabel = (item: SceneItem): string =>
+  item.selected !== undefined ? `selected=${item.selected}` : `value=${item.element.value ?? ""}`
+
+/**
  * Evaluate a predicate against a Scene. A predicate whose required observation is
  * absent (e.g. no url/host anywhere in the scene) returns `unknown` — it is never
  * silently `true`.
@@ -392,6 +418,38 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
         ...(dialog ? {} : { cited: ["no dialog region"] }),
       }
     }
+    case "option_selected": {
+      const matches = scene.items.filter((item) => includesToken(item.label, predicate.matching))
+      if (matches.length === 0)
+        return {
+          verdict: "unknown",
+          evidence: `no option whose label carries "${predicate.matching}" is observable in the scene`,
+        }
+      const on = matches.find((item) => observedState(item) === "on")
+      return {
+        verdict: on ? "true" : "false",
+        evidence: on
+          ? `option "${on.label}" is observed selected (${stateLabel(on)})`
+          : `${matches.length} option(s) matching "${predicate.matching}" present but none observed selected`,
+        ...(on !== undefined ? { cited: [`${on.label} [${stateLabel(on)}]`] } : {}),
+      }
+    }
+    case "state_changed": {
+      const matches = scene.items.filter((item) => includesToken(item.label, predicate.matching))
+      if (matches.length === 0)
+        return {
+          verdict: "unknown",
+          evidence: `no target whose label carries "${predicate.matching}" is observable in the scene`,
+        }
+      const set = matches.find((item) => observedState(item) !== undefined)
+      return {
+        verdict: set ? "true" : "false",
+        evidence: set
+          ? `target "${set.label}" carries the explicit observed state (${stateLabel(set)})`
+          : `${matches.length} target(s) matching "${predicate.matching}" carry no observable state`,
+        ...(set !== undefined ? { cited: [`${set.label} [${stateLabel(set)}]`] } : {}),
+      }
+    }
   }
 }
 
@@ -413,7 +471,102 @@ const WRITE_INTENT =
 
 /** A goal is READ-ONLY when it names no state-mutating verb. */
 export function readOnlyGoal(goal: string): boolean {
-  return !WRITE_INTENT.test(goal)
+  return goalIntent(goal) !== "mutate" && !WRITE_INTENT.test(goal)
+}
+
+/**
+ * INTENT CLASSIFICATION — the goal's OWN words select the plan SHAPE. A MUTATION
+ * goal (change/set/make/turn/enable/…, or one that names an application to
+ * launch) is never planned as a read and never completes on a read predicate; a
+ * NAVIGATE goal (go/open/visit, or a URL value) reaches a destination; everything
+ * else is a READ. hardcode-guard:allow the verb families are a general
+ * goal-reading grammar (an intent input), not case literals.
+ */
+export type GoalIntent = "mutate" | "navigate" | "read"
+
+const MUTATE_INTENT =
+  /\b(change|set|make|turn|enable|disable|toggle|switch|adjust|apply|assign|configure|rename|resize|move|select|choose|pick|update|edit)\b/i
+
+export function goalIntent(goal: string): GoalIntent {
+  if (MUTATE_INTENT.test(goal) || goalApp(goal) !== undefined) return "mutate"
+  if (NAV_INTENT.test(goal) || goalValue(goal) !== undefined) return "navigate"
+  return "read"
+}
+
+/**
+ * The MUTATION's value: the goal's target state. A quoted token, else the token
+ * after `to`/`into`/`as` (e.g. "... wall to black" → "black"). `undefined` when the
+ * goal names no target state.
+ */
+export function mutationValue(goal: string): string | undefined {
+  const quoted = goal.match(/["'`]([^"'`]+)["'`]/)?.[1]?.trim()
+  if (quoted) return quoted
+  return goal.match(/\b(?:to|into|as)\s+([^\s"']+)\s*$/i)?.[1]?.trim()
+}
+
+/** Tokens that name no selectable surface — generic verbs/fillers, never a target noun. */
+// hardcode-guard:allow the stopword/mutate-verb sets are a general goal-reading grammar, not case literals
+const GOAL_STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "my",
+  "your",
+  "our",
+  "their",
+  "its",
+  "this",
+  "that",
+  "these",
+  "those",
+  "to",
+  "into",
+  "as",
+  "for",
+  "of",
+  "on",
+  "off",
+  "in",
+  "at",
+  "by",
+  "and",
+  "or",
+  "is",
+  "it",
+  "mac",
+  "macos",
+  "computer",
+  "please",
+  "now",
+])
+const GOAL_VERB = /\b(change|set|make|turn|enable|disable|toggle|switch|adjust|apply|assign|configure|rename|resize|move|select|choose|pick|update|edit|read|show|list|open|go|navigate|visit|launch|activate|start|run)\b/gi
+
+/**
+ * The goal's TARGET SURFACE term: the salient noun the mutation acts on (e.g.
+ * "wallpaper"), with the verb, the value clause and generic fillers removed.
+ * Derived from the goal's own words only.
+ */
+export function targetTerm(goal: string): string | undefined {
+  const value = mutationValue(goal)?.toLowerCase()
+  const cleaned = goal
+    .replace(/["'`][^"'`]*["'`]/g, " ")
+    .replace(GOAL_VERB, " ")
+    .replace(/\b(?:to|into|as)\b[\s\S]*$/i, " ")
+  const tokens = cleaned.toLowerCase().match(/[a-z][a-z0-9-]+/g) ?? []
+  const salient = tokens.filter((token) => !GOAL_STOPWORDS.has(token) && token !== value && token.length >= 3)
+  return salient.at(-1)
+}
+
+/**
+ * An application the goal NAMES to launch/activate — never hardcoded, bound from
+ * the goal's words: the "<Name> app/application" form, else a capitalized name
+ * directly after a launch verb (a lowercase scheme like `https:` never matches).
+ */
+export function goalApp(goal: string): string | undefined {
+  const explicit = goal.match(/\bthe\s+([A-Za-z][\w .-]*?)\s+(?:app|application)\b/i)
+  if (explicit?.[1]?.trim()) return explicit[1].trim()
+  const launched = goal.match(/\b(?:launch|activate|start|run|open)\s+(?:the\s+)?([A-Z][\w.-]*)/)
+  return launched?.[1]
 }
 
 function firstInteger(goal: string): number | undefined {
@@ -482,12 +635,72 @@ function navigateSuccess(value: string): Predicate {
 }
 
 /**
+ * MUTATION PLAN SHAPE — reach the target SURFACE (an `open_app` when the goal
+ * names an application, else an `open_item` over the surface term), then APPLY the
+ * goal's value with a STATE predicate (`option_selected`). A mutation goal NEVER
+ * decomposes to a read: the read plan is unreachable from here.
+ */
+function mutationSubgoals(goal: string): PlanSubgoal[] {
+  const app = goalApp(goal)
+  const surface = targetTerm(goal)
+  const value = mutationValue(goal)
+  const openAppSub =
+    app === undefined
+      ? undefined
+      : plannedSubgoal(
+          "open_app",
+          { kind: "open_app", value: app },
+          { op: "text_present", text: app, regionKind: CONTENT_KIND },
+          NAVIGATE_BUDGET,
+        )
+  // A pure launch goal ("open the Calculator app") is just the launch.
+  if (openAppSub !== undefined && !MUTATE_INTENT.test(goal)) return [openAppSub]
+  const subs: PlanSubgoal[] = []
+  if (openAppSub !== undefined) subs.push(openAppSub)
+  if (surface !== undefined)
+    subs.push(
+      plannedSubgoal(
+        "open_item",
+        // A mutation may reach its surface through a SELECTABLE navigation row (a
+        // sidebar entry), which a read/open subgoal would never bind.
+        { kind: "open_item", matching: surface, selectable: true },
+        { op: "text_present", text: surface, regionKind: CONTENT_KIND },
+        DEFAULT_BUDGET,
+      ),
+    )
+  const target = value ?? surface
+  subs.push(
+    plannedSubgoal(
+      "apply",
+      { kind: "apply", ...(target !== undefined ? { matching: target } : {}) },
+      target !== undefined ? { op: "option_selected", matching: target } : { op: "state_changed", matching: goal },
+      DEFAULT_BUDGET,
+    ),
+  )
+  return subs
+}
+
+/**
  * Derive the candidate decompositions for a goal against a Scene. The primary
  * (commit) candidate is navigate-first when the goal names a destination not yet
  * reached; otherwise the scene-semantics decomposition is primary. All plausible
  * candidates are returned so an external chooser may reorder them.
  */
 export function plan(goal: string, scene: Scene, prior?: Plan): PlanDecision {
+  // INTENT SELECTS THE SHAPE: a mutation goal gets the mutation decomposition and
+  // can never fall through to the read fallback that produced the false completion.
+  if (goalIntent(goal) === "mutate") {
+    const mutation: PlanCandidate = {
+      id: "mutate",
+      plan: { goal, subgoals: mutationSubgoals(goal) },
+      rationale: "a mutation goal: reach the target surface, then apply the value, proven by observed state",
+    }
+    if (prior !== undefined && prior.goal === goal) {
+      const reused: PlanCandidate = { id: "prior", plan: prior, rationale: "reusing the prior decomposition for the same goal" }
+      return { candidates: [reused, mutation], commit: prior, commitId: "reused" }
+    }
+    return { candidates: [mutation], commit: mutation.plan, commitId: mutation.id }
+  }
   const value = goalValue(goal)
   const count = firstInteger(goal) ?? DEFAULT_READ_COUNT
   const readIntent = READ_INTENT.test(goal)

@@ -22,6 +22,7 @@
  */
 
 import type { Element, Observation } from "./ui-eyes"
+import { hasScrollActions } from "./ui-hands"
 
 export interface SceneBounds {
   readonly x: number
@@ -157,7 +158,9 @@ export function affordancesOf(element: Element): readonly Affordance[] {
   if (INTERACTIVE_ROLES.has(role) || actions.includes("AXPress") || actions.includes("AXConfirm"))
     out.push("activatable")
   if (SELECTABLE_ROLES.has(role) || actions.includes("AXSelect")) out.push("selectable")
-  if (SCROLL_ROLES.has(role)) out.push("scrollable")
+  // SCROLLABILITY BY ACTION, NOT ROLE: an element declaring AXScrollToVisible/Top/
+  // Bottom scrolls even with no scroll-area role.
+  if (SCROLL_ROLES.has(role) || hasScrollActions(element)) out.push("scrollable")
   return out.length > 0 ? out : ["readonly"]
 }
 
@@ -400,6 +403,21 @@ function containerText(element: Element, elements: readonly Element[], tree: Tre
 }
 
 /**
+ * A LABEL-LESS ROW's own label: the first labelled descendant it contains (e.g. a
+ * sidebar `AXRow` whose text lives on a child button). Purely structural — the row's
+ * identity is unchanged, only its exposed label is recovered.
+ */
+function descendantLabel(element: Element, elements: readonly Element[], tree: Tree): string | undefined {
+  const found = elements.find(
+    (candidate) =>
+      candidate !== element &&
+      isDescendantOf(candidate, element, tree) &&
+      (candidate.value ?? candidate.label ?? "").length > 0,
+  )
+  return found === undefined ? undefined : (found.value ?? found.label ?? "")
+}
+
+/**
  * CONTAINER-BUILT ROWS — a list whose children carry no ROW role (a web app builds
  * its rows from generic containers, so `AXRow` never appears). Recognised
  * STRUCTURALLY, never by role or name: repeated siblings under the SAME parent
@@ -591,7 +609,10 @@ export function buildScene(observation: Observation): Scene {
         if (representative === undefined) continue
         const id = identityOf(representative, tree)
         bandItems.add(representative)
-        bandLabels.set(representative, rowText(band))
+        const bandText = rowText(band)
+        // Only a non-empty band text overrides the row's own label — an unlabelled
+        // row (its text carried by a descendant control) keeps the descendant fallback.
+        if (bandText.length > 0) bandLabels.set(representative, bandText)
         for (const member of band) {
           members.push(member)
           bandMember.add(member)
@@ -647,13 +668,22 @@ export function buildScene(observation: Observation): Scene {
   }
   for (const element of elements) if (isStateChanging(element)) itemElements.add(element)
 
+  // An item's exposed label: a flat row band's text, else the container's own text
+  // cells, else the row's own label, else — a label-less row whose text lives on a
+  // descendant control (a sidebar `AXRow` carrying a labelled child button) — the
+  // first labelled descendant. Purely structural; item identity is unchanged.
+  const rowLabelOf = (element: Element): string => {
+    const band = bandLabels.get(element)
+    if (band !== undefined) return band
+    const container = containerItems.has(element) ? containerText(element, elements, tree) : ""
+    if (container.length > 0) return container
+    return (element.label ?? "").length > 0 ? (element.label ?? "") : (descendantLabel(element, elements, tree) ?? "")
+  }
+
   const items: SceneItem[] = [...itemElements].map((element) => ({
     id: identityOf(element, tree),
     role: element.role ?? "",
-    // A row built from generic containers/cells exposes the text cells it contains.
-    label:
-      bandLabels.get(element) ??
-      (containerItems.has(element) ? containerText(element, elements, tree) : (element.label ?? "")),
+    label: rowLabelOf(element),
     affordances: affordancesOf(element),
     stateChanging: isStateChanging(element),
     enabled: element.enabled !== false,

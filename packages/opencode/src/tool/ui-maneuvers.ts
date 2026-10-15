@@ -32,7 +32,17 @@ import type { Element } from "./ui-eyes"
 import type { Scene, SceneItem } from "./ui-scene"
 import { dismissDialog, goToUrl, readText, scrollTo, typeInto } from "./ui-skills"
 
-export type SubgoalKind = "navigate" | "read_items" | "open_item" | "scroll_to" | "dismiss" | "back"
+export type SubgoalKind =
+  | "navigate"
+  | "read_items"
+  | "open_item"
+  | "scroll_to"
+  | "dismiss"
+  | "back"
+  /** A MUTATION: choose the option whose label/state matches the goal's term. */
+  | "apply"
+  /** Launch or activate an application the goal named. */
+  | "open_app"
 
 export interface Subgoal {
   readonly kind: SubgoalKind
@@ -42,6 +52,12 @@ export interface Subgoal {
   readonly count?: number
   /** A token the subgoal is about (a label/fragment). */
   readonly matching?: string
+  /**
+   * MUTATION-only: allow `open_item` to bind a SELECTABLE row (a single-selection
+   * navigation row such as a sidebar entry), which LAW 1 excludes for reads/open
+   * subgoals. The target is still precondition-checked; the governor still gates it.
+   */
+  readonly selectable?: boolean
 }
 
 export type ManeuverTargetKind = "item" | "region" | "element"
@@ -130,13 +146,13 @@ const targetOf = (element: Element, scene: Scene): ManeuverTarget => {
 }
 
 /** Scene items that sit in a LIST region and are NOT state-changing — the safe rows. */
-const listedItems = (scene: Scene): SceneItem[] => {
+const listedItems = (scene: Scene, includeSelectable = false): SceneItem[] => {
   const ids = new Set<string>()
   for (const region of scene.regions) {
     if (region.kind !== LIST_KIND) continue
     for (const id of region.itemIds) ids.add(id)
   }
-  return scene.items.filter((item) => ids.has(item.id) && !item.stateChanging)
+  return scene.items.filter((item) => ids.has(item.id) && (includeSelectable || !item.stateChanging))
 }
 
 const regionTarget = (id: string, label?: string): ManeuverTarget => ({
@@ -244,7 +260,7 @@ const planReadItems: Planner = (subgoal, scene) => {
 const planOpenItem: Planner = (subgoal, scene) => {
   const matching = subgoal.matching
   const elements = sceneElements(scene)
-  const listed = listedItems(scene)
+  const listed = listedItems(scene, subgoal.selectable === true)
   const chosen = (matching ? listed.filter((item) => includesToken(item.label, matching)) : listed).slice(
     0,
     subgoal.count ?? DEFAULT_READ_COUNT,
@@ -354,6 +370,72 @@ const planBack: Planner = (_subgoal, scene) => {
   ]
 }
 
+/**
+ * `apply` — a MUTATION. Offer `select_option` for every scene target whose
+ * label (or text) carries the goal's term, so the option is chosen through the
+ * SAME affirmative click path as any other activated control (AX→pixel escalation
+ * and refused-by-policy reporting apply unchanged; the macOS wallpaper swatches
+ * are known to under-declare AX actions, so the pixel rung matters). The success
+ * is a STATE reading, never text presence. A scene with no matching option yields
+ * an empty set with a reason — the loop stops and reports rather than guessing.
+ */
+const planApply: Planner = (subgoal, scene) => {
+  const matching = subgoal.matching ?? subgoal.value
+  if (matching === undefined || matching.length === 0) return []
+  const ownedText = new Set(scene.items.map((item) => item.id))
+  const options: ManeuverOption[] = []
+  const itemTargets = scene.items
+    .filter((item) => includesToken(item.label, matching))
+    .map((item) => targetOf(item.element, scene))
+  if (itemTargets.length > 0)
+    options.push({
+      name: "select_option",
+      label: `select_option: choose the option matching "${matching}"`,
+      targets: itemTargets,
+      preconditions: [
+        { name: "matching-option-present", met: true, detail: `a scene item whose label carries "${matching}" is present` },
+      ],
+      success: success("optionSelected", "the matching option's observed state (selected/checked/on) is set, not its text"),
+      inputs: [input("matching", true, true, matching)],
+    })
+  const textTargets = scene.texts
+    .filter((text) => !ownedText.has(text.owner) && includesToken(text.text, matching))
+    .map((text) => targetOf(text.element, scene))
+  if (textTargets.length > 0)
+    options.push({
+      name: "select_option",
+      label: `select_option: choose the option whose text matches "${matching}"`,
+      targets: textTargets,
+      preconditions: [
+        { name: "matching-option-text-present", met: true, detail: `a scene text carrying "${matching}" is present` },
+      ],
+      success: success("optionSelected", "the matching option's observed state (selected/checked/on) is set, not its text"),
+      inputs: [input("matching", true, true, matching)],
+    })
+  return options
+}
+
+/**
+ * `open_app` — launch or activate an application named by the goal. The app name
+ * is supplied by the plan (derived from the goal's own words), never invented
+ * here; the option is offered whenever the subgoal carries one. Success = the app
+ * is frontmost (its name/window observable in the scene).
+ */
+const planOpenApp: Planner = (subgoal, _scene) => {
+  const app = subgoal.value
+  if (app === undefined || app.length === 0) return []
+  return [
+    {
+      name: "open_app",
+      label: `open_app: launch or activate "${app}"`,
+      targets: [],
+      preconditions: [{ name: "app-named-by-goal", met: true, detail: `the plan carries the application name "${app}"` }],
+      success: success("appFrontmost", "the named application is frontmost / its window is present"),
+      inputs: [input("app", true, true, app)],
+    },
+  ]
+}
+
 const PLANNERS: Record<SubgoalKind, Planner> = {
   navigate: planNavigate,
   read_items: planReadItems,
@@ -361,6 +443,8 @@ const PLANNERS: Record<SubgoalKind, Planner> = {
   scroll_to: planScrollTo,
   dismiss: planDismiss,
   back: planBack,
+  apply: planApply,
+  open_app: planOpenApp,
 }
 
 const emptyReason = (subgoal: Subgoal): string =>

@@ -7,32 +7,52 @@ import { JEV_DEFAULT_THRESHOLD } from "../jev/client"
 import { decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
 import type { Element } from "./ui-eyes"
 import {
+  AUTHORIZATION_FLAG,
+  AUTHORIZATION_REQUIRED,
   CLIPBOARD_REPLACED_NOTE,
+  CONTAINER_UNMOVED,
   actuationPlan,
+  ancestorChain,
   browserNeedsSetup,
+  clickActivating,
   clickAttempt,
   clickSignals,
   clickVerdict,
+  containerSignature,
+  elementCenter,
+  escalateRung,
   fieldValue,
   foldFocusConsumer,
   frameEstablishingRead,
+  frameOf,
   hotkeyArgs,
   initialTextDelivery,
   isFocusTarget,
+  isUnsupportedAction,
   keyPress,
   keySequence,
   observationArgs,
   pixelFrameRetry,
+  REVEAL_GROW_PX,
   refindElement,
   remainingSuffix,
+  resizeArgs,
+  sanctionedScroll,
+  scrollActionArgs,
+  scrollArgs,
+  scrollDirection,
   textDeliveryStep,
   valueMatches,
+  visibilityOf,
+  windowBounds,
   type ActuationMode,
   type ActuationEvidence,
   type ActuationRung,
+  type ClickAction,
   type ClickAttemptEvidence,
   type ClickOutcome,
   type ClickSignals,
+  type Frame,
   type TextDelivery,
   type WindowRef,
 } from "./ui-hands"
@@ -328,6 +348,10 @@ export const Parameters = Schema.Struct({
   maxSteps: Schema.optional(Schema.Int).annotate({
     description: `Max observe→decide→act→verify iterations (default ${DEFAULT_MAX_STEPS}, hard cap ${HARD_MAX_STEPS})`,
   }),
+  authorizeCoordinateClick: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Brain authorization for THIS run's coordinate-click path only. When true, the driver's documented per-call flag `allow_px:true` is passed on the coordinate rung (for a target that declares no activating action, e.g. a canvas/WebGL or colour-swatch control). Default absent — without it the driver's refusal is reported as `authorization-required`, never hidden.",
+  }),
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
@@ -388,6 +412,191 @@ export interface ClickRuns {
 /** One driver call, injected so the click runner is exercisable without a live MCP client. */
 export type DriverCall = (name: string, args: Record<string, unknown>) => Effect.Effect<DriverOutcome>
 
+/** The AX actions that make an element the ACTUATOR of a click — it can be actuated. */
+export const ACTUATION_ACTIONS = ["AXPress", "AXConfirm", "AXSelect", "AXPick"] as const
+
+/** Whether the element's OWN declared actions carry an actuation verb (never a role default). */
+export function declaresActuation(element: Element): boolean {
+  return (element.actions ?? []).some((action) => ACTUATION_ACTIONS.some((known) => known === action))
+}
+
+/**
+ * The nearest actionable DESCENDANT of a target, or undefined. Descendancy is
+ * established STRUCTURALLY (the candidate's parent_index chain reaches the
+ * target's element_index) or GEOMETRICALLY (the candidate's frame sits inside the
+ * target's frame when indices are absent), and ranked CLICK-ACTIVATING candidates
+ * first (press/open/confirm/select outrank a pick-only sibling), then nearest-first
+ * by parent hops, then by depth. `activatingOnly` restricts the search to
+ * activating candidates.
+ */
+function nearestActionableDescendant(
+  element: Element,
+  elements: readonly Element[],
+  activatingOnly = false,
+): Element | undefined {
+  const byIndex = new Map<number, Element>()
+  for (const candidate of elements)
+    if (candidate.element_index !== undefined) byIndex.set(candidate.element_index, candidate)
+
+  const hops = (candidate: Element): number => {
+    let current: Element | undefined = candidate
+    for (let distance = 0; current !== undefined && distance < 64; distance++) {
+      if (current.element_index !== undefined && current.element_index === element.element_index) return distance
+      current = current.parent_index === undefined ? undefined : byIndex.get(current.parent_index)
+    }
+    return Number.POSITIVE_INFINITY
+  }
+
+  const targetRect = element.frame ?? element.bounds
+  const withinTarget = (candidate: Element): boolean => {
+    const rect = candidate.frame ?? candidate.bounds
+    if (targetRect === undefined || rect === undefined) return false
+    return (
+      rect.x >= targetRect.x &&
+      rect.y >= targetRect.y &&
+      rect.x + rect.width <= targetRect.x + targetRect.width &&
+      rect.y + rect.height <= targetRect.y + targetRect.height
+    )
+  }
+
+  const usable = (candidate: Element): boolean =>
+    candidate !== element &&
+    candidate.element_token !== undefined &&
+    declaresActuation(candidate) &&
+    (!activatingOnly || clickActivating(candidate)) &&
+    (hops(candidate) < Number.POSITIVE_INFINITY || withinTarget(candidate))
+
+  return elements
+    .filter(usable)
+    .sort(
+      (a, b) =>
+        (clickActivating(b) ? 1 : 0) - (clickActivating(a) ? 1 : 0) ||
+        hops(a) - hops(b) ||
+        (a.depth ?? 0) - (b.depth ?? 0),
+    )[0]
+}
+
+/**
+ * GENERALIZATION — INVARIANT: an actuation targets the element that CARRIES the
+ * action, not merely the element that was NAMED. A resolved target that declares
+ * no actuation action of its own delivers to its nearest actionable DESCENDANT —
+ * the control that actually actuates — resolved against the FRESHEST observation
+ * (the caller passes the same element set the token was re-resolved from). When
+ * neither the target nor any descendant declares an action the target itself is
+ * returned unchanged, so the honest negative (undelivered, never a blind click on
+ * an unrelated element) still stands.
+ * hardcode-guard:allow the named live failure is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: the macOS wallpaper row under-declares its
+ * actions — the outer AXRow carries no AXPress while the swatch control inside it
+ * does, so the row's centre click changed nothing and read as "undelivered on
+ * every rung".
+ * UNSEEN CASE COVERED: any labelled container whose real control is a nested
+ * child (a list row wrapping a toggle, a group wrapping a segmented control) is
+ * actuated by the child, whatever the container's role default is.
+ * TARGET SELECTION PREFERS THE ACTIVATING CANDIDATE: when the named element is
+ * pick-only (or carries no action) and an activating candidate sits among the
+ * same item's elements, the activating one (press/open/confirm/select) wins over a
+ * pick-only/show-menu sibling — an activating verb is what a click intends.
+ */
+export function actuatorOf(element: Element, elements: readonly Element[]): Element {
+  if (clickActivating(element)) return element
+  const activating = nearestActionableDescendant(element, elements, true)
+  if (activating !== undefined) return activating
+  if (declaresActuation(element)) return element
+  return nearestActionableDescendant(element, elements) ?? element
+}
+
+/**
+ * The row→actuator BINDING for a listed item, with how it was chosen. `activating`
+ * is whether the chosen actuator carries a click-activating action (press/open/
+ * confirm/select); `lastResort` is true only when no activating candidate existed
+ * and a pick/show-menu-only element was used because it was the sole actuable one.
+ * Pure; the loop records `lastResort` in telemetry so a pick-only fallback is never
+ * silent.
+ */
+export interface ActuatorBinding {
+  readonly actuator: Element
+  readonly activating: boolean
+  readonly lastResort: boolean
+}
+
+export function actuatorBinding(element: Element, elements: readonly Element[]): ActuatorBinding {
+  if (clickActivating(element)) return { actuator: element, activating: true, lastResort: false }
+  const activating = nearestActionableDescendant(element, elements, true)
+  if (activating !== undefined) return { actuator: activating, activating: true, lastResort: false }
+  if (declaresActuation(element)) return { actuator: element, activating: clickActivating(element), lastResort: !clickActivating(element) }
+  const fallback = nearestActionableDescendant(element, elements)
+  if (fallback === undefined) return { actuator: element, activating: clickActivating(element), lastResort: false }
+  return { actuator: fallback, activating: clickActivating(fallback), lastResort: !clickActivating(fallback) }
+}
+
+/** Structural ITEM roles — rows/cells/containers that group an item's control(s). */
+const STRUCTURED_ITEM_ROLES = new Set([
+  "AXRow",
+  "AXOutlineRow",
+  "AXTableRow",
+  "AXCell",
+  "AXListItem",
+  "AXListOption",
+  "AXGroup",
+  "AXOpaqueProviderGroup",
+  "AXList",
+  "AXOutline",
+  "AXTable",
+  "AXDisclosureTriangle",
+])
+/** Bare LABEL roles — a text/image match, not a control in its own right. */
+const LABEL_ROLES = new Set(["AXStaticText", "AXImage", "AXHeading"])
+
+/**
+ * ITEM SELECTION BEFORE ACTUATOR SELECTION — pick the correct ITEM first, then
+ * the actuator within it. `reason` distinguishes a STRUCTURED row/cell/container
+ * (or an item with an actuable descendant) from a bare LABEL match; the actuator
+ * is then chosen inside the item (nearest click-activating descendant). A bare
+ * label match with no activating descendant is flagged `weak` — reported, never
+ * silently used.
+ * hardcode-guard:allow the named live incident is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: the wallpaper row's real control is an AXPress
+ * child while the row itself declares no AXPress; a bare label match on the row
+ * would click nothing, so the structural item and its activating descendant are
+ * chosen instead.
+ * UNSEEN CASE COVERED: any list whose row is a container (a group wrapping a
+ * toggle, a cell wrapping a button) binds to the container's actuator the same way.
+ */
+export interface ItemSelection {
+  readonly item: Element
+  readonly reason: "structure" | "label"
+  readonly actuator: Element
+  readonly activating: boolean
+  readonly lastResort: boolean
+  readonly weak: boolean
+}
+
+export function selectItem(
+  candidates: readonly Element[],
+  elements: readonly Element[],
+): ItemSelection | undefined {
+  if (candidates.length === 0) return undefined
+  const scored = candidates.map((item) => ({
+    item,
+    binding: actuatorBinding(item, elements),
+    structured:
+      STRUCTURED_ITEM_ROLES.has(item.role ?? "") ||
+      nearestActionableDescendant(item, elements) !== undefined,
+  }))
+  const chosen = scored.find((entry) => entry.structured && entry.binding.activating) ?? scored[0]!
+  const reason: "structure" | "label" = chosen.structured ? "structure" : "label"
+  const weak = reason === "label" && !chosen.binding.activating && LABEL_ROLES.has(chosen.item.role ?? "")
+  return {
+    item: chosen.item,
+    reason,
+    actuator: chosen.binding.actuator,
+    activating: chosen.binding.activating,
+    lastResort: chosen.binding.lastResort,
+    weak,
+  }
+}
+
 /**
  * CLICK RUNGS — the ONE implementation both call sites (the main loop and
  * executeSkill's click sub-step) share, so an on-demand sensor rule can never be
@@ -401,7 +610,21 @@ export type DriverCall = (name: string, args: Record<string, unknown>) => Effect
  * — which is also that failed attempt's after-capture, folding the focus signal
  * the economy probe omits — then a single retry of the same pixel rung. Delivery
  * is judged throughout on the multi-signal world state, never the driver's code.
- * hardcode-guard:allow the named live refusal is one instance cited to ground the invariant
+ *
+ * INVARIANT OWNED: an ELEMENT is actuated by ANY of its declared actions, so the
+ * declared rung walks its ordered `actions` list (skipping any the driver reports
+ * unsupported) before it is judged undelivered; and a HANDLE is FETCHED FRESH for
+ * the call that uses it — every element rung re-resolves its token from the
+ * runner's freshest observation immediately before the call, and the pixel rung
+ * re-derives its aim from it, so no rung reuses a handle an intervening driver
+ * call invalidated.
+ * hardcode-guard:allow the named live failures are instances cited to ground the invariants
+ * LIVE FAILURE AS ONE INSTANCE: the wallpaper row ended after ONE unsupported verb
+ * (`AXUIElementPerformAction(AXPick) returned -25206`), and the foreground rung
+ * reused a token another call had staled ("element_token is stale …").
+ * UNSEEN CASE COVERED: a control declaring several verbs is walked past the
+ * unsupported ones; a navigate/prepare that renumbers the tree is followed by a
+ * re-resolved handle the same way.
  */
 export const runClickRungs = (
   call: DriverCall,
@@ -417,31 +640,289 @@ export const runClickRungs = (
     let signature = fallbackSignature
     let observations = 0
     let frameEstablished = false
-    for (const rung of plan) {
-      result = yield* call("cua-driver_click", rung.args)
-      if (pixelFrameRetry(rung, result.ok ? undefined : result.error, frameEstablished)) {
-        const frame = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
-        observations++
-        frameEstablished = true
-        const frameObs = frame.ok ? decodeObservation(frame.result.structuredContent) : null
-        if (frameObs) signature = screenSignature(frameObs.elements)
-        const signalAfter = frameObs ? clickSignals(signature, target, frameObs.elements) : signalBefore
-        const failed = clickAttempt(rung, signalBefore, signalAfter, target, result.ok ? undefined : result.error)
-        attempts.push(failed)
-        if (failed.delivered) break
-        result = yield* call("cua-driver_click", rung.args)
+    // The FRESHEST element set the runner itself observed (each attempt probes
+    // after its call). An element rung re-resolves its handle from THIS set
+    // immediately before the call, and the pixel rung re-derives its aim from it,
+    // so no rung reuses a token an intervening driver call invalidated.
+    let observed: readonly Element[] | undefined
+    let delivered = false
+    // The LADDER: each planned rung, with a declared rung immediately followed by
+    // its FOREGROUND re-issue. A rung is reached only when every earlier rung
+    // delivered nothing, so a delivered declared click never spends the
+    // foreground rung, and an undelivered one always escalates before the pixel.
+    const ladder = plan.flatMap((rung) => {
+      const escalated = escalateRung(rung)
+      return escalated === undefined ? [rung] : [rung, escalated]
+    })
+    // FRESHNESS at the call that uses the handle: re-resolve the target element by
+    // role+label against the runner's freshest observation, then substitute its
+    // token (element rung) or its frame centre (pixel rung). Falls back to the
+    // rung's own args when no fresher identity is known.
+    const rungArgs = (rung: ActuationRung, action: ClickAction | undefined): Record<string, unknown> => {
+      const base = action === undefined ? rung.args : { ...rung.args, action }
+      if (observed === undefined) return base
+      const fresh = refindElement(target, observed)
+      if (fresh === undefined) return base
+      if (base.element_token !== undefined && fresh.element_token !== undefined)
+        return { ...base, element_token: fresh.element_token }
+      if (base.element_token === undefined && base.x !== undefined && base.y !== undefined) {
+        const center = elementCenter(fresh)
+        return center === undefined ? base : { ...base, x: center.x, y: center.y }
       }
-      const probe = yield* call("cua-driver_get_window_state", observationArgs(window))
-      observations++
-      const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
-      if (probed) signature = screenSignature(probed.elements)
-      const signalAfter = probed ? clickSignals(signature, target, probed.elements) : signalBefore
-      const attempt = clickAttempt(rung, signalBefore, signalAfter, target, result.ok ? undefined : result.error)
-      attempts.push(attempt)
-      if (attempt.delivered) break
+      return base
+    }
+    for (const rung of ladder) {
+      // The actions this element rung walks (a plain/pixel rung has none).
+      const actions: readonly (ClickAction | undefined)[] =
+        rung.actions !== undefined && rung.actions.length > 0 ? rung.actions : [undefined]
+      for (let index = 0; index < actions.length; index++) {
+        const action = actions[index]
+        result = yield* call("cua-driver_click", rungArgs(rung, action))
+        const error = result.ok ? undefined : result.error
+        // An element commonly declares several actions; an UNSUPPORTED one never
+        // aborts the rung while an untried declared action remains — record it and
+        // walk on.
+        if (action !== undefined && isUnsupportedAction(error) && index < actions.length - 1) {
+          attempts.push(clickAttempt({ ...rung, label: action }, signalBefore, signalBefore, target, error))
+          continue
+        }
+        if (pixelFrameRetry(rung, error, frameEstablished)) {
+          const frame = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
+          observations++
+          frameEstablished = true
+          const frameObs = frame.ok ? decodeObservation(frame.result.structuredContent) : null
+          if (frameObs) {
+            observed = frameObs.elements
+            signature = screenSignature(frameObs.elements)
+          }
+          const signalAfter = frameObs ? clickSignals(signature, target, frameObs.elements) : signalBefore
+          const failed = clickAttempt(
+            { ...rung, label: action ?? rung.label },
+            signalBefore,
+            signalAfter,
+            target,
+            error,
+          )
+          attempts.push(failed)
+          if (failed.delivered) {
+            delivered = true
+            break
+          }
+          result = yield* call("cua-driver_click", rungArgs(rung, action))
+        }
+        const probe = yield* call("cua-driver_get_window_state", observationArgs(window))
+        observations++
+        const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
+        if (probed) {
+          observed = probed.elements
+          signature = screenSignature(probed.elements)
+        }
+        const signalAfter = probed ? clickSignals(signature, target, probed.elements) : signalBefore
+        const attempt = clickAttempt(
+          { ...rung, label: action ?? rung.label },
+          signalBefore,
+          signalAfter,
+          target,
+          result.ok ? undefined : result.error,
+        )
+        attempts.push(attempt)
+        if (attempt.delivered) {
+          delivered = true
+          break
+        }
+      }
+      if (delivered) break
     }
     return { attempts, outcome: clickVerdict(attempts), result, signature, observations }
   })
+
+/** The reveal budget: bounded scroll/resize steps tried before a target is called unreachable. */
+export const REVEAL_BUDGET = 3
+
+export interface RevealAttempt {
+  readonly mode: "action" | "scroll" | "resize"
+  readonly label: string
+  /** The route that revealed the target: the sanctioned action verb, or the scroll/resize mode. */
+  readonly route: string
+  /** The driver's own answer when the reveal call failed — diagnostics only. */
+  readonly error?: string
+  /** The scroll container this actuator was SCOPED to (token | role), when scrolling. */
+  readonly container?: string
+  /** Whether the actuation was VERIFIED against THAT container (its own content moved). */
+  readonly verified?: boolean
+}
+
+/** The container label a reveal telemetry entry names (token preferred, else role). */
+const containerLabel = (container: Element): string => container.element_token ?? container.role ?? "container"
+
+export interface RevealRuns {
+  /** The target re-resolved from the POST-reveal observation (freshest token AND frame). */
+  readonly target: Element
+  /** The post-reveal element set — the click plan is built from THIS, never pre-reveal. */
+  readonly elements: readonly Element[]
+  readonly signature: string
+  readonly attempts: readonly RevealAttempt[]
+  readonly observations: number
+  readonly visible: boolean
+}
+
+/** The distinct status when a target stays off-viewport after the reveal budget. */
+export const OFF_VIEWPORT = "target off-viewport"
+
+/** Honest off-viewport summary naming every reveal attempt — never a blind click. */
+export function revealFailure(attempts: readonly RevealAttempt[]): string {
+  const detail = attempts
+    .map(
+      (a) =>
+        `${a.label}${a.error === undefined ? "" : `: ${a.error}`}${a.verified === false ? ` [${CONTAINER_UNMOVED}]` : ""}`,
+    )
+    .join(" | ")
+  return `${OFF_VIEWPORT} (${detail})`
+}
+
+/**
+ * ENSURE-VISIBLE-BEFORE-ACT — the actuator must be INSIDE the sensor's field of
+ * view before it is actuated.
+ *
+ * INVARIANT OWNED: visibility is decided by the TREE's own geometry (the frame
+ * clipped by every ancestor clip rect, `visibilityOf`); a target that is not fully
+ * visible is REVEALED — a scroll SCOPED to its nearest container, else a window
+ * grow — and re-resolved from the post-reveal observation BEFORE any click. A
+ * scroll is VERIFIED against THAT container's own content: a scroll that moved a
+ * different window or region (the intended container's content unmoved) is
+ * reported undelivered, not assumed to have worked. If the bounded budget is spent
+ * with the target still off-viewport the run stops with the distinct `OFF_VIEWPORT`
+ * status naming every attempt, never a blind click outside the target.
+ * hardcode-guard:allow the named live failure is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: in System Settings' wallpaper pane the black
+ * swatch's frame resolved BELOW its scroll container's viewport (the Colors row is
+ * under the fold), a flat window-bounds check called it visible so no reveal ran,
+ * and a reveal scroll aimed without its container moved a different region.
+ * UNSEEN CASE COVERED: a horizontally scrolled table whose target sits off the
+ * right edge, or a nested clip chain (scroll area inside a dialog) — both are
+ * classified from the clipped geometry and re-resolved from the post-reveal
+ * observation before the click.
+ */
+export const ensureVisible = (
+  call: DriverCall,
+  window: WindowRef,
+  target: Element,
+  elements: readonly Element[],
+  signature: string,
+): Effect.Effect<RevealRuns> =>
+  Effect.gen(function* () {
+    const attempts: RevealAttempt[] = []
+    let current = target
+    let currentElements = elements
+    let currentSignature = signature
+    let observations = 0
+    // GEOMETRY-AUTHORITATIVE: visible iff the tree's own clips leave the whole frame on screen.
+    const visibleNow = (): boolean => visibilityOf(current, currentElements).state === "visible"
+    // NO-OP ON A VISIBLE TARGET: proceed directly to the click rungs, no side effect.
+    if (visibleNow())
+      return {
+        target: current,
+        elements: currentElements,
+        signature: currentSignature,
+        attempts,
+        observations,
+        visible: true,
+      }
+    for (let round = 0; round < REVEAL_BUDGET; round++) {
+      const frame = frameOf(current)
+      if (frame === undefined) break
+      const vis = visibilityOf(current, currentElements)
+      const container = vis.container
+      const bounds = vis.bounds ?? windowBounds(currentElements)
+      if (bounds === undefined) break
+      const direction = vis.scroll?.direction ?? scrollDirection(frame, bounds)
+      // (1) REVEAL VIA THE ELEMENT'S OWN SANCTIONED ACTION FIRST — the target's or
+      // its nearest ancestor's declared scroll action — before ANY computed delta
+      // or window resize. Falls to the scoped scroll, then the bounded resize.
+      const sanctioned = sanctionedScroll(current, currentElements, direction)
+      let mode: RevealAttempt["mode"] =
+        sanctioned !== undefined ? "action" : container !== undefined ? "scroll" : "resize"
+      // ALTERNATE within the budget: if the preferred route just failed, step DOWN the ladder.
+      const last = attempts[attempts.length - 1]
+      if (last !== undefined && last.mode === mode && last.error !== undefined) {
+        if (mode === "action") mode = container !== undefined ? "scroll" : "resize"
+        else if (mode === "scroll") mode = "resize"
+        else mode = "scroll"
+      }
+      const args =
+        mode === "action" && sanctioned !== undefined
+          ? scrollActionArgs(window, sanctioned.element, sanctioned.action)
+          : mode === "scroll"
+            ? scrollArgs(window, frame, bounds, container)
+            : resizeArgs(window, bounds.height + REVEAL_GROW_PX)
+      const label =
+        mode === "action" && sanctioned !== undefined
+          ? `action ${sanctioned.action} on ${sanctioned.element.element_token ?? sanctioned.element.role ?? "element"}`
+          : mode === "scroll"
+            ? `scroll ${direction} by ${String(args.amount)} line(s)`
+            : `grow window to height ${String(args.height)}`
+      const tool =
+        mode === "action" ? "cua-driver_click" : mode === "scroll" ? "cua-driver_scroll" : "cua-driver_set_window_frame"
+      // CONTAINER-SCOPED VERIFICATION: snapshot the container's own content BEFORE acting
+      // (the action route is not container-scoped — it asks the element to reveal itself).
+      const scoped = mode === "scroll" && container !== undefined
+      const sigBefore = scoped ? containerSignature(container, currentElements) : undefined
+      const revealed = yield* call(tool, args)
+      const after = yield* call("cua-driver_get_window_state", observationArgs(window))
+      observations++
+      const observedAfter = after.ok ? decodeObservation(after.result.structuredContent) : null
+      if (observedAfter) {
+        currentElements = observedAfter.elements
+        currentSignature = screenSignature(observedAfter.elements)
+        current = refindElement(current, observedAfter.elements) ?? current
+      }
+      // Verify against THAT container: its own content must move. A scroll that
+      // moved a different window/region leaves it untouched → undelivered.
+      const liveContainer = scoped && container !== undefined ? (refindElement(container, currentElements) ?? container) : undefined
+      const sigAfter = liveContainer === undefined ? undefined : containerSignature(liveContainer, currentElements)
+      const verified = sigBefore === undefined || sigAfter === undefined ? undefined : sigBefore !== sigAfter
+      attempts.push({
+        mode,
+        label,
+        route: mode === "action" && sanctioned !== undefined ? sanctioned.action : mode,
+        ...(scoped && container !== undefined ? { container: containerLabel(container) } : {}),
+        ...(verified !== undefined ? { verified } : {}),
+        ...(revealed.ok ? {} : { error: revealed.error }),
+      })
+      if (visibleNow())
+        return {
+          target: current,
+          elements: currentElements,
+          signature: currentSignature,
+          attempts,
+          observations,
+          visible: true,
+        }
+    }
+    return {
+      target: current,
+      elements: currentElements,
+      signature: currentSignature,
+      attempts,
+      observations,
+      visible: false,
+    }
+  })
+
+/**
+ * HONEST UNDELIVERED SUMMARY — the base failure plus EVERY attempted rung's mode
+ * and driver answer, so no attempt is lost and a refusal keeps the driver's own
+ * message. A refusal that demands the driver's per-call coordinate authorization
+ * is surfaced as the distinct `authorization-required` outcome NAMING the flag,
+ * never a generic undelivered and never a fabricated success. Pure; the loop
+ * reports it verbatim.
+ */
+export function clickFailure(attempts: readonly ClickAttemptEvidence[]): string {
+  const detail = attempts.map((attempt) => `${attempt.mode}: ${attempt.error ?? "no effect"}`).join(" | ")
+  const base = `click undelivered on every rung (${detail})`
+  if (!attempts.some((attempt) => attempt.reasons.includes("authorization-required"))) return base
+  return `${AUTHORIZATION_REQUIRED}: the coordinate path needs the driver's per-call '${AUTHORIZATION_FLAG}: true' authorization; ${base}`
+}
 
 export interface TypeDeliveryRuns {
   readonly rounds: number
@@ -594,11 +1075,47 @@ export const STATUS_UNEVIDENCED = "completion-without-evidence"
 /** The loop's existing maneuver-repeat bound status, mirrored into the plan loop. */
 const REASON_MANEUVER_REPEAT = "maneuver-repeat-limit"
 
+/**
+ * WINDOW+CONTAINER-SCOPED ACTUATION telemetry for one click step: what window and
+ * element it touched, the target's clipped visible rect and containment path, the
+ * scroll container a reveal was scoped to, whether the driver's per-call
+ * coordinate authorization was supplied, and whether the actuation was verified
+ * against its intended container/window. Enough that a failed step names which of
+ * the tree-geometry / row-binding / window-scoping / authorization failures it hit.
+ */
+export interface ActuationScope {
+  readonly window: { readonly pid: number; readonly window_id: number }
+  /** The element the maneuver named (its token or scene id). */
+  readonly target: string
+  /** The actuator actually clicked — the element that carries the action. */
+  readonly actuator: string
+  /** The nearest-first role path of the actuator's clipping ancestors. */
+  readonly containment: readonly string[]
+  /** The actuator's visible rect (frame ∩ ancestor clips) at decision time. */
+  readonly visibleRect?: Frame
+  /** The scroll container a reveal was SCOPED to (token | role), when revealing. */
+  readonly container?: string
+  /** The ROUTE that revealed the actuator: the sanctioned action verb, or scroll/resize. */
+  readonly route?: string
+  /** The chosen item's selection reason: a STRUCTURED row/cell/container, or a bare LABEL. */
+  readonly itemReason?: "structure" | "label"
+  /** Whether item selection was WEAK evidence (a bare label with no activating descendant). */
+  readonly weak?: boolean
+  /** The driver's per-call authorization flag supplied for the coordinate rung, when supplied. */
+  readonly authorization?: string
+  /** Whether the actuator was a pick/show-menu-only LAST RESORT (no activating candidate existed). */
+  readonly lastResort?: boolean
+  /** The verification result against the intended container/window. */
+  readonly verified?: boolean
+}
+
 export interface ManeuverExecution {
   readonly deliveryModes: readonly ActuationMode[]
   readonly paste?: { readonly mode: string; readonly completed: boolean }
   readonly navigate?: { readonly requested?: string; readonly landed?: string }
   readonly failure?: string
+  /** WINDOW+CONTAINER-SCOPED actuation telemetry, when the maneuver clicked. */
+  readonly scope?: ActuationScope
 }
 
 export interface ManeuverChoice {
@@ -638,6 +1155,8 @@ export interface PlanLoopTelemetry {
   readonly progress: { readonly done: number; readonly total: number; readonly reasons: readonly string[] }
   /** How many observations the post-action settle took, and whether it converged. */
   readonly settle?: { readonly observations: number; readonly settled: boolean }
+  /** WINDOW+CONTAINER-SCOPED actuation telemetry, when the maneuver clicked. */
+  readonly scope?: ActuationScope
   readonly reason: string
 }
 
@@ -760,6 +1279,10 @@ export function readOnlyPlan(plan: Plan): boolean {
 
 /** Whether acting on a maneuver mutates state (checkbox/radio/toggle/selectable row). */
 export function stateChangingManeuver(option: ManeuverOption, scene: Scene): boolean {
+  // A `select_option` mutation is ALWAYS state-changing, whatever control the
+  // swatch is declared as: the read-only governor must never offer it, and it is
+  // gated as a write when the goal permits mutation.
+  if (option.name === "select_option") return true
   const ids = new Set(option.targets.map((target) => target.id))
   return scene.items.some((item) => ids.has(item.id) && item.stateChanging)
 }
@@ -790,7 +1313,7 @@ export const isDestructive = (label: string): boolean => DESTRUCTIVE.test(label)
  * can commit an irreversible write. Reading, scrolling, navigation and typing never
  * activate a labelled control, so a destructive label under them stays inert.
  */
-const ACTIVATING_MANEUVERS = new Set(["open_item", "activate", "dismiss_dialog"])
+const ACTIVATING_MANEUVERS = new Set(["open_item", "activate", "dismiss_dialog", "select_option"])
 
 /** Whether executing a maneuver would activate an irreversible affordance. */
 export function destructiveManeuver(option: ManeuverOption, scene: Scene): boolean {
@@ -981,6 +1504,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
         deliveryModes: execution.deliveryModes,
         ...(execution.paste !== undefined ? { paste: execution.paste } : {}),
         ...(execution.navigate !== undefined ? { navigate: execution.navigate } : {}),
+        ...(execution.scope !== undefined ? { scope: execution.scope } : {}),
         ...(post !== undefined ? { settle: { observations: post.observations, settled: post.settled } } : {}),
         progress: {
           done: after.done,
@@ -1264,13 +1788,44 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   // observation before the click commits its handle.
                   // hardcode-guard:allow the freshness rule is the hand contract, not a case literal
                   target = yield* freshTarget
-                  const plan = actuationPlan(target, params.window)
-                  const fallback = signatures.at(-1) ?? before
-                  const signalBefore = clickSignals(fallback, target, newest)
+                  // The click lands on the ACTUATOR — the element that carries the
+                  // action — resolved from the same freshest observation the token
+                  // rules require; a named container with no action hands the
+                  // click to its actionable descendant.
+                  const clickTarget = actuatorOf(target, newest)
+                  // ENSURE-VISIBLE-BEFORE-ACT: an off-screen actuator is revealed
+                  // (targeted scroll, else a window grow) and re-resolved from the
+                  // POST-reveal observation before any click; a visible target is a
+                  // strict no-op. A target still off-viewport after the budget stops
+                  // with the distinct status, never a blind click outside it.
+                  const revealBefore = signatures.at(-1) ?? before
+                  const reveal = yield* ensureVisible(
+                    (name, args) => callDriver(tools, name, args, ctx.abort),
+                    params.window,
+                    clickTarget,
+                    newest,
+                    revealBefore,
+                  )
+                  observationsUsed += reveal.observations
+                  if (!reveal.visible) {
+                    signatures.push(reveal.signature)
+                    modes.push({ label: sub.label, mode: "scroll" })
+                    reads.push(undefined)
+                    urlChanges.push(undefined)
+                    deliveries.push(false)
+                    failure = revealFailure(reveal.attempts)
+                    break
+                  }
+                  newest = reveal.elements
+                  staleSnapshot = false
+                  const clickOn = actuatorOf(reveal.target, reveal.elements)
+                  const plan = actuationPlan(clickOn, params.window, params.authorizeCoordinateClick === true)
+                  const fallback = reveal.signature
+                  const signalBefore = clickSignals(fallback, clickOn, reveal.elements)
                   const run = yield* runClickRungs(
                     (name, args) => callDriver(tools, name, args, ctx.abort),
                     params.window,
-                    target,
+                    clickOn,
                     plan,
                     signalBefore,
                     fallback,
@@ -1300,7 +1855,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   urlChanges.push(undefined)
                   deliveries.push(run.outcome.worked)
                   if (!run.outcome.worked) {
-                    failure = "click undelivered on every rung"
+                    failure = clickFailure(run.attempts)
                     break
                   }
                   continue
@@ -1727,6 +2282,16 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               }
               // READ_ITEMS: no actuation — the observation IS the result.
               if (option.name === "read_items") return { deliveryModes: ["read"] }
+              // OPEN_APP: launch or activate the application the goal named. The app
+              // name comes from the subgoal (never invented in the executor).
+              if (option.name === "open_app") {
+                const app = subgoal.params.value ?? extractGoalValue(goal)
+                if (app === undefined || app.length === 0) return { deliveryModes: [], failure: "open_app named no application" }
+                const opened = yield* callDriver(tools, "cua-driver_launch_app", { app }, ctx.abort)
+                observations++
+                if (!opened.ok) return { deliveryModes: ["declared"], failure: `launch_app failed: ${opened.error}` }
+                return { deliveryModes: ["declared"] }
+              }
               // BACK: the navigation-chrome affordance — one Escape key event.
               if (option.name === "back") {
                 const args = keyPress("escape", params.window, [])
@@ -1746,26 +2311,82 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 if (!pressed.ok) return { deliveryModes: ["key"], failure: pressed.error }
                 return { deliveryModes: ["key"] }
               }
-              // OPEN_ITEM / ACTIVATE: a click through the SHARED rung runner.
-              const target = option.targets
+              // OPEN_ITEM / ACTIVATE / SELECT_OPTION: a click through the SHARED
+              // rung runner, aimed at the ACTUATOR — the element that carries the
+              // action, not merely the row that was named. ITEM SELECTION comes
+              // FIRST (prefer a structured row/cell/container with an activating
+              // descendant over a bare label match), then the actuator WITHIN it.
+              const candidates = option.targets
                 .map((entry) => resolveTargetElement(entry.id))
-                .find((element) => element !== undefined)
-              if (target === undefined) return { deliveryModes: [], failure: "no resolvable maneuver target" }
-              const plan = actuationPlan(target, params.window)
-              const fallback = lastSignature
-              const run = yield* runClickRungs(
+                .filter((element): element is Element => element !== undefined)
+              const selection = selectItem(candidates, lastElements)
+              if (selection === undefined) return { deliveryModes: [], failure: "no resolvable maneuver target" }
+              const named = selection.item
+              // WINDOW+CONTAINER-SCOPED telemetry: the target, its clipped visible
+              // rect and containment path, the actuator used, the container a reveal
+              // was scoped to, the reveal route, the item-selection reason, the
+              // authorization supplied, and the verification result.
+              const scopeOf = (
+                actuator: Element,
+                elements: readonly Element[],
+                attempts: readonly RevealAttempt[],
+                lastResort: boolean,
+              ): ActuationScope => {
+                const vis = visibilityOf(actuator, elements)
+                const verified = [...attempts].reverse().find((attempt) => attempt.verified !== undefined)
+                const route = attempts[attempts.length - 1]?.route
+                return {
+                  window: { pid: params.window.pid, window_id: params.window.window_id },
+                  target: named.element_token ?? option.targets[0]?.id ?? "target",
+                  actuator: actuator.element_token ?? actuator.role ?? "actuator",
+                  containment: ancestorChain(actuator, elements).map((ancestor) => ancestor.role ?? ""),
+                  ...(vis.visibleRect !== undefined ? { visibleRect: vis.visibleRect } : {}),
+                  ...(verified?.container !== undefined ? { container: verified.container } : {}),
+                  ...(route !== undefined ? { route } : {}),
+                  itemReason: selection.reason,
+                  ...(selection.weak ? { weak: true } : {}),
+                  ...(params.authorizeCoordinateClick === true ? { authorization: AUTHORIZATION_FLAG } : {}),
+                  ...(verified?.verified !== undefined ? { verified: verified.verified } : {}),
+                  ...(lastResort ? { lastResort: true } : {}),
+                }
+              }
+              const target = selection.actuator
+              // ENSURE-VISIBLE-BEFORE-ACT: reveal an off-screen actuator and click
+              // from the POST-reveal observation, else stop with the distinct status.
+              const reveal = yield* ensureVisible(
                 (name, args) => callDriver(tools, name, args, ctx.abort),
                 params.window,
                 target,
+                lastElements,
+                lastSignature,
+              )
+              observations += reveal.observations
+              if (!reveal.visible)
+                return {
+                  deliveryModes: reveal.attempts.map((attempt) => attempt.mode),
+                  failure: revealFailure(reveal.attempts),
+                  scope: scopeOf(target, lastElements, reveal.attempts, selection.lastResort),
+                }
+              const binding = actuatorBinding(reveal.target, reveal.elements)
+              const clickOn = binding.actuator
+              const plan = actuationPlan(clickOn, params.window, params.authorizeCoordinateClick === true)
+              const fallback = reveal.signature
+              const run = yield* runClickRungs(
+                (name, args) => callDriver(tools, name, args, ctx.abort),
+                params.window,
+                clickOn,
                 plan,
-                clickSignals(fallback, target, lastElements),
+                clickSignals(fallback, clickOn, reveal.elements),
                 fallback,
               )
               observations += run.observations
               executed++
               return {
-                deliveryModes: [run.outcome.mode],
-                ...(run.outcome.worked ? {} : { failure: "click undelivered on every rung" }),
+                // EVERY attempted rung is recorded, never only the delivered/last
+                // one — the live `modes=[declared]` lie hid the un-tried modes.
+                deliveryModes: run.attempts.map((attempt) => attempt.mode),
+                ...(run.outcome.worked ? {} : { failure: clickFailure(run.attempts) }),
+                scope: scopeOf(clickOn, reveal.elements, reveal.attempts, binding.lastResort),
               }
             })
 

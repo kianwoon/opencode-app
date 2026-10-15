@@ -18,13 +18,19 @@ import {
   FRONTIER_HARD_MAX,
   GATE_FLOOR,
   MAX_MANEUVER_REPEATS,
+  OFF_VIEWPORT,
   Parameters,
+  REVEAL_BUDGET,
   STATUS_UNSETTLED,
   UiRunTool,
+  actuatorBinding,
+  actuatorOf,
   advanceMap,
+  clickFailure,
   completionEvidence,
   decodeObservation,
   destructiveManeuver,
+  ensureVisible,
   extractGoalValue,
   focusConsumerAhead,
   initialManeuverRepeat,
@@ -39,13 +45,16 @@ import {
   planLoop,
   planSummary,
   resolveTarget,
+  revealFailure,
   runClickRungs,
   runTypeDelivery,
   runUrlEntry,
   screenSignature,
+  selectItem,
   stateChangingManeuver,
   type DriverCall,
   type DriverOutcome,
+  type ActuationScope,
   type PlanLoopDeps,
   type PlanLoopTelemetry,
   type StepTrace,
@@ -53,26 +62,43 @@ import {
 import type { ManeuverOption } from "@/tool/ui-maneuvers"
 import type { Progress } from "@/tool/ui-progress"
 import type { Scene, SceneItem, SceneRegion } from "@/tool/ui-scene"
+import { affordancesOf } from "@/tool/ui-scene"
 import { buildCandidates, usableElements, type Element } from "@/tool/ui-eyes"
 import {
+  AUTHORIZATION_FLAG,
+  AUTHORIZATION_REQUIRED,
   CLIPBOARD_REPLACED_NOTE,
+  CONTAINER_UNMOVED,
+  REFUSED_BY_POLICY,
+  UNSUPPORTED_ACTION,
   actuationPlan,
+  ancestorChain,
   changeEvidence,
   clickAttempt,
   clickSignals,
   clickVerdict,
+  containerSignature,
   declaredAction,
+  declaredActions,
   elementCenter,
+  escalateRung,
   focusIdentity,
   foldFocusConsumer,
   frameEstablishingRead,
+  hasScrollActions,
   hotkeyArgs,
   isFocusTarget,
   isNoFrameError,
   isPolicyRefused,
+  isScrollableContainer,
   observationArgs,
   pixelFrameRetry,
+  scrollContainerOf,
   targetState,
+  visibilityOf,
+  windowBounds,
+  withinBounds,
+  type ActuationRung,
   type ClickSignals,
 } from "@/tool/ui-hands"
 import { goToUrl, matchSkills, type SkillStep } from "@/tool/ui-skills"
@@ -706,7 +732,8 @@ describe("runClickRungs — the shared click rung runner", () => {
     return { call, calls }
   }
 
-  test("(a) a pixel rung reporting no frame establishes ONE frame then retries — a skill sub-step's path", async () => {
+  // hardcode-guard:allow the element token, action and tree labels are the enumerable actuation inputs under test
+  test("(a) a no-op declared rung escalates to foreground, then a no-frame pixel rung establishes ONE frame and retries", async () => {
     const button = {
       element_token: "t1",
       role: "AXButton",
@@ -716,13 +743,15 @@ describe("runClickRungs — the shared click rung runner", () => {
     }
     const plan = actuationPlan(button, win)
     expect(plan.map((r) => r.mode)).toEqual(["declared", "pixel"])
-    // the "before" screen IS the unchanged tree's signature, so the declared probe reads no change
+    // the "before" screen IS the unchanged tree's signature, so each probe reads no change
     const unchanged = decodeObservation(tree("Go"))
     if (unchanged === null) throw new Error("tree must decode")
     const before = clickSignals(screenSignature(unchanged.elements), button, unchanged.elements)
 
     const driver = makeDriver([
       { ok: true, result: { content: [] } }, // declared click
+      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // FOREGROUND element re-issue
       { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
       { ok: false, error: NO_FRAME }, // pixel click: no frame
       { ok: true, result: { content: [], structuredContent: tree("Go") } }, // frame-establishing read: unchanged
@@ -732,6 +761,10 @@ describe("runClickRungs — the shared click rung runner", () => {
 
     const run = await Effect.runPromise(runClickRungs(driver.call, win, button, plan, before, before.screen))
 
+    // the declared no-op escalated to the SAME element re-issued foreground
+    const foreground = driver.calls.filter((c) => c.args.delivery_mode === "foreground" && c.args.x === undefined)
+    expect(foreground).toHaveLength(1)
+    expect(foreground[0]!.args).toMatchObject({ element_token: "t1", action: "press" })
     // exactly ONE frame-establishing read, carrying a screenshot
     const frameReads = driver.calls.filter(
       (c) => c.name === "cua-driver_get_window_state" && c.args.include_screenshot === true,
@@ -743,8 +776,8 @@ describe("runClickRungs — the shared click rung runner", () => {
     // delivery is judged by the multi-signal world state, on the retried attempt
     expect(run.outcome.worked).toBe(true)
     expect(run.outcome.mode).toBe("pixel")
-    expect(run.attempts.map((a) => a.mode)).toEqual(["declared", "pixel", "pixel"])
-    expect(run.attempts[2].reasons).toContain("screen")
+    expect(run.attempts.map((a) => a.mode)).toEqual(["declared", "foreground", "pixel", "pixel"])
+    expect(run.attempts[3].reasons).toContain("screen")
   })
 
   test("(b)/(d) both call sites use the one runner; no click call site bypasses it", async () => {
@@ -755,6 +788,120 @@ describe("runClickRungs — the shared click rung runner", () => {
     const callSites = src.slice(src.indexOf("export const UiRunTool"))
     expect(callSites.includes("cua-driver_click")).toBe(false)
     expect(callSites.includes("pixelFrameRetry(")).toBe(false)
+  })
+})
+
+// GENERALIZATION — INVARIANT: an actuation targets the element that CARRIES the
+// action, not merely the element that was NAMED. A resolved container that
+// declares no action hands the click to its nearest actionable DESCENDANT; a
+// target with neither an action nor an actionable descendant is reported
+// UNDELIVERED, never blind-clicked on an unrelated element. LIVE INSTANCE: the
+// macOS wallpaper row carries no AXPress while the swatch control inside it does.
+// UNSEEN CASE COVERED: a list row wrapping a toggle is actuated by the toggle.
+// hardcode-guard:allow fixture labels/tokens are the enumerable inputs under test
+describe("actuator resolution — the click lands on the element that carries the action", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s1",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      selected: element.selected,
+      actions: element.actions,
+      frame: element.frame,
+      element_index: element.element_index,
+      parent_index: element.parent_index,
+      depth: element.depth,
+    })),
+  })
+  const makeDriver = (script: DriverOutcome[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    return { call, calls }
+  }
+
+  test("(a) a row declaring no action resolves to its AXPress child, and the click carries the child", async () => {
+    const els: Element[] = [
+      {
+        element_index: 0,
+        element_token: "t0",
+        role: "AXRow",
+        label: "Wallpaper",
+        depth: 1,
+        frame: { x: 0, y: 0, width: 200, height: 40 },
+      },
+      {
+        element_index: 1,
+        element_token: "t1",
+        role: "AXButton",
+        label: "Black",
+        depth: 2,
+        parent_index: 0,
+        actions: ["AXPress"],
+        frame: { x: 8, y: 8, width: 40, height: 24 },
+      },
+    ]
+    const named = els[0]!
+    const target = actuatorOf(named, els)
+    expect(target.element_token).toBe("t1")
+    const plan = actuationPlan(target, win)
+    // declared rung first (the CHILD's own AXPress), pixel second at the CHILD's frame
+    expect(plan.map((r) => r.mode)).toEqual(["declared", "pixel"])
+    expect(plan[0].args).toMatchObject({ element_token: "t1", action: "press" })
+    expect(plan[1].args).toMatchObject({ x: 28, y: 20, delivery_mode: "foreground" })
+
+    const before = clickSignals(screenSignature(els), target, els)
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared click on the child
+      { ok: true, result: { content: [], structuredContent: wire([{ ...els[1]!, selected: true }, els[0]!]) } }, // child state changed → delivered
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, target, plan, before, before.screen))
+    expect(driver.calls[0]).toMatchObject({ name: "cua-driver_click" })
+    expect(driver.calls[0]!.args).toMatchObject({ element_token: "t1", action: "press" })
+    expect(run.outcome.worked).toBe(true)
+  })
+
+  test("(b) a target with neither an action nor an actionable descendant stays undelivered, not blind-clicked", async () => {
+    const els: Element[] = [
+      {
+        element_index: 0,
+        element_token: "r0",
+        role: "AXRow",
+        label: "Wallpaper",
+        depth: 1,
+        frame: { x: 0, y: 0, width: 200, height: 40 },
+      },
+      {
+        element_index: 1,
+        element_token: "c1",
+        role: "AXStaticText",
+        label: "Black",
+        depth: 2,
+        parent_index: 0,
+        frame: { x: 8, y: 8, width: 40, height: 24 },
+      },
+    ]
+    const named = els[0]!
+    expect(actuatorOf(named, els)).toBe(named)
+    const plan = actuationPlan(named, win)
+    const before = clickSignals(screenSignature(els), named, els)
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared click
+      { ok: true, result: { content: [], structuredContent: wire(els) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // foreground element re-issue
+      { ok: true, result: { content: [], structuredContent: wire(els) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // pixel click
+      { ok: true, result: { content: [], structuredContent: wire(els) } }, // probe: unchanged
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, named, plan, before, before.screen))
+    expect(run.outcome.worked).toBe(false)
+    // the whole permitted ladder was attempted, declared → foreground → pixel
+    expect(run.attempts.map((attempt) => attempt.mode)).toEqual(["declared", "foreground", "pixel"])
+    expect(run.attempts.every((attempt) => !attempt.delivered)).toBe(true)
   })
 })
 
@@ -1844,5 +1991,886 @@ describe("focus-click delivery — every consumer class (functional delivery)", 
     expect(src.includes("focusConsumerAhead(queue)")).toBe(true)
     // the deferral is never silently absorbed: an unresolved focus click still fails
     expect(src.includes('"focus click undelivered (no consumer landed)"')).toBe(true)
+  })
+})
+
+// GENERALIZATION — INVARIANT: intent selects the plan shape, and a MUTATION is
+// proven by OBSERVED STATE, never by reading. LIVE INSTANCE: "change my mac
+// wallpaper to black" reported `completed` by reading the Settings sidebar (0
+// actions). UNSEEN SHAPE COVERED: any toggle/radio/option goal — the read plan is
+// unreachable from a mutation goal, so no list read can ever complete it.
+// hardcode-guard:allow fixture labels/tokens are the enumerable inputs under test
+describe("ui_run — a mutation goal is never completed by a read", () => {
+  const el = (label: string, role = "AXLink"): Element => ({ element_token: label, role, label })
+  const row = (label: string): SceneItem => ({
+    id: label,
+    role: "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+  })
+  const sidebar = (): Scene => ({
+    snapshot: "s-sidebar",
+    regions: [{ id: "r0:list", kind: "list", itemIds: ["About", "Software Update", "Storage", "Wallpaper"], textIds: [] }],
+    items: ["About", "Software Update", "Storage", "Wallpaper"].map(row),
+    texts: [],
+  })
+
+  test("(a) a wallpaper-mutation goal over the Settings sidebar never completes on the sidebar read", async () => {
+    let executed = 0
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "change my mac wallpaper to black",
+        observe: () => Effect.succeed(sidebar()),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: () => {
+          executed++
+          return Effect.succeed({ deliveryModes: [] })
+        },
+        stateChanging: () => false,
+        readOnly: false,
+        maxSteps: 8,
+      }),
+    )
+    // NOT the live false completion: the plan is the mutation, never `read-here`
+    expect(result.planId).toBe("mutate")
+    expect(result.status).not.toBe("completed")
+    expect(result.evidence).toBeUndefined()
+    expect(result.progress?.perSubgoal.every((entry) => !entry.success)).toBe(true)
+    // it DID attempt the mutation (the pane/option), rather than reading
+    expect(executed).toBeGreaterThan(0)
+  })
+})
+
+// GENERALIZATION — INVARIANT: actuation ESCALATES through every PERMITTED modality
+// before it is declared failed, recording each attempt; a silent no-op is not an
+// answer, and a driver policy refusal is recorded (refused-by-policy) without
+// terminating the ladder while a permitted mode remains. LIVE INSTANCE: the macOS
+// wallpaper row no-oped its declared AXPress and the run reported undelivered with
+// `modes=[declared]` — the remaining modes were never attempted. UNSEEN CASE: any
+// surface that no-ops a background element action (a custom toggle, a canvas
+// control that still exposes an element) escalates to a real foreground input event.
+// hardcode-guard:allow the fixture element/tree labels and driver tokens are the enumerable actuation inputs under test
+describe("runClickRungs — an undelivered rung escalates every permitted modality", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s1",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      selected: element.selected,
+      actions: element.actions,
+      frame: element.frame,
+    })),
+  })
+  const makeDriver = (script: DriverOutcome[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    return { call, calls }
+  }
+  const button: Element = {
+    element_token: "t1",
+    role: "AXButton",
+    label: "Black",
+    actions: ["AXPress"],
+    frame: { x: 10, y: 10, width: 40, height: 20 },
+  }
+
+  test("(a) an undelivered declared rung escalates to the foreground element click; both modes recorded", async () => {
+    const plan = actuationPlan(button, win)
+    // the foreground escalation is the SAME element re-issued as a real input event
+    expect(escalateRung(plan[0]!)).toMatchObject({
+      mode: "foreground",
+      args: { element_token: "t1", action: "press", delivery_mode: "foreground" },
+    })
+    const before = clickSignals(screenSignature([button]), button, [button])
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared: success code, no world change
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // foreground element re-issue
+      { ok: true, result: { content: [], structuredContent: wire([{ ...button, selected: true }]) } }, // probe: state changed → delivered
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, button, plan, before, before.screen))
+
+    expect(run.outcome.worked).toBe(true)
+    expect(run.outcome.mode).toBe("foreground")
+    // BOTH modes recorded: the declared rung and its foreground escalation
+    expect(run.attempts.map((attempt) => attempt.mode)).toEqual(["declared", "foreground"])
+    expect(run.attempts[0]!.delivered).toBe(false)
+    expect(run.attempts[1]!.delivered).toBe(true)
+    expect(driver.calls[2]).toMatchObject({ name: "cua-driver_click" })
+    expect(driver.calls[2]!.args).toMatchObject({ element_token: "t1", action: "press", delivery_mode: "foreground" })
+  })
+
+  test("(b) permitted modes exhausted → undelivered with EVERY attempt and the refusal text", async () => {
+    const plan = actuationPlan(button, win)
+    const before = clickSignals(screenSignature([button]), button, [button])
+    const refusal = `${REFUSED_BY_POLICY} for an AX-exposed element`
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared: no change
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // foreground: no change
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+      { ok: false, error: refusal }, // pixel: policy refusal
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, button, plan, before, before.screen))
+
+    expect(run.outcome.worked).toBe(false)
+    expect(run.attempts.map((attempt) => attempt.mode)).toEqual(["declared", "foreground", "pixel"])
+    expect(run.attempts.every((attempt) => !attempt.delivered)).toBe(true)
+    const pixel = run.attempts[2]!
+    expect(pixel.reasons).toContain("refused-by-policy")
+    expect(pixel.error).toBe(refusal)
+    // the honest summary carries every attempt's mode and the refusal text
+    const failure = clickFailure(run.attempts)
+    expect(failure).toContain("declared:")
+    expect(failure).toContain("foreground:")
+    expect(failure).toContain(`pixel: ${refusal}`)
+  })
+
+  test("(c) a policy refusal does not stop the ladder while a permitted mode remains", async () => {
+    // An explicit plan whose coordinate rung sits BEFORE a permitted element rung,
+    // so the runner's refusal-continuation invariant is exercised directly.
+    const plan: ActuationRung[] = [
+      { mode: "pixel", label: "pixel(1,1)", args: { x: 1, y: 1, delivery_mode: "foreground" } },
+      { mode: "declared", label: "press", args: { element_token: "t1", action: "press" } },
+    ]
+    const before = clickSignals(screenSignature([button]), button, [button])
+    const driver = makeDriver([
+      { ok: false, error: REFUSED_BY_POLICY }, // pixel: refused
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // declared element click
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // foreground escalation
+      { ok: true, result: { content: [], structuredContent: wire([{ ...button, selected: true }]) } }, // probe: delivered
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, button, plan, before, before.screen))
+
+    // the refusal is recorded, and the ladder CONTINUED to the permitted modes
+    expect(run.attempts.map((attempt) => attempt.mode)).toEqual(["pixel", "declared", "foreground"])
+    expect(run.attempts[0]!.reasons).toContain("refused-by-policy")
+    expect(run.outcome.worked).toBe(true)
+    expect(run.outcome.mode).toBe("foreground")
+  })
+})
+
+// GENERALIZATION — INVARIANT: an element is actuated by ANY of its declared
+// actions, walking past any the driver reports unsupported; and a handle is FETCHED
+// FRESH for the call that uses it, so no rung reuses a token an intervening driver
+// call staled; and target selection prefers a click-activating element over a
+// pick-only sibling. LIVE INSTANCE: the macOS wallpaper row's declared rung ended
+// after ONE unsupported verb (AXPick, -25206) and its foreground rung reused a
+// token another call had invalidated. UNSEEN CASES: a control declaring several
+// verbs is walked until one delivers; a navigate that renumbers the tree is
+// followed by a re-resolved handle; a pick-only cell beside an activating control
+// is not chosen.
+// hardcode-guard:allow the driver's unsupported code and fixture tokens/labels/frames are the enumerable actuation inputs under test
+describe("runClickRungs — declared-action walk, handle freshness, activating target", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s1",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      selected: element.selected,
+      actions: element.actions,
+      frame: element.frame,
+      element_index: element.element_index,
+      parent_index: element.parent_index,
+      depth: element.depth,
+    })),
+  })
+  const makeDriver = (script: DriverOutcome[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    return { call, calls }
+  }
+
+  test("(a) a declared rung walks past an unsupported first action and delivers on the next, recording both", async () => {
+    const el: Element = {
+      element_token: "t1",
+      role: "AXButton",
+      label: "Wallpaper",
+      actions: ["AXPick", "AXPress"],
+      frame: { x: 0, y: 0, width: 40, height: 20 },
+    }
+    // press-like outranks pick even though pick was declared first
+    expect(declaredActions(el)).toEqual(["press", "pick"])
+    const plan = actuationPlan(el, win)
+    const before = clickSignals(screenSignature([el]), el, [el])
+    const driver = makeDriver([
+      { ok: false, error: `AX action failed: AXUIElementPerformAction(AXPick) returned ${UNSUPPORTED_ACTION}` }, // press: unsupported
+      { ok: true, result: { content: [] } }, // pick: delivered
+      { ok: true, result: { content: [], structuredContent: wire([{ ...el, selected: true }]) } }, // probe: state changed
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, el, plan, before, before.screen))
+
+    expect(driver.calls[0]!.args.action).toBe("press")
+    expect(driver.calls[1]!.args.action).toBe("pick")
+    // each attempted action is recorded; the unsupported one did not abort the rung
+    expect(run.attempts.map((attempt) => attempt.label)).toEqual(["press", "pick"])
+    expect(run.attempts[0]!.delivered).toBe(false)
+    expect(run.attempts[0]!.error).toContain(UNSUPPORTED_ACTION)
+    expect(run.attempts[1]!.delivered).toBe(true)
+    expect(run.outcome.worked).toBe(true)
+    expect(run.outcome.mode).toBe("declared")
+  })
+
+  test("(b) the foreground and pixel rungs re-resolve their handle from the newest observation", async () => {
+    const el: Element = {
+      element_token: "t1",
+      role: "AXButton",
+      label: "Black",
+      actions: ["AXPress"],
+      frame: { x: 0, y: 0, width: 40, height: 20 },
+    }
+    const plan = actuationPlan(el, win)
+    expect(plan[0]!.args.element_token).toBe("t1")
+    const before = clickSignals(screenSignature([el]), el, [el])
+    // every probe mints a NEWER token AND moves the frame, so a reused token or a
+    // stale centre would be observable
+    const moved: Element = { ...el, element_token: "t2", frame: { x: 100, y: 100, width: 40, height: 20 } }
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared: no change
+      { ok: true, result: { content: [], structuredContent: wire([moved]) } }, // probe: t2, moved, unchanged
+      { ok: true, result: { content: [] } }, // foreground: no change
+      { ok: true, result: { content: [], structuredContent: wire([moved]) } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // pixel: no change
+      { ok: true, result: { content: [], structuredContent: wire([{ ...moved, selected: true }]) } }, // probe: delivered
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, el, plan, before, before.screen))
+
+    // the declared rung used the plan's token; the foreground rung used the FRESH one
+    expect(driver.calls[0]!.args.element_token).toBe("t1")
+    expect(driver.calls[2]!.args.element_token).toBe("t2")
+    // the pixel rung re-derived its aim from the fresh frame centre (100+20, 100+10)
+    expect(driver.calls[4]!.args).toMatchObject({ x: 120, y: 110 })
+    expect(run.outcome.worked).toBe(true)
+  })
+
+  test("(c) target selection prefers a click-activating element over a pick-only sibling", () => {
+    const container: Element = {
+      element_index: 0,
+      element_token: "box",
+      role: "AXGroup",
+      label: "Wallpaper",
+      depth: 1,
+      frame: { x: 0, y: 0, width: 200, height: 80 },
+    }
+    const pickOnly: Element = {
+      element_index: 1,
+      element_token: "pick",
+      role: "AXRow",
+      label: "Black",
+      depth: 2,
+      parent_index: 0,
+      actions: ["AXPick"],
+      frame: { x: 0, y: 0, width: 200, height: 40 },
+    }
+    const activating: Element = {
+      element_index: 2,
+      element_token: "press",
+      role: "AXButton",
+      label: "Black",
+      depth: 2,
+      parent_index: 0,
+      actions: ["AXPress"],
+      frame: { x: 8, y: 48, width: 40, height: 24 },
+    }
+    // the pick-only sibling is FIRST and equally near — without the preference it wins
+    expect(actuatorOf(container, [container, pickOnly, activating]).element_token).toBe("press")
+    // a pick-only element is still usable when NO activating candidate exists
+    expect(actuatorOf(container, [container, pickOnly]).element_token).toBe("pick")
+  })
+})
+
+// GENERALIZATION — INVARIANT: an actuator must be INSIDE the sensor's field of
+// view before it is actuated, and visibility is RE-CHECKED (target re-resolved)
+// after any reveal. LIVE INSTANCE: in System Settings' wallpaper pane the black
+// swatch's frame resolved BELOW the panel window (the Colors row is under the
+// fold), so every click landed outside the target. UNSEEN CASE: a horizontally
+// scrolled table whose target sits off the right edge, or a virtualized list that
+// re-renders after a scroll — both re-resolve from the post-reveal observation.
+// hardcode-guard:allow the fixture frames/roles/tokens are the enumerable visibility inputs under test
+describe("ensureVisible — reveal an off-screen target before any click", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s1",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      selected: element.selected,
+      actions: element.actions,
+      frame: element.frame,
+      element_index: element.element_index,
+      parent_index: element.parent_index,
+      depth: element.depth,
+    })),
+  })
+  const makeDriver = (script: DriverOutcome[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    return { call, calls }
+  }
+  const windowEl: Element = {
+    element_index: 0,
+    element_token: "w0",
+    role: "AXWindow",
+    label: "Settings",
+    depth: 0,
+    frame: { x: 0, y: 0, width: 400, height: 300 },
+  }
+  const scroller: Element = {
+    element_index: 1,
+    element_token: "s1",
+    role: "AXScrollArea",
+    depth: 1,
+    parent_index: 0,
+    frame: { x: 0, y: 40, width: 400, height: 260 },
+  }
+  const below: Element = {
+    element_index: 2,
+    element_token: "t1",
+    role: "AXButton",
+    label: "Black",
+    depth: 2,
+    parent_index: 1,
+    actions: ["AXPress"],
+    frame: { x: 10, y: 400, width: 40, height: 20 },
+  }
+
+  test("(a) an off-screen target is revealed by a targeted scroll, re-resolved, and the click uses post-reveal coordinates", async () => {
+    const elements = [windowEl, scroller, below]
+    const before = screenSignature(elements)
+    const moved: Element = { ...below, element_token: "t2", frame: { x: 10, y: 200, width: 40, height: 20 } }
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // scroll toward the target
+      { ok: true, result: { content: [], structuredContent: wire([windowEl, scroller, moved]) } }, // re-observe: revealed
+    ])
+    const reveal = await Effect.runPromise(ensureVisible(driver.call, win, below, elements, before))
+
+    // the reveal moved the pane HOLDING the target and stopped once it was visible
+    expect(driver.calls[0]).toMatchObject({ name: "cua-driver_scroll" })
+    expect(driver.calls[0]!.args).toMatchObject({ direction: "down", element_token: "s1" })
+    expect(reveal.attempts.map((attempt) => attempt.mode)).toEqual(["scroll"])
+    expect(reveal.visible).toBe(true)
+    // the target is re-resolved from the POST-reveal observation (fresh token + FRAME)
+    expect(reveal.target.element_token).toBe("t2")
+    expect(reveal.target.frame?.y).toBe(200)
+    // the click plan is built from the POST-reveal frame, never the pre-reveal one
+    const plan = actuationPlan(actuatorOf(reveal.target, reveal.elements), win)
+    expect(plan.map((rung) => rung.label)).toContain("pixel(30,210)")
+    expect(plan.map((rung) => rung.label)).not.toContain("pixel(30,410)")
+  })
+
+  test("(b) an already-visible target is a strict no-op — no scroll, no resize, no read", async () => {
+    const inside: Element = { ...below, frame: { x: 10, y: 100, width: 40, height: 20 } }
+    const elements = [windowEl, scroller, inside]
+    const bounds = windowBounds(elements)
+    expect(bounds).toEqual({ x: 0, y: 0, width: 400, height: 300 })
+    expect(withinBounds(inside.frame!, bounds!)).toBe(true)
+    const driver = makeDriver([])
+    const reveal = await Effect.runPromise(ensureVisible(driver.call, win, inside, elements, screenSignature(elements)))
+
+    expect(reveal.visible).toBe(true)
+    expect(reveal.attempts).toHaveLength(0)
+    expect(reveal.observations).toBe(0)
+    expect(driver.calls).toHaveLength(0)
+  })
+
+  test("(c) the bounded budget exhausting yields the distinct off-viewport status with every attempt, never a blind click", async () => {
+    const elements = [windowEl, scroller, below]
+    const script: DriverOutcome[] = []
+    for (let i = 0; i < REVEAL_BUDGET; i++) {
+      script.push({ ok: true, result: { content: [] } }) // scroll (no effect)
+      script.push({
+        ok: true,
+        result: { content: [], structuredContent: wire([windowEl, scroller, { ...below, element_token: `t${i + 2}` }]) },
+      }) // re-observe: still below the fold
+    }
+    const driver = makeDriver(script)
+    const reveal = await Effect.runPromise(ensureVisible(driver.call, win, below, elements, screenSignature(elements)))
+
+    expect(reveal.visible).toBe(false)
+    expect(reveal.attempts).toHaveLength(REVEAL_BUDGET)
+    expect(reveal.attempts.every((attempt) => attempt.mode === "scroll")).toBe(true)
+    const failure = revealFailure(reveal.attempts)
+    expect(failure).toContain(OFF_VIEWPORT)
+    expect(failure).toContain("scroll down")
+    // NOT a blind click: every attempt was a reveal, and no click was ever issued
+    expect(driver.calls.some((call) => call.name === "cua-driver_click")).toBe(false)
+  })
+
+  test("(d) with no scroll container the reveal grows the window instead, then re-resolves", async () => {
+    const detached: Element = { ...below, parent_index: 0 } // parent is the AXWindow, not a scroller
+    const elements = [windowEl, detached]
+    const grown: Element = { ...windowEl, frame: { x: 0, y: 0, width: 400, height: 600 } }
+    const shown: Element = { ...detached, element_token: "t2" }
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // set_window_frame
+      { ok: true, result: { content: [], structuredContent: wire([grown, shown]) } }, // now visible
+    ])
+    const reveal = await Effect.runPromise(ensureVisible(driver.call, win, detached, elements, screenSignature(elements)))
+
+    expect(driver.calls[0]).toMatchObject({ name: "cua-driver_set_window_frame" })
+    expect(driver.calls[0]!.args).toMatchObject({ height: 600 })
+    expect(reveal.attempts.map((attempt) => attempt.mode)).toEqual(["resize"])
+    expect(reveal.visible).toBe(true)
+    expect(reveal.target.element_token).toBe("t2")
+  })
+
+  test("(e) BOTH click call sites ensure visibility before the rungs (no blind click site)", async () => {
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    const callSites = src.slice(src.indexOf("export const UiRunTool"))
+    expect(callSites.match(/yield\* ensureVisible\(/g) ?? []).toHaveLength(2)
+  })
+})
+
+// GENERALIZATION — INVARIANT: the accessibility tree's own geometry decides what
+// is on screen (frame ∩ every ancestor clip), a row is actuated through the
+// descendant that ACTIVATES it, an actuator NAMES and VERIFIES its window and
+// container, and a guarded capability is used through the driver's own sanctioned
+// per-call authorization — never by weakening the guard. LIVE INSTANCES: the
+// wallpaper swatch lay below its scroll container's viewport (visibility), the
+// row's real control was a rejecting-descendant (binding), the reveal scroll aimed
+// without a container moved another region (scoping), and the coordinate click was
+// refused for lack of the per-call authorization (authorization). UNSEEN CASES: a
+// nested clip chain; a pick-only cell beside an activating control; a horizontally
+// overflowing table; a tokenless canvas control.
+// hardcode-guard:allow the fixture roles/frames/tokens are the enumerable geometry inputs under test
+describe("ui-hands — geometry visibility, row binding, container scoping, authorized click", () => {
+  const WINDOW_EL: Element = {
+    element_index: 0,
+    element_token: "w0",
+    role: "AXWindow",
+    label: "Settings",
+    depth: 0,
+    frame: { x: 0, y: 0, width: 400, height: 300 },
+  }
+  const DIALOG: Element = {
+    element_index: 1,
+    element_token: "d1",
+    role: "AXDialog",
+    depth: 1,
+    parent_index: 0,
+    frame: { x: 0, y: 0, width: 400, height: 300 },
+  }
+  const SCROLLER: Element = {
+    element_index: 2,
+    element_token: "s1",
+    role: "AXScrollArea",
+    depth: 2,
+    parent_index: 1,
+    frame: { x: 0, y: 40, width: 400, height: 200 },
+  }
+  const BELOW: Element = {
+    element_index: 3,
+    element_token: "t1",
+    role: "AXButton",
+    label: "Black",
+    depth: 3,
+    parent_index: 2,
+    actions: ["AXPress"],
+    frame: { x: 10, y: 300, width: 40, height: 20 },
+  }
+  const INSIDE: Element = { ...BELOW, element_token: "t2", frame: { x: 10, y: 100, width: 40, height: 20 } }
+  const STRADDLE: Element = { ...BELOW, element_token: "t3", frame: { x: 10, y: 230, width: 40, height: 40 } }
+  const win = { pid: 4242, window_id: 7 }
+
+  test("(a) geometry visibility: below the container viewport is off-screen with a scroll delta; a nested clip chain is honored", () => {
+    const elements = [WINDOW_EL, DIALOG, SCROLLER, BELOW, INSIDE]
+    const below = visibilityOf(BELOW, elements)
+    expect(below.state).toBe("off-screen")
+    expect(below.container?.element_token).toBe("s1")
+    expect(below.scroll?.direction).toBe("down")
+    expect(below.scroll?.lines ?? 0).toBeGreaterThanOrEqual(1)
+    // containment comes from the parent_index chain: scroller inside dialog inside window
+    expect(ancestorChain(BELOW, elements).map((ancestor) => ancestor.role)).toEqual([
+      "AXScrollArea",
+      "AXDialog",
+      "AXWindow",
+    ])
+    expect(visibilityOf(INSIDE, elements).state).toBe("visible")
+  })
+
+  test("(a) an element straddling the container edge is partial; the nearest scroll container is found structurally", () => {
+    const elements = [WINDOW_EL, DIALOG, SCROLLER, STRADDLE]
+    expect(visibilityOf(STRADDLE, elements).state).toBe("partial")
+    expect(scrollContainerOf(STRADDLE, elements)?.element_token).toBe("s1")
+  })
+
+  test("(b) a row with an activating descendant binds to it; a pick-only sibling is a recorded last resort", () => {
+    const box: Element = {
+      element_index: 0,
+      element_token: "box",
+      role: "AXGroup",
+      label: "Wallpaper",
+      depth: 1,
+      frame: { x: 0, y: 0, width: 200, height: 80 },
+    }
+    const pick: Element = {
+      element_index: 1,
+      element_token: "pick",
+      role: "AXRow",
+      label: "Black",
+      depth: 2,
+      parent_index: 0,
+      actions: ["AXPick"],
+      frame: { x: 0, y: 0, width: 200, height: 40 },
+    }
+    const activating: Element = {
+      element_index: 2,
+      element_token: "press",
+      role: "AXButton",
+      label: "Black",
+      depth: 2,
+      parent_index: 0,
+      actions: ["AXPress"],
+      frame: { x: 8, y: 48, width: 40, height: 24 },
+    }
+    const withActivating = actuatorBinding(box, [box, pick, activating])
+    expect(withActivating.actuator.element_token).toBe("press")
+    expect(withActivating.activating).toBe(true)
+    expect(withActivating.lastResort).toBe(false)
+    // with NO activating candidate the pick-only element is used, RECORDED as a last resort
+    const onlyPick = actuatorBinding(box, [box, pick])
+    expect(onlyPick.actuator.element_token).toBe("pick")
+    expect(onlyPick.activating).toBe(false)
+    expect(onlyPick.lastResort).toBe(true)
+  })
+
+  test("(c) a scroll is scoped (pid+window_id+container) and verified against THAT container; a scroll that moved another region is undelivered", async () => {
+    const wire = (elements: readonly Element[]) => ({
+      snapshot_id: "s1",
+      elements: elements.map((element) => ({
+        token: element.element_token,
+        role: element.role,
+        label: element.label,
+        value: element.value,
+        actions: element.actions,
+        frame: element.frame,
+        element_index: element.element_index,
+        parent_index: element.parent_index,
+        depth: element.depth,
+      })),
+    })
+    const script: DriverOutcome[] = []
+    const otherChild = (y: number): Element => ({
+      element_index: 9,
+      element_token: "cx",
+      role: "AXStaticText",
+      label: "moved",
+      value: "moved",
+      depth: 2,
+      parent_index: 8,
+      frame: { x: 0, y, width: 10, height: 10 },
+    })
+    for (let i = 0; i < REVEAL_BUDGET; i++) {
+      script.push({ ok: true, result: { content: [] } }) // scroll ok
+      // a DIFFERENT container's content moved; the target's scroller + the target are untouched
+      script.push({
+        ok: true,
+        result: {
+          content: [],
+          structuredContent: wire([WINDOW_EL, SCROLLER, { ...BELOW, element_token: `t${i + 2}` }, otherChild(i + 1)]),
+        },
+      })
+    }
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    const elements = [WINDOW_EL, SCROLLER, BELOW]
+    const reveal = await Effect.runPromise(ensureVisible(call, win, BELOW, elements, screenSignature(elements)))
+
+    // the scroll names its window AND its container
+    expect(calls[0]).toMatchObject({ name: "cua-driver_scroll" })
+    expect(calls[0]!.args).toMatchObject({ pid: 4242, window_id: 7, element_token: "s1" })
+    // the intended container never moved → every attempt is unverified and the target stays undelivered
+    expect(reveal.visible).toBe(false)
+    expect(reveal.attempts.every((attempt) => attempt.container === "s1")).toBe(true)
+    expect(reveal.attempts.every((attempt) => attempt.verified === false)).toBe(true)
+    const failure = revealFailure(reveal.attempts)
+    expect(failure).toContain(OFF_VIEWPORT)
+    expect(failure).toContain(CONTAINER_UNMOVED)
+    // the container signature is what proves movement: a target move IS a container-content move
+    const moved = { ...BELOW, frame: { x: 10, y: 100, width: 40, height: 20 } }
+    expect(containerSignature(SCROLLER, [WINDOW_EL, SCROLLER, moved])).not.toBe(
+      containerSignature(SCROLLER, [WINDOW_EL, SCROLLER, BELOW]),
+    )
+  })
+
+  test("(d) the coordinate rung carries the driver's per-call authorization only when supplied; absence is a distinct authorization-required outcome", () => {
+    const swatch: Element = {
+      element_token: "sw",
+      role: "AXImage",
+      label: "Black",
+      frame: { x: 100, y: 100, width: 40, height: 40 },
+    }
+    const plain = actuationPlan(swatch, win)
+    const pixelPlain = plain.find((rung) => rung.mode === "pixel")!
+    // default: no authorization on the coordinate path
+    expect(pixelPlain.args[AUTHORIZATION_FLAG]).toBeUndefined()
+    // supplied: the documented per-call flag rides the coordinate rung, at the visible frame centre
+    const authorized = actuationPlan(swatch, win, true)
+    const pixelAuthorized = authorized.find((rung) => rung.mode === "pixel")!
+    expect(pixelAuthorized.args).toMatchObject({
+      [AUTHORIZATION_FLAG]: true,
+      x: 120,
+      y: 120,
+      delivery_mode: "foreground",
+    })
+    // the driver's own refusal names the flag; the attempt records authorization-required (never delivery)
+    const before = clickSignals(screenSignature([swatch]), swatch, [swatch])
+    const refusal = `${REFUSED_BY_POLICY}: canvas/WebGL targets: pass ${AUTHORIZATION_FLAG}:true (Brain-authorized) to bypass`
+    const attempt = clickAttempt(pixelPlain, before, before, swatch, refusal)
+    expect(attempt.reasons).toContain("authorization-required")
+    expect(attempt.delivered).toBe(false)
+    // the distinct requirement outcome names exactly what is required, not a generic undelivered
+    expect(clickFailure([attempt])).toContain(AUTHORIZATION_REQUIRED)
+    expect(clickFailure([attempt])).toContain(AUTHORIZATION_FLAG)
+  })
+
+  test("(e) step telemetry records window, container, authorization and verification result", async () => {
+    const el = (label: string): Element => ({ element_token: label, role: "AXLink", label })
+    const row = (label: string): SceneItem => ({
+      id: label,
+      role: "AXLink",
+      label,
+      affordances: ["activatable"],
+      stateChanging: false,
+      enabled: true,
+      element: el(label),
+    })
+    const listScene = (labels: readonly string[], snapshot: string): Scene => ({
+      snapshot,
+      regions: [{ id: `${snapshot}:list`, kind: "list", itemIds: [...labels], textIds: [] }],
+      items: labels.map(row),
+      texts: [],
+    })
+    const scenes = [listScene(["m1"], "s-partial"), listScene(["m1", "m2", "m3"], "s-satisfied")]
+    let observed = scenes[0]
+    const scope: ActuationScope = {
+      window: { pid: 4242, window_id: 7 },
+      target: "t1",
+      actuator: "press",
+      containment: ["AXGroup", "AXWindow"],
+      visibleRect: { x: 10, y: 100, width: 40, height: 20 },
+      container: "s1",
+      authorization: AUTHORIZATION_FLAG,
+      verified: true,
+    }
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "read the last 3 messages",
+        observe: () => Effect.succeed(observed),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: () => {
+          observed = scenes[1]
+          return Effect.succeed({ deliveryModes: ["read"], scope })
+        },
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 8,
+      }),
+    )
+    expect(result.telemetry[0]?.scope).toEqual(scope)
+  })
+})
+
+// GENERALIZATION — INVARIANT: (1) reveal through the element's own SANCTIONED
+// action first (AXScrollToVisible/Top/Bottom), before any computed delta or
+// resize; (2) SCROLLABILITY IS AN ACTION PROPERTY, not a role — an element with
+// scroll actions but no scroll-area role is a scroller; (3) ITEM SELECTION selects
+// the structural item before its actuator, reporting a bare label match as weak.
+// LIVE INSTANCE: the Wallpaper pane's swatch declares AXScrollToVisible while no
+// scroll-area wraps the pane (role: AXOpaqueProviderGroup). UNSEEN CASES: an
+// ancestor scroller that declares AXScrollToBottom; a label-only match; content
+// overflowing on BOTH axes with no scroll-area role.
+// hardcode-guard:allow the fixture roles/actions/frames are the enumerable inputs under test
+describe("ui-hands — reveal by sanctioned action, scrollability by action, structured item selection", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s1",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      actions: element.actions,
+      frame: element.frame,
+      element_index: element.element_index,
+      parent_index: element.parent_index,
+      depth: element.depth,
+    })),
+  })
+  const makeDriver = (script: DriverOutcome[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    return { call, calls }
+  }
+  const windowEl: Element = {
+    element_index: 0,
+    element_token: "w0",
+    role: "AXWindow",
+    label: "Settings",
+    depth: 0,
+    frame: { x: 0, y: 0, width: 400, height: 300 },
+  }
+  // A colour group with NO scroll-area role that scrolls by ACTION alone.
+  const pane: Element = {
+    element_index: 1,
+    element_token: "p1",
+    role: "AXOpaqueProviderGroup",
+    label: "Colors",
+    depth: 1,
+    parent_index: 0,
+    actions: ["AXScrollToTop", "AXScrollToBottom"],
+    frame: { x: 0, y: 40, width: 400, height: 260 },
+  }
+  const swatch: Element = {
+    element_index: 2,
+    element_token: "t1",
+    role: "AXButton",
+    label: "Black",
+    depth: 2,
+    parent_index: 1,
+    actions: ["AXScrollToVisible", "AXShowMenu"],
+    frame: { x: 10, y: 400, width: 40, height: 40 },
+  }
+
+  test("(a) an off-screen swatch declaring AXScrollToVisible reveals via THAT action (route recorded) and is re-checked visible", async () => {
+    const elements = [windowEl, pane, swatch]
+    const moved: Element = { ...swatch, element_token: "t2", frame: { x: 10, y: 120, width: 40, height: 40 } }
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // the sanctioned action (no effect yet)
+      { ok: true, result: { content: [], structuredContent: wire([windowEl, pane, moved]) } }, // revealed
+    ])
+    const reveal = await Effect.runPromise(ensureVisible(driver.call, win, swatch, elements, screenSignature(elements)))
+
+    // the FIRST route is the element's own action, through the driver's action mechanism
+    expect(driver.calls[0]).toMatchObject({ name: "cua-driver_click" })
+    expect(driver.calls[0]!.args).toMatchObject({ element_token: "t1", action: "scroll_to_visible" })
+    expect(reveal.attempts[0]!.mode).toBe("action")
+    expect(reveal.attempts[0]!.route).toBe("scroll_to_visible")
+    // re-observed and re-checked visible; the target is re-resolved from the post-reveal observation
+    expect(reveal.visible).toBe(true)
+    expect(reveal.target.element_token).toBe("t2")
+    expect(reveal.target.frame?.y).toBe(120)
+  })
+
+  test("(a) an element with scroll actions but NO scroll-area role is treated as scrollable", () => {
+    // scrollability by ACTION: a role-less group declaring AXScrollToTop/Bottom
+    expect(isScrollableContainer(pane)).toBe(true)
+    expect(hasScrollActions(pane)).toBe(true)
+    expect(scrollContainerOf(swatch, [windowEl, pane, swatch])?.element_token).toBe("p1")
+    // the SCENE affordance is likewise driven by the declared action, not the role
+    expect(affordancesOf(pane)).toContain("scrollable")
+  })
+
+  test("(a) a pane with no scroll-area role and content wider than the window clips on BOTH axes", () => {
+    const beyondRight: Element = { ...swatch, element_token: "br", frame: { x: 450, y: 120, width: 60, height: 40 } }
+    const beyondBottom: Element = { ...swatch, element_token: "bb", frame: { x: 10, y: 420, width: 40, height: 40 } }
+    const straddleRight: Element = { ...swatch, element_token: "sr", frame: { x: 360, y: 120, width: 80, height: 40 } }
+    const straddleBottom: Element = { ...swatch, element_token: "sb", frame: { x: 10, y: 270, width: 40, height: 60 } }
+    const elements = [windowEl, pane, beyondRight, beyondBottom, straddleRight, straddleBottom]
+
+    expect(visibilityOf(beyondRight, elements).state).toBe("off-screen")
+    expect(visibilityOf(beyondRight, elements).scroll?.direction).toBe("right")
+    expect(visibilityOf(beyondBottom, elements).state).toBe("off-screen")
+    expect(visibilityOf(beyondBottom, elements).scroll?.direction).toBe("down")
+    // a straddling frame is CLIPPED (partial) on each axis, scoped to the action-scrollable pane
+    expect(visibilityOf(straddleRight, elements).state).toBe("partial")
+    expect(visibilityOf(straddleRight, elements).scroll?.direction).toBe("right")
+    expect(visibilityOf(straddleBottom, elements).state).toBe("partial")
+    expect(visibilityOf(straddleBottom, elements).scroll?.direction).toBe("down")
+    expect(visibilityOf(straddleRight, elements).container?.element_token).toBe("p1")
+  })
+
+  test("(c) an unrevealable off-screen target ends in the distinct unreachable outcome with ALL attempts recorded", async () => {
+    const elements = [windowEl, pane, swatch]
+    const script: DriverOutcome[] = []
+    for (let i = 0; i < REVEAL_BUDGET; i++) {
+      script.push({ ok: true, result: { content: [] } }) // action delivered nothing
+      script.push({
+        ok: true,
+        result: { content: [], structuredContent: wire([windowEl, pane, { ...swatch, element_token: `t${i + 2}` }]) },
+      }) // still below the fold
+    }
+    const driver = makeDriver(script)
+    const reveal = await Effect.runPromise(ensureVisible(driver.call, win, swatch, elements, screenSignature(elements)))
+
+    expect(reveal.visible).toBe(false)
+    expect(reveal.attempts).toHaveLength(REVEAL_BUDGET)
+    expect(reveal.attempts[0]!.route).toBe("scroll_to_visible")
+    expect(driver.calls.some((call) => call.name === "cua-driver_click" && call.args.action === "scroll_to_visible")).toBe(
+      true,
+    )
+    // never a blind click: every attempt is the sanctioned reveal
+    const failure = revealFailure(reveal.attempts)
+    expect(failure).toContain(OFF_VIEWPORT)
+  })
+})
+
+// GENERALIZATION — INVARIANT: ITEM SELECTION precedes actuator selection; a
+// structured row/container with a click-activating descendant is preferred over a
+// bare LABEL match that has none, and the weak case is REPORTED, never silently
+// used. LIVE INSTANCE: the Wallpaper row's activating control is a child AXButton
+// while the row itself declares no AXPress. UNSEEN CASE: a label-only match.
+// hardcode-guard:allow the fixture roles/actions are the enumerable selection inputs under test
+describe("ui-run — item selection before actuator selection", () => {
+  test("(b) a structured row with an activating descendant is preferred over a bare label match; the weak case is reported", () => {
+    const label: Element = { element_index: 0, element_token: "lab", role: "AXStaticText", label: "Black" }
+    const row: Element = {
+      element_index: 1,
+      element_token: "row",
+      role: "AXRow",
+      label: "Black",
+      actions: ["AXShowDefaultUI"],
+    }
+    const press: Element = {
+      element_index: 2,
+      element_token: "press",
+      role: "AXButton",
+      label: "Black",
+      parent_index: 1,
+      actions: ["AXPress"],
+      frame: { x: 0, y: 0, width: 40, height: 40 },
+    }
+    const elements = [label, row, press]
+
+    const selection = selectItem([label, row], elements)
+    // the STRUCTURAL item wins, and its actuator is the activating descendant
+    expect(selection?.item.element_token).toBe("row")
+    expect(selection?.reason).toBe("structure")
+    expect(selection?.actuator.element_token).toBe("press")
+    expect(selection?.activating).toBe(true)
+    expect(selection?.weak).toBe(false)
+
+    // a bare label match with NO activating descendant is flagged weak, not silently used
+    const weak = selectItem([label], [label])
+    expect(weak?.reason).toBe("label")
+    expect(weak?.weak).toBe(true)
+    expect(weak?.actuator.element_token).toBe("lab")
   })
 })

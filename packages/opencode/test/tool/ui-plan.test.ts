@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { decodeObservation, type Element } from "@/tool/ui-eyes"
 import { buildScene, type Scene, type SceneItem, type SceneRegion, type SceneText } from "@/tool/ui-scene"
-import { evalPredicate, plan, replan, targetRegionKind, type Plan, type StepRecord } from "@/tool/ui-plan"
+import { evalPredicate, goalApp, goalIntent, mutationValue, plan, replan, targetRegionKind, targetTerm, type Plan, type StepRecord } from "@/tool/ui-plan"
 
 const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
 
@@ -273,6 +273,77 @@ describe("ui-plan — (a)/(c)/(e) honest arrival identity + goal-anchored reads"
     expect(hit.verdict).toBe("true")
     expect(hit.evidence).toContain("zeta")
     expect(hit.cited?.join(" ")).toContain("zeta-1")
+  })
+})
+
+// GENERALIZATION — INVARIANT: a goal's INTENT (its own verb family) selects the
+// plan SHAPE, and a MUTATION is proven by OBSERVED STATE, never by reading text.
+// LIVE INSTANCE: "change my mac wallpaper to black" "completed" by reading the
+// Settings sidebar (0 actions). UNSEEN SHAPES COVERED: "open the Calculator app"
+// (pure launch) and "turn on dark mode" (toggle) take the same mutation shape.
+// hardcode-guard:allow the goal phrasings are the enumerable inputs under test
+describe("ui-plan — (e) intent selects the plan shape; mutation proven by state", () => {
+  const el = (label: string, role = "AXLink"): Element => ({ element_token: label, role, label })
+  const item = (label: string, extra: Partial<SceneItem> = {}): SceneItem => ({
+    id: label,
+    role: "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+    ...extra,
+  })
+  const settingsScene = (): Scene => ({
+    snapshot: "s-settings",
+    regions: [
+      { id: "r0:list", kind: "list", itemIds: ["About", "Software Update", "Storage", "Wallpaper"], textIds: [] },
+      { id: "r1:content", kind: "content", itemIds: [], textIds: ["h"] },
+    ],
+    items: [item("About"), item("Software Update"), item("Storage"), item("Wallpaper")],
+    texts: [{ id: "h", role: "AXHeading", text: "About", owner: "r1:content", element: el("About", "AXStaticText") }],
+  })
+
+  test("(a) intent classification maps the verb families", () => {
+    expect(goalIntent("change my mac wallpaper to black")).toBe("mutate")
+    expect(goalIntent("toggle the checkbox")).toBe("mutate")
+    expect(goalIntent("open the Calculator app")).toBe("mutate")
+    expect(goalIntent(READ_GOAL)).toBe("read")
+    expect(goalIntent(`go to "${GOAL_DESTINATION}"`)).toBe("navigate")
+  })
+
+  test("(b) a mutation goal never yields a read plan and never a read predicate", () => {
+    const decision = plan("change my mac wallpaper to black", settingsScene())
+    expect(decision.commitId).toBe("mutate")
+    expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === READ)).toBe(false)
+    expect(decision.commit.subgoals.every((subgoal) => subgoal.success.op !== READ_COUNT)).toBe(true)
+    // the mutation is the LAST step and it is a STATE predicate
+    const applyLast = decision.commit.subgoals.at(-1)
+    expect(applyLast?.kind).toBe("apply")
+    expect(applyLast?.success.op).toBe("option_selected")
+    // the surface step may reach a selectable navigation row (mutation-only)
+    const surface = decision.commit.subgoals.find((subgoal) => subgoal.kind === "open_item")
+    expect(surface?.params.selectable).toBe(true)
+    // reading the sidebar can never satisfy it (the option is absent → unknown)
+    expect(evalPredicate(applyLast!.success, settingsScene()).verdict).not.toBe("true")
+  })
+
+  test("(b) the mutation derivations come from the goal's own words", () => {
+    expect(mutationValue("change my mac wallpaper to black")).toBe("black")
+    expect(targetTerm("change my mac wallpaper to black")).toBe("wallpaper")
+    expect(goalApp("open the Calculator app")).toBe("Calculator")
+    expect(goalApp("change my mac wallpaper to black")).toBeUndefined()
+  })
+
+  test("(b) option_selected reads STATE, never text: a labelled-but-unselected option is not a selection", () => {
+    const labelled = syntheticScene([item("Black")])
+    expect(evalPredicate({ op: "option_selected", matching: "black" }, labelled).verdict).toBe("false")
+    const selected = syntheticScene([item("Black", { selected: true })])
+    const hit = evalPredicate({ op: "option_selected", matching: "black" }, selected)
+    expect(hit.verdict).toBe("true")
+    expect(hit.cited?.[0]).toContain("Black")
+    // an option that is not observable at all is unknown, never true
+    expect(evalPredicate({ op: "option_selected", matching: "black" }, syntheticScene([])).verdict).toBe("unknown")
   })
 })
 

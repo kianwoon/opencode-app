@@ -4,6 +4,7 @@ import path from "path"
 import { decodeObservation, type Element } from "@/tool/ui-eyes"
 import { buildScene } from "@/tool/ui-scene"
 import { MAX_OPTIONS, deriveManeuvers, type ManeuverOption, type Subgoal } from "@/tool/ui-maneuvers"
+import type { Scene, SceneItem } from "@/tool/ui-scene"
 
 const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
 
@@ -101,5 +102,86 @@ describe("ui-maneuvers — (b) every offered option carries a success predicate"
       expect(option.success.detail.length).toBeGreaterThan(0)
       expect(option.preconditions.length).toBeGreaterThan(0)
     }
+  })
+})
+
+// GENERALIZATION — INVARIANT: a mutation subgoal offers `select_option` bound to
+// the goal's term, whose success is a STATE reading (`optionSelected`); an app
+// subgoal offers `open_app` bound to the app the goal named. LIVE INSTANCE: the
+// macOS wallpaper swatches under-declare AX actions, so the option is executed by
+// the same click path and proven only by observed state. UNSEEN SHAPE: any
+// toggle/radio/selectable option on any pane takes the same `apply` shape.
+// hardcode-guard:allow the fixture labels are the enumerable inputs under test
+describe("ui-maneuvers — (e) mutation maneuvers (select_option, open_app)", () => {
+  const el = (label: string, role = "AXButton"): Element => ({ element_token: label, role, label })
+  const item = (label: string): SceneItem => ({
+    id: label,
+    role: "AXButton",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+  })
+  const scene = (items: readonly SceneItem[]): Scene => ({ snapshot: "s", regions: [], items, texts: [] })
+  const SELECT_OPTION = "select_option"
+  const OPEN_APP = "open_app"
+  const APPLY_TERM = "black"
+
+  test("(b) select_option binds to the goal term and its success reads STATE, not text", () => {
+    const set = deriveManeuvers({ kind: "apply", matching: APPLY_TERM }, scene([item("Black"), item("Blue")]))
+    const option = set.options.find((entry) => entry.name === SELECT_OPTION)
+    expect(option).toBeDefined()
+    expect(option?.targets.length).toBe(1)
+    expect(option?.success.predicate).toBe("optionSelected")
+    expect(option?.inputs.find((entry) => entry.name === "matching")?.value).toBe(APPLY_TERM)
+  })
+
+  test("(b) an option space with no matching term is empty + reason (never a guess)", () => {
+    const set = deriveManeuvers({ kind: "apply", matching: "chartreuse" }, scene([item("Black")]))
+    expect(set.options).toHaveLength(0)
+    expect(set.reason).toContain("apply")
+  })
+
+  test("(a) open_app derives from the app the goal named, and is offered", () => {
+    const set = deriveManeuvers({ kind: "open_app", value: "Calculator" }, scene([]))
+    const option = set.options.find((entry) => entry.name === OPEN_APP)
+    expect(option).toBeDefined()
+    expect(option?.inputs.find((entry) => entry.name === "app")?.value).toBe("Calculator")
+    // without an app name there is no option
+    expect(deriveManeuvers({ kind: "open_app" }, scene([])).options).toHaveLength(0)
+  })
+
+  test("(a) a label-less selectable row is recovered from its labelled descendant and reachable only as a mutation surface", () => {
+    const els: Element[] = []
+    const add = (element: Omit<Element, "element_index">): number => {
+      const index = els.length
+      els.push({ element_index: index, ...element })
+      return index
+    }
+    const win = add({ role: "AXWindow", frame: { x: 0, y: 0, width: 800, height: 600 } })
+    const outline = add({
+      role: "AXOutline",
+      label: "Sidebar",
+      parent_index: win,
+      depth: 1,
+      frame: { x: 0, y: 0, width: 200, height: 600 },
+    })
+    const row = (label: string, y: number) => {
+      const r = add({ role: "AXRow", parent_index: outline, depth: 2, selected: false, frame: { x: 0, y, width: 200, height: 28 } })
+      add({ role: "AXButton", label, parent_index: r, depth: 3, actions: ["AXPress"], frame: { x: 8, y, width: 180, height: 24 } })
+    }
+    row("panel-alpha", 40)
+    row("panel-beta", 72)
+    const panelScene = buildScene({ snapshot_id: "s", elements: els })
+    // the row's own label is empty; the labelled child is recovered structurally
+    expect(panelScene.items.some((item) => item.label === "panel-alpha")).toBe(true)
+    // a READ never binds the selectable row (LAW 1 intact)...
+    const read = deriveManeuvers({ kind: "read_items", count: 3 }, panelScene)
+    const readLabels = read.options.flatMap((option) => option.targets.map((target) => target.label ?? ""))
+    expect(readLabels.some((label) => label.includes("panel-alpha"))).toBe(false)
+    // ...but a mutation surface does
+    const open = deriveManeuvers({ kind: "open_item", matching: "panel-alpha", selectable: true }, panelScene)
+    expect(open.options.some((option) => option.name === OPEN_ITEMS)).toBe(true)
   })
 })
