@@ -30,8 +30,11 @@ import {
   nextAmbiguity,
   normalizeExpect,
   resolveTarget,
+  runClickRungs,
   screenSignature,
   traceStep,
+  type DriverCall,
+  type DriverOutcome,
   type StepTrace,
 } from "@/tool/ui-run"
 import { usableElements } from "@/tool/ui-eyes"
@@ -44,6 +47,10 @@ import {
   declaredAction,
   elementCenter,
   focusIdentity,
+  frameEstablishingRead,
+  isNoFrameError,
+  observationArgs,
+  pixelFrameRetry,
   targetState,
   type ClickSignals,
 } from "@/tool/ui-hands"
@@ -962,6 +969,175 @@ describe("affirmative click delivery (multi-signal world state)", () => {
     expect(attempt.delivered).toBe(true)
     expect(attempt.reasons).toContain("focus")
     expect(attempt.reasons).not.toContain("screen")
+  })
+})
+
+// GENERALIZATION — INVARIANT: a SENSOR-DEPENDENT actuator establishes the sensor
+// state it needs ON DEMAND, while an OBSERVER optimizes its own payload
+// independently. The live failure — a pixel click erroring "No screenshot frame"
+// because every loop observation requested include_screenshot:false — is ONE
+// instance. UNSEEN CASE COVERED: a second sensor-dependent actuator needing a
+// frame (a contrast/OCR probe) establishes it the same way, never by widening
+// observer payloads.
+// hardcode-guard:allow the driver's refusal token and the capture are the live inputs under test
+describe("on-demand sensor establishment (pixel frame)", () => {
+  const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
+  const win = { pid: 4242, window_id: 7 }
+  const unchanged = (signals: ClickSignals): ClickSignals => ({ ...signals })
+  const NO_FRAME =
+    "No screenshot frame for window 7: its latest read had no screenshot and the window changed size since the last one (or it was never captured)"
+
+  test("(c) the loop's own observation payload stays cheap; only the frame-establishing read carries a screenshot", () => {
+    expect(observationArgs(win)).toEqual({
+      pid: 4242,
+      window_id: 7,
+      include_screenshot: false,
+      tree_format: "elements",
+    })
+    expect(frameEstablishingRead(win)).toEqual({
+      pid: 4242,
+      window_id: 7,
+      include_screenshot: true,
+      tree_format: "elements",
+    })
+    expect(isNoFrameError(NO_FRAME)).toBe(true)
+    expect(isNoFrameError("driver reports ok")).toBe(false)
+  })
+
+  test("(a) a pixel rung reporting no frame establishes ONE frame, then the retry is judged by world state", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const button = observation.elements.find((e) => e.role === "AXButton")
+    if (button === undefined) throw new Error("fixture must hold a button")
+    const plan = actuationPlan(button, win)
+    expect(plan.map((r) => r.mode)).toEqual(["declared", "pixel"])
+    const before = clickSignals("nA", button, observation.elements)
+
+    // rung 1 (declared) changes nothing; rung 2 (pixel) fails for lack of a frame.
+    const declared = clickAttempt(plan[0], before, unchanged(before), button)
+    expect(declared.delivered).toBe(false)
+    expect(pixelFrameRetry(plan[1], NO_FRAME, false)).toBe(true)
+    expect(frameEstablishingRead(win).include_screenshot).toBe(true)
+
+    // the establishing read supplies the after-capture; the retried pixel attempt
+    // delivers on the screen signal — judged by the same multi-signal evidence.
+    const pixelFailed = clickAttempt(plan[1], before, unchanged(before), button, NO_FRAME)
+    const pixelRetry = clickAttempt(plan[1], before, { ...before, screen: "nB" }, button)
+    const verdict = clickVerdict([declared, pixelFailed, pixelRetry])
+    expect(verdict.worked).toBe(true)
+    expect(verdict.mode).toBe("pixel")
+    expect(pixelRetry.reasons).toContain("screen")
+  })
+
+  test("(b) a still-failing retry returns worked:false with the full three-attempt chain", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    if (observation === null) throw new Error("fixture must decode")
+    const button = observation.elements.find((e) => e.role === "AXButton")
+    if (button === undefined) throw new Error("fixture must hold a button")
+    const plan = actuationPlan(button, win)
+    const before = clickSignals("nA", button, observation.elements)
+
+    const declared = clickAttempt(plan[0], before, unchanged(before), button)
+    const pixelFailed = clickAttempt(plan[1], before, unchanged(before), button, NO_FRAME)
+    const pixelRetry = clickAttempt(plan[1], before, unchanged(before), button)
+    const verdict = clickVerdict([declared, pixelFailed, pixelRetry])
+    expect(verdict.worked).toBe(false)
+    expect(verdict.attempts).toHaveLength(3)
+    expect(verdict.attempts.map((a) => a.mode)).toEqual(["declared", "pixel", "pixel"])
+    expect(verdict.attempts[1].error).toContain("No screenshot frame")
+    expect(verdict.attempts.every((a) => a.delivered)).toBe(false)
+  })
+
+  test("pixelFrameRetry fires only for an unestablished pixel rung with the no-frame error", () => {
+    const plan = actuationPlan(
+      {
+        element_token: "s1:9",
+        role: "AXButton",
+        label: "B",
+        actions: ["AXPress"],
+        frame: { x: 0, y: 0, width: 10, height: 10 },
+      },
+      win,
+    )
+    expect(pixelFrameRetry(plan[0], NO_FRAME, false)).toBe(false)
+    expect(pixelFrameRetry(plan[1], NO_FRAME, true)).toBe(false)
+    expect(pixelFrameRetry(plan[1], "some other error", false)).toBe(false)
+    expect(pixelFrameRetry(plan[1], NO_FRAME, false)).toBe(true)
+  })
+})
+
+// GENERALIZATION — the SAME shared rung runner drives both call sites (the main
+// loop and executeSkill's click sub-step), so a skill click sub-step cannot keep a
+// latent no-frame bug the main loop fixed. INVARIANT: a sensor-dependent actuator
+// establishes its sensor state on demand. The source-scan test below confirms no
+// other pixel/click call site bypasses the helper.
+// hardcode-guard:allow the driver's refusal token is the live error under test
+describe("runClickRungs — the shared click rung runner", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const NO_FRAME =
+    "No screenshot frame for window 7: its latest read had no screenshot and the window changed size since the last one"
+  const tree = (label: string) => ({ snapshot_id: "s1", elements: [{ token: "t1", role: "AXButton", label }] })
+
+  const makeDriver = (script: DriverOutcome[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    return { call, calls }
+  }
+
+  test("(a) a pixel rung reporting no frame establishes ONE frame then retries — a skill sub-step's path", async () => {
+    const button = {
+      element_token: "t1",
+      role: "AXButton",
+      label: "Go",
+      actions: ["AXPress"],
+      frame: { x: 0, y: 0, width: 10, height: 10 },
+    }
+    const plan = actuationPlan(button, win)
+    expect(plan.map((r) => r.mode)).toEqual(["declared", "pixel"])
+    // the "before" screen IS the unchanged tree's signature, so the declared probe reads no change
+    const unchanged = decodeObservation(tree("Go"))
+    if (unchanged === null) throw new Error("tree must decode")
+    const before = clickSignals(screenSignature(unchanged.elements), button, unchanged.elements)
+
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared click
+      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
+      { ok: false, error: NO_FRAME }, // pixel click: no frame
+      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // frame-establishing read: unchanged
+      { ok: true, result: { content: [] } }, // retried pixel click
+      { ok: true, result: { content: [], structuredContent: tree("Gone") } }, // probe: screen changed → delivered
+    ])
+
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, button, plan, before, before.screen))
+
+    // exactly ONE frame-establishing read, carrying a screenshot
+    const frameReads = driver.calls.filter(
+      (c) => c.name === "cua-driver_get_window_state" && c.args.include_screenshot === true,
+    )
+    expect(frameReads).toHaveLength(1)
+    // the pixel rung was attempted twice: the no-frame attempt, then the retry
+    const pixelClicks = driver.calls.filter((c) => c.name === "cua-driver_click" && c.args.x !== undefined)
+    expect(pixelClicks).toHaveLength(2)
+    // delivery is judged by the multi-signal world state, on the retried attempt
+    expect(run.outcome.worked).toBe(true)
+    expect(run.outcome.mode).toBe("pixel")
+    expect(run.attempts.map((a) => a.mode)).toEqual(["declared", "pixel", "pixel"])
+    expect(run.attempts[2].reasons).toContain("screen")
+  })
+
+  test("(b)/(d) both call sites use the one runner; no click call site bypasses it", async () => {
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    // the two call sites (main loop + executeSkill) both delegate to the helper...
+    expect(src.match(/yield\* runClickRungs\(/g) ?? []).toHaveLength(2)
+    // ...and NO click / frame-retry logic remains outside the helper region
+    const callSites = src.slice(src.indexOf("export const UiRunTool"))
+    expect(callSites.includes("cua-driver_click")).toBe(false)
+    expect(callSites.includes("pixelFrameRetry(")).toBe(false)
   })
 })
 

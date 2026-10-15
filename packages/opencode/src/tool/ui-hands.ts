@@ -124,6 +124,51 @@ export function actuationPlan(element: Element, window: WindowRef): readonly Act
 }
 
 /**
+ * ON-DEMAND SENSOR ESTABLISHMENT.
+ * INVARIANT OWNED: a SENSOR-DEPENDENT actuator establishes the sensor state it
+ * needs ON DEMAND, while an OBSERVER optimizes its own payload independently —
+ * the two concerns never contaminate each other's call shape. The loop's
+ * observations stay cheap (`include_screenshot:false`); the pixel click rung,
+ * which needs a screenshot frame to aim at, establishes one itself when missing.
+ * hardcode-guard:allow the named live refusal is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: the pixel click fails live with the driver's
+ * no-screenshot-frame refusal because the loop's observations request
+ * `include_screenshot:false`, so no frame ever exists when the pixel rung fires.
+ * UNSEEN CASE COVERED: any second sensor-dependent actuator (an OCR- or
+ * contrast-driven probe) that needs a screenshot frame establishes it the same
+ * on-demand way, leaving observer payloads untouched.
+ */
+/** The driver's live refusal when a pixel click has no screenshot frame to aim at. */
+export const NO_SCREENSHOT_FRAME = "No screenshot frame"
+
+export function isNoFrameError(error: string | undefined): boolean {
+  return error !== undefined && error.includes(NO_SCREENSHOT_FRAME)
+}
+
+/** The loop's OWN observation payloads: no screenshot (payload economy). */
+export function observationArgs(window: WindowRef): Record<string, unknown> {
+  return { pid: window.pid, window_id: window.window_id, include_screenshot: false, tree_format: "elements" }
+}
+
+/**
+ * The ON-DEMAND observation that ESTABLISHES a screenshot frame for a
+ * sensor-dependent actuator. Issued only when the actuator reports no frame — the
+ * observer never carries a screenshot on its own.
+ */
+export function frameEstablishingRead(window: WindowRef): Record<string, unknown> {
+  return { pid: window.pid, window_id: window.window_id, include_screenshot: true, tree_format: "elements" }
+}
+
+/**
+ * Whether the hand must establish a frame and retry: a PIXEL rung, not yet
+ * frame-established, whose click reported no screenshot frame. Pure — the caller
+ * performs the establishing read and the single retry.
+ */
+export function pixelFrameRetry(rung: ActuationRung, error: string | undefined, frameEstablished: boolean): boolean {
+  return rung.mode === "pixel" && !frameEstablished && isNoFrameError(error)
+}
+
+/**
  * How an actuation was carried out: a click rung, a key press, a typed text
  * entry, a scroll, or a read (no actuation — the observation IS the result).
  */

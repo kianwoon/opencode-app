@@ -11,13 +11,17 @@ import {
   clickAttempt,
   clickSignals,
   clickVerdict,
+  frameEstablishingRead,
   keyPress,
+  observationArgs,
+  pixelFrameRetry,
   type ActuationMode,
   type ActuationEvidence,
   type ActuationRung,
   type ClickAttemptEvidence,
   type ClickOutcome,
   type ClickSignals,
+  type WindowRef,
 } from "./ui-hands"
 import {
   foldSubstepEvidence,
@@ -417,7 +421,7 @@ type ContentItem = { type: string; text?: string }
 /** The two CallToolResult fields this loop reads; the SDK type resolves to `never` here. */
 type DriverResult = { content: readonly ContentItem[]; structuredContent?: unknown }
 
-type DriverOutcome = { ok: true; result: DriverResult } | { ok: false; error: string }
+export type DriverOutcome = { ok: true; result: DriverResult } | { ok: false; error: string }
 
 /** One driver call, collapsed to ok/error so the loop never inspects an Exit. */
 function callDriver(
@@ -454,6 +458,74 @@ function textOf(content: readonly { type: string; text?: string }[]): string {
     .filter((text) => text.trim())
     .join("\n\n")
 }
+
+export interface ClickRuns {
+  readonly attempts: readonly ClickAttemptEvidence[]
+  readonly outcome: ClickOutcome
+  /** The last driver click result — diagnostics only, never the verdict. */
+  readonly result: DriverOutcome
+  /** Screen signature after the last attempt's observation (falls back when unreadable). */
+  readonly signature: string
+  readonly observations: number
+}
+
+/** One driver call, injected so the click runner is exercisable without a live MCP client. */
+export type DriverCall = (name: string, args: Record<string, unknown>) => Effect.Effect<DriverOutcome>
+
+/**
+ * CLICK RUNGS — the ONE implementation both call sites (the main loop and
+ * executeSkill's click sub-step) share, so an on-demand sensor rule can never be
+ * fixed at one site and left latent at another.
+ *
+ * INVARIANT (stated once here): a SENSOR-DEPENDENT actuator establishes the
+ * sensor state it needs ON DEMAND, while an OBSERVER optimizes its own payload
+ * independently. The pixel rung clicks only when a screenshot frame exists; the
+ * loop's own observations carry no screenshot (economy), so a pixel click that
+ * reports the driver's no-frame refusal triggers ONE include_screenshot:true read
+ * — which is also that failed attempt's after-capture, folding the focus signal
+ * the economy probe omits — then a single retry of the same pixel rung. Delivery
+ * is judged throughout on the multi-signal world state, never the driver's code.
+ * hardcode-guard:allow the named live refusal is one instance cited to ground the invariant
+ */
+export const runClickRungs = (
+  call: DriverCall,
+  window: WindowRef,
+  target: Element,
+  plan: readonly ActuationRung[],
+  signalBefore: ClickSignals,
+  fallbackSignature: string,
+): Effect.Effect<ClickRuns> =>
+  Effect.gen(function* () {
+    const attempts: ClickAttemptEvidence[] = []
+    let result: DriverOutcome = { ok: false, error: "no actuation rung" }
+    let signature = fallbackSignature
+    let observations = 0
+    let frameEstablished = false
+    for (const rung of plan) {
+      result = yield* call("cua-driver_click", rung.args)
+      if (pixelFrameRetry(rung, result.ok ? undefined : result.error, frameEstablished)) {
+        const frame = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
+        observations++
+        frameEstablished = true
+        const frameObs = frame.ok ? decodeObservation(frame.result.structuredContent) : null
+        if (frameObs) signature = screenSignature(frameObs.elements)
+        const signalAfter = frameObs ? clickSignals(signature, target, frameObs.elements) : signalBefore
+        const failed = clickAttempt(rung, signalBefore, signalAfter, target, result.ok ? undefined : result.error)
+        attempts.push(failed)
+        if (failed.delivered) break
+        result = yield* call("cua-driver_click", rung.args)
+      }
+      const probe = yield* call("cua-driver_get_window_state", observationArgs(window))
+      observations++
+      const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
+      if (probed) signature = screenSignature(probed.elements)
+      const signalAfter = probed ? clickSignals(signature, target, probed.elements) : signalBefore
+      const attempt = clickAttempt(rung, signalBefore, signalAfter, target, result.ok ? undefined : result.error)
+      attempts.push(attempt)
+      if (attempt.delivered) break
+    }
+    return { attempts, outcome: clickVerdict(attempts), result, signature, observations }
+  })
 
 export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
   "ui_run",
@@ -550,46 +622,28 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 // hardcode-guard:allow the refusal token is the loop's internal vocabulary, not a case literal
                 if (sub.kind === "click") {
                   // AFFIRMATIVE click sub-step: escalate declared→pixel on ABSENT
-                  // delivery; an undelivered click aborts the maneuver.
+                  // delivery through the shared rung runner (which also establishes
+                  // a screenshot frame on demand for the sensor-dependent pixel
+                  // rung); an undelivered click aborts the maneuver.
+                  // hardcode-guard:allow the failure token is the skill runner's own internal vocabulary, not a case literal
                   const plan = actuationPlan(match.element, params.window)
-                  const signalBefore = clickSignals(signatures.at(-1) ?? before, match.element, elements)
-                  mode = "declared"
-                  result = { ok: false, error: "no actuation rung" }
-                  let delivered = false
-                  let afterSignature = signatures.at(-1) ?? before
-                  for (const rung of plan) {
-                    result = yield* callDriver(tools, "cua-driver_click", rung.args, ctx.abort)
-                    mode = rung.mode
-                    const probe = yield* callDriver(
-                      tools,
-                      "cua-driver_get_window_state",
-                      {
-                        pid: params.window.pid,
-                        window_id: params.window.window_id,
-                        include_screenshot: false,
-                        tree_format: "elements",
-                      },
-                      ctx.abort,
-                    )
-                    observationsUsed++
-                    const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
-                    afterSignature = probed ? screenSignature(probed.elements) : (signatures.at(-1) ?? before)
-                    const signalAfter = probed
-                      ? clickSignals(afterSignature, match.element, probed.elements)
-                      : signalBefore
-                    if (
-                      clickAttempt(rung, signalBefore, signalAfter, match.element, result.ok ? undefined : result.error)
-                        .delivered
-                    ) {
-                      delivered = true
-                      break
-                    }
-                  }
-                  signatures.push(afterSignature)
+                  const fallback = signatures.at(-1) ?? before
+                  const run = yield* runClickRungs(
+                    (name, args) => callDriver(tools, name, args, ctx.abort),
+                    params.window,
+                    match.element,
+                    plan,
+                    clickSignals(fallback, match.element, elements),
+                    fallback,
+                  )
+                  observationsUsed += run.observations
+                  mode = run.outcome.mode
+                  result = run.result
+                  signatures.push(run.signature)
                   modes.push({ label: sub.label, mode })
-                  deliveries.push(delivered)
+                  deliveries.push(run.outcome.worked)
                   reads.push(undefined)
-                  if (!delivered) {
+                  if (!run.outcome.worked) {
                     failure = "click undelivered on every rung"
                     break
                   }
@@ -602,12 +656,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   const observedRead = yield* callDriver(
                     tools,
                     "cua-driver_get_window_state",
-                    {
-                      pid: params.window.pid,
-                      window_id: params.window.window_id,
-                      include_screenshot: false,
-                      tree_format: "elements",
-                    },
+                    observationArgs(params.window),
                     ctx.abort,
                   )
                   observationsUsed++
@@ -660,12 +709,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 const observedAfter = yield* callDriver(
                   tools,
                   "cua-driver_get_window_state",
-                  {
-                    pid: params.window.pid,
-                    window_id: params.window.window_id,
-                    include_screenshot: false,
-                    tree_format: "elements",
-                  },
+                  observationArgs(params.window),
                   ctx.abort,
                 )
                 observationsUsed++
@@ -685,15 +729,11 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             const observed = yield* callDriver(
               tools,
               "cua-driver_get_window_state",
-              {
-                pid: params.window.pid,
-                window_id: params.window.window_id,
-                include_screenshot: false,
-                // The driver DEFAULTS tree_format to "markdown" (a `tree_markdown`
-                // string, no `elements`); this loop parses the structured
-                // `elements` array, so it must request the format it parses.
-                tree_format: "elements",
-              },
+              // The driver DEFAULTS tree_format to "markdown" (a `tree_markdown`
+              // string, no `elements`); this loop parses the structured
+              // `elements` array, so it must request the format it parses.
+              // The loop's own observations stay cheap: no screenshot (economy).
+              observationArgs(params.window),
               ctx.abort,
             )
             observations++
@@ -901,7 +941,6 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // frame. A rung is tried only when its predecessor fails.
             let actLabel: string
             let actResult: DriverOutcome
-            let clickRung: ActuationRung | undefined
             // hardcode-guard:allow a per-step state slot, not a case literal
             let clickOutcome: ClickOutcome | undefined
             if (verdict.action === "type") {
@@ -919,48 +958,24 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               actLabel = `type_text "${verdict.text}"${retried ? " (foreground retry)" : ""}`
             } else {
               // AFFIRMATIVE CLICK: rung 1 (declared action), rung 2 (pixel frame
-              // centre). After EACH rung the loop re-observes and judges delivery
-              // on WORLD STATE; absent evidence escalates. Two silent rungs →
-              // worked:false with both rungs' evidence — an affirmative failure.
-              // hardcode-guard:allow the refusal token is the loop's internal vocabulary, not a case literal
+              // centre), run through the shared on-demand-sensor runner (see
+              // runClickRungs): the sensor-dependent pixel rung establishes a
+              // screenshot frame when missing and retries once. Delivery is judged
+              // on WORLD STATE after each rung; absent evidence escalates. Two
+              // silent rungs → worked:false with both rungs' evidence.
               const plan = actuationPlan(verdict.element, params.window)
-              const signalBefore = clickSignals(map.current, verdict.element, observation.elements)
               actLabel = plan[0]?.label ?? "click"
-              actResult = { ok: false, error: "no actuation rung" }
-              const attempts: ClickAttemptEvidence[] = []
-              for (const rung of plan) {
-                actResult = yield* callDriver(tools, "cua-driver_click", rung.args, ctx.abort)
-                actLabel = rung.label
-                const probe = yield* callDriver(
-                  tools,
-                  "cua-driver_get_window_state",
-                  {
-                    pid: params.window.pid,
-                    window_id: params.window.window_id,
-                    include_screenshot: false,
-                    tree_format: "elements",
-                  },
-                  ctx.abort,
-                )
-                observations++
-                const probed = probe.ok ? decodeObservation(probe.result.structuredContent) : null
-                const signalAfter = probed
-                  ? clickSignals(screenSignature(probed.elements), verdict.element, probed.elements)
-                  : signalBefore
-                const attempt = clickAttempt(
-                  rung,
-                  signalBefore,
-                  signalAfter,
-                  verdict.element,
-                  actResult.ok ? undefined : actResult.error,
-                )
-                attempts.push(attempt)
-                if (attempt.delivered) {
-                  clickRung = rung
-                  break
-                }
-              }
-              clickOutcome = clickVerdict(attempts)
+              const run = yield* runClickRungs(
+                (name, args) => callDriver(tools, name, args, ctx.abort),
+                params.window,
+                verdict.element,
+                plan,
+                clickSignals(map.current, verdict.element, observation.elements),
+                map.current,
+              )
+              observations += run.observations
+              actResult = run.result
+              clickOutcome = run.outcome
               const prior = trace[trace.length - 1]
               if (prior) trace[trace.length - 1] = { ...prior, click: clickOutcome }
               if (!clickOutcome.worked) {
@@ -998,10 +1013,10 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             }
             // Remember the target + mode so a focus click on the successor's target
             // reads as a prerequisite rather than a no-op next iteration.
-            actedMode = clickRung ? clickRung.mode : "type"
+            actedMode = clickOutcome ? clickOutcome.mode : "type"
             actedTarget = target
             lastActuation = {
-              mode: clickRung ? clickRung.mode : "type",
+              mode: clickOutcome ? clickOutcome.mode : "type",
               before: map.current,
             }
             previous = `[ok ${step + 1}] ${actLabel} → ${target}`
