@@ -14,10 +14,17 @@
  *      re-resolves a chosen label against FRESH elements by role+label, so a
  *      target whose element_token churned is acted on instead of dropped as
  *      "not-in-fresh-candidates".
+ *   3. TOLERANT VOCABULARY — decode the NAMES the driver actually ships. The
+ *      live probe ships the element token as `token`, not `element_token`; the
+ *      decoder aliases known variants and defaults only fields the driver
+ *      genuinely omits. A key-NAME change must never read as an unusable
+ *      payload: `decodeObservation` returns null only when the payload is truly
+ *      undecodable, never because a key is aliased.
  *
  * INVARIANT OWNED: the world model (`NavMap.frontier`) contains every
- * goal-relevant control the screen holds, and a decision keyed to a (role,label)
- * survives a token/snapshot change.
+ * goal-relevant control the screen holds, a decision keyed to a (role,label)
+ * survives a token/snapshot change, and the decoder accepts the driver's aliased
+ * wire vocabulary rather than one hard-coded spelling.
  * LIVE FAILURE AS ONE INSTANCE: "controls truncated from 159 to 60" on System
  * Settings, and every valid choice lost as "target-not-in-fresh-candidates"
  * when tokens churned.
@@ -45,9 +52,9 @@ const Rect = Schema.Struct({
   height: Schema.Number,
 })
 
-export const Element = Schema.Struct({
+/** Element fields shared by the canonical and wire shapes. */
+const elementFields = {
   element_index: Schema.optional(Schema.Int),
-  element_token: Schema.optional(Schema.String),
   role: Schema.optional(Schema.String),
   label: Schema.optional(Schema.String),
   enabled: Schema.optional(Schema.Boolean),
@@ -56,8 +63,36 @@ export const Element = Schema.Struct({
   /** Screen-space frame; the hand's pixel fallback clicks its centre. */
   frame: Schema.optional(Rect),
   bounds: Schema.optional(Rect),
+} as const
+
+/** The canonical element the rest of the organ speaks: the token is `element_token`. */
+export const Element = Schema.Struct({
+  ...elementFields,
+  element_token: Schema.optional(Schema.String),
 })
 export type Element = Schema.Schema.Type<typeof Element>
+
+/**
+ * GENERAL RULE — parse the vocabulary the driver actually ships, not one
+ * hard-coded spelling. The live `get_window_state` probe keys the token as
+ * `token` (not `element_token`); the wire schema accepts BOTH, so a key alias
+ * decodes rather than reading as unusable. `enabled`/`frame`/`bounds`/`actions`
+ * are the driver's own names where present and default when the driver omits
+ * them (the probe ships only `token`/`role`/`label`). Unseen variant it covers:
+ * a driver that emits the frame under either `frame` or `bounds`.
+ */
+const WireElement = Schema.Struct({
+  ...elementFields,
+  element_token: Schema.optional(Schema.String),
+  token: Schema.optional(Schema.String),
+})
+type WireElement = Schema.Schema.Type<typeof WireElement>
+
+/** Fold the wire element onto the canonical shape, aliasing `token` -> `element_token`. */
+function normalizeElement(wire: WireElement): Element {
+  const { token, ...rest } = wire
+  return { ...rest, element_token: rest.element_token ?? token }
+}
 
 const Observation = Schema.Struct({
   snapshot_id: Schema.String,
@@ -72,14 +107,22 @@ const Observation = Schema.Struct({
 })
 export type Observation = Schema.Schema.Type<typeof Observation>
 
+const WireObservation = Schema.Struct({
+  snapshot_id: Schema.String,
+  elements: Schema.Array(WireElement).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+})
+
 /**
- * Decode a `cua-driver_get_window_state` `structuredContent`. A missing or
- * undecodable payload is never guessed from the text channel: it returns `null`
- * and the run stops, because a target invented from prose would be a blind click.
+ * Decode a `cua-driver_get_window_state` `structuredContent`. The wire shape is
+ * decoded first (tolerating aliased keys), then normalized to the canonical
+ * element. A missing or truly-undecodable payload is never guessed from the text
+ * channel: it returns `null` and the run stops, because a target invented from
+ * prose would be a blind click.
  */
 export function decodeObservation(input: unknown): Observation | null {
-  const decoded = Schema.decodeUnknownOption(Observation)(input)
-  return Option.isSome(decoded) ? decoded.value : null
+  const decoded = Schema.decodeUnknownOption(WireObservation)(input)
+  if (Option.isNone(decoded)) return null
+  return { snapshot_id: decoded.value.snapshot_id, elements: decoded.value.elements.map(normalizeElement) }
 }
 
 /** The elements the loop may enumerate: token + role present, interactive, enabled. */

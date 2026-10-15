@@ -178,6 +178,44 @@ describe("decodeObservation", () => {
     expect(elements?.elements.length).toBe(2)
     expect(buildCandidates(elements?.elements ?? []).labels).toEqual(["c1 AXButton Settings"])
   })
+
+  // hardcode-guard:allow the fixture mirrors the probed get_window_state wire shape verbatim
+  test("decodes the probed driver wire shape: elements keyed `token`, snapshot s+8hex, 201 elements", () => {
+    const wire = {
+      snapshot_id: "s00000062",
+      window_id: 7,
+      pid: 4242,
+      elements: Array.from({ length: 201 }, (_, i) => ({
+        token: `s00000062:${i + 1}`,
+        role: "AXButton",
+        label: `web-${i}`,
+      })),
+    }
+    const decoded = decodeObservation(wire)
+    expect(decoded).not.toBeNull()
+    expect(decoded?.snapshot_id).toBe("s00000062")
+    expect(decoded?.elements.length).toBe(201)
+    // the driver's `token` key is folded onto the canonical element_token
+    expect(decoded?.elements[0].element_token).toBe("s00000062:1")
+
+    const { labels, truncated } = buildCandidates(decoded?.elements ?? [])
+    expect(labels.length).toBe(201) // every element usable — no key-alias drop
+    expect(truncated).toBeUndefined()
+    expect(labels.some((label) => label.includes("web-200"))).toBe(true)
+  })
+
+  test("both token spellings fold to the same canonical identity", () => {
+    const viaToken = decodeObservation({
+      snapshot_id: "s1",
+      elements: [{ token: "s1:9", role: "AXButton", label: "Go" }],
+    })
+    const viaElementToken = decodeObservation({
+      snapshot_id: "s1",
+      elements: [{ element_token: "s1:9", role: "AXButton", label: "Go" }],
+    })
+    expect(viaToken?.elements[0].element_token).toBe("s1:9")
+    expect(viaElementToken?.elements[0].element_token).toBe("s1:9")
+  })
 })
 
 describe("buildCandidates", () => {
