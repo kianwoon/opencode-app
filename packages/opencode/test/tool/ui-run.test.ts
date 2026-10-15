@@ -30,7 +30,8 @@ import {
   screenSignature,
   traceStep,
 } from "@/tool/ui-run"
-import { actuationPlan, changeEvidence, declaredAction } from "@/tool/ui-hands"
+import { usableElements } from "@/tool/ui-eyes"
+import { actuationPlan, changeEvidence, declaredAction, elementCenter } from "@/tool/ui-hands"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -850,4 +851,51 @@ describe("ui_run tool", () => {
       expect(result.output).toBe("cua-driver MCP server is not connected")
     }),
   )
+})
+
+// GENERAL RULE (mirrors ui-eyes.ts): the wire schema mirrors the DRIVER's field
+// vocabulary at EVERY nesting depth, not just top-level keys. The captured Brave
+// `get_window_state` payload keys each frame `{x, y, w, h}` while the canonical
+// shape is `{x, y, width, height}`; the NESTED frame decoder aliases and
+// normalizes, so a nested key-name change decodes instead of reading "Expected
+// object". This 78/78 failure is one instance; an unseen nested variant it
+// covers is a driver that ships `bounds` (not `frame`) under the same `w`/`h`
+// spelling — the override applies to both fields identically.
+// hardcode-guard:allow regression fixture — the captured payload IS the artifact under test; gate (a)/(b) require the exact captured shape, not synthesized values.
+describe("ui-eyes — driver frame vocabulary", () => {
+  const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
+
+  test("decodes the captured Brave payload: all 78 rows usable from the driver's {x,y,w,h} vocabulary", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    expect(observation).not.toBeNull()
+    if (observation === null) return
+    expect(observation.snapshot_id).toBe("s00000067")
+    // full 78-row shape: every element decodes, every nested frame normalizes
+    expect(raw.elements).toHaveLength(78)
+    expect(observation.elements).toHaveLength(78)
+    expect(
+      observation.elements.every((e) => typeof e.frame?.width === "number" && typeof e.frame?.height === "number"),
+    ).toBe(true)
+    // the driver's own `w`/`h` are preserved as `width`/`height`, row for row
+    expect(
+      observation.elements.every(
+        (e, i) => e.frame?.width === raw.elements[i].frame.w && e.frame?.height === raw.elements[i].frame.h,
+      ),
+    ).toBe(true)
+    // the 54 interactive rows become candidates (AXStaticText/AXImage excluded)
+    expect(usableElements(observation.elements)).toHaveLength(54)
+  })
+
+  test("the pixel fallback centre math holds on a {x,y,w,h} frame", async () => {
+    const raw = await Bun.file(CAPTURE).json()
+    const observation = decodeObservation(raw)
+    expect(observation).not.toBeNull()
+    const back = observation?.elements.find((e) => e.label === "Back")
+    expect(back?.frame).toEqual({ x: 4595, y: 320, width: 28, height: 28 })
+    // centre = (x + width/2, y + height/2) → (4595 + 14, 320 + 14)
+    expect(elementCenter(back!)).toEqual({ x: 4609, y: 334 })
+    const plan = actuationPlan(back!, { pid: raw.pid, window_id: raw.window_id })
+    expect(plan.map((r) => r.label)).toContain("pixel(4609,334)")
+  })
 })

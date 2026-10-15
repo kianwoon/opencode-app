@@ -44,13 +44,43 @@ export const clip = (s: string, max: number): string => (s.length <= max ? s : s
 /** AXStaticText/AXImage carry no actions, so offering them as click targets emits blind clicks. */
 export const NON_INTERACTIVE = new Set(["AXStaticText", "AXImage"])
 
-/** Axis-aligned frame as the driver reports it (either key name is tolerated). */
+/** Canonical axis-aligned frame consumed by the organ and the hand's pixel fallback. */
 const Rect = Schema.Struct({
   x: Schema.Number,
   y: Schema.Number,
   width: Schema.Number,
   height: Schema.Number,
 })
+
+type RectType = Schema.Schema.Type<typeof Rect>
+
+/**
+ * GENERAL RULE — every NESTED object mirrors the driver's field vocabulary, not
+ * just the top-level keys. The live `get_window_state` frame is keyed `{x, y, w,
+ * h}`; the canonical shape is `{x, y, width, height}`. The wire frame accepts
+ * either spelling and normalizes to canonical, so a nested key-NAME change
+ * decodes rather than reading as "Expected object". This failure (frame `w`/`h`
+ * vs `width`/`height`) is one instance; an unseen nested variant it covers is a
+ * driver that ships `bounds` under the same `w`/`h` spelling instead of `frame`.
+ */
+const RectWire = Schema.Struct({
+  x: Schema.Number,
+  y: Schema.Number,
+  w: Schema.optional(Schema.Number),
+  h: Schema.optional(Schema.Number),
+  width: Schema.optional(Schema.Number),
+  height: Schema.optional(Schema.Number),
+})
+
+type RectWire = Schema.Schema.Type<typeof RectWire>
+
+/** Fold the wire frame onto the canonical `{x, y, width, height}`; undefined when no size is shipped. */
+const normalizeRect = (wire: RectWire): RectType | undefined => {
+  const width = wire.width ?? wire.w
+  const height = wire.height ?? wire.h
+  if (width === undefined || height === undefined) return undefined
+  return { x: wire.x, y: wire.y, width, height }
+}
 
 /** Element fields shared by the canonical and wire shapes. */
 const elementFields = {
@@ -83,15 +113,22 @@ export type Element = Schema.Schema.Type<typeof Element>
  */
 const WireElement = Schema.Struct({
   ...elementFields,
+  frame: Schema.optional(RectWire),
+  bounds: Schema.optional(RectWire),
   element_token: Schema.optional(Schema.String),
   token: Schema.optional(Schema.String),
 })
 type WireElement = Schema.Schema.Type<typeof WireElement>
 
-/** Fold the wire element onto the canonical shape, aliasing `token` -> `element_token`. */
+/** Fold the wire element onto the canonical shape: alias `token`, normalize every nested frame. */
 function normalizeElement(wire: WireElement): Element {
-  const { token, ...rest } = wire
-  return { ...rest, element_token: rest.element_token ?? token }
+  const { token, frame, bounds, ...rest } = wire
+  return {
+    ...rest,
+    element_token: rest.element_token ?? token,
+    frame: frame === undefined ? undefined : normalizeRect(frame),
+    bounds: bounds === undefined ? undefined : normalizeRect(bounds),
+  }
 }
 
 const Observation = Schema.Struct({
