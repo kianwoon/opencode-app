@@ -61,7 +61,7 @@ import {
   type PlanSubgoal,
   type StepRecord,
 } from "./ui-plan"
-import { progress as measureProgress, type Progress } from "./ui-progress"
+import { progress as measureProgress, sameScene, type Progress } from "./ui-progress"
 
 // EYES owns observation + world model; HANDS owns actuation. They are
 // re-exported so the loop's public surface (and its tests) reach the organs
@@ -569,6 +569,24 @@ const STATUS_READ_ONLY = "read-only-blocked"
 const STATUS_BELOW_GATE = "below-gate"
 const STATUS_NO_MANEUVER = "no-maneuver"
 const STATUS_LOGIN_WALL = "login-wall"
+/**
+ * The scene kept arriving past the settle budget, so the loop withheld judgement
+ * rather than deciding on a moving page. A DISTINCT status, never `completed` or
+ * `no-maneuver` — a partial render must not satisfy a read or end the run.
+ */
+export const STATUS_UNSETTLED = "scene-unsettled"
+/** Bounded number of observations one settle may take before it is declared unsettled. */
+export const SETTLE_BUDGET = 8
+/**
+ * A page can present a momentarily-stable LOADING state (a skeleton, a spinner)
+ * that two back-to-back observations would agree on. Settling therefore WAITS
+ * between observations and requires the scene to stay unchanged for a minimum
+ * duration before it counts as settled, so a page that is still arriving is never
+ * judged. Both are wired by the tool; the loop's defaults are zero so tests run
+ * without wall-clock delay.
+ */
+export const SETTLE_INTERVAL_MS = 800
+export const SETTLE_MIN_STABLE_MS = 1_500
 /** A destructive maneuver stops here for consent — distinct from the gate stops. */
 export const STATUS_DESTRUCTIVE = "destructive-consent-required"
 /** Every predicate is satisfied but no satisfied subgoal cites observable content. */
@@ -586,6 +604,17 @@ export interface ManeuverExecution {
 export interface ManeuverChoice {
   readonly label?: string
   readonly strength?: number
+}
+
+/**
+ * The outcome of SETTLING perception: the last observed Scene, how many
+ * observations the settle took, and whether consecutive observations converged
+ * (`settled`) or the bounded budget expired first (`false`).
+ */
+export interface SettleOutcome {
+  readonly scene: Scene
+  readonly observations: number
+  readonly settled: boolean
 }
 
 /** The destructive maneuver the loop blocked on, and the strength it carried. */
@@ -607,6 +636,8 @@ export interface PlanLoopTelemetry {
   readonly navigate?: { readonly requested?: string; readonly landed?: string }
   /** Progress measured over the Scene AFTER the step. */
   readonly progress: { readonly done: number; readonly total: number; readonly reasons: readonly string[] }
+  /** How many observations the post-action settle took, and whether it converged. */
+  readonly settle?: { readonly observations: number; readonly settled: boolean }
   readonly reason: string
 }
 
@@ -624,6 +655,12 @@ export interface PlanLoopDeps {
   readonly readOnly: boolean
   readonly maxSteps: number
   readonly gateFloor?: number
+  /** Bounded observations one settle may take before it is declared unsettled (default SETTLE_BUDGET). */
+  readonly settleBudget?: number
+  /** Bounded wait between settle observations (default 0; the tool wires SETTLE_INTERVAL_MS). */
+  readonly settleDelayMs?: number
+  /** How long the scene must stay unchanged before it counts as settled (default 0). */
+  readonly settleMinStableMs?: number
 }
 
 export interface PlanLoopResult {
@@ -776,6 +813,9 @@ export function destructiveTarget(option: ManeuverOption, scene: Scene): string 
 export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
   return Effect.gen(function* () {
     const gateFloor = deps.gateFloor ?? GATE_FLOOR
+    const settleBudget = Math.max(2, deps.settleBudget ?? SETTLE_BUDGET)
+    const settleDelayMs = Math.max(0, deps.settleDelayMs ?? 0)
+    const settleMinStableMs = Math.max(0, deps.settleMinStableMs ?? 0)
     const telemetry: PlanLoopTelemetry[] = []
     const history: StepRecord[] = []
     let maneuverRepeat: ManeuverRepeatState = initialManeuverRepeat()
@@ -799,6 +839,34 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       ...(evidence !== undefined ? { evidence } : {}),
     })
 
+    // SETTLE: perception must CONVERGE before it is judged. Poll the one
+    // non-state-changing action (the observation itself, so nothing mutates),
+    // waiting between observations, until two consecutive observations show the
+    // SAME scene identity AND the same item/text content signature AND the scene
+    // has stayed unchanged for the minimum stable duration — or the bounded settle
+    // budget expires. The duration floor rejects a momentarily-stable loading state
+    // (a skeleton/spinner) that two back-to-back observations would agree on.
+    const settle = (): Effect.Effect<SettleOutcome | undefined> =>
+      Effect.gen(function* () {
+        let previous = yield* deps.observe()
+        if (previous === undefined) return undefined
+        let observations = 1
+        let stableSince = Date.now()
+        while (observations < settleBudget) {
+          if (settleDelayMs > 0) yield* Effect.sleep(settleDelayMs)
+          const next = yield* deps.observe()
+          if (next === undefined) return undefined
+          observations++
+          if (sameScene(previous, next)) {
+            if (Date.now() - stableSince >= settleMinStableMs) return { scene: next, observations, settled: true }
+          } else {
+            stableSince = Date.now()
+          }
+          previous = next
+        }
+        return { scene: previous, observations, settled: false }
+      })
+
     // EVIDENCE-BOUND COMPLETION: completion is only reported when every satisfied
     // subgoal cites the observed content behind it. A completion that cannot cite
     // evidence is refused with a distinct status rather than reported as success.
@@ -813,8 +881,18 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
     }
 
     for (let iteration = 0; iteration < deps.maxSteps; iteration++) {
-      const scene = yield* deps.observe()
-      if (scene === undefined) return result("unparseable-observation", "observation could not be decoded into a Scene")
+      const seen = yield* settle()
+      if (seen === undefined) return result("unparseable-observation", "observation could not be decoded into a Scene")
+      const scene = seen.scene
+      // NO JUDGEMENT ON A MOVING SCENE: a page still arriving is never judged —
+      // no plan is derived from it, no predicate read (so a partial list can never
+      // satisfy a read) and no completion. The loop stops with a DISTINCT status
+      // rather than a false decision.
+      if (!seen.settled)
+        return result(
+          STATUS_UNSETTLED,
+          `scene did not settle within ${settleBudget} observations (${seen.observations} observed); judgement withheld`,
+        )
       const wall = loginWall(scene)
       if (wall !== undefined) return result(STATUS_LOGIN_WALL, wall)
       if (plan === undefined) {
@@ -882,13 +960,17 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       if (repeat.exceeded) return result(REASON_MANEUVER_REPEAT, `maneuver ${option.name} re-issued ${maneuverRepeat.runs}× unresolved`)
       maneuverRepeat = repeat.next
       const execution = yield* deps.execute(option, subgoal, scene)
-      const afterScene = (yield* deps.observe()) ?? scene
+      // SETTLE AFTER ACTION: the maneuver may have changed the page; wait for the
+      // result to arrive (bounded) before judging it. The settle's observation
+      // count and convergence are recorded in this step's telemetry.
+      const post = yield* settle()
+      const afterScene = post?.scene ?? scene
       history.push({
         maneuver: key,
         scene: afterScene,
         subgoalIndex: current.nextSubgoal,
       })
-      const after = measureProgress(plan, afterScene, history)
+      const after = measureProgress(plan, afterScene, history, post?.settled ?? false)
       lastProgress = after
       telemetry.push({
         planId: planId ?? "plan",
@@ -899,6 +981,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
         deliveryModes: execution.deliveryModes,
         ...(execution.paste !== undefined ? { paste: execution.paste } : {}),
         ...(execution.navigate !== undefined ? { navigate: execution.navigate } : {}),
+        ...(post !== undefined ? { settle: { observations: post.observations, settled: post.settled } } : {}),
         progress: {
           done: after.done,
           total: after.total,
@@ -907,6 +990,11 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
         reason: execution.failure !== undefined ? `failed: ${execution.failure}` : "executed",
       })
       if (execution.failure !== undefined) return result("failed", execution.failure)
+      if (post !== undefined && !post.settled)
+        return result(
+          STATUS_UNSETTLED,
+          `scene did not settle after ${option.name} within ${settleBudget} observations (${post.observations} observed); judgement withheld`,
+        )
     }
     return result("budget-exhausted", `no predicate proved within ${deps.maxSteps} steps`)
   })
@@ -1707,6 +1795,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             stateChanging: stateChangingManeuver,
             readOnly: readOnlyGoal(goal),
             maxSteps,
+            settleDelayMs: SETTLE_INTERVAL_MS,
+            settleMinStableMs: SETTLE_MIN_STABLE_MS,
           })
 
           lines.push(`[plan ${planResult.planId ?? "?"}] ${planResult.status}: ${planResult.reason}`)

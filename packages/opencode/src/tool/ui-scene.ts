@@ -214,20 +214,27 @@ const hash = (value: string): string => {
 
 const lineageKey = (element: Element): string => `${element.role ?? ""}\u0000${element.label ?? ""}`
 
-function identityOf(element: Element, tree: Tree): string {
-  const chain: string[] = []
-  let current: Element | undefined = element
-  for (let depth = 0; current && depth < 64; depth++) {
-    chain.unshift(lineageKey(current))
-    current = tree.parentOf(current)
-  }
+/** This element's ordinal among preceding siblings that share its role+label lineage. */
+function ordinalOf(element: Element, tree: Tree): number {
   const self = lineageKey(element)
   let ordinal = 0
   for (const sibling of tree.siblingsOf(element)) {
     if (sibling === element) break
     if (lineageKey(sibling) === self) ordinal++
   }
-  return hash(`${chain.join("\u0001")}\u0002${ordinal}`)
+  return ordinal
+}
+
+function identityOf(element: Element, tree: Tree): string {
+  const chain: string[] = []
+  let current: Element | undefined = element
+  for (let depth = 0; current && depth < 64; depth++) {
+    // Each ancestor contributes its OWN ordinal, so two same-shaped sibling
+    // containers produce DISTINCT identities for the descendants inside each.
+    chain.unshift(`${lineageKey(current)}\u0002${ordinalOf(current, tree)}`)
+    current = tree.parentOf(current)
+  }
+  return hash(chain.join("\u0001"))
 }
 
 /**
@@ -365,6 +372,136 @@ function listRuns(members: readonly Element[], content: boolean): Element[][] {
   return runs
 }
 
+// A readable text cell a row exposes (name/date/preview), never an image control.
+const TEXT_CELL_ROLES = new Set(["AXStaticText", "AXHeading", "AXLink", "AXTextField", "AXTextArea"])
+const CONTAINER_WIDTH_TOL = 24
+
+/** Whether `candidate` sits anywhere under `ancestor` (exclusive of itself). */
+const isDescendantOf = (candidate: Element, ancestor: Element, tree: Tree): boolean => {
+  let current = tree.parentOf(candidate)
+  for (let depth = 0; current && depth < 64; depth++) {
+    if (current === ancestor) return true
+    current = tree.parentOf(current)
+  }
+  return false
+}
+
+/** The readable text a container-built row exposes: its own text/name/preview cells joined. */
+function containerText(element: Element, elements: readonly Element[], tree: Tree): string {
+  const cells: string[] = []
+  for (const candidate of elements) {
+    if (candidate === element || candidate.element_index === element.element_index) continue
+    if (!isDescendantOf(candidate, element, tree)) continue
+    if (!(TEXT_CELL_ROLES.has(candidate.role ?? "") || candidate.value !== undefined)) continue
+    const text = candidate.value ?? candidate.label ?? ""
+    if (text.length > 0) cells.push(text)
+  }
+  return cells.join(" ")
+}
+
+/**
+ * CONTAINER-BUILT ROWS — a list whose children carry no ROW role (a web app builds
+ * its rows from generic containers, so `AXRow` never appears). Recognised
+ * STRUCTURALLY, never by role or name: repeated siblings under the SAME parent
+ * (same depth), aligned left edge, similar width, stacked vertically, each owning
+ * its own text cells. The invariant: item structure is inferred from
+ * containment/repetition/geometry, so it holds for any framework's markup.
+ * UNSEEN SHAPE COVERED: a card grid built from `div`s with no list/row roles.
+ */
+function containerRuns(members: readonly Element[], elements: readonly Element[]): Element[][] {
+  const parents = new Set<number>()
+  for (const element of elements) if (element.parent_index !== undefined) parents.add(element.parent_index)
+  const byRole = new Map<string, Element[]>()
+  for (const element of members) {
+    if (rowLike(element) || !hasArea(element)) continue
+    if (element.element_index === undefined || !parents.has(element.element_index)) continue
+    const role = element.role ?? ""
+    const bucket = byRole.get(role)
+    if (bucket) bucket.push(element)
+    else byRole.set(role, [element])
+  }
+  const runs: Element[][] = []
+  for (const items of byRole.values()) {
+    let run: Element[] = []
+    for (const element of [...items].sort(byY)) {
+      const previous = run.at(-1)
+      const ra = previous ? rectOf(previous) : undefined
+      const rb = rectOf(element)
+      const similarWidth =
+        ra !== undefined && rb !== undefined && Math.abs(ra.width - rb.width) <= CONTAINER_WIDTH_TOL
+      if (previous && alignedX(previous, element) && similarWidth && verticalStep(previous, element)) run.push(element)
+      else {
+        if (run.length >= 2) runs.push(run)
+        run = [element]
+      }
+    }
+    if (run.length >= 2) runs.push(run)
+  }
+  return runs
+}
+
+// A container whose role DECLARES a list owns its children as the list's rows —
+// the structural signal that a group's children are row CELLS, not unrelated siblings.
+const LIST_PARENT_ROLES = new Set(["AXList", "AXOutline", "AXTable", "AXTree"])
+const BAND_COLUMN_TOL = 24
+
+/** Distinct left-edge columns in a cluster (>= 2 means the cells sit side-by-side). */
+function columnCount(members: readonly Element[]): number {
+  const xs = members.map((element) => rectOf(element)?.x).filter((x): x is number => x !== undefined).sort((a, b) => a - b)
+  let columns = 0
+  let previous: number | undefined
+  for (const x of xs) {
+    if (previous === undefined || x - previous > BAND_COLUMN_TOL) columns++
+    previous = x
+  }
+  return columns
+}
+
+/** The readable text a ROW exposes: its text/name/preview cells joined in reading order. */
+const rowText = (members: readonly Element[]): string =>
+  [...members]
+    .sort((a, b) => byY(a, b) || byX(a, b))
+    .filter((element) => TEXT_CELL_ROLES.has(element.role ?? "") || element.value !== undefined)
+    .map((element) => element.value ?? element.label ?? "")
+    .filter((text) => text.length > 0)
+    .join(" ")
+
+/**
+ * FLAT ROW-BUILT ROWS — a list whose children carry no ROW role and are NOT wrapped
+ * in per-row containers (a web app emits every row's cells flat under the list).
+ * Recognised STRUCTURALLY from geometry alone: siblings whose frames overlap
+ * vertically form a horizontal BAND, and a band spanning >= 2 columns (side-by-side
+ * cells: avatar/name/date/preview) that REPEATS down the list is a row. The
+ * invariant: item structure is inferred from containment/repetition/geometry, so it
+ * holds for any framework's markup — a nested-container list and a flat cell list
+ * both reduce to rows. UNSEEN SHAPE COVERED: a table/grid emitting header+cell
+ * static texts flat with no row roles.
+ */
+function multiColumnBands(members: readonly Element[]): Element[][] {
+  const framed = members.filter(hasArea).sort(byY)
+  const clusters: Element[][] = []
+  let current: Element[] = []
+  let bottom = -Infinity
+  for (const element of framed) {
+    const rect = rectOf(element)
+    if (rect === undefined) continue
+    // A band is a maximal run of cells whose vertical extents touch/overlap.
+    if (current.length === 0 || rect.y < bottom) {
+      current.push(element)
+      bottom = Math.max(bottom, rect.y + rect.height)
+    } else {
+      clusters.push(current)
+      current = [element]
+      bottom = rect.y + rect.height
+    }
+  }
+  if (current.length > 0) clusters.push(current)
+  return clusters.filter((cluster) => columnCount(cluster) >= 2)
+}
+
+const coverageOf = (groups: readonly (readonly Element[])[]): number =>
+  groups.reduce((total, group) => total + group.length, 0)
+
 /** The widest horizontal row of interactive siblings, if any — a toolbar. */
 function toolbarRun(members: readonly Element[]): Element[] | undefined {
   const rows = new Map<number, Element[]>()
@@ -399,6 +536,14 @@ export function buildScene(observation: Observation): Scene {
   for (const element of elements) zone.set(element, zoneOf(element, tree))
 
   const assigned = new Set<Element>()
+  // Elements recognised as container-built rows (no row role) — they become items.
+  const containerItems = new Set<Element>()
+  // Flat row-built lists: the representative element of each row band, its
+  // synthesized label, and the row-cell → item-id ownership the band imposes.
+  const bandItems = new Set<Element>()
+  const bandMember = new Set<Element>()
+  const bandLabels = new Map<Element, string>()
+  const bandOwner = new Map<Element, string>()
   const drafts: RegionDraft[] = []
   const push = (kind: RegionKind, members: Element[]): void => {
     for (const member of members) assigned.add(member)
@@ -430,7 +575,41 @@ export function buildScene(observation: Observation): Scene {
   }
   for (const group of groups.values()) {
     const free = group.filter((element) => !assigned.has(element))
-    for (const run of listRuns(free, isContentZone(zoneOfGroup(free, zone)))) push(LIST_KIND, run)
+    // A container whose role DECLARES a list owns its children as rows: try to
+    // recover rows from FLAT sibling cells (no per-row container, no row role).
+    const parentIndex = free[0]?.parent_index
+    const parent = parentIndex === undefined ? undefined : elements.find((element) => element.element_index === parentIndex)
+    const rows = parent !== undefined && LIST_PARENT_ROLES.has(parent.role ?? "") ? multiColumnBands(free) : []
+    const runs = listRuns(free, isContentZone(zoneOfGroup(free, zone)))
+    if (rows.length >= 2 && coverageOf(rows) > coverageOf(runs)) {
+      const members: Element[] = []
+      for (const band of rows) {
+        const representative =
+          band
+            .filter((element) => (element.label ?? "").length > 0)
+            .sort((a, b) => byY(a, b) || byX(a, b))[0] ?? band[0]
+        if (representative === undefined) continue
+        const id = identityOf(representative, tree)
+        bandItems.add(representative)
+        bandLabels.set(representative, rowText(band))
+        for (const member of band) {
+          members.push(member)
+          bandMember.add(member)
+          if (member !== representative && (TEXT_CELL_ROLES.has(member.role ?? "") || member.value !== undefined))
+            bandOwner.set(member, id)
+        }
+      }
+      if (bandItems.size > 0) push(LIST_KIND, members)
+    } else {
+      for (const run of runs) push(LIST_KIND, run)
+      // STRUCTURAL rows: any remaining repeated sibling CONTAINERS with no row role
+      // still become list items.
+      const structural = group.filter((element) => !assigned.has(element))
+      for (const run of containerRuns(structural, elements)) {
+        for (const member of run) containerItems.add(member)
+        push(LIST_KIND, run)
+      }
+    }
     const remaining = group.filter((element) => !assigned.has(element))
     if (remaining.length > 0 && isChromeZone(zoneOfGroup(remaining, zone))) {
       const toolbar = toolbarRun(remaining)
@@ -459,14 +638,22 @@ export function buildScene(observation: Observation): Scene {
   const itemElements = new Set<Element>()
   for (const draft of drafts) {
     if (draft.kind !== LIST_KIND) continue
-    for (const member of draft.members) if (rowLike(member)) itemElements.add(member)
+    for (const member of draft.members) {
+      // A row band IS the item: its non-representative cells are not separate items
+      // (state-changing cells are still re-added below as governor targets).
+      if (bandMember.has(member) && !bandItems.has(member)) continue
+      if (rowLike(member) || containerItems.has(member) || bandItems.has(member)) itemElements.add(member)
+    }
   }
   for (const element of elements) if (isStateChanging(element)) itemElements.add(element)
 
   const items: SceneItem[] = [...itemElements].map((element) => ({
     id: identityOf(element, tree),
     role: element.role ?? "",
-    label: element.label ?? "",
+    // A row built from generic containers/cells exposes the text cells it contains.
+    label:
+      bandLabels.get(element) ??
+      (containerItems.has(element) ? containerText(element, elements, tree) : (element.label ?? "")),
     affordances: affordancesOf(element),
     stateChanging: isStateChanging(element),
     enabled: element.enabled !== false,
@@ -503,6 +690,9 @@ export function buildScene(observation: Observation): Scene {
       (READONLY_ROLES.has(element.role ?? "") || element.value !== undefined),
   )
   const ownerOf = (element: Element): string | undefined => {
+    // A flat row band forces ownership: a cell's text belongs to its band's item.
+    const band = bandOwner.get(element)
+    if (band !== undefined) return band
     let current = tree.parentOf(element)
     for (let depth = 0; current && depth < 64; depth++) {
       const candidate = itemById.get(identityOf(current, tree))

@@ -210,3 +210,35 @@ describe("ui-progress — (e) generalization invariants", () => {
     expect(result.reason).toBe(REASON_OSCILLATION)
   })
 })
+
+// GENERALIZATION — INVARIANT: perception must be allowed to CONVERGE before it is
+// judged, so a Scene still arriving is PENDING to every predicate and can never be
+// credited. LIVE INSTANCE: a cold messaging page shows a partial conversation list;
+// a read must not count its lone row while the rest is still rendering. UNSEEN CASE
+// COVERED: a spinner/overlay that removes itself, or a list that keeps growing via
+// infinite scroll — the same `settled:false` gate withholds every read.
+describe("ui-progress — (e) no judgement on a moving scene", () => {
+  test("a still-arriving scene yields unknown/pending — never satisfied — while the settled scene credits its units", () => {
+    const partial = syntheticScene([sceneItem("row-1")])
+    const decision = plan(READ_GOAL, partial)
+    const moving = progress(decision.commit, partial, [], false)
+    expect(moving.perSubgoal[0].verdict).toBe("unknown")
+    expect(moving.perSubgoal[0].success).toBe(false)
+    expect(moving.done).toBe(0)
+    expect(moving.nextSubgoal).toBe(0)
+    // the SAME scene, once settled, credits the one row it actually shows.
+    const settled = progress(decision.commit, partial, [], true)
+    expect(settled.done).toBe(1)
+  })
+
+  test("a fully-readable scene is still pending while it is moving: completion can never be taken from a moving page", () => {
+    const satisfied = syntheticScene([sceneItem("row-1"), sceneItem("row-2"), sceneItem("row-3")])
+    const decision = plan(READ_GOAL, satisfied)
+    expect(progress(decision.commit, satisfied, [], true).nextSubgoal).toBeUndefined()
+    const moving = progress(decision.commit, satisfied, [], false)
+    expect(moving.nextSubgoal).toBe(0)
+    expect(moving.done).toBe(0)
+    expect(moving.shouldReplan).toBe(false)
+    expect(moving.exhausted).toBe(false)
+  })
+})

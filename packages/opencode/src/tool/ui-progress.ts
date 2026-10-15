@@ -14,6 +14,9 @@
  * (`maneuver-repeat-limit`, the loop's existing bound mirrored), a Scene
  * oscillating A↔B without predicate progress (`scene-oscillation`), and step
  * budget exhaustion (`budget-exhausted`).
+ * NO JUDGEMENT ON A MOVING SCENE: predicate evaluation against a Scene that has
+ * not SETTLED yields `unknown` (pending) for every subgoal — never `true` — so a
+ * still-rendering page can never satisfy a read or report completion.
  * LIVE INSTANCE: the loop re-issuing the same maneuver while the screen flips
  * between two views is not progress and yields `scene-oscillation` + shouldReplan.
  * UNSEEN CASE: alternation between two structurally different views (any A≠B pair)
@@ -51,7 +54,15 @@ const REASON_OSCILLATION = "scene-oscillation"
 const REASON_REPEAT = "maneuver-repeat-limit"
 const REASON_BUDGET = "budget-exhausted"
 
-const sameScene = (a: Scene, b: Scene): boolean => {
+/** Evidence recorded for a predicate WITHHELD because the Scene has not settled. */
+const UNSETTLED_EVIDENCE = "scene has not settled; judgement withheld"
+
+/**
+ * Whether two observations are the SAME settled scene: identical item/text
+ * IDENTITY and identical content fingerprints (labels, values, text). A Scene
+ * whose item/text sets are still arriving is NOT the same scene.
+ */
+export const sameScene = (a: Scene, b: Scene): boolean => {
   const diff = diffScene(a, b)
   return diff.appeared.length === 0 && diff.disappeared.length === 0 && diff.changed.length === 0
 }
@@ -110,9 +121,15 @@ function budgetExceeded(plan: Plan, history: readonly StepRecord[]): boolean {
 /**
  * Measure progress of a plan against the current Scene and the step history. The
  * `reason`/`shouldReplan`/`exhausted` trio names the no-progress shape, if any.
+ * NO JUDGEMENT ON A MOVING SCENE: passing `settled:false` (the observed Scene is
+ * still arriving) makes every predicate PENDING (`unknown`) — never `true` — so
+ * no unit is credited, `done` stays 0, and completion is impossible until a
+ * settled Scene is supplied.
  */
-export function progress(plan: Plan, scene: Scene, history: readonly StepRecord[]): Progress {
-  const results = plan.subgoals.map((subgoal) => evalPredicate(subgoal.success, scene))
+export function progress(plan: Plan, scene: Scene, history: readonly StepRecord[], settled = true): Progress {
+  const results = plan.subgoals.map((subgoal) =>
+    settled ? evalPredicate(subgoal.success, scene) : { verdict: "unknown" as const, evidence: UNSETTLED_EVIDENCE },
+  )
   // ARRIVAL GATE: a subgoal behind an unsatisfied predecessor is not a satisfied
   // step — its verdict is still reported honestly, but it is never credited while
   // the arrival/target predicate it depends on is unmet.
@@ -127,13 +144,14 @@ export function progress(plan: Plan, scene: Scene, history: readonly StepRecord[
     if (result.verdict !== "true") reachable = false
     return entry
   })
-  const done = doneOf(plan, scene)
+  const done = settled ? doneOf(plan, scene) : 0
   const total = plan.subgoals.reduce((sum, subgoal) => sum + (subgoal.success.op === "read_count" ? subgoal.success.n : 1), 0)
   const index = results.findIndex((result) => result.verdict !== "true")
   const nextSubgoal = index === -1 ? undefined : index
   const base = { perSubgoal, done, total, nextSubgoal }
 
   if (nextSubgoal === undefined) return { ...base, shouldReplan: false, exhausted: false, reason: undefined }
+  if (!settled) return { ...base, shouldReplan: false, exhausted: false, reason: undefined }
   if (oscillating(plan, history)) return { ...base, shouldReplan: true, exhausted: false, reason: REASON_OSCILLATION }
   if (repeatedManeuver(history)) return { ...base, shouldReplan: true, exhausted: false, reason: REASON_REPEAT }
   if (budgetExceeded(plan, history)) return { ...base, shouldReplan: false, exhausted: true, reason: REASON_BUDGET }

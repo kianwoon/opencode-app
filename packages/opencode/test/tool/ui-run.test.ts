@@ -19,6 +19,7 @@ import {
   GATE_FLOOR,
   MAX_MANEUVER_REPEATS,
   Parameters,
+  STATUS_UNSETTLED,
   UiRunTool,
   advanceMap,
   completionEvidence,
@@ -1486,6 +1487,158 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
     expect(result.status).toBe("no-maneuver")
     expect(result.reason).toContain("no maneuver can advance subgoal")
     expect(result.telemetry).toHaveLength(0)
+  })
+})
+
+// GENERALIZATION — INVARIANT: perception must be ALLOWED TO CONVERGE before it is
+// judged. A page that is still arriving is observed repeatedly (bounded) until two
+// consecutive observations agree; only a SETTLED scene may decide the run. LIVE
+// INSTANCE: a cold page presents a partial conversation list, so a single
+// observation must never complete the read. UNSEEN CASES COVERED: infinite scroll
+// (the list keeps growing), a spinner that removes itself (the scene changes as the
+// overlay leaves), and content that arrives in two waves (blank → partial → full).
+// hardcode-guard:allow fixture labels/tokens are the enumerable inputs under test
+describe("ui_run — settlement: no judgement on a moving scene", () => {
+  const el = (label: string, role = "AXLink"): Element => ({ element_token: label, role, label })
+  const row = (label: string): SceneItem => ({
+    id: label,
+    role: "AXLink",
+    label,
+    affordances: ["activatable"],
+    stateChanging: false,
+    enabled: true,
+    element: el(label),
+  })
+  const listScene = (labels: readonly string[], snapshot: string): Scene => ({
+    snapshot,
+    regions: [{ id: `${snapshot}:list`, kind: "list", itemIds: [...labels], textIds: [] }],
+    items: labels.map(row),
+    texts: [],
+  })
+  const base = (over: Partial<PlanLoopDeps>): PlanLoopDeps => ({
+    goal: "read the last 3 messages",
+    observe: () => Effect.succeed(listScene(["m1", "m2", "m3"], "s-satisfied")),
+    choosePlan: () => Effect.succeed(undefined),
+    chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+    execute: () => Effect.succeed({ deliveryModes: [] }),
+    stateChanging: () => false,
+    readOnly: true,
+    maxSteps: 8,
+    ...over,
+  })
+
+  test("(a) a settled scene proceeds, and the step telemetry records the settle count", async () => {
+    const partial = listScene(["m1"], "s-partial")
+    const full = listScene(["m1", "m2", "m3"], "s-full")
+    let observed = partial
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(observed),
+          execute: () => {
+            observed = full
+            return Effect.succeed({ deliveryModes: ["read"] })
+          },
+          settleBudget: 6,
+          maxSteps: 4,
+        }),
+      ),
+    )
+    expect(result.status).toBe("completed")
+    expect(result.telemetry).toHaveLength(1)
+    expect(result.telemetry[0].settle?.settled).toBe(true)
+    expect(result.telemetry[0].settle?.observations).toBeGreaterThanOrEqual(2)
+  })
+
+  test("(b) a still-arriving list is observed repeatedly, then read only once it is stable", async () => {
+    // The page arrives in two waves: partial, partial, full, full.
+    const partial = listScene(["m1"], "s-partial")
+    const full = listScene(["m1", "m2", "m3"], "s-full")
+    const timeline = [partial, partial, full, full]
+    let calls = 0
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(timeline[Math.min(calls++, timeline.length - 1)]),
+          settleBudget: 8,
+          maxSteps: 4,
+        }),
+      ),
+    )
+    expect(result.status).toBe("completed")
+    // it did NOT decide from the first observation: it waited through both waves.
+    expect(calls).toBeGreaterThanOrEqual(3)
+  })
+
+  test("(b) an unstable scene yields pending (never satisfied) and the loop waits, then stops distinct", async () => {
+    const a = listScene(["m1"], "s-a")
+    const b = listScene(["m1", "m2"], "s-b")
+    const views = [a, b]
+    let calls = 0
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => {
+            calls++
+            return Effect.succeed(views[calls % 2])
+          },
+          settleBudget: 4,
+          maxSteps: 4,
+        }),
+      ),
+    )
+    // the scene never converged: the loop waited and withheld judgement.
+    expect(result.status).toBe(STATUS_UNSETTLED)
+    expect(result.status).not.toBe("completed")
+    expect(result.evidence).toBeUndefined()
+    expect(result.telemetry).toHaveLength(0)
+    expect(calls).toBeGreaterThanOrEqual(4)
+  })
+
+  test("(b) the settle budget expiring yields a distinct status, never a false decision from a full-but-moving list", async () => {
+    // Every observation WOULD satisfy the read; the scene is moving, so it may not.
+    const full = listScene(["m1", "m2", "m3"], "s-full")
+    const partial = listScene(["m1"], "s-partial")
+    let calls = 0
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => {
+            calls++
+            return Effect.succeed(calls % 2 === 1 ? full : partial)
+          },
+          settleBudget: 3,
+          maxSteps: 2,
+        }),
+      ),
+    )
+    expect(result.status).toBe(STATUS_UNSETTLED)
+    expect(result.status).not.toBe("completed")
+    expect(result.evidence).toBeUndefined()
+  })
+
+  test("(b) a momentarily-stable loading state is not settled: the duration floor withholds judgement", async () => {
+    // The scene is identical across every observation, but it has NOT stayed
+    // unchanged for the minimum duration — a skeleton/spinner, not loaded content.
+    const loading = listScene(["m1"], "s-loading")
+    let calls = 0
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => {
+            calls++
+            return Effect.succeed(loading)
+          },
+          settleBudget: 3,
+          settleDelayMs: 10,
+          settleMinStableMs: 5_000,
+          maxSteps: 2,
+        }),
+      ),
+    )
+    expect(result.status).toBe(STATUS_UNSETTLED)
+    expect(result.status).not.toBe("completed")
+    expect(calls).toBe(3)
   })
 })
 

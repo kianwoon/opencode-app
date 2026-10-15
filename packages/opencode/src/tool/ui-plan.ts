@@ -21,7 +21,7 @@
  * with a `back` corrective (no dialog to dismiss) rather than a `dismiss`.
  */
 
-import type { RegionKind, Scene, SceneText } from "./ui-scene"
+import type { RegionKind, Scene, SceneRegion, SceneText } from "./ui-scene"
 import type { Subgoal, SubgoalKind } from "./ui-maneuvers"
 
 // ---------------------------------------------------------------------------
@@ -189,6 +189,17 @@ function observables(scene: Scene): readonly string[] {
   ]
 }
 
+/** The readable units of ONE region: its non-state-changing row items + its own texts. */
+function unitsOfRegion(scene: Scene, region: SceneRegion, allItemIds: ReadonlySet<string>): readonly string[] {
+  const itemSet = new Set(region.itemIds)
+  const items = scene.items.filter((item) => itemSet.has(item.id) && !item.stateChanging).map((item) => item.label)
+  const textIds = new Set(region.textIds)
+  const texts = scene.texts
+    .filter((text) => textIds.has(text.id) && !allItemIds.has(text.owner))
+    .map((text) => text.text)
+  return [...items, ...texts]
+}
+
 /**
  * The READABLE UNIT labels in the goal-relevant region — the concrete content a
  * read predicate can cite as evidence. A readable unit is a non-state-changing
@@ -203,6 +214,17 @@ function readableUnits(scene: Scene, regionKind?: RegionKind): readonly string[]
     const items = scene.items.filter((item) => !item.stateChanging).map((item) => item.label)
     const texts = scene.texts.filter((text) => !itemIds.has(text.owner)).map((text) => text.text)
     return [...items, ...texts]
+  }
+  // hardcode-guard:allow the content-richest-region rule is this module's own read contract, not a case literal
+  // Several regions can share the LIST kind: a page's content list plus incidental
+  // nav/control strips. A READ is about CONTENT, so bind it to the TEXT-RICHEST list
+  // region — a strip of controls must never stand in for the list being read.
+  if (regionKind === LIST_KIND) {
+    const lists = scene.regions.filter((region) => region.kind === LIST_KIND)
+    if (lists.length > 1) {
+      const units = lists.map((region) => unitsOfRegion(scene, region, itemIds))
+      return units.reduce((best, next) => (next.join(" ").length > best.join(" ").length ? next : best))
+    }
   }
   const inRegion = textIdsInRegionKind(scene, regionKind)
   const items = scene.items
