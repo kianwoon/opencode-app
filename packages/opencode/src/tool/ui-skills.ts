@@ -102,7 +102,7 @@ export type SkillStep =
   | { readonly kind: "prepare"; readonly label: string }
   | { readonly kind: "bind"; readonly label: string }
   | { readonly kind: "navigate"; readonly label: string; readonly url: string }
-  | { readonly kind: "verifyUrl"; readonly label: string }
+  | { readonly kind: "verifyUrl"; readonly label: string; readonly url: string }
   | { readonly kind: "verifyScreen"; readonly label: string }
   /** A runtime branch: a browser-classified bind takes `browser`, else `fallback`. */
   | {
@@ -142,6 +142,19 @@ export interface SkillSubstepEvidence {
    * (the typed value, the key press landing) must never be read as success.
    */
   readonly urlChanged?: boolean
+  /**
+   * The URL this sub-step REQUESTED (a navigate/paste destination). Recorded for
+   * every navigate/paste attempt so the evidence carries the request independent
+   * of whether the landing was readable.
+   */
+  readonly urlRequested?: string
+  /**
+   * The ARRIVAL measurement for a verify sub-step: where the page LANDED relative
+   * to the goal URL, by destination identity (host). `arrived-via-redirect` means
+   * a same-host redirect (login/feed/canonical); `different-host` is honest
+   * failure. Carries both the requested (goal) and the landed URL.
+   */
+  readonly arrival?: Arrival
   /**
    * A value-gate sub-step's result: the target's observed value MATCHED the
    * goal's value, so the following Return may proceed. `false` aborts the
@@ -223,6 +236,57 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 
 /**
+ * ARRIVAL — where a navigation LANDED, measured by destination IDENTITY, not
+ * string equality.
+ * INVARIANT OWNED: arrival is measured by destination identity, not string
+ * equality — servers redirect. A navigation that leaves the previous page but is
+ * then redirected by the site (login/feed/canonical) HAS arrived when the landed
+ * URL's host matches the goal URL's host; only a different HOST is honest failure.
+ * `viaRedirect` distinguishes an exact/canonical landing from a same-host redirect.
+ * hardcode-guard:allow the named live redirect is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: `go_to_url(https://www.linkedin.com/messaging/` was
+ * redirected by LinkedIn to a same-host login/feed URL, so an exact-string compare
+ * read a successful arrival as failure and the loop re-issued the maneuver.
+ * UNSEEN CASE COVERED: any host that canonicalizes (trailing slash, `www.`,
+ * locale path, `?utm_…`) — the identity compare ignores the string variance.
+ */
+export interface Arrival {
+  readonly status: "arrived" | "arrived-via-redirect" | "different-host" | "unknown"
+  readonly goalUrl: string
+  readonly landedUrl?: string
+}
+
+const parseUrl = (value: string): URL | undefined => {
+  try {
+    return new URL(value)
+  } catch {
+    return undefined
+  }
+}
+
+/** Host identity: case-insensitive, with a leading `www.` dropped (a pure alias). */
+const hostIdentity = (host: string): string => (host.startsWith("www.") ? host.slice(4) : host).toLowerCase()
+
+/**
+ * Measure arrival of `landedUrl` at `goalUrl`. Different host → `different-host`
+ * (never arrival). Same host with the same normalized path → `arrived`; a deeper
+ * path under the goal path → `arrived`; any other same-host landing (a redirect to
+ * login/feed/canonical) → `arrived-via-redirect`. Unparseable input → `unknown`.
+ */
+export function arrival(goalUrl: string, landedUrl: string | undefined): Arrival {
+  const landed = landedUrl !== undefined ? parseUrl(landedUrl) : undefined
+  if (landed === undefined) return { status: "unknown", goalUrl, ...(landedUrl !== undefined ? { landedUrl } : {}) }
+  const goal = parseUrl(goalUrl)
+  if (goal === undefined) return { status: "unknown", goalUrl, landedUrl }
+  if (hostIdentity(goal.host) !== hostIdentity(landed.host)) return { status: "different-host", goalUrl, landedUrl }
+  const goalPath = goal.pathname.replace(/\/$/, "")
+  const landedPath = landed.pathname.replace(/\/$/, "")
+  if (landedPath === goalPath) return { status: "arrived", goalUrl, landedUrl }
+  if (goalPath !== "" && landedPath.startsWith(`${goalPath}/`)) return { status: "arrived", goalUrl, landedUrl }
+  return { status: "arrived-via-redirect", goalUrl, landedUrl }
+}
+
+/**
  * Classify a `get_browser_state` BIND result (mode 1: pid+window_id). A browser is
  * a result reporting a usable binding (`status:"ok"`, and `mutation_allowed` not
  * false); a non-browser window or a failed bind yields `browser:false` and the
@@ -276,7 +340,7 @@ const addressBarRoute = (value: string): readonly SkillStep[] => [
  */
 const browserRoute = (value: string): readonly SkillStep[] => [
   { kind: "navigate", label: `navigate to ${value}`, url: value },
-  { kind: "verifyUrl", label: "verify url changed" },
+  { kind: "verifyUrl", label: "verify url arrived", url: value },
 ]
 
 /**
@@ -316,13 +380,20 @@ const readFound = (evidence: readonly SkillSubstepEvidence[]): boolean =>
   evidence.some((sub) => (sub.read?.length ?? 0) > 0)
 
 /**
- * Success = the page URL/title ACTUALLY changed (a verify sub-step marked it).
- * This is the only honest success signal for a navigation route: neither the
- * typed value nor the Return key landing proves the page moved (Chromium does not
- * submit an accessibility-inserted address-bar entry on Return).
+ * Success = ARRIVAL at the goal's destination identity: a verify sub-step measured
+ * a same-host landing (`arrived`/`arrived-via-redirect`), OR the native address-bar
+ * fallback's screen-change verify moved the page. A `different-host` arrival never
+ * counts. This is the only honest success signal for a navigation route: neither
+ * the requested value nor the Return key landing proves the page moved, and a
+ * redirect to the goal host is arrival, not failure.
  */
-const urlChanged = (evidence: readonly SkillSubstepEvidence[]): boolean =>
-  evidence.some((sub) => sub.urlChanged === true)
+const arrived = (evidence: readonly SkillSubstepEvidence[]): boolean =>
+  evidence.some(
+    (sub) =>
+      sub.arrival?.status === "arrived" ||
+      sub.arrival?.status === "arrived-via-redirect" ||
+      sub.urlChanged === true,
+  )
 
 /**
  * `go_to_url` — navigate to the goal's URL by the SANCTIONED route. First BIND the
@@ -332,7 +403,7 @@ const urlChanged = (evidence: readonly SkillSubstepEvidence[]): boolean =>
  * re-bind, and again prefer `browser_navigate`; only a window that is still not
  * browser-classifiable falls to the LAST-resort address-bar sequence (clipboard
  * paste, value-gated before Return). EVERY arm ends with a VERIFY sub-step and
- * success is the page URL/title ACTUALLY changing, never an intermediate. A
+ * success is ARRIVAL, measured by destination identity — never string equality. A
  * prepare, bind, or navigate that fails, or a delivery that does not submit,
  * reports honest failure with its evidence chain.
  *
@@ -345,11 +416,19 @@ const urlChanged = (evidence: readonly SkillSubstepEvidence[]): boolean =>
  *
  * INVARIANT (gate e): PREFER ONE ATOMIC INPUT EVENT over N synthesized events when
  * the surface accepts it. Instance: the live per-character `type_text` that landed
- * only 6 of 24 characters, so the address-bar route now writes the goal value to
- * the clipboard and delivers it with ONE `cmd+v` paste. UNSEEN CASE COVERED: any
- * second surface that accepts a single paste but drops synthesized keystrokes (an
- * Electron/WebGL field) takes the SAME atomic-paste route, with a bounded type
- * fallback only when the clipboard write is unavailable.
+ * only a prefix of the goal value, so the address-bar route now writes the goal
+ * value to the clipboard and delivers it with ONE `cmd+v` paste. UNSEEN CASE
+ * COVERED: any second surface that accepts a single paste but drops synthesized
+ * keystrokes (an Electron/WebGL field) takes the SAME atomic-paste route, with a
+ * bounded type fallback only when the clipboard write is unavailable.
+ *
+ * hardcode-guard:allow the named live redirect is one instance cited to ground the invariant
+ * INVARIANT (gate d): ARRIVAL IS MEASURED BY DESTINATION IDENTITY, NOT STRING
+ * EQUALITY — servers redirect. Instance: the live `go_to_url` the site redirected
+ * to a same-host login/feed URL, so an exact-string compare read a successful
+ * arrival as failure. UNSEEN CASE COVERED: any host that canonicalizes (trailing
+ * slash, `www.`, locale path, tracking query) — the identity compare ignores the
+ * string variance and only a different HOST is honest failure.
  */
 export const goToUrl: Skill = {
   name: "go_to_url",
@@ -366,7 +445,8 @@ export const goToUrl: Skill = {
       fallback: goToUrlRoute(false, match.value),
     },
   ],
-  succeeded: urlChanged,
+  // hardcode-guard:allow the arrival predicate is the registry's own contract, not a case literal
+  succeeded: arrived,
 }
 
 /**
@@ -527,10 +607,20 @@ export function skillIndex(matches: readonly SkillMatch[]): Map<string, SkillMat
 }
 
 /**
+ * A sub-step's URL record: the destination REQUESTED (a navigate/paste) and, for a
+ * verify sub-step, the ARRIVAL measured against the goal URL. Both URLs are kept
+ * so the evidence never loses the request when the landing is unreadable.
+ */
+export interface UrlRecord {
+  readonly requested?: string
+  readonly arrival?: Arrival
+}
+
+/**
  * Fold per-sub-step `{ label, mode }`, the observed signatures (`signatures[i]` =
- * before step i, `signatures[i+1]` = after step i) and any read results into the
- * folded evidence the skill is one trace step over. Same before/after contract as
- * the hands' `changeEvidence`.
+ * before step i, `signatures[i+1]` = after step i), read results, and URL records
+ * into the folded evidence the skill is one trace step over. Same before/after
+ * contract as the hands' `changeEvidence`.
  */
 export function foldSubstepEvidence(
   steps: readonly { readonly label: string; readonly mode: ActuationMode }[],
@@ -541,6 +631,7 @@ export function foldSubstepEvidence(
   texts?: readonly ({ readonly rounds: number; readonly delivered: number } | undefined)[],
   valueMatches?: readonly (boolean | undefined)[],
   notes?: readonly (string | undefined)[],
+  urls?: readonly (UrlRecord | undefined)[],
 ): SkillSubstepEvidence[] {
   return steps.map((step, i) => {
     const before = signatures[i] ?? ""
@@ -551,6 +642,7 @@ export function foldSubstepEvidence(
     const textDelivery = texts?.[i]
     const valueMatched = valueMatches?.[i]
     const note = notes?.[i]
+    const url = urls?.[i]
     return {
       label: step.label,
       mode: step.mode,
@@ -563,6 +655,8 @@ export function foldSubstepEvidence(
       ...(textDelivery !== undefined ? { textDelivery } : {}),
       ...(valueMatched !== undefined ? { valueMatched } : {}),
       ...(note !== undefined ? { note } : {}),
+      ...(url?.requested !== undefined ? { urlRequested: url.requested } : {}),
+      ...(url?.arrival !== undefined ? { arrival: url.arrival } : {}),
     }
   })
 }

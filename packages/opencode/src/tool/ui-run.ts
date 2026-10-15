@@ -38,6 +38,7 @@ import {
   type WindowRef,
 } from "./ui-hands"
 import {
+  arrival,
   decodeBrowserBinding,
   foldSubstepEvidence,
   matchSkills,
@@ -49,6 +50,7 @@ import {
   type SkillMatch,
   type SkillStep,
   type SkillSubstepEvidence,
+  type UrlRecord,
 } from "./ui-skills"
 
 // EYES owns observation + world model; HANDS owns actuation. They are
@@ -71,6 +73,43 @@ const HARD_MAX_STEPS = 100
 const MAX_AMBIGUOUS = 3
 /** Consecutive below-gate re-observations before the loop degrades to the strongest option it saw. */
 export const MAX_BELOW_GATE = 2
+/**
+ * Identical re-issues of the SAME maneuver (skill name + goal value) the loop
+ * tolerates before it stops. A maneuver may run `MAX_MANEUVER_REPEATS + 1` times;
+ * the next identical re-issue stops with `maneuver-repeat-limit`.
+ */
+export const MAX_MANEUVER_REPEATS = 2
+/** Maneuver-repeat accounting state: the current maneuver key and its run count. */
+export interface ManeuverRepeatState {
+  readonly key?: string
+  readonly runs: number
+}
+export const initialManeuverRepeat = (): ManeuverRepeatState => ({ runs: 0 })
+
+/**
+ * MANEUVER REPEAT BOUND.
+ * INVARIANT OWNED: a repeated DELIBERATE maneuver is not progress even when the
+ * screen changes. Re-issuing the SAME maneuver (skill name + goal value) counts
+ * toward a stop bound INDEPENDENT of the screen-change/ambiguity bound — which a
+ * redirect can keep resetting (each redirect changes the screen, so the no-op
+ * bound never fires). `exceeded` is true once the SAME maneuver has already run
+ * `MAX_MANEUVER_REPEATS + 1` times; the caller stops with `maneuver-repeat-limit`
+ * and records the attempt chain rather than issuing one more.
+ * hardcode-guard:allow the named live repeat is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: `go_to_url` was re-issued 3-4 times in a row
+ * because a same-host redirect kept changing the screen, so the no-op bound reset
+ * every iteration; the maneuver bound stops the identical re-issue.
+ * UNSEEN CASE COVERED: any other deliberate maneuver (dismiss/scroll/search) that
+ * keeps "succeeding" without resolving takes the SAME bound, no loop change.
+ */
+export function maneuverRepeatStep(
+  state: ManeuverRepeatState,
+  key: string,
+): { readonly next: ManeuverRepeatState; readonly runs: number; readonly exceeded: boolean } {
+  if (state.key !== key) return { next: { key, runs: 1 }, runs: 1, exceeded: false }
+  const runs = state.runs + 1
+  return { next: { key, runs }, runs, exceeded: state.runs >= MAX_MANEUVER_REPEATS + 1 }
+}
 /** Input verbs whose success depends on a preceding focus click on the SAME target. */
 const FOCUS_CONSUMING = new Set<JevAction>(["type", "key"])
 const DEFAULT_TIMEOUT = 30_000
@@ -710,6 +749,10 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // option seen in the current spiral.
           let belowGate = 0
           let strongestBelowGate: BelowGateOption | undefined
+          // MANEUVER REPEAT BOUND: identical maneuver re-issues, counted INDEPENDENT
+          // of screen change (a redirect keeps changing the screen, so the no-op bound
+          // never fires on it). Never reset by a redirect.
+          let maneuverRepeat: ManeuverRepeatState = initialManeuverRepeat()
           // HANDS: the mode + before-signature of the last action, folded with the
           // next observation into change evidence (never a bare success boolean).
           let lastActuation: { readonly mode: ActuationEvidence["mode"]; readonly before: string } | undefined
@@ -740,6 +783,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               const valueByIndex = new Map<number, boolean>()
               // Per-sub-step privacy/actuation notes (e.g. the clipboard was replaced), by trace index.
               const noteByIndex = new Map<number, string>()
+              // Per-sub-step URL records (requested + arrival), by trace index.
+              const urlByIndex = new Map<number, UrlRecord>()
               let observationsUsed = 0
               let failure: string | undefined
               // Whether the clipboard write landed — the paste sub-step's fallback gate.
@@ -854,6 +899,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   deliveries.push(undefined)
                   reads.push(undefined)
                   urlChanges.push(undefined)
+                  urlByIndex.set(modes.length - 1, { requested: sub.url })
                   if (!nav.ok) {
                     failure = nav.error
                     break
@@ -874,11 +920,16 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   if (state !== undefined) observationsUsed++
                   staleSnapshot = true
                   const after = state?.ok ? decodeBrowserBinding(state.result.structuredContent) : undefined
-                  urlChanges.push(after !== undefined && (after.url !== bound?.url || after.title !== bound?.title))
+                  // hardcode-guard:allow the arrival predicate is the loop's own contract, not a case literal
+                  // ARRIVAL BY DESTINATION IDENTITY: the landed URL's host vs the
+                  // goal's host — a same-host redirect is arrival, not failure.
+                  const landing = arrival(sub.url, after?.url)
+                  urlChanges.push(landing.status === "arrived" || landing.status === "arrived-via-redirect")
                   signatures.push(signatures.at(-1) ?? before)
                   modes.push({ label: sub.label, mode: "read" })
                   deliveries.push(undefined)
                   reads.push(undefined)
+                  urlByIndex.set(modes.length - 1, { requested: sub.url, arrival: landing })
                   continue
                 }
                 if (sub.kind === "verifyScreen") {
@@ -1076,6 +1127,22 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   // hardcode-guard:allow the paste/type mode vocabulary is the runner's own contract, not a case literal
                   if (run.mode === "paste") noteByIndex.set(modes.length - 1, CLIPBOARD_REPLACED_NOTE)
                   if (run.mode === "type") textByIndex.set(modes.length - 1, { rounds: run.rounds, delivered: run.delivered })
+                  // EVIDENCE (requested + landed URL): always record the REQUESTED
+                  // destination; best-effort read where the tab LANDED so a paste a
+                  // site redirects still reports the landing (arrival by host).
+                  // hardcode-guard:allow the browser-state driver tool name is the loop's own contract, not a case literal
+                  const landedRead = yield* callDriver(
+                    tools,
+                    "cua-driver_get_browser_state",
+                    { pid: params.window.pid, window_id: params.window.window_id },
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  const landedUrl = landedRead.ok ? decodeBrowserBinding(landedRead.result.structuredContent).url : undefined
+                  urlByIndex.set(modes.length - 1, {
+                    requested: sub.text,
+                    ...(landedUrl !== undefined ? { arrival: arrival(sub.text, landedUrl) } : {}),
+                  })
                   if (run.failure !== undefined) {
                     failure = run.failure
                     break
@@ -1260,6 +1327,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 modes.map((_, i) => textByIndex.get(i)),
                 modes.map((_, i) => valueByIndex.get(i)),
                 modes.map((_, i) => noteByIndex.get(i)),
+                modes.map((_, i) => urlByIndex.get(i)),
               )
               if (failure === undefined && pendingFocus !== undefined) failure = "focus click undelivered (no consumer landed)"
               const succeeded = failure === undefined && match.skill.succeeded(substeps)
@@ -1414,6 +1482,24 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 ? skills.get(chosenTarget)
                 : undefined
             if (chosen) {
+              // MANEUVER REPEAT BOUND: a repeated DELIBERATE maneuver is not
+              // progress even when the screen changes; an identical re-issue is
+              // counted independently of the no-op/ambiguity bound (which a redirect
+              // keeps resetting) and stops the loop rather than hammering.
+              const repeat = maneuverRepeatStep(maneuverRepeat, `${chosen.skill.name}\u0000${chosen.value}`)
+              if (repeat.exceeded) {
+                status = "maneuver-repeat-limit"
+                const repeatVerdict: SkillDecision = {
+                  kind: "skill",
+                  name: chosen.skill.name,
+                  reason: "maneuver-repeat-limit",
+                }
+                trace.push(traceStep(step + 1, outcome, repeatVerdict))
+                previous = `[maneuver ${step + 1}] ${chosen.skill.name} re-issued ${maneuverRepeat.runs}× unresolved — stopping (maneuver-repeat-limit)`
+                lines.push(previous)
+                break
+              }
+              maneuverRepeat = repeat.next
               const skillVerdict: SkillDecision = { kind: "skill", name: chosen.skill.name, reason: "skill-chosen" }
               const execution = yield* executeSkill(chosen, map.current, observation.elements)
               observations += execution.observations

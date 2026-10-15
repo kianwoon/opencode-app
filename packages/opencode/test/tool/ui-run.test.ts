@@ -16,6 +16,7 @@ import { LABEL_MAX, buildControllerQuestions, buildState, foldController, type N
 import {
   FRONTIER_HARD_MAX,
   MAX_BELOW_GATE,
+  MAX_MANEUVER_REPEATS,
   Parameters,
   UiRunTool,
   advanceMap,
@@ -23,8 +24,10 @@ import {
   decideStep,
   decodeObservation,
   extractGoalValue,
+  initialManeuverRepeat,
   isDestructive,
   isGoalMet,
+  maneuverRepeatStep,
   mineTrace,
   needsForegroundDelivery,
   nextAmbiguity,
@@ -1307,6 +1310,48 @@ describe("executeSkill — clipboard paste wiring", () => {
       expect((await Bun.file(path.join(dir, file)).text()).includes("clipboard_read")).toBe(false)
     }
     expect(CLIPBOARD_REPLACED_NOTE).toContain("clipboard")
+  })
+})
+
+// GENERALIZATION — INVARIANT: a repeated DELIBERATE maneuver is not progress even
+// when the screen changes. The live go_to_url re-issued 3-4× because a same-host
+// redirect kept changing the screen (resetting the no-op bound) is ONE instance.
+// An unseen case it covers: any maneuver (dismiss/scroll/search) that keeps
+// "succeeding" without resolving — the SAME bound stops it, no loop change.
+// hardcode-guard:allow the maneuver vocabulary is the loop's own contract under test
+describe("maneuver-repeat bound", () => {
+  test("(b) MAX_MANEUVER_REPEATS + 1 identical issues run; the next is refused, not a fourth", () => {
+    const key = "go_to_url\u0000https://www.linkedin.com/messaging/"
+    let state = initialManeuverRepeat()
+    const runs: number[] = []
+    const exceeded: boolean[] = []
+    for (let i = 0; i < 5; i++) {
+      const step = maneuverRepeatStep(state, key)
+      state = step.next
+      runs.push(step.runs)
+      exceeded.push(step.exceeded)
+    }
+    expect(runs.slice(0, 3)).toEqual([1, 2, 3])
+    expect(exceeded.slice(0, 3)).toEqual([false, false, false])
+    expect(exceeded[3]).toBe(true)
+    expect(MAX_MANEUVER_REPEATS).toBe(2)
+  })
+
+  test("(b) a DIFFERENT maneuver resets the count", () => {
+    const a = "go_to_url\u0000https://a.test/"
+    const b = "dismiss_dialog\u0000"
+    let state = initialManeuverRepeat()
+    state = maneuverRepeatStep(state, a).next
+    state = maneuverRepeatStep(state, a).next
+    const switched = maneuverRepeatStep(state, b)
+    expect(switched.runs).toBe(1)
+    expect(switched.exceeded).toBe(false)
+  })
+
+  test("(b) the loop stops with maneuver-repeat-limit and records the chain", async () => {
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    expect(src.includes("maneuverRepeatStep(")).toBe(true)
+    expect(src.includes('"maneuver-repeat-limit"')).toBe(true)
   })
 })
 

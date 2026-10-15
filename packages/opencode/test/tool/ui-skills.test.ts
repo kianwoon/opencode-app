@@ -16,8 +16,10 @@ import {
   remainingSuffix,
   textDeliveryStep,
 } from "@/tool/ui-hands"
+// hardcode-guard:allow the registry's route/arrival vocabulary is the contract under test
 import {
   SKILLS,
+  arrival,
   decodeBrowserBinding,
   dismissDialog,
   foldSubstepEvidence,
@@ -91,6 +93,9 @@ describe("ui-skills — go_to_url over the captured Brave frontier", () => {
     if (branch.kind !== "branch") throw new Error("expected a branch")
     expect(branch.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
     expect(branch.browser[0]).toMatchObject({ kind: "navigate", url: VALUE }) // value from the GOAL
+    // hardcode-guard:allow the route's verify sub-step carries the goal url (arrival contract under test)
+    // the verify carries the GOAL url so arrival is measured against the destination
+    expect(branch.browser[1]).toMatchObject({ kind: "verifyUrl", url: VALUE })
     // hardcode-guard:allow the prepare/rebind route shape is the registry contract under test
     // bind failed → prepare the browser endpoint, re-bind, then retry the browser arm.
     expect(branch.fallback.map((s) => s.kind)).toEqual(["prepare", "bind", "branch"])
@@ -375,6 +380,85 @@ describe("go_to_url — prepare → rebind → navigate is the primary route", (
     expect(evidence.map((e) => e.label)).toContain("prepare browser")
     expect(evidence.every((e) => e.changed === false)).toBe(true)
     expect(goToUrl.succeeded(evidence)).toBe(false)
+  })
+})
+
+// GENERALIZATION — INVARIANT: ARRIVAL is measured by destination IDENTITY, not
+// string equality — servers redirect. The live `go_to_url` a site redirected to a
+// same-host login/feed URL (so an exact compare read a successful arrival as
+// failure) is ONE instance. An unseen case it covers: any host that canonicalizes
+// (trailing slash, `www.`, locale path, tracking query) — the identity compare
+// ignores the string variance, and only a different HOST is honest failure.
+// hardcode-guard:allow the live goal/landed URLs are the contract inputs under test
+describe("ui-skills — arrival by destination identity (redirect-tolerant)", () => {
+  const GOAL_URL = "https://www.linkedin.com/messaging/"
+
+  test("(a) a same-host redirect (login/feed/canonical) counts as arrival", () => {
+    const login = arrival(GOAL_URL, "https://www.linkedin.com/login")
+    expect(login.status).toBe("arrived-via-redirect")
+    expect(login.goalUrl).toBe(GOAL_URL)
+    expect(login.landedUrl).toBe("https://www.linkedin.com/login")
+    expect(arrival(GOAL_URL, "https://www.linkedin.com/feed").status).toBe("arrived-via-redirect")
+    // a host alias (`www.`) and a deeper path under the goal both count
+    expect(arrival("https://linkedin.com/messaging/", "https://www.linkedin.com/messaging/thread/9").status).toBe(
+      "arrived",
+    )
+    expect(arrival(GOAL_URL, GOAL_URL).status).toBe("arrived")
+  })
+
+  test("(a) a different HOST is never arrival (honest failure); no landing is unknown", () => {
+    const evil = arrival(GOAL_URL, "https://evil.example/login")
+    expect(evil.status).toBe("different-host")
+    expect(evil.landedUrl).toBe("https://evil.example/login")
+    expect(arrival(GOAL_URL, undefined).status).toBe("unknown")
+  })
+
+  test("(a) the go_to_url success predicate reads arrival from the folded evidence", () => {
+    const base = [
+      { label: "bind browser", mode: "bind" as const, before: "nA", after: "nA", changed: false },
+      { label: "navigate to url", mode: "navigate" as const, before: "nA", after: "nA", changed: false },
+    ]
+    const viaRedirect = [
+      ...base,
+      {
+        label: "verify url arrived",
+        mode: "read" as const,
+        before: "nA",
+        after: "nA",
+        changed: false,
+        arrival: arrival(GOAL_URL, "https://www.linkedin.com/feed"),
+      },
+    ]
+    expect(goToUrl.succeeded(viaRedirect)).toBe(true)
+    const evil = [
+      ...base,
+      {
+        label: "verify url arrived",
+        mode: "read" as const,
+        before: "nA",
+        after: "nA",
+        changed: false,
+        arrival: arrival(GOAL_URL, "https://evil.example/"),
+      },
+    ]
+    expect(goToUrl.succeeded(evil)).toBe(false)
+  })
+
+  test("(3) fold carries the requested + landed URL and the arrival token", () => {
+    const ev = foldSubstepEvidence(
+      [{ label: "verify url arrived", mode: "read" as const }],
+      ["nA", "nA"],
+      undefined,
+      undefined,
+      [true],
+      undefined,
+      undefined,
+      undefined,
+      [{ requested: GOAL_URL, arrival: arrival(GOAL_URL, "https://www.linkedin.com/login") }],
+    )
+    expect(ev[0].urlRequested).toBe(GOAL_URL)
+    expect(ev[0].arrival?.status).toBe("arrived-via-redirect")
+    expect(ev[0].arrival?.landedUrl).toBe("https://www.linkedin.com/login")
   })
 })
 
