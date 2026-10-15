@@ -147,6 +147,29 @@ describe("decodeObservation", () => {
     expect(decodeObservation({ elements: [] })).toBeNull()
     expect(decodeObservation({ snapshot_id: "s1", elements: [{ role: "AXButton" }] })?.elements[0].role).toBe("AXButton")
   })
+
+  // hardcode-guard:allow test mirrors the documented live cua-driver wire shapes (markdown default + elements)
+  test("decodes the live payload in both wire formats (markdown default and elements)", () => {
+    // Driver DEFAULT (tree_format omitted => "markdown"): a `tree_markdown` string
+    // and NO top-level `elements` — the exact body that decoded to null at step 0.
+    const markdown = decodeObservation({
+      snapshot_id: "s00000011",
+      tree_markdown: "Window\n  AXButton Settings",
+    })
+
+    expect(markdown).not.toBeNull()
+    expect(markdown?.snapshot_id).toBe("s00000011")
+    expect(markdown?.elements).toEqual([])
+
+    // The format ui_run now requests (tree_format:"elements"): top-level `elements`.
+    const elements = decodeObservation({
+      snapshot_id: "s00000011",
+      elements: [button(1, "Settings"), text(2, "Preferences")],
+    })
+
+    expect(elements?.elements.length).toBe(2)
+    expect(buildCandidates(elements?.elements ?? []).labels).toEqual(["c1 AXButton Settings"])
+  })
 })
 
 describe("buildCandidates", () => {

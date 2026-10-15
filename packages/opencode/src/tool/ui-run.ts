@@ -27,7 +27,14 @@ export type Element = Schema.Schema.Type<typeof Element>
 
 const Observation = Schema.Struct({
   snapshot_id: Schema.String,
-  elements: Schema.Array(Element),
+  /**
+   * `tree_format:"elements"` (the format this loop requests) delivers the array.
+   * The driver's default `tree_format:"markdown"` omits it and ships a
+   * `tree_markdown` string instead; a missing array defaults to empty so the
+   * loop proceeds on zero candidates rather than stopping — parse the format
+   * asked for, tolerate the ones it is not.
+   */
+  elements: Schema.Array(Element).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 })
 export type Observation = Schema.Schema.Type<typeof Observation>
 
@@ -338,7 +345,15 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             const observed = yield* callDriver(
               tools,
               "cua-driver_get_window_state",
-              { pid: params.window.pid, window_id: params.window.window_id, include_screenshot: false },
+              {
+                pid: params.window.pid,
+                window_id: params.window.window_id,
+                include_screenshot: false,
+                // The driver DEFAULTS tree_format to "markdown" (a `tree_markdown`
+                // string, no `elements`); this loop parses the structured
+                // `elements` array, so it must request the format it parses.
+                tree_format: "elements",
+              },
               ctx.abort,
             )
             observations++
