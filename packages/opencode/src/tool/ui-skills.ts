@@ -34,6 +34,11 @@
  * LIVE FAILURE AS ONE INSTANCE (cont.): reaching a URL took four separate
  * decisions (focus the field, select-all, type, Enter), each fragile; `go_to_url`
  * collapses them into one option.
+ * hardcode-guard:allow the named live partial-delivery incident is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE (cont.): the address bar's per-character entry
+ * landed only a prefix of the goal value; the route now writes the goal value to
+ * the clipboard and delivers it with ONE atomic `cmd+v` paste (bounded type
+ * fallback only when the clipboard write is unavailable).
  * UNSEEN CASE THE REGISTRY SHAPE COVERS: a `drag_to` maneuver (press, move,
  * release) — same contract object, no loop change.
  */
@@ -45,13 +50,37 @@ import type { ActuationMode } from "./ui-hands"
 export type SkillStep =
   | { readonly kind: "click"; readonly label: string }
   | { readonly kind: "key"; readonly label: string; readonly key: string; readonly modifiers: readonly string[] }
-  | { readonly kind: "type"; readonly label: string; readonly text: string }
+  /**
+   * A text entry. `verify` asks the loop to read the target's value back and, on a
+   * mismatch (a partially-delivered entry), re-do select-all + the entry ONCE —
+   * the destination is confirmed before any later submit (Return).
+   */
+  | { readonly kind: "type"; readonly label: string; readonly text: string; readonly verify?: boolean }
   /**
    * The SANCTIONED KEYSTROKE verb: deliver `text` as REAL per-character key
    * events (never accessibility insertion), for a surface known to drop an
    * inserted value without committing it.
    */
   | { readonly kind: "keys"; readonly label: string; readonly text: string }
+  /**
+   * CLIPBOARD WRITE — replace the clipboard with the goal's value as ONE atomic
+   * payload, the precondition for a single-event paste. The route never reads the
+   * clipboard back (privacy); a failed write is disclosed, not fatal — the paste
+   * sub-step then falls back to the bounded resumable type path.
+   */
+  | { readonly kind: "clipboard"; readonly label: string; readonly text: string }
+  /**
+   * ATOMIC PASTE — enter the clipboard as ONE `cmd+v` input event, never N
+   * synthesized per-character presses (which land only a prefix). The runner falls
+   * back to the bounded resumable type path when the clipboard write did not land.
+   */
+  | { readonly kind: "paste"; readonly label: string; readonly text: string; readonly verify?: boolean }
+  /**
+   * VALUE GATE — read the target's value back and confirm it matches the goal's
+   * value BEFORE any later submit (Return). A mismatch aborts the maneuver rather
+   * than navigating to a malformed destination.
+   */
+  | { readonly kind: "verifyValue"; readonly label: string; readonly text: string }
   | {
       readonly kind: "scroll"
       readonly label: string
@@ -113,6 +142,23 @@ export interface SkillSubstepEvidence {
    * (the typed value, the key press landing) must never be read as success.
    */
   readonly urlChanged?: boolean
+  /**
+   * A value-gate sub-step's result: the target's observed value MATCHED the
+   * goal's value, so the following Return may proceed. `false` aborts the
+   * maneuver before submitting a malformed destination.
+   */
+  readonly valueMatched?: boolean
+  /**
+   * A privacy/actuation disclosure on a sub-step (e.g. the clipboard was replaced
+   * with the goal value and never read back). Never carries clipboard contents.
+   */
+  readonly note?: string
+  /**
+   * A text sub-step's resumable-delivery accounting: rounds spent driving the
+   * string to completion and the FINAL confirmed character count. Partial output
+   * is not failure — a completed delivery records `delivered === text.length`.
+   */
+  readonly textDelivery?: { readonly rounds: number; readonly delivered: number }
 }
 
 export interface Skill {
@@ -201,17 +247,24 @@ export function decodeBrowserBinding(input: unknown): BrowserBinding {
 }
 
 /**
- * The address-bar route: focus the bar, select-all, deliver the goal's URL as
- * REAL per-character key events, submit, then VERIFY the page changed. The URL is
- * NOT typed via accessibility insertion (`type_text`), which Chromium's address
- * bar accepts but never submits on Return; the verify is the only success signal —
- * the delivered value and the Return landing are intermediate. A no-navigation
- * outcome is honest failure, not success.
+ * The address-bar route: focus the bar, write the goal's URL to the clipboard as
+ * ONE atomic payload, select-all, deliver it as a single `cmd+v` PASTE (one input
+ * event Chromium accepts and submits on Return — never N synthesized keystrokes,
+ * which land only a prefix), CONFIRM the bar's value matches the URL before
+ * submitting, then Return, then VERIFY the page changed. The `verifyValue` gate
+ * holds the Return until the destination actually landed, so a truncated or
+ * mismatched entry never navigates. The clipboard is OVERWRITTEN and never read
+ * back; the paste sub-step falls back to the bounded resumable type path when the
+ * clipboard write fails. The verify is the only success signal — the delivered
+ * value and the Return landing are intermediate.
  */
+// hardcode-guard:allow the sub-step verb vocabulary is the registry's own contract, not a case literal
 const addressBarRoute = (value: string): readonly SkillStep[] => [
   { kind: "click", label: "focus address bar" },
+  { kind: "clipboard", label: "copy url to clipboard", text: value },
   { kind: "key", label: "select all", key: "a", modifiers: ["cmd"] },
-  { kind: "keys", label: "type url", text: value },
+  { kind: "paste", label: "paste url", text: value, verify: true },
+  { kind: "verifyValue", label: "verify url value", text: value },
   { kind: "key", label: "enter", key: "return", modifiers: [] },
   { kind: "verifyScreen", label: "verify page changed" },
 ]
@@ -277,10 +330,11 @@ const urlChanged = (evidence: readonly SkillSubstepEvidence[]): boolean =>
  * browser, drive the bound tab with `browser_navigate` — no synthesized key
  * sequence. When the bind fails, PREPARE the browser endpoint (`browser_prepare`),
  * re-bind, and again prefer `browser_navigate`; only a window that is still not
- * browser-classifiable falls to the LAST-resort keystroke address-bar sequence.
- * EVERY arm ends with a VERIFY sub-step and success is the page URL/title ACTUALLY
- * changing, never an intermediate. A prepare, bind, or navigate that fails, or a
- * delivery that does not submit, reports honest failure with its evidence chain.
+ * browser-classifiable falls to the LAST-resort address-bar sequence (clipboard
+ * paste, value-gated before Return). EVERY arm ends with a VERIFY sub-step and
+ * success is the page URL/title ACTUALLY changing, never an intermediate. A
+ * prepare, bind, or navigate that fails, or a delivery that does not submit,
+ * reports honest failure with its evidence chain.
  *
  * INVARIANT (gate c): PREFER THE TARGET'S TYPED, SANCTIONED API over synthesized
  * input sequences. Instances: a raw-coordinate click refused where the AX action
@@ -288,6 +342,14 @@ const urlChanged = (evidence: readonly SkillSubstepEvidence[]): boolean =>
  * per-character typing where `browser_navigate` exists. UNSEEN CASE COVERED: any
  * future typed route (e.g. a native app's AppleScript/URL-scheme verb) slots in as
  * the browser arm and demotes the synthesized fallback identically.
+ *
+ * INVARIANT (gate e): PREFER ONE ATOMIC INPUT EVENT over N synthesized events when
+ * the surface accepts it. Instance: the live per-character `type_text` that landed
+ * only 6 of 24 characters, so the address-bar route now writes the goal value to
+ * the clipboard and delivers it with ONE `cmd+v` paste. UNSEEN CASE COVERED: any
+ * second surface that accepts a single paste but drops synthesized keystrokes (an
+ * Electron/WebGL field) takes the SAME atomic-paste route, with a bounded type
+ * fallback only when the clipboard write is unavailable.
  */
 export const goToUrl: Skill = {
   name: "go_to_url",
@@ -476,6 +538,9 @@ export function foldSubstepEvidence(
   delivered?: readonly (boolean | undefined)[],
   reads?: readonly (readonly string[] | undefined)[],
   urlChanges?: readonly (boolean | undefined)[],
+  texts?: readonly ({ readonly rounds: number; readonly delivered: number } | undefined)[],
+  valueMatches?: readonly (boolean | undefined)[],
+  notes?: readonly (string | undefined)[],
 ): SkillSubstepEvidence[] {
   return steps.map((step, i) => {
     const before = signatures[i] ?? ""
@@ -483,6 +548,9 @@ export function foldSubstepEvidence(
     const delivery = delivered?.[i]
     const read = reads?.[i]
     const urlChanged = urlChanges?.[i]
+    const textDelivery = texts?.[i]
+    const valueMatched = valueMatches?.[i]
+    const note = notes?.[i]
     return {
       label: step.label,
       mode: step.mode,
@@ -492,6 +560,9 @@ export function foldSubstepEvidence(
       ...(delivery !== undefined ? { delivered: delivery } : {}),
       ...(read !== undefined ? { read } : {}),
       ...(urlChanged !== undefined ? { urlChanged } : {}),
+      ...(textDelivery !== undefined ? { textDelivery } : {}),
+      ...(valueMatched !== undefined ? { valueMatched } : {}),
+      ...(note !== undefined ? { note } : {}),
     }
   })
 }

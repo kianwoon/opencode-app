@@ -244,7 +244,8 @@ export function foldFocusOutcome(
 
 /**
  * How an actuation was carried out: a click rung, a key press, a typed text
- * entry, a scroll, a browser bind/navigate, or a read (the observation IS the result).
+ * entry, a scroll, a browser bind/navigate, a clipboard write, an atomic paste,
+ * or a read (the observation IS the result).
  */
 export type ActuationMode =
   | ActuationRung["mode"]
@@ -255,6 +256,8 @@ export type ActuationMode =
   | "prepare"
   | "bind"
   | "navigate"
+  | "clipboard"
+  | "paste"
 
 /**
  * Args for the driver's key-press verb (`cua-driver_press_key`): a fixed key plus
@@ -279,6 +282,23 @@ export function keyPress(
 }
 
 /**
+ * Args for the driver's `cua-driver_hotkey` verb: a chord (e.g. `["cmd","v"]`)
+ * scoped to the window. The paste route uses it to deliver ONE atomic input
+ * event where a surface accepts it, instead of N synthesized per-character
+ * presses that land only a prefix.
+ */
+export function hotkeyArgs(window: WindowRef, keys: readonly string[]): Record<string, unknown> {
+  return { pid: window.pid, window_id: window.window_id, keys: [...keys] }
+}
+
+/**
+ * Evidence note for the paste route: the clipboard was OVERWRITTEN with the goal
+ * value and never read back (privacy — the route never inspects the user's
+ * clipboard content, and never restores it).
+ */
+export const CLIPBOARD_REPLACED_NOTE = "clipboard replaced with the goal value (not read back)"
+
+/**
  * KEYSTROKE ROUTE — the sanctioned real-input verb for a target surface that
  * DROPS accessibility insertion.
  * INVARIANT OWNED: where a surface is known to discard accessibility-inserted
@@ -299,6 +319,132 @@ export function keyPress(
  */
 export function keySequence(text: string, window: WindowRef, element?: Element): readonly Record<string, unknown>[] {
   return Array.from(text).map((key) => keyPress(key, window, [], element))
+}
+
+// ── RESUMABLE TEXT DELIVERY + FRESH HANDLES ─────────────────────────────────
+/**
+ * INVARIANT OWNED: PARTIAL ACTUATOR OUTPUT IS RESUMABLE and must be driven to
+ * completion, never treated as a failure and never submitted half-delivered.
+ * `type_text` (foreground, real keystrokes) can land a PREFIX of a long string and
+ * report it; the caller parses the report, retries ONLY the remaining suffix, and
+ * stops at a bounded round count while keeping the leftover from the last report.
+ * hardcode-guard:allow the named live report is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: `type_text` delivered 6 of 24 characters of a URL,
+ * the loop pressed Return anyway, and the tab navigated to the 6-character prefix.
+ * UNSEEN CASE COVERED: any second partial-delivery actuator (a paste that
+ * truncates, a drag that stops short) reports its progress the same way and is
+ * resumed by the SAME reducer, no loop change.
+ */
+export const TYPE_ROUND_MAX = 3
+
+export interface PartialDelivery {
+  readonly delivered: number
+  readonly total: number
+}
+
+/** Parse the driver's partial text-delivery report, e.g. "delivered 6 of 24 character(s)". */
+export function parsePartialDelivery(error: string | undefined): PartialDelivery | undefined {
+  if (error === undefined) return undefined
+  const match = error.match(/delivered\s+(\d+)\s+of\s+(\d+)\s+character/i)
+  if (match === null) return undefined
+  return { delivered: Number(match[1]), total: Number(match[2]) }
+}
+
+export interface TextDeliveryAttempt {
+  readonly ok: boolean
+  readonly error?: string
+}
+
+/** Resumable-delivery state: characters CONFIRMED delivered, rounds spent, and a terminal failure. */
+export interface TextDelivery {
+  readonly confirmed: number
+  readonly rounds: number
+  readonly failure?: string
+}
+
+export const initialTextDelivery = (): TextDelivery => ({ confirmed: 0, rounds: 0 })
+
+/** The suffix still to deliver after `confirmed` characters landed. */
+export const remainingSuffix = (text: string, delivery: TextDelivery): string => text.slice(delivery.confirmed)
+
+export const textDeliveryComplete = (text: string, delivery: TextDelivery): boolean =>
+  delivery.failure === undefined && delivery.confirmed >= text.length
+
+/**
+ * Advance the resumable-delivery state by ONE attempt: `ok` completes; a partial
+ * report advances the confirmed prefix and keeps the leftover for the next round;
+ * an unparsable error — or exceeding `maxRounds` with text still outstanding —
+ * fails. A partial report is NEVER a failure.
+ */
+export function textDeliveryStep(
+  text: string,
+  current: TextDelivery,
+  attempt: TextDeliveryAttempt,
+  maxRounds = TYPE_ROUND_MAX,
+): TextDelivery {
+  if (current.failure !== undefined) return current
+  const rounds = current.rounds + 1
+  if (attempt.ok) return { confirmed: text.length, rounds }
+  const partial = parsePartialDelivery(attempt.error)
+  if (partial === undefined) return { confirmed: current.confirmed, rounds, failure: attempt.error ?? "type_text failed" }
+  const confirmed = Math.min(text.length, current.confirmed + partial.delivered)
+  if (confirmed >= text.length) return { confirmed, rounds }
+  if (rounds >= maxRounds) return { confirmed, rounds, failure: `text incomplete after ${maxRounds} round(s)` }
+  return { confirmed, rounds }
+}
+
+/**
+ * INVARIANT OWNED: a SNAPSHOT-SCOPED HANDLE must be re-resolved after any call
+ * that mints a new snapshot. `refindElement` re-resolves the skill's target by
+ * role+label against the NEWEST observation, never the `element_token` captured
+ * before an intervening driver call.
+ * hardcode-guard:allow the named live error is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: the address-bar focus click used a token whose
+ * snapshot a bind had invalidated ("element_token is stale; call get_window_state
+ * again to refresh; current snapshots for pid …"), so the click never landed.
+ * UNSEEN CASE COVERED: any handler re-resolved across a navigate/prepare that
+ * renumbers the tree is refreshed the same way.
+ */
+export function refindElement(target: Element, elements: readonly Element[]): Element | undefined {
+  return elements.find(
+    (element) =>
+      element.element_token !== undefined &&
+      element.role === target.role &&
+      (element.label ?? "") === (target.label ?? ""),
+  )
+}
+
+/** The driver's live refusal when a handle outlives the snapshot that minted it. */
+export const STALE_TOKEN = "element_token is stale"
+
+export function isStaleToken(error: string | undefined): boolean {
+  return error !== undefined && error.includes(STALE_TOKEN)
+}
+
+/**
+ * INVARIANT OWNED: TYPED-ROUTE UNAVAILABILITY resolves by POLICY ANSWER, not
+ * retry. `browser_prepare` answering `browser_requires_setup` means the target is
+ * a live browser with no owned endpoint: retrying is futile, so the route
+ * short-circuits to the address-bar sequence.
+ * hardcode-guard:allow the named live answer is one instance cited to ground the invariant
+ * LIVE FAILURE AS ONE INSTANCE: `browser_prepare` answered
+ * "browser_requires_setup … no owned endpoint" and the route retried it in vain.
+ * UNSEEN CASE COVERED: any second typed route that answers a terminal
+ * "unavailable by policy" code short-circuits identically instead of retrying.
+ */
+export const BROWSER_REQUIRES_SETUP = "browser_requires_setup"
+
+export function browserNeedsSetup(error: string | undefined): boolean {
+  return error !== undefined && error.includes(BROWSER_REQUIRES_SETUP)
+}
+
+/** Whether a field's observed value matches the value a `type` sub-step delivered. */
+export const valueMatches = (actual: string | undefined, expected: string): boolean =>
+  actual !== undefined && actual.trim() === expected.trim()
+
+/** The observed value of the target (by role+label) in a fresh element set. */
+export function fieldValue(target: Element, elements: readonly Element[]): string | undefined {
+  return refindElement(target, elements)?.value
 }
 
 export interface ActuationEvidence {

@@ -31,6 +31,8 @@ import {
   normalizeExpect,
   resolveTarget,
   runClickRungs,
+  runTypeDelivery,
+  runUrlEntry,
   screenSignature,
   traceStep,
   type DriverCall,
@@ -39,6 +41,7 @@ import {
 } from "@/tool/ui-run"
 import { usableElements } from "@/tool/ui-eyes"
 import {
+  CLIPBOARD_REPLACED_NOTE,
   actuationPlan,
   changeEvidence,
   clickAttempt,
@@ -48,6 +51,7 @@ import {
   elementCenter,
   focusIdentity,
   frameEstablishingRead,
+  hotkeyArgs,
   isNoFrameError,
   observationArgs,
   pixelFrameRetry,
@@ -1147,6 +1151,49 @@ describe("runClickRungs — the shared click rung runner", () => {
 // Chromium's address bar is the one live instance; an unseen surface that drops
 // insertion is delivered the same way. The source scan confirms the wiring.
 // hardcode-guard:allow the driver tool names are the wiring contract under test
+// GENERALIZATION — INVARIANT: partial actuator output is RESUMABLE and must be
+// driven to completion, never submitted half-typed. The live `type_text`
+// "delivered 6 of 24 … retry only the remaining suffix" report is one instance;
+// any second partial-delivery actuator is resumed by the SAME runner.
+// hardcode-guard:allow the driver's partial-delivery report is the live input under test
+describe("runTypeDelivery — resumable text delivery", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const el = { element_token: "t1", role: "AXTextField", label: "Address and search bar" }
+  const TEXT = "https://www.linkedin.com"
+  const PARTIAL =
+    "type_text incomplete: delivered 6 of 24 character(s) via foreground keystrokes (30ms delay); retry only the remaining suffix"
+
+  test("(a) a partial report is resumed with ONLY the remaining suffix, in foreground", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const script: DriverOutcome[] = [
+      { ok: false, error: PARTIAL },
+      { ok: true, result: { content: [] } },
+    ]
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed(script.shift() ?? { ok: false, error: "unscripted" })
+    }
+    const run = await Effect.runPromise(runTypeDelivery(call, win, el, TEXT))
+    expect(run.completed).toBe(true)
+    expect(run.delivered).toBe(24)
+    expect(run.rounds).toBe(2)
+    expect(run.failure).toBeUndefined()
+    expect(calls.map((c) => c.name)).toEqual(["cua-driver_type_text", "cua-driver_type_text"])
+    expect(calls[0].args.text).toBe(TEXT)
+    expect(calls[1].args.text).toBe(TEXT.slice(6))
+    expect(calls.every((c) => c.args.delivery_mode === "foreground")).toBe(true)
+  })
+
+  test("(a) BOUNDED: repeated partials stop at the round cap with delivered < total", async () => {
+    const call: DriverCall = () => Effect.succeed({ ok: false, error: "delivered 1 of 24 character(s); retry the remaining suffix" })
+    const run = await Effect.runPromise(runTypeDelivery(call, win, el, TEXT))
+    expect(run.completed).toBe(false)
+    expect(run.rounds).toBe(3)
+    expect(run.delivered).toBe(3)
+    expect(run.failure).toBeDefined()
+  })
+})
+
 describe("executeSkill — keystroke route wiring", () => {
   test("(a)/(d) the keys sub-step drives cua-driver_press_key per character, not accessibility insertion", async () => {
     const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
@@ -1163,6 +1210,103 @@ describe("executeSkill — keystroke route wiring", () => {
     expect(skillRegion.includes("cua-driver_browser_prepare")).toBe(true)
     // a failed prepare records the driver error as the skill's failure (honest stop)
     expect(skillRegion.includes("failure = prepared.error")).toBe(true)
+  })
+
+  // hardcode-guard:allow the freshness/policy/delivery wiring is the hand contract under test
+  test("(a)/(b)/(c) executeSkill resumes type, refreshes handles, and short-circuits a live-browser prepare", async () => {
+    const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
+    const skillRegion = src.slice(src.indexOf("const executeSkill"), src.indexOf("for (let step = 0"))
+    // (b) TOKEN FRESHNESS before token-using driver calls
+    expect(skillRegion.includes("freshTarget")).toBe(true)
+    expect(skillRegion.includes("refindElement(target")).toBe(true)
+    // (a) resumable text delivery on the type sub-step
+    expect(skillRegion.includes("runTypeDelivery(")).toBe(true)
+    expect(skillRegion.includes('sub.kind === "type"')).toBe(true)
+    // (c) a live-browser policy answer short-circuits (no retry) to the address-bar arm
+    expect(skillRegion.includes("browserNeedsSetup(")).toBe(true)
+  })
+})
+
+// GENERALIZATION — INVARIANT: prefer ONE atomic input event over N synthesized
+// events when the surface accepts it. The address bar's clipboard paste is ONE
+// input event; the live per-character type_text that landed only a prefix is the
+// instance. An unseen surface that accepts a paste but drops keystrokes takes the
+// SAME runner, with the bounded resumable type path as fallback only when the
+// clipboard write did not land.
+// hardcode-guard:allow the driver tool names + partial-delivery report are the wiring contract under test
+describe("runUrlEntry — atomic paste with a bounded type fallback", () => {
+  const win = { pid: 4242, window_id: 7 }
+  const el = { element_token: "t1", role: "AXTextField", label: "Address and search bar" }
+  const TEXT = "https://www.linkedin.com"
+
+  test("(a) a written clipboard is delivered as ONE cmd+v paste, no per-character keys", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed({ ok: true, result: { content: [] } })
+    }
+    const run = await Effect.runPromise(runUrlEntry(call, win, el, TEXT, true))
+    expect(run.mode).toBe("paste")
+    expect(run.completed).toBe(true)
+    expect(run.delivered).toBe(TEXT.length)
+    expect(run.rounds).toBe(0)
+    // ONE atomic input event: a single hotkey call, never a per-character press
+    expect(calls.map((c) => c.name)).toEqual(["cua-driver_hotkey"])
+    expect(calls[0].args.keys).toEqual(["cmd", "v"])
+    expect(calls.some((c) => c.name === "cua-driver_type_text")).toBe(false)
+  })
+
+  test("(b) a failed clipboard write falls back to the bounded resumable type path", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      return Effect.succeed({ ok: true, result: { content: [] } })
+    }
+    const run = await Effect.runPromise(runUrlEntry(call, win, el, TEXT, false))
+    expect(run.mode).toBe("type")
+    expect(run.completed).toBe(true)
+    expect(calls.some((c) => c.name === "cua-driver_hotkey")).toBe(false)
+    expect(calls.map((c) => c.name)).toEqual(["cua-driver_type_text"])
+  })
+
+  test("(b) the fallback stays bounded when the type path never completes", async () => {
+    const call: DriverCall = () =>
+      Effect.succeed({ ok: false, error: "delivered 1 of 24 character(s); retry the remaining suffix" })
+    const run = await Effect.runPromise(runUrlEntry(call, win, el, TEXT, false))
+    expect(run.mode).toBe("type")
+    expect(run.completed).toBe(false)
+    expect(run.rounds).toBe(3)
+    expect(run.failure).toBeDefined()
+  })
+
+  test("(a) hotkeyArgs emits a window-scoped chord for the atomic paste", () => {
+    const args = hotkeyArgs(win, ["cmd", "v"])
+    expect(args).toEqual({ pid: win.pid, window_id: win.window_id, keys: ["cmd", "v"] })
+  })
+})
+
+describe("executeSkill — clipboard paste wiring", () => {
+  test("(a) the route writes the clipboard, pastes once, value-gates before Return, and never reads the clipboard", async () => {
+    const dir = path.join(import.meta.dir, "..", "..", "src", "tool")
+    const src = await Bun.file(path.join(dir, "ui-run.ts")).text()
+    const skillRegion = src.slice(src.indexOf("const executeSkill"), src.indexOf("for (let step = 0"))
+    expect(skillRegion.includes('sub.kind === "clipboard"')).toBe(true)
+    expect(skillRegion.includes('sub.kind === "paste"')).toBe(true)
+    expect(skillRegion.includes('sub.kind === "verifyValue"')).toBe(true)
+    expect(skillRegion.includes("cua-driver_clipboard_write")).toBe(true)
+    expect(skillRegion.includes("runUrlEntry(")).toBe(true)
+    // hardcode-guard:allow the atomic-paste driver tool name is the wiring contract under test
+    // the paste chord lives in the shared runner this sub-step calls
+    expect(src.includes("cua-driver_hotkey")).toBe(true)
+    // (b) the paste sub-step can fall back to the bounded resumable type path
+    expect(skillRegion.includes("runTypeDelivery(")).toBe(true)
+    // (c) the value gate aborts before Return on a mismatch
+    expect(skillRegion.includes("valueMatches(fieldValue(")).toBe(true)
+    // (a) privacy: no route ever READS the clipboard
+    for (const file of ["ui-run.ts", "ui-skills.ts", "ui-hands.ts"]) {
+      expect((await Bun.file(path.join(dir, file)).text()).includes("clipboard_read")).toBe(false)
+    }
+    expect(CLIPBOARD_REPLACED_NOTE).toContain("clipboard")
   })
 })
 

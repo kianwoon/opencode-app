@@ -6,25 +6,35 @@ import { jevControlDetailed, jevKey, type ControllerOutcome, type JevAction, typ
 import { advanceMap, buildCandidates, decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
 import type { Element } from "./ui-eyes"
 import {
+  CLIPBOARD_REPLACED_NOTE,
   actuationPlan,
+  browserNeedsSetup,
   changeEvidence,
   clickAttempt,
   clickSignals,
   clickVerdict,
+  fieldValue,
   foldFocusConsumer,
   foldFocusOutcome,
   frameEstablishingRead,
+  hotkeyArgs,
+  initialTextDelivery,
   isFocusTarget,
   keyPress,
   keySequence,
   observationArgs,
   pixelFrameRetry,
+  refindElement,
+  remainingSuffix,
+  textDeliveryStep,
+  valueMatches,
   type ActuationMode,
   type ActuationEvidence,
   type ActuationRung,
   type ClickAttemptEvidence,
   type ClickOutcome,
   type ClickSignals,
+  type TextDelivery,
   type WindowRef,
 } from "./ui-hands"
 import {
@@ -534,6 +544,104 @@ export const runClickRungs = (
     return { attempts, outcome: clickVerdict(attempts), result, signature, observations }
   })
 
+export interface TypeDeliveryRuns {
+  readonly rounds: number
+  readonly delivered: number
+  /** The full string landed (partial reports were resumed to completion). */
+  readonly completed: boolean
+  readonly failure?: string
+  /** The last driver result — diagnostics only, never the verdict. */
+  readonly result: DriverOutcome
+}
+
+/**
+ * RESUMABLE TEXT DELIVERY — the ONE implementation both call sites (the main loop
+ * and executeSkill's type sub-step) share, so a partial-delivery fix can never land
+ * at one site and stay latent at the other. Foreground `type_text` sends REAL
+ * keystrokes but may land only a PREFIX and report it; this drives the string to
+ * completion, retrying ONLY the remaining suffix, bounded by TYPE_ROUND_MAX, and
+ * records the rounds and final confirmed count. A partial report is never a
+ * failure; an unparsable error or exhausted rounds is.
+ */
+export const runTypeDelivery = (
+  call: DriverCall,
+  window: WindowRef,
+  element: Element,
+  text: string,
+): Effect.Effect<TypeDeliveryRuns> =>
+  Effect.gen(function* () {
+    let delivery: TextDelivery = initialTextDelivery()
+    let result: DriverOutcome = { ok: false, error: "no type attempt" }
+    while (delivery.failure === undefined && delivery.confirmed < text.length) {
+      const args = {
+        ...(element.element_token !== undefined ? { element_token: element.element_token } : {}),
+        pid: window.pid,
+        window_id: window.window_id,
+        text: remainingSuffix(text, delivery),
+        delivery_mode: "foreground",
+      }
+      result = yield* call("cua-driver_type_text", args)
+      delivery = textDeliveryStep(text, delivery, result.ok ? { ok: true } : { ok: false, error: result.error })
+    }
+    return {
+      rounds: delivery.rounds,
+      delivered: delivery.confirmed,
+      completed: delivery.failure === undefined && delivery.confirmed >= text.length,
+      ...(delivery.failure !== undefined ? { failure: delivery.failure } : {}),
+      result,
+    }
+  })
+
+export interface UrlEntryRuns {
+  readonly mode: "paste" | "type"
+  /** The full string landed (a paste is atomic; a type fallback was resumed to completion). */
+  readonly completed: boolean
+  readonly delivered: number
+  readonly rounds: number
+  readonly failure?: string
+  /** The last driver result — diagnostics only, never the verdict. */
+  readonly result: DriverOutcome
+}
+
+/**
+ * ATOMIC URL ENTRY — INVARIANT: prefer ONE atomic input event over N synthesized
+ * events when the surface accepts it. A clipboard paste (a clipboard already
+ * written, then one `cmd+v` hotkey) is a SINGLE input event that Chromium accepts
+ * and submits on Return; N synthesized per-character presses are the live
+ * partial-delivery instance, so they are the BOUNDED fallback taken only when the
+ * clipboard write did not land. The same runner is shared so a fix cannot land at
+ * one sub-step and stay latent at another.
+ * hardcode-guard:allow the named live partial-delivery report + driver tool names are the wiring contract under test
+ * LIVE FAILURE AS ONE INSTANCE: foreground `type_text` delivered 6 of 24 characters
+ * of a URL and the tab navigated to the 6-character prefix.
+ * UNSEEN CASE COVERED: any second surface that accepts a single paste but drops
+ * synthesized keystrokes (an Electron/WebGL field) takes the SAME atomic paste,
+ * with the bounded type fallback unchanged.
+ */
+export const runUrlEntry = (
+  call: DriverCall,
+  window: WindowRef,
+  element: Element,
+  text: string,
+  clipboardOk: boolean,
+): Effect.Effect<UrlEntryRuns> =>
+  Effect.gen(function* () {
+    if (clipboardOk) {
+      const pasted = yield* call("cua-driver_hotkey", hotkeyArgs(window, ["cmd", "v"]))
+      if (pasted.ok) return { mode: "paste", completed: true, delivered: text.length, rounds: 0, result: pasted }
+    }
+    // clipboard unavailable or the paste chord failed → the bounded resumable type path
+    const run = yield* runTypeDelivery(call, window, element, text)
+    return {
+      mode: "type",
+      completed: run.completed,
+      delivered: run.delivered,
+      rounds: run.rounds,
+      ...(run.failure !== undefined ? { failure: run.failure } : {}),
+      result: run.result,
+    }
+  })
+
 export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
   "ui_run",
   Effect.gen(function* () {
@@ -628,12 +736,47 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               const reads: (readonly string[] | undefined)[] = []
               // Verify sub-step results (the page URL/title actually changed).
               const urlChanges: (boolean | undefined)[] = []
+              // Value-gate sub-step results (the target's value matched the goal), by trace index.
+              const valueByIndex = new Map<number, boolean>()
+              // Per-sub-step privacy/actuation notes (e.g. the clipboard was replaced), by trace index.
+              const noteByIndex = new Map<number, string>()
               let observationsUsed = 0
               let failure: string | undefined
+              // Whether the clipboard write landed — the paste sub-step's fallback gate.
+              let clipboardOk = false
               // BIND classification, carried to the branch step.
               let binding: BrowserBinding | undefined
               // A FOCUS click whose delivery is deferred to its consumer sub-step.
               let pendingFocus: { readonly index: number; readonly attempt: ClickAttemptEvidence } | undefined
+              // Text sub-step delivery accounting (rounds + final delivered count), by trace index.
+              const textByIndex = new Map<number, { readonly rounds: number; readonly delivered: number }>()
+              // TOKEN FRESHNESS: the skill's target, the newest observed element set,
+              // and whether a snapshot-minting driver call has run since that set was
+              // read (bind/prepare/navigate/act mint new snapshots and stale tokens).
+              let target = match.element
+              let newest: readonly Element[] = elements
+              let staleSnapshot = false
+              // Re-resolve the target from a NEWEST observation before any driver call
+              // that uses its element_token. Observes only when a snapshot-minting
+              // call ran since the last observation, then always re-resolves the
+              // handle against the newest element set, so a token never outlives its
+              // snapshot (the stale-token live failure).
+              const freshTarget = Effect.gen(function* () {
+                if (staleSnapshot) {
+                  const fresh = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    observationArgs(params.window),
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  staleSnapshot = false
+                  const obs = fresh.ok ? decodeObservation(fresh.result.structuredContent) : null
+                  if (obs) newest = obs.elements
+                }
+                target = refindElement(target, newest) ?? target
+                return target
+              })
               const queue: SkillStep[] = [...match.skill.steps(match)]
               while (queue.length > 0) {
                 const sub = queue.shift()
@@ -644,10 +787,14 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   continue
                 }
                 // hardcode-guard:allow the browser tool/verb vocabulary is the registry's own contract, not a case literal
+                // hardcode-guard:allow the policy-answer token is the driver's own refusal vocabulary, not a case literal
                 if (sub.kind === "prepare") {
                   // PREPARE the browser endpoint (`browser_prepare`) — attaches/owns
                   // the DevTools endpoint, the precondition for a bind to succeed on
-                  // a Chromium window. Its failure is an honest skill failure.
+                  // a Chromium window. `browser_requires_setup` (a live browser with
+                  // no owned endpoint) is a POLICY ANSWER, not a transient error:
+                  // do NOT retry — treat the window as not-a-browser and let the
+                  // route short-circuit to the address-bar sequence.
                   const prepared = yield* callDriver(
                     tools,
                     "cua-driver_browser_prepare",
@@ -655,16 +802,19 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                     ctx.abort,
                   )
                   observationsUsed++
+                  staleSnapshot = true
                   signatures.push(signatures.at(-1) ?? before)
                   modes.push({ label: sub.label, mode: "prepare" })
                   deliveries.push(undefined)
                   reads.push(undefined)
                   urlChanges.push(undefined)
-                  if (!prepared.ok) {
-                    failure = prepared.error
-                    break
+                  if (prepared.ok) continue
+                  if (browserNeedsSetup(prepared.error)) {
+                    binding = { browser: false }
+                    continue
                   }
-                  continue
+                  failure = prepared.error
+                  break
                 }
                 // hardcode-guard:allow the browser tool/branch vocabulary is the registry's own contract, not a case literal
                 if (sub.kind === "bind") {
@@ -677,6 +827,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   )
                   observationsUsed++
                   binding = bound.ok ? decodeBrowserBinding(bound.result.structuredContent) : { browser: false }
+                  // a bind mints a new snapshot: any token read before it is stale
+                  staleSnapshot = true
                   signatures.push(signatures.at(-1) ?? before)
                   modes.push({ label: sub.label, mode: "bind" })
                   deliveries.push(undefined)
@@ -696,6 +848,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                     ctx.abort,
                   )
                   observationsUsed++
+                  staleSnapshot = true
                   signatures.push(signatures.at(-1) ?? before)
                   modes.push({ label: sub.label, mode: "navigate" })
                   deliveries.push(undefined)
@@ -719,6 +872,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                         )
                       : undefined
                   if (state !== undefined) observationsUsed++
+                  staleSnapshot = true
                   const after = state?.ok ? decodeBrowserBinding(state.result.structuredContent) : undefined
                   urlChanges.push(after !== undefined && (after.url !== bound?.url || after.title !== bound?.title))
                   signatures.push(signatures.at(-1) ?? before)
@@ -736,6 +890,9 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   )
                   observationsUsed++
                   const vObs = observedVerify.ok ? decodeObservation(observedVerify.result.structuredContent) : null
+                  // a fresh observation is the NEWEST element set; nothing is stale now
+                  if (vObs) newest = vObs.elements
+                  staleSnapshot = false
                   const priorSignature = signatures.at(-1) ?? before
                   const verifiedSignature = vObs ? screenSignature(vObs.elements) : priorSignature
                   urlChanges.push(verifiedSignature !== priorSignature)
@@ -752,24 +909,29 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   // a screenshot frame on demand for the sensor-dependent pixel
                   // rung). A FOCUS click is NOT aborted on absent delivery: its
                   // delivery is deferred to its consumer sub-step.
-                  const plan = actuationPlan(match.element, params.window)
+                  // TOKEN FRESHNESS: re-resolve the target from the newest
+                  // observation before the click commits its handle.
+                  // hardcode-guard:allow the freshness rule is the hand contract, not a case literal
+                  target = yield* freshTarget
+                  const plan = actuationPlan(target, params.window)
                   const fallback = signatures.at(-1) ?? before
-                  const signalBefore = clickSignals(fallback, match.element, elements)
+                  const signalBefore = clickSignals(fallback, target, newest)
                   const run = yield* runClickRungs(
                     (name, args) => callDriver(tools, name, args, ctx.abort),
                     params.window,
-                    match.element,
+                    target,
                     plan,
                     signalBefore,
                     fallback,
                   )
                   observationsUsed += run.observations
+                  staleSnapshot = true
                   signatures.push(run.signature)
                   modes.push({ label: sub.label, mode: run.outcome.mode })
                   reads.push(undefined)
                   urlChanges.push(undefined)
                   const first = run.attempts[0]
-                  if (!run.outcome.worked && first !== undefined && isFocusTarget(match.element)) {
+                  if (!run.outcome.worked && first !== undefined && isFocusTarget(target)) {
                     pendingFocus = { index: modes.length - 1, attempt: first }
                     deliveries.push(false)
                     continue
@@ -793,6 +955,8 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   )
                   observationsUsed++
                   const readObs = observedRead.ok ? decodeObservation(observedRead.result.structuredContent) : null
+                  if (readObs) newest = readObs.elements
+                  staleSnapshot = false
                   signatures.push(readObs ? screenSignature(readObs.elements) : (signatures.at(-1) ?? before))
                   modes.push({ label: sub.label, mode: "read" })
                   deliveries.push(undefined)
@@ -810,12 +974,14 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 if (sub.kind === "keys") {
                   // KEYSTROKE ROUTE — real per-character key events, never
                   // accessibility insertion: a surface that accepts an inserted
-                  // value but never commits it (Chromium's address bar shows a
-                  // type_text URL yet does NOT submit on Return) commits only on
-                  // real key events. One press_key per code point, the foreground
-                  // remedy for `same_pid_keyboard_ambiguity` applied exactly as for
-                  // a single key, then ONE observation of the sub-step's effect.
-                  for (const keyArgs of keySequence(sub.text, params.window, match.element)) {
+                  // value but never commits it commits only on real key events. One
+                  // press_key per code point, the foreground remedy for
+                  // `same_pid_keyboard_ambiguity` applied exactly as for a single
+                  // key, then ONE observation of the sub-step's effect. TOKEN
+                  // FRESHNESS: re-resolve the target before the sequence commits.
+                  // hardcode-guard:allow the freshness rule is the hand contract, not a case literal
+                  target = yield* freshTarget
+                  for (const keyArgs of keySequence(sub.text, params.window, target)) {
                     const pressed = yield* callDriver(tools, "cua-driver_press_key", keyArgs, ctx.abort)
                     observationsUsed++
                     const result =
@@ -841,44 +1007,216 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                   )
                   observationsUsed++
                   const keysObs = keysAfter.ok ? decodeObservation(keysAfter.result.structuredContent) : null
+                  if (keysObs) newest = keysObs.elements
+                  staleSnapshot = false
                   signatures.push(keysObs ? screenSignature(keysObs.elements) : (signatures.at(-1) ?? before))
                   modes.push({ label: sub.label, mode: "key" })
                   deliveries.push(undefined)
                   reads.push(undefined)
                   urlChanges.push(undefined)
                   if (pendingFocus !== undefined && keysObs) {
-                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, match.element, keysObs.elements)
-                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, match.element).delivered) {
+                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, keysObs.elements)
+                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
                       deliveries[pendingFocus.index] = true
                       pendingFocus = undefined
                     }
                   }
                   continue
                 }
-                const tool =
-                  sub.kind === "key"
-                    ? "cua-driver_press_key"
-                    : sub.kind === "type"
-                      ? "cua-driver_type_text"
-                      : "cua-driver_scroll"
+                // hardcode-guard:allow the clipboard verb + driver tool name are the registry/hand contract, not a case literal
+                if (sub.kind === "clipboard") {
+                  // CLIPBOARD WRITE — replace the clipboard with the goal value as ONE
+                  // atomic payload, the precondition for a single-event paste. The route
+                  // NEVER reads the clipboard back (privacy); the overwrite is disclosed
+                  // in the evidence. A failed write is NOT fatal: it sets the paste
+                  // sub-step's fallback gate rather than aborting the maneuver.
+                  target = yield* freshTarget
+                  const clip = yield* callDriver(tools, "cua-driver_clipboard_write", { text: sub.text }, ctx.abort)
+                  observationsUsed++
+                  staleSnapshot = false
+                  clipboardOk = clip.ok
+                  signatures.push(signatures.at(-1) ?? before)
+                  modes.push({ label: sub.label, mode: "clipboard" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  noteByIndex.set(modes.length - 1, CLIPBOARD_REPLACED_NOTE)
+                  continue
+                }
+                // hardcode-guard:allow the paste verb + driver tool name are the registry/hand contract, not a case literal
+                if (sub.kind === "paste") {
+                  // ATOMIC PASTE — one `cmd+v` input event when the clipboard write
+                  // landed; else the BOUNDED resumable type path. TOKEN FRESHNESS:
+                  // re-resolve the target before the entry commits. One observation of
+                  // the sub-step's effect; the value gate (below) confirms before Return.
+                  target = yield* freshTarget
+                  const run = yield* runUrlEntry(
+                    (name, a) => callDriver(tools, name, a, ctx.abort),
+                    params.window,
+                    target,
+                    sub.text,
+                    clipboardOk,
+                  )
+                  observationsUsed += run.rounds + (run.mode === "paste" ? 1 : 0)
+                  const observed = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    observationArgs(params.window),
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  const after = observed.ok ? decodeObservation(observed.result.structuredContent) : null
+                  if (after) newest = after.elements
+                  staleSnapshot = false
+                  signatures.push(after ? screenSignature(after.elements) : (signatures.at(-1) ?? before))
+                  modes.push({ label: sub.label, mode: run.mode })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  // hardcode-guard:allow the paste/type mode vocabulary is the runner's own contract, not a case literal
+                  if (run.mode === "paste") noteByIndex.set(modes.length - 1, CLIPBOARD_REPLACED_NOTE)
+                  if (run.mode === "type") textByIndex.set(modes.length - 1, { rounds: run.rounds, delivered: run.delivered })
+                  if (run.failure !== undefined) {
+                    failure = run.failure
+                    break
+                  }
+                  if (pendingFocus !== undefined && after) {
+                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, after.elements)
+                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
+                      deliveries[pendingFocus.index] = true
+                      pendingFocus = undefined
+                    }
+                  }
+                  continue
+                }
+                // hardcode-guard:allow the value-gate verb is the registry's own contract, not a case literal
+                if (sub.kind === "verifyValue") {
+                  // VALUE GATE — read the target's value back and confirm it matches the
+                  // goal's value BEFORE any later Return. A mismatch aborts the maneuver
+                  // rather than submitting a malformed destination.
+                  const observedValue = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    observationArgs(params.window),
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  const gateObs = observedValue.ok ? decodeObservation(observedValue.result.structuredContent) : null
+                  if (gateObs) newest = gateObs.elements
+                  staleSnapshot = false
+                  const matched = gateObs !== null && valueMatches(fieldValue(target, gateObs.elements), sub.text)
+                  signatures.push(gateObs ? screenSignature(gateObs.elements) : (signatures.at(-1) ?? before))
+                  modes.push({ label: sub.label, mode: "read" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  valueByIndex.set(modes.length - 1, matched)
+                  if (!matched) {
+                    failure = "address bar value did not match the goal before Return"
+                    break
+                  }
+                  continue
+                }
+                // hardcode-guard:allow the freshness rule is the hand contract, not a case literal
+                if (sub.kind === "type") {
+                  // RESUMABLE TEXT DELIVERY: drive the string to completion — a partial
+                  // report (a prefix landed) is resumed, never treated as failure and
+                  // never submitted half-typed. With `verify`, read the field's value
+                  // back and, on a mismatch (a truncated entry), re-do select-all + the
+                  // entry ONCE, so the destination is confirmed before any later
+                  // Return. The delivered rounds/count fold into the evidence.
+                  target = yield* freshTarget
+                  let run = yield* runTypeDelivery(
+                    (name, a) => callDriver(tools, name, a, ctx.abort),
+                    params.window,
+                    target,
+                    sub.text,
+                  )
+                  observationsUsed += run.rounds
+                  const observed = yield* callDriver(
+                    tools,
+                    "cua-driver_get_window_state",
+                    observationArgs(params.window),
+                    ctx.abort,
+                  )
+                  observationsUsed++
+                  let after = observed.ok ? decodeObservation(observed.result.structuredContent) : null
+                  if (after) newest = after.elements
+                  staleSnapshot = false
+                  let delivered = run.delivered
+                  let rounds = run.rounds
+                  if (run.failure === undefined && sub.verify === true && after !== null) {
+                    if (!valueMatches(fieldValue(target, after.elements), sub.text)) {
+                      // the entry did not land intact: re-do select-all + the entry once
+                      target = refindElement(target, after.elements) ?? target
+                      yield* callDriver(
+                        tools,
+                        "cua-driver_press_key",
+                        keyPress("a", params.window, ["cmd"], target),
+                        ctx.abort,
+                      )
+                      observationsUsed++
+                      // the select-all mints a new snapshot: re-resolve before the repair entry
+                      // hardcode-guard:allow the freshness rule is the hand contract, not a case literal
+                      staleSnapshot = true
+                      target = yield* freshTarget
+                      const repair = yield* runTypeDelivery(
+                        (name, a) => callDriver(tools, name, a, ctx.abort),
+                        params.window,
+                        target,
+                        sub.text,
+                      )
+                      observationsUsed += repair.rounds
+                      rounds += repair.rounds
+                      delivered = repair.delivered
+                      const recheck = yield* callDriver(
+                        tools,
+                        "cua-driver_get_window_state",
+                        observationArgs(params.window),
+                        ctx.abort,
+                      )
+                      observationsUsed++
+                      after = recheck.ok ? decodeObservation(recheck.result.structuredContent) : after
+                      if (after) newest = after.elements
+                      run = repair
+                    }
+                  }
+                  signatures.push(after ? screenSignature(after.elements) : (signatures.at(-1) ?? before))
+                  modes.push({ label: sub.label, mode: "type" })
+                  deliveries.push(undefined)
+                  reads.push(undefined)
+                  urlChanges.push(undefined)
+                  textByIndex.set(modes.length - 1, { rounds, delivered })
+                  if (run.failure !== undefined) {
+                    failure = run.failure
+                    break
+                  }
+                  if (sub.verify === true && after !== null && !valueMatches(fieldValue(target, after.elements), sub.text)) {
+                    failure = "typed value did not match the goal after one repair"
+                    break
+                  }
+                  if (pendingFocus !== undefined && after) {
+                    const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, after.elements)
+                    if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
+                      deliveries[pendingFocus.index] = true
+                      pendingFocus = undefined
+                    }
+                  }
+                  continue
+                }
+                if (sub.kind === "key") target = yield* freshTarget
                 const args =
                   sub.kind === "key"
-                    ? keyPress(sub.key, params.window, sub.modifiers, match.element)
-                    : sub.kind === "type"
-                      ? {
-                          element_token: match.element.element_token,
-                          pid: params.window.pid,
-                          window_id: params.window.window_id,
-                          text: sub.text,
-                        }
-                      : {
-                          pid: params.window.pid,
-                          window_id: params.window.window_id,
-                          direction: sub.direction,
-                          by: sub.by ?? "page",
-                          amount: sub.amount ?? 1,
-                        }
-                const mode: ActuationMode = sub.kind === "key" ? "key" : sub.kind === "type" ? "type" : "scroll"
+                    ? keyPress(sub.key, params.window, sub.modifiers, target)
+                    : {
+                        pid: params.window.pid,
+                        window_id: params.window.window_id,
+                        direction: sub.direction,
+                        by: sub.by ?? "page",
+                        amount: sub.amount ?? 1,
+                      }
+                const mode: ActuationMode = sub.kind === "key" ? "key" : "scroll"
+                const tool = sub.kind === "key" ? "cua-driver_press_key" : "cua-driver_scroll"
                 const attempt = yield* callDriver(tools, tool, args, ctx.abort)
                 const result =
                   !attempt.ok && needsForegroundDelivery(attempt.error)
@@ -896,22 +1234,33 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 )
                 observationsUsed++
                 const after = observedAfter.ok ? decodeObservation(observedAfter.result.structuredContent) : null
+                if (after) newest = after.elements
+                staleSnapshot = false
                 signatures.push(after ? screenSignature(after.elements) : (signatures.at(-1) ?? before))
                 modes.push({ label: sub.label, mode })
                 deliveries.push(undefined)
                 reads.push(undefined)
                 urlChanges.push(undefined)
                 // FUNCTIONAL DELIVERY: a pending FOCUS click is delivered when a
-                // consumer (type/key on the SAME target) lands in the target's state.
-                if (pendingFocus !== undefined && (sub.kind === "type" || sub.kind === "key") && after) {
-                  const consumerSignals = clickSignals(signatures.at(-1) ?? before, match.element, after.elements)
-                  if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, match.element).delivered) {
+                // consumer (key on the SAME target) lands in the target's state.
+                if (pendingFocus !== undefined && sub.kind === "key" && after) {
+                  const consumerSignals = clickSignals(signatures.at(-1) ?? before, target, after.elements)
+                  if (foldFocusConsumer(pendingFocus.attempt, consumerSignals, target).delivered) {
                     deliveries[pendingFocus.index] = true
                     pendingFocus = undefined
                   }
                 }
               }
-              const substeps = foldSubstepEvidence(modes, signatures, deliveries, reads, urlChanges)
+              const substeps = foldSubstepEvidence(
+                modes,
+                signatures,
+                deliveries,
+                reads,
+                urlChanges,
+                modes.map((_, i) => textByIndex.get(i)),
+                modes.map((_, i) => valueByIndex.get(i)),
+                modes.map((_, i) => noteByIndex.get(i)),
+              )
               if (failure === undefined && pendingFocus !== undefined) failure = "focus click undelivered (no consumer landed)"
               const succeeded = failure === undefined && match.skill.succeeded(substeps)
               return { substeps, succeeded, observations: observationsUsed, failure }
@@ -1155,18 +1504,20 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
             // hardcode-guard:allow a per-step state slot, not a case literal
             let clickOutcome: ClickOutcome | undefined
             if (verdict.action === "type") {
-              const actArgs = {
-                element_token: verdict.element.element_token,
-                pid: params.window.pid,
-                window_id: params.window.window_id,
-                text: verdict.text,
-              }
-              const attempt = yield* callDriver(tools, "cua-driver_type_text", actArgs, ctx.abort)
-              const retried = !attempt.ok && needsForegroundDelivery(attempt.error)
-              actResult = retried
-                ? yield* callDriver(tools, "cua-driver_type_text", { ...actArgs, delivery_mode: "foreground" }, ctx.abort)
-                : attempt
-              actLabel = `type_text "${verdict.text}"${retried ? " (foreground retry)" : ""}`
+              // RESUMABLE TEXT DELIVERY: foreground type_text may land only a PREFIX;
+              // drive the string to completion, retrying the remaining suffix.
+              // hardcode-guard:allow the resumable-delivery verb is the hand contract, not a case literal
+              const text = verdict.text ?? ""
+              const run = yield* runTypeDelivery(
+                (name, a) => callDriver(tools, name, a, ctx.abort),
+                params.window,
+                verdict.element,
+                text,
+              )
+              actResult = run.completed
+                ? { ok: true, result: run.result.ok ? run.result.result : { content: [] } }
+                : run.result
+              actLabel = `type_text "${text}" (${run.rounds} round(s), ${run.delivered}/${text.length})`
             } else {
               // AFFIRMATIVE CLICK: rung 1 (declared action), rung 2 (pixel frame
               // centre), run through the shared on-demand-sensor runner (see

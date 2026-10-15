@@ -3,7 +3,19 @@ import path from "path"
 import { LABEL_MAX } from "@/jev/controller"
 import { advanceMap, decodeObservation, extractGoalValue, screenSignature } from "@/tool/ui-run"
 // hardcode-guard:allow the driver's browser tool/status vocabulary is the contract under test
-import { clickAttempt, clickSignals, foldFocusConsumer, keySequence } from "@/tool/ui-hands"
+import {
+  CLIPBOARD_REPLACED_NOTE,
+  browserNeedsSetup,
+  clickAttempt,
+  clickSignals,
+  foldFocusConsumer,
+  initialTextDelivery,
+  keySequence,
+  parsePartialDelivery,
+  refindElement,
+  remainingSuffix,
+  textDeliveryStep,
+} from "@/tool/ui-hands"
 import {
   SKILLS,
   decodeBrowserBinding,
@@ -86,39 +98,61 @@ describe("ui-skills — go_to_url over the captured Brave frontier", () => {
     if (afterPrepare.kind !== "branch") throw new Error("expected a post-prepare branch")
     expect(afterPrepare.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
     expect(afterPrepare.browser[0]).toMatchObject({ kind: "navigate", url: VALUE })
-    // keystroke route demoted to the LAST resort
-    expect(afterPrepare.fallback.map((s) => s.kind)).toEqual(["click", "key", "keys", "key", "verifyScreen"])
-    expect(afterPrepare.fallback[2]).toMatchObject({ kind: "keys", text: VALUE })
-    expect(afterPrepare.fallback[3]).toMatchObject({ key: "return", modifiers: [] })
+    // keystroke route demoted to the LAST resort: the non-browser arm's clipboard-paste route
+    // hardcode-guard:allow the fallback route shape is the registry contract under test
+    expect(afterPrepare.fallback.map((s) => s.kind)).toEqual([
+      "click",
+      "clipboard",
+      "key",
+      "paste",
+      "verifyValue",
+      "key",
+      "verifyScreen",
+    ])
+    expect(afterPrepare.fallback[1]).toMatchObject({ kind: "clipboard", text: VALUE })
+    expect(afterPrepare.fallback[3]).toMatchObject({ kind: "paste", text: VALUE, verify: true })
+    expect(afterPrepare.fallback[4]).toMatchObject({ kind: "verifyValue", text: VALUE })
+    expect(afterPrepare.fallback[5]).toMatchObject({ key: "return", modifiers: [] })
   })
 
   test("(a) the route's sub-steps fold into ONE trace step with per-step evidence", () => {
-    // The address-bar fallback: focus/select/keys change no role-label signature; the verify reads the page.
+    // The address-bar fallback: focus/clipboard/select/paste/verify change no role-label signature; the verify reads the page.
     // hardcode-guard:allow the route's sub-step labels/modes are the trace inputs under test
     const modes = [
       { label: "focus address bar", mode: "declared" as const },
+      { label: "copy url to clipboard", mode: "clipboard" as const },
       { label: "select all", mode: "key" as const },
-      { label: "type url", mode: "key" as const },
+      { label: "paste url", mode: "paste" as const },
+      { label: "verify url value", mode: "read" as const },
       { label: "enter", mode: "key" as const },
       { label: "verify page changed", mode: "read" as const },
     ]
     // hardcode-guard:allow synthetic signatures are the trace inputs under test
-    const signatures = ["nA", "nA", "nA", "nA", "nA", "nB"]
-    const evidence = foldSubstepEvidence(modes, signatures, undefined, undefined, [
+    const signatures = ["nA", "nA", "nA", "nA", "nA", "nA", "nA", "nB"]
+    const evidence = foldSubstepEvidence(
+      modes,
+      signatures,
       undefined,
       undefined,
+      [undefined, undefined, undefined, undefined, undefined, undefined, true],
       undefined,
-      undefined,
-      true,
-    ])
-    expect(evidence).toHaveLength(5)
-    expect(evidence.map((e) => e.changed)).toEqual([false, false, false, false, true])
-    expect(evidence[4].before).toBe("nA")
-    expect(evidence[4].after).toBe("nB")
-    expect(evidence[4].urlChanged).toBe(true)
+      [undefined, undefined, undefined, undefined, true, undefined, undefined],
+      [undefined, CLIPBOARD_REPLACED_NOTE, undefined, CLIPBOARD_REPLACED_NOTE, undefined, undefined, undefined],
+    )
+    expect(evidence).toHaveLength(7)
+    expect(evidence.map((e) => e.changed)).toEqual([false, false, false, false, false, false, true])
+    expect(evidence[6].before).toBe("nA")
+    expect(evidence[6].after).toBe("nB")
+    expect(evidence[6].urlChanged).toBe(true)
+    // (a) the paste route discloses the clipboard overwrite; the value gate confirms before Return.
+    expect(evidence[1].mode).toBe("clipboard")
+    expect(evidence[1].note).toBe(CLIPBOARD_REPLACED_NOTE)
+    expect(evidence[3].mode).toBe("paste")
+    expect(evidence[3].note).toBe(CLIPBOARD_REPLACED_NOTE)
+    expect(evidence[4].valueMatched).toBe(true)
     expect(goToUrl.succeeded(evidence)).toBe(true)
     // No verify result yet → not yet a success.
-    expect(goToUrl.succeeded(evidence.slice(0, 4))).toBe(false)
+    expect(goToUrl.succeeded(evidence.slice(0, 6))).toBe(false)
   })
 
   test("(a) the post-skill observation advances the map (new node, appended path)", async () => {
@@ -213,16 +247,18 @@ describe("ui-skills — go_to_url over the captured Brave frontier", () => {
   })
 })
 
-// GENERALIZATION — INVARIANT: sanctioned REAL-input delivery outranks
-// accessibility insertion where the target surface is known to drop it. The
-// Chromium address-bar AX-insert no-submit is ONE instance; an unseen second
-// surface (an Electron field whose AXSetAttribute write is a no-op) is covered by
-// the SAME per-character key sequence, no loop change.
-// hardcode-guard:allow the per-character key args are the hand contract under test
-describe("ui-skills — keystroke route (real key events over accessibility insertion)", () => {
+// GENERALIZATION — INVARIANT: PREFER ONE ATOMIC INPUT EVENT over N synthesized
+// events when the surface accepts it. The address bar takes a clipboard paste
+// (clipboard_write then ONE cmd+v) instead of per-character keystrokes; the live
+// per-character `type_text` that landed only a prefix of the URL is ONE instance.
+// An unseen second surface that accepts a single paste but drops synthesized
+// keystrokes (an Electron/WebGL field) takes the SAME atomic-paste route, with the
+// bounded per-character type path as a fallback only when the clipboard is unavailable.
+// hardcode-guard:allow the per-character key args + route vocabulary are the hand contract under test
+describe("ui-skills — atomic-paste address-bar route", () => {
   const win = { pid: 4242, window_id: 7 }
 
-  test("(a) keySequence delivers ONE real key press per character, never an inserted value", () => {
+  test("(a) keySequence (the bounded fallback verb) delivers ONE real key press per character", () => {
     const field = { element_token: "t1", role: "AXTextField", label: "Address and search bar" }
     const seq = keySequence("a/b", win, field)
     expect(seq).toHaveLength(3)
@@ -232,32 +268,49 @@ describe("ui-skills — keystroke route (real key events over accessibility inse
     expect(seq.every((args) => args.element_token === "t1")).toBe(true)
   })
 
-  // hardcode-guard:allow the route's sub-step kinds + the keystroke verb are the registry contract under test
-  test("(a) the keystroke route is demoted to the LAST-resort fallback, not the primary arm", () => {
+  // hardcode-guard:allow the route's sub-step kinds are the registry contract under test
+  test("(a) the address-bar fallback is last-resort and pastes (clipboard → cmd+a → cmd+v → verify → return)", () => {
     const route = goToUrlRoute(false, VALUE)
-    // the non-browser arm PREPARES and RE-BINDS before any keystroke happens
+    // the non-browser arm PREPARES and RE-BINDS before any address-bar entry
     expect(route.map((s) => s.kind)).toEqual(["prepare", "bind", "branch"])
     const branch = route[2]
     if (branch.kind !== "branch") throw new Error("expected a post-prepare branch")
-    // re-bind classified as a browser → the SANCTIONED typed navigate, no keys
+    // re-bind classified as a browser → the SANCTIONED typed navigate, no address-bar entry
     expect(branch.browser.map((s) => s.kind)).toEqual(["navigate", "verifyUrl"])
-    // only a still-unclassifiable window reaches the keystroke address-bar route
-    expect(branch.fallback.map((s) => s.kind)).toEqual(["click", "key", "keys", "key", "verifyScreen"])
-    // the URL sub-step is the REAL-input verb; no `type` (insertion) sub-step remains
-    expect(branch.fallback.some((s) => s.kind === "type")).toBe(false)
-    expect(branch.fallback[2]).toMatchObject({ kind: "keys", text: VALUE })
+    // only a still-unclassifiable window reaches the address-bar route
+    expect(branch.fallback.map((s) => s.kind)).toEqual([
+      "click",
+      "clipboard",
+      "key",
+      "paste",
+      "verifyValue",
+      "key",
+      "verifyScreen",
+    ])
+    // NO per-character key step: the URL entry is a single paste, and the value gate
+    // holds the Return until the destination landed.
+    expect(branch.fallback.some((s) => s.kind === "keys")).toBe(false)
+    expect(branch.fallback[1]).toMatchObject({ kind: "clipboard", text: VALUE })
+    expect(branch.fallback[2]).toMatchObject({ key: "a", modifiers: ["cmd"] })
+    expect(branch.fallback[3]).toMatchObject({ kind: "paste", text: VALUE, verify: true })
+    expect(branch.fallback[4]).toMatchObject({ kind: "verifyValue", text: VALUE })
   })
 
-  test("(b)/(d) the keystroke route succeeds only on a real URL change; no navigation is honest failure", () => {
+  test("(b)/(d) the paste route succeeds only on a real URL change; no navigation is honest failure", () => {
     // hardcode-guard:allow the trace labels/signatures are the folded-evidence inputs under test
     const modes = [
       { label: "focus address bar", mode: "declared" as const },
+      { label: "copy url to clipboard", mode: "clipboard" as const },
       { label: "select all", mode: "key" as const },
-      { label: "type url", mode: "key" as const },
+      { label: "paste url", mode: "paste" as const },
+      { label: "verify url value", mode: "read" as const },
       { label: "enter", mode: "key" as const },
       { label: "verify page changed", mode: "read" as const },
     ]
-    const navigated = foldSubstepEvidence(modes, ["nA", "nA", "nA", "nA", "nA", "nB"], undefined, undefined, [
+    const sig = (last: string) => ["nA", "nA", "nA", "nA", "nA", "nA", "nA", last]
+    const navigated = foldSubstepEvidence(modes, sig("nB"), undefined, undefined, [
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -265,8 +318,10 @@ describe("ui-skills — keystroke route (real key events over accessibility inse
       true,
     ])
     expect(goToUrl.succeeded(navigated)).toBe(true)
-    // delivered keys + Return landing but NO url change → honest failure, never success
-    const noNav = foldSubstepEvidence(modes, ["nA", "nA", "nA", "nA", "nA", "nA"], undefined, undefined, [
+    // a delivered paste + Return landing but NO url change → honest failure, never success
+    const noNav = foldSubstepEvidence(modes, sig("nA"), undefined, undefined, [
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -320,6 +375,66 @@ describe("go_to_url — prepare → rebind → navigate is the primary route", (
     expect(evidence.map((e) => e.label)).toContain("prepare browser")
     expect(evidence.every((e) => e.changed === false)).toBe(true)
     expect(goToUrl.succeeded(evidence)).toBe(false)
+  })
+})
+
+// GENERALIZATION — INVARIANTS: partial actuator output is RESUMABLE and must be
+// driven to completion; a snapshot-scoped handle must be RE-RESOLVED after any
+// call that mints a new snapshot; typed-route unavailability resolves by POLICY
+// ANSWER, not retry. Live instances: type_text delivered 6 of 24 chars of a URL
+// (then the tab navigated to the 6-char prefix); the address-bar focus click used
+// a stale element_token after a bind minted a new snapshot; browser_prepare
+// answered browser_requires_setup for a live browser. Unseen cases: a paste that
+// truncates resumes the same way; a token churned by an insertion is re-resolved
+// by role+label; a second typed route answering "unavailable by policy"
+// short-circuits identically.
+// hardcode-guard:allow the driver's partial/delivery vocabulary is the contract under test
+describe("ui-hands — resumable delivery, fresh handles, policy short-circuit", () => {
+  const TEXT = "https://www.linkedin.com" // 24 chars, the live goal value
+  const PARTIAL =
+    "type_text incomplete: delivered 6 of 24 character(s) via foreground keystrokes (30ms delay); retry only the remaining suffix"
+
+  test("(a) a partial-delivery report resumes the remaining suffix to completion", () => {
+    expect(TEXT).toHaveLength(24)
+    expect(parsePartialDelivery(PARTIAL)).toEqual({ delivered: 6, total: 24 })
+    const first = textDeliveryStep(TEXT, initialTextDelivery(), { ok: false, error: PARTIAL })
+    expect(first.confirmed).toBe(6)
+    expect(first.rounds).toBe(1)
+    expect(first.failure).toBeUndefined()
+    // ONLY the remaining suffix is retried
+    expect(remainingSuffix(TEXT, first)).toBe(TEXT.slice(6))
+    const done = textDeliveryStep(TEXT, first, { ok: true })
+    expect(done.confirmed).toBe(24)
+    expect(done.rounds).toBe(2)
+    expect(done.failure).toBeUndefined()
+  })
+
+  test("(a) resumable delivery is BOUNDED — repeated partials fail after the round cap", () => {
+    const delivery = [0, 1, 2].reduce(
+      (state) =>
+        textDeliveryStep(TEXT, state, { ok: false, error: "delivered 1 of 24 character(s); retry the remaining suffix" }),
+      initialTextDelivery(),
+    )
+    expect(delivery.rounds).toBe(3)
+    expect(delivery.confirmed).toBe(3)
+    expect(delivery.failure).toBeDefined()
+  })
+
+  test("(b) a target is re-resolved from the NEWEST observation, never an older token", () => {
+    const older = { element_token: "s000000cd:1", role: "AXTextField", label: "Address and search bar" }
+    const newest = [{ element_token: "s000000ef:1", role: "AXTextField", label: "Address and search bar" }]
+    const resolved = refindElement(older, newest)
+    expect(resolved?.element_token).toBe("s000000ef:1")
+    expect(resolved?.element_token).not.toBe(older.element_token)
+    // a target absent from the newest observation is NOT invented
+    expect(refindElement(older, [{ element_token: "x:1", role: "AXButton", label: "Go" }])).toBeUndefined()
+  })
+
+  test("(c) a live-browser policy answer short-circuits to the address bar without a second prepare", () => {
+    expect(browserNeedsSetup("browser_requires_setup: the window is a live browser with no owned endpoint")).toBe(true)
+    expect(browserNeedsSetup("some other error")).toBe(false)
+    // the non-browser route holds exactly ONE prepare — it is never retried
+    expect(goToUrlRoute(false, VALUE).filter((s) => s.kind === "prepare")).toHaveLength(1)
   })
 })
 
