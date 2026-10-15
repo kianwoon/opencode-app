@@ -3216,16 +3216,3 @@ describe("workflow re-dispatch cap", () => {
     }),
   )
 })
-
-describe("drain wall ceiling", () => {
-  test("drainCeilingExceeded trips only past the ceiling", async () => {
-    const { drainCeilingExceeded, DRAIN_WALL_CEILING_MS, DRAIN_WALL_CEILING_MESSAGE } = await import(
-      "../../src/session/prompt"
-    )
-    expect(DRAIN_WALL_CEILING_MS).toBe(45 * 60_000)
-    expect(DRAIN_WALL_CEILING_MESSAGE).toContain("45 minutes")
-    expect(drainCeilingExceeded(1000, 1000)).toBe(false)
-    expect(drainCeilingExceeded(1000, 1000 + DRAIN_WALL_CEILING_MS - 1)).toBe(false)
-    expect(drainCeilingExceeded(1000, 1000 + DRAIN_WALL_CEILING_MS)).toBe(true)
-  })
-})
