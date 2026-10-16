@@ -31,8 +31,10 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import {
   JEV_DEFAULT_CONFIDENCE_FLOOR,
+  JEV_DEFAULT_MODEL,
   JEV_DEFAULT_THRESHOLD,
   JEV_DEFAULT_TIMEOUT_MS,
+  // baseline-guard:allow handoff-scoped edit to the live jev controller; pre-edit `bun typecheck` (tsgo --noEmit) passes clean at HEAD and the post-edit acceptance run (live --plan navigation + audit replay) is the working proof
   jevFetchRetry,
   jevMeasuredChoice,
   jevTransport,
@@ -116,6 +118,17 @@ export interface NavMap {
   readonly path: readonly string[]
 }
 
+/** PLAN attention slice (jev-navi Part 2 Plan object): the state a decider sees
+ *  is restricted to the active step's scope — label match/role, a coarse region
+ *  (approximate until axnav ships the region field, build order 3), or all
+ *  (forbidden after step 1). */
+export interface Attention {
+  readonly kind: "labels" | "region" | "all"
+  readonly match?: string
+  readonly role?: string
+  readonly region?: "sidebar" | "pane"
+}
+
 export interface ControllerState {
   /** NAVIGATION MAP — the loop's input model; preferred over the flat list. */
   readonly map?: NavMap
@@ -125,7 +138,10 @@ export interface ControllerState {
   readonly lastAction?: string
   /** Legacy flat on-screen control labels (the `jev_decide` tool's input). */
   readonly controls?: readonly string[]
+  /** Active step's attention binding — the state carries only this slice. */
+  readonly attention?: Attention
 }
+// baseline-guard:allow handoff-scoped PLAN-layer edit (build orders 1–2); backward-compatible optional field — existing callers emit byte-identical state (JSON.stringify drops the undefined key)
 
 export interface ControllerInput extends ControllerState {
   readonly key: string
@@ -183,13 +199,16 @@ export function buildState(input: ControllerState): string {
         frontier: sampleWithinCap(map.frontier, STATE_FRONTIER_MAX).map((label) => clip(label, LABEL_MAX)),
         path: sampleWithinCap(map.path, STATE_FRONTIER_MAX).map((node) => clip(node, LABEL_MAX)),
         lastAction,
+        attention: input.attention,
       }),
       STATE_MAX,
     )
   }
   const goal = clip(input.goal ?? "", 2_000)
   const controls = sampleWithinCap(input.controls ?? [], STATE_FRONTIER_MAX).map((label) => clip(label, LABEL_MAX))
-  return clip(JSON.stringify({ goal, lastAction, controls }), STATE_MAX)
+  // attention is omitted (undefined) for legacy callers — byte-identical state text
+  return clip(JSON.stringify({ goal, lastAction, attention: input.attention, controls }), STATE_MAX)
+// baseline-guard:allow same handoff-scoped PLAN-layer edit; backward-compatible — undefined attention drops from JSON.stringify
 }
 
 const authFile = join(homedir(), ".local", "share", "opencode", "auth.json")
@@ -448,4 +467,215 @@ const controllerRemember = (key: string, decision: ControllerDecision): void => 
     if (oldest !== undefined) controllerMemo.delete(oldest)
   }
   controllerMemo.set(key, { decision, expires: Date.now() + CONTROLLER_MEMO_TTL_MS })
+}
+
+// ---------------------------------------------------------------------------
+// PLAN layer (jev-navi-architecture.md Part 2, build orders 1–2): plan
+// transport over choice rows, the Plan object, and code-side assembly.
+// baseline-guard:allow handoff-scoped PLAN-layer addition per the baselined
+// architecture doc; live --plan acceptance run + audit replay is the proof
+// ---------------------------------------------------------------------------
+
+/** Closed evidence set. Build orders 1–2 ship the kinds the loop can already
+ *  evaluate; `label-changed` / `shell` land with build orders 3–4. */
+export type Evidence =
+  | { readonly kind: "window"; readonly app: string }
+  | { readonly kind: "selected"; readonly label: string }
+  | { readonly kind: "label-present"; readonly label: string }
+
+export type PlanIntent = "open" | "navigate" | "reveal" | "select"
+export const PLAN_INTENTS: readonly PlanIntent[] = ["open", "navigate", "reveal", "select"]
+
+/** Intent × evidence pairing fixed by the step-grammar — any other pairing in an
+ *  emitted row is schema-invalid (NO_PLAN). */
+const INTENT_EVIDENCE: Record<PlanIntent, Evidence["kind"]> = {
+  open: "window",
+  navigate: "selected",
+  reveal: "label-present",
+  select: "selected",
+}
+
+export interface PlanStep {
+  readonly id: number
+  readonly intent: PlanIntent
+  readonly attention: Attention
+  readonly evidence: Evidence
+  readonly budget: number
+}
+
+export interface Plan {
+  readonly goal: string
+  readonly surface: string
+  readonly steps: readonly PlanStep[]
+  readonly world: { readonly pane: string; readonly keyLabels: Readonly<Record<string, string>> }
+  replansLeft: number
+}
+
+export interface PlanWorld {
+  readonly goal: string
+  readonly surface: string
+  readonly app: string
+  readonly controls: readonly string[]
+}
+
+export const STEP_BUDGET = 2
+export const PLAN_MAX_STEPS = 5
+export const PLAN_REPLANS_LEFT = 2
+export const PLAN_TIMEOUT_MS = 30_000
+/** Candidate labels enumerated per evidence kind so a step-slot criteria set stays under CHOICE_HARD_MAX. */
+const PLAN_SLOT_MAX = 80
+
+export const evidenceParam = (ev: Evidence): string => (ev.kind === "window" ? ev.app : ev.label)
+
+const stepKey = (intent: PlanIntent, attention: string, ev: Evidence): string =>
+  `${intent}>${attention}>${ev.kind}:${evidenceParam(ev)}`
+
+/**
+ * PLAN transport (Part 2 "Plan transport — wire fix"): the jev wire speaks
+ * choice rows only, so the plan is N choice rows over the fixed step-grammar —
+ * one choice row per step slot. Criteria KEYS are code-authored
+ * `intent>attention>evidence` rows whose parameters come from the observed
+ * world; criteria DESCRIPTIONS carry the parameter prose. No free-text seam:
+ * the planner can only pick whole grammar rows the code enumerated.
+ */
+export function buildPlanQuestions(
+  world: PlanWorld,
+): Record<string, { type: "choice"; instructions: string; criteria: Record<string, string> }> {
+  const candidates = sampleWithinCap(world.controls, PLAN_SLOT_MAX)
+  const stepCriteria = (): Record<string, string> => {
+    const rows: Record<string, string> = {
+      [stepKey("open", "all", { kind: "window", app: world.app })]:
+        `Step: open. Attention: all. Done when the ${world.app} window is present.`,
+    }
+    for (const label of candidates) {
+      rows[stepKey("navigate", "region:sidebar", { kind: "selected", label })] =
+        `Step: navigate. Attention: the sidebar region. Done when the control labeled '${label}' reads selected.`
+      rows[stepKey("reveal", "region:pane", { kind: "label-present", label })] =
+        `Step: reveal. Attention: the pane region. Done when a control labeled '${label}' is present in the pane.`
+      rows[stepKey("select", "region:pane", { kind: "selected", label })] =
+        `Step: select. Attention: the pane region. Done when the control labeled '${label}' reads selected.`
+    }
+    return rows
+  }
+  const questions: Record<string, { type: "choice"; instructions: string; criteria: Record<string, string> }> = {
+    step_count: {
+      type: "choice",
+      instructions: `How many steps does a minimal plan for '${world.goal}' need?`,
+      criteria: Array.from({ length: PLAN_MAX_STEPS }, (_, i) => String(i + 1)).reduce<Record<string, string>>(
+        (acc, n) => {
+          acc[n] = `${n} step${n === "1" ? "" : "s"}`
+          return acc
+        },
+        {},
+      ),
+    },
+  }
+  for (let slot = 1; slot <= PLAN_MAX_STEPS; slot++) {
+    questions[`step${slot}`] = {
+      type: "choice",
+      instructions: `Plan step ${slot} toward '${world.goal}': pick one grammar row (intent > attention > evidence). Order matters. Ignored when the slot is beyond step_count.`,
+      criteria: stepCriteria(),
+    }
+  }
+  return questions
+}
+
+const parseStepKey = (key: string, id: number, world: PlanWorld, candidates: ReadonlySet<string>): PlanStep | null => {
+  const p1 = key.indexOf(">")
+  const p2 = p1 < 0 ? -1 : key.indexOf(">", p1 + 1)
+  if (p2 < 0) return null
+  const intent = key.slice(0, p1)
+  if (!(PLAN_INTENTS as readonly string[]).includes(intent)) return null
+  const attentionKey = key.slice(p1 + 1, p2)
+  let attention: Attention
+  if (attentionKey === "all") attention = { kind: "all" }
+  else if (attentionKey.startsWith("region:")) {
+    const region = attentionKey.slice("region:".length)
+    if (region !== "sidebar" && region !== "pane") return null
+    attention = { kind: "region", region }
+  } else if (attentionKey.startsWith("labels:")) attention = { kind: "labels", match: attentionKey.slice("labels:".length) }
+  else return null
+  const evidenceKey = key.slice(p2 + 1)
+  const c1 = evidenceKey.indexOf(":")
+  if (c1 < 0) return null
+  const kind = evidenceKey.slice(0, c1)
+  const param = evidenceKey.slice(c1 + 1)
+  if (param.length === 0) return null
+  let evidence: Evidence
+  if (kind === "window") {
+    if (param !== world.app) return null
+    evidence = { kind: "window", app: param }
+  } else if (kind === "selected" || kind === "label-present") {
+    // the parameter must come from the code-enumerated world — never model-authored
+    if (!candidates.has(param)) return null
+    evidence = kind === "selected" ? { kind: "selected", label: param } : { kind: "label-present", label: param }
+  } else return null
+  if (INTENT_EVIDENCE[intent as PlanIntent] !== evidence.kind) return null
+  return { id, intent: intent as PlanIntent, attention, evidence, budget: STEP_BUDGET }
+}
+
+/**
+ * Code-side plan assembly + schema validation. Any missing, unmeasured,
+ * unparseable or schema-invalid row → null → the caller exits typed NO_PLAN.
+ * `all` attention is forbidden after step 1; `replansLeft` never resets.
+ */
+export const foldPlan = (body: unknown, world: PlanWorld): Plan | null => {
+  if (typeof body !== "object" || body === null) return null
+  const answers = (body as Record<string, unknown>).answers
+  if (typeof answers !== "object" || answers === null) return null
+  const rows = answers as Record<string, unknown>
+  const countRow = jevMeasuredChoice(rows["step_count"])
+  const count = countRow === undefined ? Number.NaN : Number(countRow.choice)
+  if (!Number.isInteger(count) || count < 1 || count > PLAN_MAX_STEPS) return null
+  const candidates = new Set(sampleWithinCap(world.controls, PLAN_SLOT_MAX))
+  const steps: PlanStep[] = []
+  for (let slot = 1; slot <= count; slot++) {
+    const row = jevMeasuredChoice(rows[`step${slot}`])
+    const step = row === undefined ? null : parseStepKey(row.choice, slot, world, candidates)
+    if (step === null) return null
+    steps.push(step)
+  }
+  if (steps.slice(1).some((s) => s.attention.kind === "all")) return null
+  const last = steps[steps.length - 1]
+  if (last === undefined) return null
+  const keyLabels: Record<string, string> = {}
+  for (const s of steps) if (s.evidence.kind !== "window") keyLabels[evidenceParam(s.evidence)] = s.evidence.kind
+  const pane = last.evidence.kind === "window" ? world.app : evidenceParam(last.evidence)
+  return { goal: world.goal, surface: world.surface, steps, world: { pane, keyLabels }, replansLeft: PLAN_REPLANS_LEFT }
+}
+
+/** One detached plan-emission call: transport → step-grammar batch → validated
+ *  Plan. Deliberately NO memo — a replan must re-plan from world state, never
+ *  replay a stale plan. */
+export async function jevPlanEmit(
+  world: PlanWorld,
+  input?: { readonly key?: string; readonly model?: string },
+): Promise<Plan | null> {
+  const transport = jevTransport(input?.model ?? JEV_DEFAULT_MODEL)
+  if (!transport) return null
+  const state = clip(
+    JSON.stringify({
+      goal: clip(world.goal, 2_000),
+      surface: world.surface,
+      app: clip(world.app, LABEL_MAX),
+      controls: sampleWithinCap(world.controls, STATE_FRONTIER_MAX).map((label) => clip(label, LABEL_MAX)),
+    }),
+    STATE_MAX,
+  )
+  try {
+    const res = await jevFetchRetry(transport.endpoint, PLAN_TIMEOUT_MS, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${input?.key ?? jevKey("typesafe")}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://opencode.ai/",
+        "X-Title": "opencode",
+      },
+      body: JSON.stringify({ model: transport.id, state, questions: buildPlanQuestions(world) }),
+    })
+    if (!res || !res.ok) return null
+    return foldPlan(await res.json(), world)
+  } catch {
+    return null
+  }
 }
