@@ -20,7 +20,7 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { SessionRenameTool } from "./session-rename"
 import { CuaBatchTool } from "./cua-batch"
-import { UiRunTool } from "./ui-run"
+import { UiNavTool } from "./ui-nav"
 import { JevAcceptTool } from "./jev-accept"
 import { JevAskTool } from "./jev-ask"
 import { JevDecideTool } from "./jev-decide"
@@ -135,7 +135,7 @@ const layer = Layer.effect(
     const jevlabel = yield* JevLabelTool
     const jevrank = yield* JevRankTool
     const cuabatch = yield* CuaBatchTool
-    const uirun = yield* UiRunTool
+    const uinav = yield* UiNavTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -251,7 +251,7 @@ const layer = Layer.effect(
           jev_label: Tool.init(jevlabel),
           jev_rank: Tool.init(jevrank),
           cua_batch: Tool.init(cuabatch),
-          ui_run: Tool.init(uirun),
+          ui_nav: Tool.init(uinav),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -286,7 +286,7 @@ const layer = Layer.effect(
             tool.jev_rank,
             tool.patch,
             tool.cua_batch,
-            tool.ui_run,
+            tool.ui_nav,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && ["cli", "desktop"].includes(flags.client) ? [tool.plan] : []),

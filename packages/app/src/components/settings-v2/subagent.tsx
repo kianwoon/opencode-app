@@ -66,7 +66,7 @@ const OWNS_GROUPS = [
   },
   {
     label: "settings.subagent.owns.group.webDynamic",
-    tools: ["webfetch", "websearch", "skill", "lsp", "tool_search", "cua_batch", "ui_run", "session_rename"],
+    tools: ["webfetch", "websearch", "skill", "lsp", "tool_search", "cua_batch", "ui_nav", "session_rename"],
   },
   {
     label: "settings.subagent.owns.group.jev",

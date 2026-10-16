@@ -1327,8 +1327,8 @@ export const dict = {
   "settings.permissions.tool.tool_search.description": "Search for additional tools to load",
   "settings.permissions.tool.cua_batch.title": "CUA Batch",
   "settings.permissions.tool.cua_batch.description": "Drive the computer in batched actions",
-  "settings.permissions.tool.ui_run.title": "UI Run",
-  "settings.permissions.tool.ui_run.description": "Run a bounded observe-decide-act-verify loop on the computer",
+  "settings.permissions.tool.ui_nav.title": "UI Nav",
+  "settings.permissions.tool.ui_nav.description": "Navigate the computer's UI via the accessibility sensor",
   "settings.permissions.tool.session_rename.title": "Session Rename",
   "settings.permissions.tool.session_rename.description": "Rename the current session",
 

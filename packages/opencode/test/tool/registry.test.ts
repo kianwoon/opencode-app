@@ -139,7 +139,7 @@ describe("tool.registry", () => {
       const ids = yield* registry.ids()
 
       expect(ids).toContain("cua_batch")
-      expect(ids).toContain("ui_run")
+      expect(ids).toContain("ui_nav")
     }),
   )
 
