@@ -687,13 +687,33 @@ export function escalateRung(rung: ActuationRung): ActuationRung | undefined {
 /** The driver's live refusal when a pixel click has no screenshot frame to aim at. */
 export const NO_SCREENSHOT_FRAME = "No screenshot frame"
 
+/**
+ * The distinct reason a COORDINATE click was refused: its target could not be
+ * re-resolved in a frame captured immediately before the click. A stale frame's
+ * coordinates land on whatever moved into that spot (another window, a dialog), so
+ * the click is refused and reported rather than aimed blind.
+ */
+export const PIXEL_UNVERIFIED = "pixel-target-unverified"
+
 export function isNoFrameError(error: string | undefined): boolean {
   return error !== undefined && error.includes(NO_SCREENSHOT_FRAME)
 }
 
-/** The loop's OWN observation payloads: no screenshot (payload economy). */
+/**
+ * The loop's OWN observation payloads. `full_output` returns BOTH halves of the
+ * driver's answer: the addressable `elements` array (geometry, tokens, roles) AND the
+ * rendered `tree_markdown`, which carries the UNNUMBERED static-text nodes — a pane's
+ * displayed labels and values that the elements array omits entirely. A read needs
+ * the second half; a navigation decision needs the first.
+ */
 export function observationArgs(window: WindowRef): Record<string, unknown> {
-  return { pid: window.pid, window_id: window.window_id, include_screenshot: false, tree_format: "elements" }
+  return {
+    pid: window.pid,
+    window_id: window.window_id,
+    include_screenshot: false,
+    tree_format: "elements",
+    full_output: true,
+  }
 }
 
 /**
@@ -702,7 +722,13 @@ export function observationArgs(window: WindowRef): Record<string, unknown> {
  * observer never carries a screenshot on its own.
  */
 export function frameEstablishingRead(window: WindowRef): Record<string, unknown> {
-  return { pid: window.pid, window_id: window.window_id, include_screenshot: true, tree_format: "elements" }
+  return {
+    pid: window.pid,
+    window_id: window.window_id,
+    include_screenshot: true,
+    tree_format: "elements",
+    full_output: true,
+  }
 }
 
 /**

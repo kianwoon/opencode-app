@@ -223,11 +223,17 @@ describe("ui-maneuvers — (a) reads are offered over observed labelled elements
   })
 
   test("(a) a goal-anchored read binds the labelled value on a pane with no list region", () => {
+    // hardcode-guard:allow the fixture token/labels are the enumerable read inputs under test
     const set = deriveManeuvers({ kind: "read_items", count: 1, matching: "chip" }, pane())
     expect(set.reason).toBeUndefined()
-    const option = set.options.find((entry) => entry.name === READ_ITEMS)
-    expect(option).toBeDefined()
+    // ONE read option per subgoal: a token-anchored read is offered through the STRATEGY
+    // LADDER alone. A second, near-equivalent generic option beside it made the choice
+    // undecidable live (the decider returned nothing among 2 offers).
+    expect(set.options.map((entry) => entry.name)).toEqual(["read_text"])
+    const option = set.options[0]
+    expect(option?.strategy).toBe("direct-token")
     expect(option?.targets.some((target) => (target.label ?? "").includes("Chip"))).toBe(true)
+    expect(option?.inputs.some((entry) => entry.name === "matching" && entry.value === "chip")).toBe(true)
   })
 
   test("(a) with no matching token the pane's labelled elements are still readable", () => {

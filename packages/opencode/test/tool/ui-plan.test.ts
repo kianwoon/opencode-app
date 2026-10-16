@@ -508,5 +508,65 @@ describe("ui-plan — a report goal derives goal-anchored reads for its named at
   })
 })
 
+// GENERALIZATION — INVARIANT (navigation): arrival is judged by the DESTINATION's own
+// identity — the surface you arrive at — never by a reference point that merely
+// mentions it (a breadcrumb, a heading, a sidebar row, a text somewhere in content).
+// UNSEEN INPUT: an app whose content shows the target's name while the surface is
+// something else — the reach stays unsatisfied.
+// hardcode-guard:allow the fixture labels are the enumerable navigation inputs under test
+describe("ui-plan — (a) navigation arrival is the destination, not a reference to it", () => {
+  const scene = (window: string | undefined, breadcrumb: boolean): Scene => ({
+    snapshot: "s-arrival",
+    ...(window !== undefined ? { window } : {}),
+    regions: [{ id: "r:content", kind: "content", itemIds: [], textIds: breadcrumb ? ["t:crumb"] : [] }],
+    items: [],
+    texts: breadcrumb
+      ? [
+          {
+            id: "t:crumb",
+            role: "AXStaticText",
+            text: "About",
+            owner: "r:content",
+            element: { element_token: "t:crumb", role: "AXStaticText", label: "About" },
+          },
+        ]
+      : [],
+  })
+
+  test("(a) the destination's own identity satisfies the reach; a reference to it never does", () => {
+    expect(evalPredicate({ op: "surface_is", text: "About" }, scene("About", true)).verdict).toBe("true")
+    // the word is present only as a REFERENCE — the surface is somewhere else
+    expect(evalPredicate({ op: "surface_is", text: "About" }, scene("Accessibility", true)).verdict).toBe("false")
+    // no observable window identity → unknown, never a fabricated arrival
+    expect(evalPredicate({ op: "surface_is", text: "About" }, scene(undefined, true)).verdict).toBe("unknown")
+  })
+
+  // hardcode-guard:allow the fixture lines are the driver-rendered node forms under test
+  test("(a) an attribute reads its OWN value — a menu item naming it is never the answer", () => {
+    const rendered: Scene = {
+      snapshot: "s-tree",
+      treeText: [
+        '  - AXMenuItem = "About This Mac"',
+        '  - AXStaticText = "About This Mac"',
+        '  - AXStaticText = "Chip"',
+        '  - AXStaticText = "Apple M3 Max"',
+        '  - AXStaticText = "macOS Golden Gate"',
+        '  - AXStaticText = "Version 27.2 Beta (26B5112a)"',
+      ].join("\n"),
+      regions: [],
+      items: [],
+      texts: [],
+    }
+    // the goal asked for the macOS VERSION: the Apple-menu item mentioning the name
+    // must not satisfy it — the version line beneath the label does.
+    const macos = evalPredicate({ op: "read_value", matching: "macos" }, rendered)
+    expect(macos.verdict).toBe("true")
+    expect(macos.cited).toEqual(["Version 27.2 Beta (26B5112a)"])
+    const chip = evalPredicate({ op: "read_value", matching: "chip" }, rendered)
+    expect(chip.verdict).toBe("true")
+    expect(chip.cited).toEqual(["Apple M3 Max"])
+  })
+})
+
 
 

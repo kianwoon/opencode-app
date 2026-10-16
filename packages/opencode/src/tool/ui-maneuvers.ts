@@ -434,7 +434,12 @@ const planReadItems: Planner = (subgoal, scene, consumed) => {
         : observed
   const chosen = pool.slice(0, count)
   const options: ManeuverOption[] = []
-  if (chosen.length > 0) {
+  // ONE READ OPTION PER SUBGOAL. A token-anchored read (the goal's own attribute) is
+  // offered through the STRATEGY LADDER alone: a second, near-equivalent generic
+  // `read_items` beside it made the choice undecidable — the decider returned no
+  // maneuver among 2 offers and the run halted without reading anything, while the
+  // same read succeeded when offered alone.
+  if (chosen.length > 0 && matching === undefined) {
     const targets = chosen.map((entry) => targetOf(entry.element, scene))
     options.push({
       name: "read_items",

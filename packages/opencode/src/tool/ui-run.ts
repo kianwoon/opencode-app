@@ -4,7 +4,7 @@ import { MCP } from "../mcp"
 import * as Tool from "./tool"
 import { jevControlDetailed, jevKey, type ControllerOutcome, type JevAction } from "../jev/controller"
 import { JEV_DEFAULT_THRESHOLD } from "../jev/client"
-import { decodeObservation, resolveTarget, screenSignature } from "./ui-eyes"
+import { decodeObservation, isMenuRole, pairInTreeText, resolveTarget, screenSignature, treeStaticTextLines } from "./ui-eyes"
 import type { Element } from "./ui-eyes"
 import {
   AUTHORIZATION_FLAG,
@@ -34,6 +34,7 @@ import {
   launchAppArgs,
   observationArgs,
   pixelFrameRetry,
+  PIXEL_UNVERIFIED,
   REVEAL_GROW_PX,
   refindElement,
   remainingSuffix,
@@ -644,6 +645,31 @@ export const runClickRungs = (
       return base
     }
     for (const rung of ladder) {
+      // PIXEL FRESHNESS (safety): a COORDINATE click may fire only against a frame
+      // captured IMMEDIATELY BEFORE it, in which the target still resolves. A stale
+      // frame's coordinates land on whatever moved into that spot — another window, a
+      // dialog — so a pixel rung whose fresh read cannot re-resolve the target is
+      // REFUSED and reported, never aimed blind.
+      if (rung.mode === "pixel" && !frameEstablished) {
+        const frame = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
+        observations++
+        frameEstablished = true
+        const frameObs = frame.ok ? decodeObservation(frame.result.structuredContent) : null
+        if (frameObs === null || refindElement(target, frameObs.elements) === undefined) {
+          attempts.push(
+            clickAttempt(
+              { ...rung, label: `${rung.label} (refused: target unverifiable in a fresh frame)` },
+              signalBefore,
+              signalBefore,
+              target,
+              PIXEL_UNVERIFIED,
+            ),
+          )
+          continue
+        }
+        observed = frameObs.elements
+        signature = screenSignature(frameObs.elements)
+      }
       // The actions this element rung walks (a plain/pixel rung has none).
       const actions: readonly (ClickAction | undefined)[] =
         rung.actions !== undefined && rung.actions.length > 0 ? rung.actions : [undefined]
@@ -1065,6 +1091,15 @@ export const STATUS_DESTRUCTIVE = "destructive-consent-required"
 export const STATUS_UNEVIDENCED = "completion-without-evidence"
 
 /**
+ * A PER-SUBGOAL ACTUATION BOUND. An actuation may fire at most once per distinct
+ * target inside one subgoal, and at most ACTUATION_LIMIT times for it: repeated
+ * firing is how a stray click lands on another window's control once the UI has
+ * shifted. A refusal is this named outcome, never a silent re-fire.
+ */
+export const STATUS_ACTUATION_BOUND = "actuation-bound"
+export const ACTUATION_LIMIT = 3
+
+/**
  * WINDOW+CONTAINER-SCOPED ACTUATION telemetry for one click step: what window and
  * element it touched, the target's clipped visible rect and containment path, the
  * scroll container a reveal was scoped to, whether the driver's per-call
@@ -1381,6 +1416,10 @@ function readTargetMissing(subgoal: PlanSubgoal, scene: Scene): string | undefin
     ...scene.items.map((item) => item.label),
     ...scene.items.map((item) => item.element.value ?? ""),
     ...scene.texts.map((text) => text.text),
+    // THE RENDERED TREE IS A READ SOURCE TOO: a pane's displayed labels and values live
+    // in UNNUMBERED static-text nodes the element array omits entirely, so a read whose
+    // token is there is SATISFIABLE even when no addressable element carries it.
+    ...(scene.treeText !== undefined ? [scene.treeText] : []),
   ].map((value) => value.toLowerCase())
   return tokens.find((token) => !hay.some((value) => value.includes(token.toLowerCase())))
 }
@@ -1654,6 +1693,68 @@ export interface ReadRun {
 }
 
 /**
+ * TREE-TEXT BINDING — the pane's DISPLAYED labels and values as the driver renders
+ * them. An unnumbered static-text node is not in the `elements` array (no token, no
+ * geometry), so a pane whose values live only there is unreadable from elements alone;
+ * the rendered tree carries them as `AXStaticText = "…"` lines in TREE ORDER. The
+ * attribute binds through its LABEL line to the static-text line NEXT to it — the
+ * destination as rendered, never a guess at geometry.
+ * INVARIANT: a value is cited only when a label line carries the token AND a distinct
+ * value line follows it; a bare label with nothing beneath stays UNBOUND.
+ * LIVE INSTANCE IT FIXES: the settings pane showed `Chip = Apple M3 Max` while the
+ * elements array carried neither, so the read was declared unreadable on a pane whose
+ * values were on screen.
+ * UNSEEN INPUT: a rendering that prefixes the node differently — label and value are
+ * still paired by their order in the tree.
+ * hardcode-guard:allow the driver's rendered node form is the interface under repair, not a case literal
+ */
+export function bindFromTreeText(
+  text: string | undefined,
+  tokens: readonly string[],
+): { readonly evidence: readonly ReadEvidence[]; readonly unbound: readonly string[] } {
+  if (text === undefined || text.trim().length === 0) return { evidence: [], unbound: [...tokens] }
+  const lines = treeStaticTextLines(text)
+  const evidence: ReadEvidence[] = []
+  const unbound: string[] = []
+  for (const token of tokens) {
+    const pair = pairInTreeText(text, token)
+    if (pair === undefined) {
+      unbound.push(token)
+      continue
+    }
+    const index = lines.indexOf(pair.label)
+    evidence.push({
+      token,
+      text: pair.value,
+      identity: `tree:${index}`,
+      role: "AXStaticText",
+      label: { text: pair.label, identity: `tree:${index}`, role: "AXStaticText" },
+    })
+  }
+  return { evidence, unbound }
+}
+
+/**
+ * RESOLVE A READ FROM ONE OBSERVATION — the addressable elements first, then the
+ * rendered tree's text nodes. Both halves come from the SAME observation, so a cited
+ * value is a value observed, never carried over from another read.
+ */
+const readResolution = (
+  observation: ReturnType<typeof decodeObservation>,
+  tokens: readonly string[],
+): { readonly evidence: readonly ReadEvidence[]; readonly unbound: readonly string[] } => {
+  // MENU CHROME IS EXCLUDED from the read's own binding: a menu item is a REFERENCE to a
+  // command, never a value a pane displays (the Apple menu's "About This Mac" was cited
+  // as the macOS version — a false completion).
+  const byElements = resolveRead(
+    (observation?.elements ?? []).filter((element) => !isMenuRole(element.role)),
+    tokens,
+  )
+  if (byElements.evidence.length > 0) return byElements
+  return bindFromTreeText(observation?.text, tokens)
+}
+
+/**
  * READ MANEUVER — runs as an OBSERVATION, never an actuation. It issues the loop's
  * own cheap (no-screenshot) observation and resolves the named attributes through
  * their labels. PIXEL/OCR IS A LAST RESORT, AND ONLY WITH A FRESH CAPTURE: only when
@@ -1680,28 +1781,31 @@ export const runReadManeuver = (
     if (strategy === "observation-fallback") {
       const capture = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
       calls.push("cua-driver_get_window_state:capture")
-      const captured = capture.ok ? (decodeObservation(capture.result.structuredContent)?.elements ?? []) : []
-      const resolved = resolveRead(captured, tokens)
+      const observation = capture.ok ? decodeObservation(capture.result.structuredContent) : null
+      const resolved = readResolution(observation, tokens)
       return { evidence: resolved.evidence, unbound: resolved.unbound, calls, captured: true, strategies: ["observation-fallback"] }
     }
     // TREE-FIRST strategies (and the whole sequence when no strategy is named):
     // the read resolves from the CURRENT observation.
     const read = yield* call("cua-driver_get_window_state", observationArgs(window))
     calls.push("cua-driver_get_window_state")
-    const elements = read.ok ? (decodeObservation(read.result.structuredContent)?.elements ?? []) : []
+    const observation = read.ok ? decodeObservation(read.result.structuredContent) : null
+    const elements = (observation?.elements ?? []).filter((element) => !isMenuRole(element.role))
     if (strategy === "direct-token" || strategy === "label-pairing") {
-      const resolved = strategy === "direct-token" ? resolveDirect(elements, tokens) : resolvePairing(elements, tokens)
+      const byElements = strategy === "direct-token" ? resolveDirect(elements, tokens) : resolvePairing(elements, tokens)
+      // the SAME observation's rendered tree is the second half of the source
+      const resolved = byElements.evidence.length > 0 ? byElements : bindFromTreeText(observation?.text, tokens)
       return { evidence: resolved.evidence, unbound: resolved.unbound, calls, captured: false, strategies: [strategy] }
     }
-    const resolved = resolveRead(elements, tokens)
+    const resolved = readResolution(observation, tokens)
     if (resolved.evidence.length > 0 || tokens.length === 0)
       return { evidence: resolved.evidence, unbound: resolved.unbound, calls, captured: false, strategies: ["direct-token", "label-pairing"] }
     // CAPTURE FALLBACK — only when the text is genuinely absent from the tree, and
     // only after a FRESH capture is established. Geometry derives from this capture.
     const capture = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
     calls.push("cua-driver_get_window_state:capture")
-    const captured = capture.ok ? (decodeObservation(capture.result.structuredContent)?.elements ?? []) : []
-    const fromCapture = resolveRead(captured, tokens)
+    const captureObs = capture.ok ? decodeObservation(capture.result.structuredContent) : null
+    const fromCapture = readResolution(captureObs, tokens)
     return {
       evidence: fromCapture.evidence,
       unbound: fromCapture.unbound,
@@ -1729,11 +1833,14 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
     // PER-SUBGOAL LEDGER — owned by the LOOP, not the executor: the strategies
     // consumed for each subgoal (so the offer set DEPLETES) and every attempt's
     // provenance. An identical re-pick is impossible by construction.
-    const ledger = new Map<number, { readonly consumed: ReadStrategyName[]; readonly attempts: AttemptProvenance[] }>()
+    const ledger = new Map<
+      number,
+      { readonly consumed: ReadStrategyName[]; readonly attempts: AttemptProvenance[]; readonly actuations: string[] }
+    >()
     const ledgerOf = (index: number) => {
       const entry = ledger.get(index)
       if (entry !== undefined) return entry
-      const created = { consumed: [] as ReadStrategyName[], attempts: [] as AttemptProvenance[] }
+      const created = { consumed: [] as ReadStrategyName[], attempts: [] as AttemptProvenance[], actuations: [] as string[] }
       ledger.set(index, created)
       return created
     }
@@ -1923,6 +2030,11 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       // BEFORE the gate — even a strong verdict never auto-executes it. The
       // blocking option, its irreversible target and its measured strength are
       // reported so the brain/user can consent.
+      // A READ IS NEVER A STATE-CHANGING MANEUVER: it observes, it does not act — so the
+      // strength gate (which exists to keep an unmeasured ACTION from firing) does not
+      // apply to it. Live failure: a `read_text` option was gated as state-changing with
+      // no measured strength, and the run stopped below-gate without reading anything.
+      const readAttempt = isReadManeuver(option)
       const blocking = destructiveTarget(option, scene)
       if (blocking !== undefined)
         return result(
@@ -1934,7 +2046,7 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
             ...(choice.strength !== undefined ? { strength: choice.strength } : {}),
           },
         )
-      if (deps.stateChanging(option, scene)) {
+      if (!readAttempt && deps.stateChanging(option, scene)) {
         if (choice.strength === undefined)
           return result(STATUS_BELOW_GATE, "state-changing maneuver with no measured gate strength; nothing executed")
         if (choice.strength < gateFloor)
@@ -1945,7 +2057,23 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       }
       // The OFFERED option carries the strategy; the loop never records it after
       // the fact. Only a readiness strategy option is a "read attempt".
-      const readAttempt = isReadManeuver(option)
+      // PER-SUBGOAL ACTUATION BOUND (safety): the SAME maneuver may actuate at most
+      // ACTUATION_LIMIT times for one subgoal. A wrong-but-screen-changing click can
+      // otherwise repeat unboundedly, and on shifted UI a repeat is exactly how a
+      // click lands on something else. Keyed by the maneuver that would fire, so a
+      // loop legitimately rotating through DISTINCT maneuvers is not mistaken for a
+      // stuck one (oscillation keeps its own bounded path).
+      if (!readAttempt) {
+        const fired = ledgerEntry.actuations
+        const label = option.label
+        const times = fired.filter((entry) => entry === label).length
+        if (times >= ACTUATION_LIMIT)
+          return result(
+            STATUS_ACTUATION_BOUND,
+            `actuation-bound: subgoal ${current.nextSubgoal} already fired "${label}" ${times} times — stopping instead of firing again`,
+          )
+        fired.push(label)
+      }
       const execution = yield* deps.execute(option, subgoal, scene)
       // SETTLE AFTER ACTION: the maneuver may have changed the page; wait for the
       // result to arrive (bounded) before judging it. The settle's observation
@@ -2696,7 +2824,14 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               if (!observation) return undefined
               lastElements = observation.elements
               lastSignature = screenSignature(observation.elements)
-              lastScene = buildScene({ snapshot_id: observation.snapshot_id, elements: observation.elements })
+              // BOTH HALVES REACH THE SCENE: the addressable elements AND the rendered
+              // tree (`text`) the driver returned — dropping the second here severed the
+              // read's only source of a pane's displayed labels and values.
+              lastScene = buildScene({
+                snapshot_id: observation.snapshot_id,
+                elements: observation.elements,
+                ...(observation.text !== undefined ? { text: observation.text } : {}),
+              })
               return lastScene
             })
 

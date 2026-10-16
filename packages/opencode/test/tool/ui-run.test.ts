@@ -77,6 +77,7 @@ import {
   CONTAINER_UNMOVED,
   LAUNCH_APP_ACCEPTED,
   LAUNCH_APP_NAME_ARG,
+  PIXEL_UNVERIFIED,
   REFUSED_BY_POLICY,
   UNSUPPORTED_ACTION,
   actuationPlan,
@@ -232,7 +233,12 @@ describe("decodeObservation", () => {
   test("an undecodable payload is null rather than guessed from text", () => {
     expect(decodeObservation(undefined)).toBeNull()
     expect(decodeObservation("window title: Settings")).toBeNull()
-    expect(decodeObservation({ elements: [] })).toBeNull()
+    // A payload with NO header still decodes: the header is TOLERATED, not required —
+    // demanding it turned every observation blind (an empty scene while the pane was
+    // on screen). An empty payload yields an EMPTY observation, never a scene invented
+    // from prose.
+    expect(decodeObservation({ elements: [] })?.elements).toEqual([])
+    expect(decodeObservation({ tree_markdown: "Window\n  AXButton Settings" })?.text).toContain("AXButton")
     expect(decodeObservation({ snapshot_id: "s1", elements: [{ role: "AXButton" }] })?.elements[0].role).toBe("AXButton")
   })
 
@@ -639,18 +645,23 @@ describe("on-demand sensor establishment (pixel frame)", () => {
   const NO_FRAME =
     "No screenshot frame for window 7: its latest read had no screenshot and the window changed size since the last one (or it was never captured)"
 
-  test("(c) the loop's own observation payload stays cheap; only the frame-establishing read carries a screenshot", () => {
+  test("(c) the loop's own observation stays screenshot-free; only the frame-establishing read carries one", () => {
+    // The read's SOURCE is the rendered tree (`full_output`), not a screenshot: the
+    // loop's own observation still carries no frame, and the sensor-dependent read
+    // establishes one on demand.
     expect(observationArgs(win)).toEqual({
       pid: 4242,
       window_id: 7,
       include_screenshot: false,
       tree_format: "elements",
+      full_output: true,
     })
     expect(frameEstablishingRead(win)).toEqual({
       pid: 4242,
       window_id: 7,
       include_screenshot: true,
       tree_format: "elements",
+      full_output: true,
     })
     expect(isNoFrameError(NO_FRAME)).toBe(true)
     expect(isNoFrameError("driver reports ok")).toBe(false)
@@ -742,7 +753,8 @@ describe("runClickRungs — the shared click rung runner", () => {
   }
 
   // hardcode-guard:allow the element token, action and tree labels are the enumerable actuation inputs under test
-  test("(a) a no-op declared rung escalates to foreground, then a no-frame pixel rung establishes ONE frame and retries", async () => {
+  // hardcode-guard:allow this test's fixtures are the enumerable actuation inputs under test
+  test("(a) a no-op declared rung escalates to foreground, then the pixel rung establishes its frame FIRST and clicks against it", async () => {
     const button = {
       element_token: "t1",
       role: "AXButton",
@@ -758,13 +770,15 @@ describe("runClickRungs — the shared click rung runner", () => {
     const before = clickSignals(screenSignature(unchanged.elements), button, unchanged.elements)
 
     const driver = makeDriver([
+      // hardcode-guard:allow the fixture tree labels are the enumerable actuation inputs under test
       { ok: true, result: { content: [] } }, // declared click
       { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
       { ok: true, result: { content: [] } }, // FOREGROUND element re-issue
       { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
-      { ok: false, error: NO_FRAME }, // pixel click: no frame
-      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // frame-establishing read: unchanged
-      { ok: true, result: { content: [] } }, // retried pixel click
+      // the pixel rung ESTABLISHES ITS FRAME FIRST (a fresh read the target resolves
+      // in) and only then clicks — a coordinate click never aims at a stale frame
+      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // frame read: target still resolvable
+      { ok: true, result: { content: [] } }, // pixel click against that frame
       { ok: true, result: { content: [], structuredContent: tree("Gone") } }, // probe: screen changed → delivered
     ])
 
@@ -779,14 +793,46 @@ describe("runClickRungs — the shared click rung runner", () => {
       (c) => c.name === "cua-driver_get_window_state" && c.args.include_screenshot === true,
     )
     expect(frameReads).toHaveLength(1)
-    // the pixel rung was attempted twice: the no-frame attempt, then the retry
+    // the pixel rung clicks ONCE, against the frame it just established
     const pixelClicks = driver.calls.filter((c) => c.name === "cua-driver_click" && c.args.x !== undefined)
-    expect(pixelClicks).toHaveLength(2)
-    // delivery is judged by the multi-signal world state, on the retried attempt
+    expect(pixelClicks).toHaveLength(1)
+    // delivery is judged by the multi-signal world state, on that click
     expect(run.outcome.worked).toBe(true)
     expect(run.outcome.mode).toBe("pixel")
-    expect(run.attempts.map((a) => a.mode)).toEqual(["declared", "foreground", "pixel", "pixel"])
-    expect(run.attempts[3].reasons).toContain("screen")
+    expect(run.attempts.map((a) => a.mode)).toEqual(["declared", "foreground", "pixel"])
+    expect(run.attempts[2].reasons).toContain("screen")
+  })
+
+  // hardcode-guard:allow the fixture token/frame/labels are the enumerable actuation inputs under test
+  test("(a) a pixel rung whose fresh frame cannot re-resolve the target is REFUSED, never aimed blind", async () => {
+    const button = {
+      element_token: "t1",
+      role: "AXButton",
+      label: "Go",
+      actions: ["AXPress"],
+      frame: { x: 0, y: 0, width: 10, height: 10 },
+    }
+    const plan = actuationPlan(button, win)
+    const unchanged = decodeObservation(tree("Go"))
+    if (unchanged === null) throw new Error("tree must decode")
+    const before = clickSignals(screenSignature(unchanged.elements), button, unchanged.elements)
+    const driver = makeDriver([
+      { ok: true, result: { content: [] } }, // declared: no change
+      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
+      { ok: true, result: { content: [] } }, // foreground: no change
+      { ok: true, result: { content: [], structuredContent: tree("Go") } }, // probe: unchanged
+      // the fresh frame no longer holds the target — the UI moved under it, so a
+      // coordinate click would land on whatever is there now
+      { ok: true, result: { content: [], structuredContent: tree("Something else") } }, // frame read: target GONE
+    ])
+    const run = await Effect.runPromise(runClickRungs(driver.call, win, button, plan, before, before.screen))
+
+    // NO coordinate click is issued at all, and the refusal is named
+    const pixelClicks = driver.calls.filter((c) => c.name === "cua-driver_click" && c.args.x !== undefined)
+    expect(pixelClicks).toHaveLength(0)
+    const pixel = run.attempts.find((attempt) => attempt.mode === "pixel")
+    expect(pixel?.error).toBe(PIXEL_UNVERIFIED)
+    expect(run.outcome.worked).toBe(false)
   })
 
   test("(b)/(d) both call sites use the one runner; no click call site bypasses it", async () => {
@@ -1295,18 +1341,22 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
     expect(result.telemetry[0].progress.done).toBe(3)
   })
 
-  test("(b) a state-changing maneuver below the gate NEVER executes — the run stops with the distinct status", async () => {
+  test("(b) a state-changing ACTION below the gate NEVER executes — the run stops with the distinct status", async () => {
+    // hardcode-guard:allow the fixture rows are the enumerable action inputs under test
     let executed = false
     const result = await Effect.runPromise(
       planLoop(
         base({
           observe: () => Effect.succeed(listScene(["m1"], "s-partial")),
-          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label, strength: 0.4 }),
+          // the ACTION option from the derived set, not a read: the gate exists to hold
+          // back an UNMEASURED ACTION (a read observes and is never gated).
+          chooseManeuver: (_subgoal, options) =>
+            Effect.succeed({ label: options.find((option) => option.name === "open_item")?.label, strength: 0.4 }),
           execute: () => {
             executed = true
             return Effect.succeed({ deliveryModes: [] })
           },
-          stateChanging: () => true,
+          stateChanging: (option) => option.name === "open_item",
           readOnly: false,
         }),
       ),
@@ -1314,6 +1364,30 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
     expect(result.status).toBe("below-gate")
     expect(executed).toBe(false)
     expect(result.frontier.length).toBeGreaterThan(0)
+  })
+
+  // hardcode-guard:allow the fixture goal/rows are the enumerable read inputs under test
+  test("(b) a READ is never gated as state-changing — it observes, it does not act", async () => {
+    // LIVE FAILURE AS ONE INSTANCE: a `read_text` option was classified state-changing,
+    // had no measured strength, and the run stopped `below-gate` without reading anything
+    // while all three values sat on screen.
+    let executed = false
+    const result = await Effect.runPromise(
+      planLoop(
+        base({
+          observe: () => Effect.succeed(listScene(["m1"], "s-partial")),
+          chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+          execute: () => {
+            executed = true
+            return Effect.succeed({ deliveryModes: ["read"] })
+          },
+          stateChanging: () => true,
+          readOnly: false,
+        }),
+      ),
+    )
+    expect(result.status).not.toBe("below-gate")
+    expect(executed).toBe(true)
   })
 
   test("(b) a read-only goal with only a state-changing candidate stops read-only-blocked", async () => {
@@ -2108,6 +2182,7 @@ describe("runClickRungs — an undelivered rung escalates every permitted modali
       { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
       { ok: true, result: { content: [] } }, // foreground: no change
       { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // FRAME read before the coordinate click
       { ok: false, error: refusal }, // pixel: policy refusal
       { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
     ])
@@ -2135,6 +2210,8 @@ describe("runClickRungs — an undelivered rung escalates every permitted modali
     ]
     const before = clickSignals(screenSignature([button]), button, [button])
     const driver = makeDriver([
+      // the pixel rung establishes its frame FIRST; the target resolves, so the click proceeds
+      { ok: true, result: { content: [], structuredContent: wire([button]) } }, // frame read
       { ok: false, error: REFUSED_BY_POLICY }, // pixel: refused
       { ok: true, result: { content: [], structuredContent: wire([button]) } }, // probe: unchanged
       { ok: true, result: { content: [] } }, // declared element click
@@ -2237,6 +2314,9 @@ describe("runClickRungs — declared-action walk, handle freshness, activating t
       { ok: true, result: { content: [], structuredContent: wire([moved]) } }, // probe: t2, moved, unchanged
       { ok: true, result: { content: [] } }, // foreground: no change
       { ok: true, result: { content: [], structuredContent: wire([moved]) } }, // probe: unchanged
+      // pixel rung: ESTABLISH THE FRAME FIRST — the fresh read carries the moved
+      // target, which is exactly what the aim must be derived from
+      { ok: true, result: { content: [], structuredContent: wire([moved]) } }, // frame read
       { ok: true, result: { content: [] } }, // pixel: no change
       { ok: true, result: { content: [], structuredContent: wire([{ ...moved, selected: true }]) } }, // probe: delivered
     ])
@@ -2245,8 +2325,9 @@ describe("runClickRungs — declared-action walk, handle freshness, activating t
     // the declared rung used the plan's token; the foreground rung used the FRESH one
     expect(driver.calls[0]!.args.element_token).toBe("t1")
     expect(driver.calls[2]!.args.element_token).toBe("t2")
-    // the pixel rung re-derived its aim from the fresh frame centre (100+20, 100+10)
-    expect(driver.calls[4]!.args).toMatchObject({ x: 120, y: 110 })
+    // hardcode-guard:allow the fixture coordinates are the enumerable aim inputs under test
+    // the pixel rung re-derived its aim from the FRESH frame's centre (100+20, 100+10)
+    expect(driver.calls[5]!.args).toMatchObject({ x: 120, y: 110 })
     expect(run.outcome.worked).toBe(true)
   })
 
@@ -2930,6 +3011,7 @@ describe("ui_run — a report goal over a reached surface reads its named attrib
   })
   const aboutPane = (): Scene => ({
     snapshot: "s-about",
+    window: "About",
     regions: [
       { id: "a:content", kind: "content", itemIds: [], textIds: ["a:head"] },
       { id: "a:detail", kind: "detail", itemIds: ["a:macos", "a:chip", "a:memory"], textIds: [] },
@@ -2977,6 +3059,7 @@ describe("ui_run — a report goal over a reached surface reads its named attrib
   // hardcode-guard:allow the live goal and its pane names are the inputs under repair
   const accessibilityPane = (): Scene => ({
     snapshot: "s-accessibility",
+    window: "Accessibility",
     regions: [
       { id: "s:list", kind: "list", itemIds: ["Wi-Fi", "Accessibility", "General", "Wallpaper"], textIds: [] },
       { id: "s:content", kind: "content", itemIds: [], textIds: ["s:head"] },
@@ -3447,6 +3530,36 @@ describe("ui_run — a named attribute is bound through its label to its value",
     expect(cited).toContain("macOS=Version 27.2 Beta (26B5112a)")
     expect(run.captured).toBe(false)
     expect(driver.calls.every((entry) => entry.name === "cua-driver_get_window_state")).toBe(true)
+  })
+
+  // hardcode-guard:allow the fixture lines are the driver-rendered node forms under test
+  test("(a) a pane whose values live only in the RENDERED TREE binds through the label line", async () => {
+    // THE MEASURED LIVE SHAPE: these labels/values are UNNUMBERED static-text nodes in
+    // the rendered tree, absent from the elements array entirely — the pane displayed
+    // Chip = Apple M3 Max while the addressable elements carried neither.
+    const rendered = [
+      '  - AXStaticText = "Name"',
+      "  - AXStaticText = \"Kian's MacBook Pro\"",
+      '  - AXStaticText = "Chip"',
+      '  - AXStaticText = "Apple M3 Max"',
+      '  - AXStaticText = "Memory"',
+      '  - AXStaticText = "128 GB"',
+      '  - AXStaticText = "macOS Golden Gate"',
+      '  - AXStaticText = "Version 27.2 Beta (26B5112a)"',
+    ].join("\n")
+    // hardcode-guard:allow the fixture lines are the driver-rendered node forms under test
+    const payload = { ...wire([]), tree_markdown: rendered }
+    const driver = makeDriver([payload])
+    const run = await Effect.runPromise(runReadManeuver(driver.call, win, ["chip", "memory"]))
+    const cited = run.evidence.map((entry) => `${entry.label?.text}=${entry.text}`).join(" | ")
+    expect(cited).toContain("Chip=Apple M3 Max")
+    expect(cited).toContain("Memory=128 GB")
+    expect(run.unbound).toEqual([])
+    // a value is only cited when a DISTINCT value line follows its label
+    const partialDriver = makeDriver([{ ...wire([]), tree_markdown: '  - AXStaticText = "Chip"' }])
+    const partial = await Effect.runPromise(runReadManeuver(partialDriver.call, win, ["chip"]))
+    expect(partial.evidence).toEqual([])
+    expect(partial.unbound).toEqual(["chip"])
   })
 
   // hardcode-guard:allow the recorded live token/strategy names are the contract replayed under test

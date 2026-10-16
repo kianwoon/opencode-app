@@ -123,6 +123,64 @@ export const Element = Schema.Struct({
 export type Element = Schema.Schema.Type<typeof Element>
 
 /**
+ * THE RENDERED TREE'S STATIC-TEXT LINES — the wire form the driver renders an
+ * UNNUMBERED text node as, parsed in TREE ORDER (which is the only thing that makes a
+ * label and the value beneath it pairable at all). ONE implementation, shared by the
+ * read's binder AND the progress predicate: a second copy is how the two silently
+ * disagree, judging a successful read as no progress.
+ * hardcode-guard:allow the driver's rendered node form is the wire interface, not a case literal
+ */
+export function treeStaticTextLines(text: string | undefined): readonly string[] {
+  if (text === undefined) return []
+  return text
+    .split("\n")
+    .map((line) => /AXStaticText\s*=\s*"(.*)"\s*$/.exec(line.trim())?.[1])
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+}
+
+/**
+ * WORD-BOUND, case-insensitive: the token must be a WHOLE WORD of the line. Substring
+ * matching let a MENU ITEM that merely contains the name stand in for the attribute —
+ * the goal asked for the macOS version and the run cited the Apple menu's "About This
+ * Mac" while the version sat unread, reporting a completed run on a false citation.
+ */
+export function carriesTokenWord(text: string, token: string): boolean {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .includes(token.toLowerCase())
+}
+
+/**
+ * BIND A NAMED ATTRIBUTE IN THE RENDERED TREE: the FIRST static-text line whose whole
+ * word matches the token is the LABEL, and the line BENEATH it is its VALUE — the
+ * attribute's own place in the rendered tree, never a reference to it elsewhere.
+ * `undefined` when no line matches, or when the line beneath merely repeats the token.
+ */
+export function pairInTreeText(
+  text: string | undefined,
+  token: string,
+): { readonly label: string; readonly value: string } | undefined {
+  const lines = treeStaticTextLines(text)
+  const index = lines.findIndex((line) => carriesTokenWord(line, token))
+  if (index === -1) return undefined
+  const label = lines[index]
+  const value = lines[index + 1]
+  if (label === undefined || value === undefined || carriesTokenWord(value, token)) return undefined
+  return { label, value }
+}
+
+/**
+ * MENU CHROME IS NEVER CONTENT. A menu bar item is a REFERENCE to a command, not a
+ * value a pane displays: the goal asked for the macOS version and the run cited the
+ * Apple menu's "About This Mac" — a false completion. Menu roles are excluded from
+ * every read source (elements and rendered tree alike).
+ */
+export function isMenuRole(role: string | undefined): boolean {
+  return role !== undefined && role.startsWith("AXMenu")
+}
+
+/**
  * GENERAL RULE — parse the vocabulary the driver actually ships, not one
  * hard-coded spelling. The live `get_window_state` probe keys the token as
  * `token` (not `element_token`); the wire schema accepts BOTH, so a key alias
@@ -161,12 +219,25 @@ const Observation = Schema.Struct({
    * asked for, tolerate the ones it is not.
    */
   elements: Schema.Array(Element).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /**
+   * THE RENDERED TREE (`tree_markdown`) — the half of the driver's answer that carries
+   * the UNNUMBERED static-text nodes: a pane's displayed labels and values, which the
+   * `elements` array omits (no token, no geometry). Present only when the request asked
+   * for `full_output`; absent means the read has no text source, never a fabricated one.
+   */
+  text: Schema.optional(Schema.String),
 })
 export type Observation = Schema.Schema.Type<typeof Observation>
 
 const WireObservation = Schema.Struct({
-  snapshot_id: Schema.String,
+  /**
+   * The header is TOLERATED, not required: a driver answer that omits or renames it
+   * must still decode — requiring it turned every observation into a blind one (the
+   * scene came back empty while the pane was on screen).
+   */
+  snapshot_id: Schema.optional(Schema.String),
   elements: Schema.Array(WireElement).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  tree_markdown: Schema.optional(Schema.String),
 })
 
 /**
@@ -179,7 +250,12 @@ const WireObservation = Schema.Struct({
 export function decodeObservation(input: unknown): Observation | null {
   const decoded = Schema.decodeUnknownOption(WireObservation)(input)
   if (Option.isNone(decoded)) return null
-  return { snapshot_id: decoded.value.snapshot_id, elements: decoded.value.elements.map(normalizeElement) }
+  const markdown = decoded.value.tree_markdown
+  return {
+    snapshot_id: decoded.value.snapshot_id ?? "",
+    elements: decoded.value.elements.map(normalizeElement),
+    ...(markdown !== undefined && markdown.trim().length > 0 ? { text: markdown } : {}),
+  }
 }
 
 /** The elements the loop may enumerate: token + role present, interactive, enabled. */

@@ -66,6 +66,21 @@ export interface SceneRegion {
 
 export interface Scene {
   readonly snapshot: string
+  /**
+   * THE SURFACE'S OWN NAME — the window label the observation carries ("About",
+   * "Accessibility"). A pane's identity lives HERE, not in its content text, so an
+   * arrival check that searches content reports "not arrived" while the loop is
+   * already sitting on the target surface. Absent when the observation carries no
+   * window element (the arrival verdict is then `unknown`, never a fabricated true).
+   */
+  readonly window?: string
+  /**
+   * THE RENDERED TREE — the driver's `tree_markdown`, carrying the UNNUMBERED
+   * static-text nodes a pane displays (labels beside their values) that the addressable
+   * element array omits. A read binds its attribute through the LABEL line here when no
+   * addressable element carries it. Absent when the observation carried no markdown.
+   */
+  readonly treeText?: string
   readonly regions: readonly SceneRegion[]
   readonly items: readonly SceneItem[]
   readonly texts: readonly SceneText[]
@@ -762,7 +777,19 @@ export function buildScene(observation: Observation): Scene {
     textIds: textIdsByRegion.get(region.id) ?? [],
   }))
 
-  return { snapshot: observation.snapshot_id, regions: withIds, items, texts }
+  // SURFACE IDENTITY: the window element's own label names the surface on screen.
+  // Read from the observation, never assumed; absent when the payload omits it.
+  const window = elements
+    .map((element) => (element.role === "AXWindow" ? (element.label ?? "").trim() : ""))
+    .find((label) => label.length > 0)
+  return {
+    snapshot: observation.snapshot_id,
+    regions: withIds,
+    items,
+    texts,
+    ...(window !== undefined ? { window } : {}),
+    ...(observation.text !== undefined ? { treeText: observation.text } : {}),
+  }
 }
 
 const itemFingerprint = (item: SceneItem): string =>

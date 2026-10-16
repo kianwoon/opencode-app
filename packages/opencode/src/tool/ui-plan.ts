@@ -21,6 +21,7 @@
  * with a `back` corrective (no dialog to dismiss) rather than a `dismiss`.
  */
 
+import { carriesTokenWord, isMenuRole, pairInTreeText } from "./ui-eyes"
 import type { RegionKind, Scene, SceneItem, SceneRegion, SceneText } from "./ui-scene"
 import type { Subgoal, SubgoalKind } from "./ui-maneuvers"
 import { resolveNamedItem } from "./ui-maneuvers"
@@ -34,6 +35,14 @@ export type Predicate =
   /** No-host URL identity (file:, about:, data:): scheme+path, never an empty host. */
   | { readonly op: "url_identity"; readonly scheme: string; readonly path: string }
   | { readonly op: "text_present"; readonly text: string; readonly regionKind?: RegionKind }
+  /**
+   * ARRIVAL BY SURFACE IDENTITY: the SURFACE'S OWN name (the window label the
+   * observation carries) is what "reached the target surface" means — a pane's
+   * identity is not a content text, so searching content reports "not arrived"
+   * while the loop sits on the target pane. `unknown` when the observation carries
+   * no window identity, never a fabricated true.
+   */
+  | { readonly op: "surface_is"; readonly text: string }
   | { readonly op: "item_present"; readonly matching: string }
   | { readonly op: "region_present"; readonly kind: RegionKind; readonly label?: string }
   | {
@@ -378,6 +387,17 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
         ...(hit !== undefined ? { cited: [hit.text] } : {}),
       }
     }
+    case "surface_is": {
+      const surface = scene.window
+      if (surface === undefined)
+        return { verdict: "unknown", evidence: "the observation carries no window identity to test arrival against" }
+      const hit = includesToken(surface, predicate.text)
+      return {
+        verdict: hit ? "true" : "false",
+        evidence: hit ? `surface "${surface}" is the target` : `surface "${surface}" is not "${predicate.text}"`,
+        ...(hit ? { cited: [surface] } : {}),
+      }
+    }
     case "item_present": {
       const hit = scene.items.find((item) => includesToken(item.label, predicate.matching))
       return {
@@ -421,14 +441,26 @@ export function evalPredicate(predicate: Predicate, scene: Scene): PredicateResu
     case "read_value": {
       // The element that carries the goal's token IS the read target; the value it
       // holds (else its own label) is the citable content.
-      const item = scene.items.find((entry) => includesToken(entry.label, predicate.matching))
+      // MENU CHROME IS NEVER CONTENT and the match is WORD-BOUND: the goal asked for the
+      // macOS VERSION, so a menu item that merely mentions the name can never satisfy it.
+      const item = scene.items.find(
+        (entry) => !isMenuRole(entry.role) && carriesTokenWord(entry.label, predicate.matching),
+      )
       if (item !== undefined) {
         const value = (item.element.value ?? "").trim()
         const cited = value.length > 0 ? value : item.label
         return { verdict: "true", evidence: `"${item.label}" reads ${cited}`, cited: [cited] }
       }
-      const text = scene.texts.find((entry) => includesToken(entry.text, predicate.matching))
+      const text = scene.texts.find(
+        (entry) => !isMenuRole(entry.role) && carriesTokenWord(entry.text, predicate.matching),
+      )
       if (text !== undefined) return { verdict: "true", evidence: `read "${text.text}"`, cited: [text.text] }
+      // THE RENDERED TREE IS THE SAME SOURCE THE READ BINDS FROM — one shared matcher,
+      // word-bound, so a menu item that merely contains the name can never stand in for
+      // the attribute (a false completion) and predicate/evidence can never disagree.
+      const pair = pairInTreeText(scene.treeText, predicate.matching)
+      if (pair !== undefined)
+        return { verdict: "true", evidence: `"${pair.label}" reads ${pair.value}`, cited: [pair.value] }
       return { verdict: "unknown", evidence: `no labelled element carries "${predicate.matching}"` }
     }
     case "dialog_absent": {
@@ -697,9 +729,17 @@ export function reportedTokens(goal: string): readonly string[] {
   const tail = goal.slice(match.index + match[0].length)
   const out = new Set<string>()
   for (const phrase of tail.split(/,|\band\b|\bor\b|;/i)) {
-    const tokens = phrase.toLowerCase().match(/[a-z][a-z0-9]+/g) ?? []
-    const salient = tokens.find((token) => !REPORT_GENERIC.has(token))
-    if (salient !== undefined) out.add(salient)
+    // A POSSESSIVE IS A MODIFIER, NOT THE ATTRIBUTE NAME: "this Mac's macOS version"
+    // must yield "macos" — the earlier first-salient-token rule yielded "mac", which then
+    // matched "Kian's MacBook Pro" and was reported as the macOS version.
+    const tokens = phrase
+      .replace(/['\u2019]s\b/g, " ")
+      .toLowerCase()
+      .match(/[a-z][a-z0-9]+/g) ?? []
+    const salient = tokens.filter((token) => !REPORT_GENERIC.has(token))
+    // the LAST salient token is the phrase's head noun ("this Mac macOS version" -> macos)
+    const token = salient[salient.length - 1]
+    if (token !== undefined) out.add(token)
   }
   return [...out]
 }
@@ -760,7 +800,7 @@ function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
       : plannedSubgoal(
           "open_app",
           { kind: "open_app", value: app },
-          { op: "text_present", text: app, regionKind: CONTENT_KIND },
+          { op: "surface_is", text: app },
           NAVIGATE_BUDGET,
         )
   // A named target that EXISTS in the scene is reached by UI navigation.
@@ -770,7 +810,7 @@ function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
       : plannedSubgoal(
           "open_item",
           { kind: "open_item", matching: app, selectable: true },
-          { op: "text_present", text: app, regionKind: CONTENT_KIND },
+          { op: "surface_is", text: app },
           DEFAULT_BUDGET,
         )
   // PANE-INSIDE-THE-FRONTMOST-APP: a bare named target absent from the scene is
@@ -782,7 +822,7 @@ function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
       : plannedSubgoal(
           "open_item",
           { kind: "open_item", matching: app, selectable: true },
-          { op: "text_present", text: app, regionKind: CONTENT_KIND },
+          { op: "surface_is", text: app },
           DEFAULT_BUDGET,
         )
   // A pure launch goal ("open the Calculator app") is just the launch.
@@ -820,7 +860,7 @@ function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
         // A mutation may reach its surface through a SELECTABLE navigation row (a
         // sidebar entry), which a read/open subgoal would never bind.
         { kind: "open_item", matching: surface, selectable: true },
-        { op: "text_present", text: surface, regionKind: CONTENT_KIND },
+        { op: "surface_is", text: surface },
         DEFAULT_BUDGET,
       ),
     )
