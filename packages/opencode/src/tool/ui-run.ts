@@ -72,7 +72,15 @@ import {
   type UrlRecord,
 } from "./ui-skills"
 import { buildScene, type Scene } from "./ui-scene"
-import { deriveManeuvers, type ManeuverOption } from "./ui-maneuvers"
+import {
+  deriveManeuvers,
+  MANEUVER_REGISTRY,
+  READ_MANEUVERS,
+  READ_STRATEGY_NAMES,
+  type ManeuverName,
+  type ManeuverOption,
+  type ReadStrategyName,
+} from "./ui-maneuvers"
 import {
   plan as derivePlan,
   readOnlyGoal,
@@ -98,43 +106,6 @@ export type { Element, Observation } from "./ui-eyes"
 
 const DEFAULT_MAX_STEPS = 30
 const HARD_MAX_STEPS = 100
-/**
- * Identical re-issues of the SAME maneuver (skill name + goal value) the loop
- * tolerates before it stops. A maneuver may run `MAX_MANEUVER_REPEATS + 1` times;
- * the next identical re-issue stops with `maneuver-repeat-limit`.
- */
-export const MAX_MANEUVER_REPEATS = 2
-/** Maneuver-repeat accounting state: the current maneuver key and its run count. */
-export interface ManeuverRepeatState {
-  readonly key?: string
-  readonly runs: number
-}
-export const initialManeuverRepeat = (): ManeuverRepeatState => ({ runs: 0 })
-
-/**
- * MANEUVER REPEAT BOUND.
- * INVARIANT OWNED: a repeated DELIBERATE maneuver is not progress even when the
- * screen changes. Re-issuing the SAME maneuver (skill name + goal value) counts
- * toward a stop bound INDEPENDENT of the screen-change/ambiguity bound — which a
- * redirect can keep resetting (each redirect changes the screen, so the no-op
- * bound never fires). `exceeded` is true once the SAME maneuver has already run
- * `MAX_MANEUVER_REPEATS + 1` times; the caller stops with `maneuver-repeat-limit`
- * and records the attempt chain rather than issuing one more.
- * hardcode-guard:allow the named live repeat is one instance cited to ground the invariant
- * LIVE FAILURE AS ONE INSTANCE: `go_to_url` was re-issued 3-4 times in a row
- * because a same-host redirect kept changing the screen, so the no-op bound reset
- * every iteration; the maneuver bound stops the identical re-issue.
- * UNSEEN CASE COVERED: any other deliberate maneuver (dismiss/scroll/search) that
- * keeps "succeeding" without resolving takes the SAME bound, no loop change.
- */
-export function maneuverRepeatStep(
-  state: ManeuverRepeatState,
-  key: string,
-): { readonly next: ManeuverRepeatState; readonly runs: number; readonly exceeded: boolean } {
-  if (state.key !== key) return { next: { key, runs: 1 }, runs: 1, exceeded: false }
-  const runs = state.runs + 1
-  return { next: { key, runs }, runs, exceeded: state.runs >= MAX_MANEUVER_REPEATS + 1 }
-}
 /** Input verbs whose success depends on a preceding focus click on the SAME target. */
 const FOCUS_CONSUMING = new Set<JevAction>(["type", "key"])
 /**
@@ -1049,24 +1020,31 @@ export const GATE_FLOOR = JEV_DEFAULT_THRESHOLD
 
 const STATUS_READ_ONLY = "read-only-blocked"
 const STATUS_BELOW_GATE = "below-gate"
-const STATUS_NO_MANEUVER = "no-maneuver"
 const STATUS_LOGIN_WALL = "login-wall"
 /**
+ * NO maneuver is APPLICABLE for the current subgoal — the deriver offered an empty
+ * set. Its OWN outcome, distinct from the decider-failure stop: it names the subgoal
+ * (and, for a read, the attribute the read was for) and never consults the decider,
+ * which is what a zero option space must never look like.
+ */
+export const STATUS_NO_APPLICABLE = "nothing-applicable"
+/**
  * The decider returned no usable maneuver from a NON-EMPTY offered set. A DISTINCT
- * outcome from `no-maneuver` (which means nothing was offered) — the offered labels
- * and the raw returned label are recorded so the two stops can never be confused.
+ * outcome from `nothing-applicable` (an empty option space, which never reaches the
+ * decider) — the offered labels and the raw returned label are recorded so the two
+ * stops can never be confused. Reserved for an actual decider failure.
  */
 export const STATUS_UNUSABLE_CHOICE = "choice-unusable"
 /**
  * A read subgoal whose goal-named target is genuinely absent from a settled scene:
  * the elements were observed but none carries the goal's attribute tokens. DISTINCT
- * from `no-choice`/`no-maneuver` — this names WHY the target could not be read.
+ * from `no-choice`/`nothing-applicable` — this names WHY the target could not be read.
  */
 export const STATUS_UNREADABLE = "target-unreadable"
 /**
  * The scene kept arriving past the settle budget, so the loop withheld judgement
  * rather than deciding on a moving page. A DISTINCT status, never `completed` or
- * `no-maneuver` — a partial render must not satisfy a read or end the run.
+ * `nothing-applicable` — a partial render must not satisfy a read or end the run.
  */
 export const STATUS_UNSETTLED = "scene-unsettled"
 /** Bounded number of observations one settle may take before it is declared unsettled. */
@@ -1085,8 +1063,6 @@ export const SETTLE_MIN_STABLE_MS = 1_500
 export const STATUS_DESTRUCTIVE = "destructive-consent-required"
 /** Every predicate is satisfied but no satisfied subgoal cites observable content. */
 export const STATUS_UNEVIDENCED = "completion-without-evidence"
-/** The loop's existing maneuver-repeat bound status, mirrored into the plan loop. */
-const REASON_MANEUVER_REPEAT = "maneuver-repeat-limit"
 
 /**
  * WINDOW+CONTAINER-SCOPED ACTUATION telemetry for one click step: what window and
@@ -1129,6 +1105,10 @@ export interface ManeuverExecution {
   readonly failure?: string
   /** WINDOW+CONTAINER-SCOPED actuation telemetry, when the maneuver clicked. */
   readonly scope?: ActuationScope
+  /** A READ's tree-derived evidence (text + identity + geometry) — no actuation. */
+  readonly read?: readonly ReadEvidence[]
+  /** A READ's attribute NAMES it could not bind to a value — an explicit empty read. */
+  readonly unbound?: readonly string[]
 }
 
 export interface ManeuverChoice {
@@ -1170,7 +1150,34 @@ export interface PlanLoopTelemetry {
   readonly settle?: { readonly observations: number; readonly settled: boolean }
   /** WINDOW+CONTAINER-SCOPED actuation telemetry, when the maneuver clicked. */
   readonly scope?: ActuationScope
+  /** A READ's tree-derived evidence (text + identity + geometry) — no actuation. */
+  readonly read?: readonly ReadEvidence[]
+  /** PER-ATTEMPT PROVENANCE: which path was entered, the predicate result, the evidence count. */
+  readonly provenance: AttemptProvenance
   readonly reason: string
+}
+
+/**
+ * PER-ATTEMPT PROVENANCE — so a path that was NEVER reached is visible in
+ * telemetry rather than inferred from tests. One record per attempt.
+ */
+export interface AttemptProvenance {
+  readonly option: ManeuverName
+  /** The OFFERED option's strategy (owned by the loop's depleting offers). */
+  readonly strategy?: ReadStrategyName
+  /**
+   * How this maneuver was selected: `single-applicable` when it was the ONLY
+   * applicable option and the loop took it on applicability (the decider was never
+   * consulted, and no strength/probability was fabricated), or `decider` when it
+   * was one of two-or-more and the decider was consulted exactly once.
+   */
+  readonly selection: "single-applicable" | "decider"
+  /** WHICH dispatch path was entered (from the shared registry's category). */
+  readonly path: string
+  /** Whether the subgoal predicate held after the attempt. */
+  readonly predicate: boolean
+  /** How many evidence items the attempt produced. */
+  readonly evidence: number
 }
 
 export interface PlanLoopDeps {
@@ -1379,6 +1386,332 @@ function readTargetMissing(subgoal: PlanSubgoal, scene: Scene): string | undefin
 }
 
 /**
+ * READS ARE OBSERVATIONS, BOUND THROUGH THEIR LABEL.
+ * INVARIANT OWNED:
+ *   (i) a read (read_text / read_items and any read-only subgoal) resolves its
+ *       target from the CURRENT observation and takes the text straight from the
+ *       accessibility tree — NO click, NO actuation rung, NO delivery requirement;
+ *       it never walks the click ladder and "no effect" can never fail it;
+ *   (ii) an ATTRIBUTE is bound through its NAME: the token finds the LABEL element
+ *       and the VALUE that belongs to it (a structural sibling in the same
+ *       row/group, falling back to geometric adjacency — the nearest text sharing
+ *       the label's row band) is cited as the read's content;
+ *   (iii) an EMPTY read never repeats identically — the read tries its defined
+ *       alternatives (direct text hit → label pairing → a FRESH capture) and the
+ *       loop then ends the subgoal in a distinct `target-unreadable` naming the
+ *       attribute rather than re-issuing the identical maneuver;
+ *   (iv) evidence cites BOTH elements (label and value) with identity and geometry;
+ *       a label with no adjacent value is UNREADABLE, not a success.
+ * hardcode-guard:allow the named live failures are instances cited to ground the invariants
+ * LIVE FAILURE AS ONE INSTANCE: System Settings window 3178's About pane exposed the
+ * wanted values as standalone static text ("Apple M3 Max", "128 GB", "macOS Golden
+ * Gate", "Version 27.2 Beta (26B5112a)") while the goal asked for "the chip", "total
+ * memory", "the macOS version" — the NAME and its VALUE are separate elements. A
+ * token-only read cited nothing and ended in the distinct `target-unreadable`
+ * naming the attribute with `evidence=[]`. (Earlier, window 3041's `read_text`
+ * fell through to the click ladder: "click undelivered on every rung ... No
+ * screenshot frame for window 3041".)
+ * UNSEEN CASE COVERED: a label whose value is a deep descendant rather than a flat
+ * sibling still binds (the nearest text sharing its row band), and a label with no
+ * adjacent value at all ends `target-unreadable`.
+ */
+export interface ReadEvidence {
+  /** The attribute NAME this binding satisfies (the goal token). */
+  readonly token: string
+  /** The VALUE element's own text: its value when it carries one, else its label. */
+  readonly text: string
+  readonly role: string
+  /** The VALUE element's stable identity (its token, else its text). */
+  readonly identity: string
+  /** The VALUE element's frame, when the tree exposes it. */
+  readonly rect?: Frame
+  /** The LABEL element the value was bound through, when it is a separate element. */
+  readonly label?: ReadLabelElement
+}
+
+/** The label element an attribute name was found on. */
+export interface ReadLabelElement {
+  readonly text: string
+  readonly identity: string
+  readonly role: string
+  readonly rect?: Frame
+}
+
+/** The READ strategy sequence — re-exported from the SHARED registry (one source of truth). */
+export const READ_STRATEGIES: readonly ReadStrategyName[] = READ_STRATEGY_NAMES
+export type ReadStrategy = ReadStrategyName
+
+/** Whether a maneuver is a read: it never enters the click path (registry-derived). */
+export function isReadManeuver(option: ManeuverOption): boolean {
+  return READ_MANEUVERS.has(option.name)
+}
+
+/** Whether a SUBGOAL is a read (its predicate is attribute-bound). */
+export function isReadSubgoal(subgoal: PlanSubgoal): boolean {
+  return subgoal.kind === "read_items" || subgoal.success.op === "read_value" || subgoal.success.op === "read_count"
+}
+
+/** The goal tokens a READ subgoal is bound to (its predicate's matching/anchors). */
+export function readTokens(subgoal: PlanSubgoal): readonly string[] {
+  if (subgoal.success.op === "read_value") return [subgoal.success.matching]
+  if (subgoal.success.op === "read_count") return subgoal.success.anchors ?? []
+  return []
+}
+
+const hasToken = (haystack: string, token: string): boolean => haystack.toLowerCase().includes(token.toLowerCase())
+
+/** The text an element DISPLAYS: its own value when it carries one, else its label. */
+const readableText = (element: Element): string => {
+  const value = (element.value ?? "").trim()
+  return value.length > 0 ? value : (element.label ?? "").trim()
+}
+const rectOfElement = (element: Element): Frame | undefined => element.frame ?? element.bounds
+const identityOfElement = (element: Element): string => element.element_token ?? element.label ?? readableText(element)
+
+/** Normalize a name for equality: letters+digits only, case-insensitive. */
+const normalizeName = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+/**
+ * Whether the matched text is essentially the TOKEN ITSELF — a bare attribute NAME
+ * ("Chip" for "chip") rather than a value ("Apple M3 Max" for "apple"). A bare label
+ * is a success ONLY when a value is bound beside it; otherwise it is unreadable.
+ */
+const isBareLabel = (element: Element, token: string): boolean => {
+  const text = normalizeName(readableText(element))
+  const name = normalizeName(token)
+  return text.length > 0 && text === name
+}
+
+/** Whether two elements share a row band (their frames overlap vertically). */
+const shareRow = (a: Element, b: Element): boolean => {
+  const ra = rectOfElement(a)
+  const rb = rectOfElement(b)
+  return ra !== undefined && rb !== undefined && ra.y < rb.y + rb.height && rb.y < ra.y + ra.height
+}
+
+/** Horizontal gap from a label to a candidate value (right side preferred, nearest first). */
+const xGap = (label: Element, value: Element): number => {
+  const rl = rectOfElement(label)
+  const rv = rectOfElement(value)
+  if (rl === undefined || rv === undefined) return Number.MAX_SAFE_INTEGER
+  const gap = rv.x - (rl.x + rl.width)
+  return gap >= 0 ? gap : Math.abs(gap)
+}
+
+/**
+ * The VALUE element that belongs to a LABEL element: the value on the label itself,
+ * else a STRUCTURAL sibling in the same row/group, else the nearest text sharing the
+ * label's row BAND (geometric adjacency). `undefined` when the label has no value.
+ */
+function pairValue(label: Element, elements: readonly Element[], token: string): Element | undefined {
+  const own = (label.value ?? "").trim()
+  if (own.length > 0 && !hasToken(own, token)) return label
+  const candidates = elements.filter(
+    (element) =>
+      element !== label &&
+      element.element_index !== label.element_index &&
+      readableText(element).length > 0 &&
+      !hasToken(readableText(element), token),
+  )
+  const siblings = candidates.filter(
+    (element) => label.parent_index !== undefined && element.parent_index === label.parent_index,
+  )
+  const inRow = (pool: readonly Element[]): readonly Element[] => pool.filter((element) => shareRow(element, label))
+  const pool =
+    inRow(siblings).length > 0 ? inRow(siblings) : siblings.length > 0 ? siblings : inRow(candidates)
+  if (pool.length === 0) return undefined
+  return [...pool].sort((a, b) => xGap(label, a) - xGap(label, b))[0]
+}
+
+/** The evidence for one binding: the VALUE plus the LABEL element it was bound through. */
+function binding(token: string, label: Element, value: Element): ReadEvidence {
+  const valueRect = rectOfElement(value)
+  const labelRect = rectOfElement(label)
+  return {
+    token,
+    text: readableText(value),
+    role: value.role ?? "",
+    identity: identityOfElement(value),
+    ...(valueRect !== undefined ? { rect: valueRect } : {}),
+    ...(value !== label
+      ? {
+          label: {
+            text: readableText(label),
+            identity: identityOfElement(label),
+            role: label.role ?? "",
+            ...(labelRect !== undefined ? { rect: labelRect } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+/**
+ * Resolve each named attribute through its LABEL to its VALUE. A token matched to a
+ * richer text (a value) is cited directly; a token matched to a bare label is bound
+ * to the value beside it. Tokens that bind no value are returned `unbound`.
+ */
+export function resolveRead(
+  elements: readonly Element[],
+  tokens: readonly string[],
+): { readonly evidence: readonly ReadEvidence[]; readonly unbound: readonly string[] } {
+  const evidence: ReadEvidence[] = []
+  const unbound: string[] = []
+  const seen = new Set<string>()
+  for (const token of tokens) {
+    if (token.trim().length === 0) continue
+    // The element whose own value/label carries the token (the label, or a direct value).
+    const hit = elements.find(
+      (element) => hasToken(element.value ?? "", token) || hasToken(element.label ?? "", token),
+    )
+    if (hit === undefined) {
+      unbound.push(token)
+      continue
+    }
+    // A value-carrier or a text richer than the bare token is cited directly; a bare
+    // label must bind the value beside it, else it is UNREADABLE.
+    const value = hasToken(hit.value ?? "", token) || !isBareLabel(hit, token) ? hit : pairValue(hit, elements, token)
+    if (value === undefined) {
+      unbound.push(token)
+      continue
+    }
+    const key = `${token}\u0000${identityOfElement(value)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    evidence.push(binding(token, hit, value))
+  }
+  return { evidence, unbound }
+}
+
+/** The read evidence alone (the loop's callers that do not need the unbound set). */
+export function readEvidence(elements: readonly Element[], tokens: readonly string[]): readonly ReadEvidence[] {
+  return resolveRead(elements, tokens).evidence
+}
+
+/** One strategy pass: bind each token through `pick`, else record it unbound. */
+function resolveStrategy(
+  elements: readonly Element[],
+  tokens: readonly string[],
+  pick: (hit: Element, token: string) => Element | undefined,
+): { readonly evidence: readonly ReadEvidence[]; readonly unbound: readonly string[] } {
+  const evidence: ReadEvidence[] = []
+  const unbound: string[] = []
+  const seen = new Set<string>()
+  for (const token of tokens) {
+    if (token.trim().length === 0) continue
+    const hit = elements.find(
+      (element) => hasToken(element.value ?? "", token) || hasToken(element.label ?? "", token),
+    )
+    if (hit === undefined) {
+      unbound.push(token)
+      continue
+    }
+    const value = pick(hit, token)
+    if (value === undefined) {
+      unbound.push(token)
+      continue
+    }
+    const key = `${token}\u0000${identityOfElement(value)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    evidence.push(binding(token, hit, value))
+  }
+  return { evidence, unbound }
+}
+
+/** STRATEGY 1 — the element's displayed text CARRIES the token (a value, not a bare name). */
+export function resolveDirect(
+  elements: readonly Element[],
+  tokens: readonly string[],
+): { readonly evidence: readonly ReadEvidence[]; readonly unbound: readonly string[] } {
+  return resolveStrategy(elements, tokens, (hit, token) =>
+    hasToken(hit.value ?? "", token) || !isBareLabel(hit, token) ? hit : undefined,
+  )
+}
+
+/** STRATEGY 2 — the token is a bare LABEL; bind the VALUE adjacent to it. */
+export function resolvePairing(
+  elements: readonly Element[],
+  tokens: readonly string[],
+): { readonly evidence: readonly ReadEvidence[]; readonly unbound: readonly string[] } {
+  return resolveStrategy(elements, tokens, (hit, token) =>
+    isBareLabel(hit, token) ? pairValue(hit, elements, token) : undefined,
+  )
+}
+
+/**
+ * A read's outcome: the tree-derived bindings, the tokens that bound nothing, the
+ * driver calls it made (an observation only — never a click/scroll/pixel) and
+ * whether the fallback capture was taken.
+ */
+export interface ReadRun {
+  readonly evidence: readonly ReadEvidence[]
+  readonly unbound: readonly string[]
+  readonly calls: readonly string[]
+  readonly captured: boolean
+  /** The distinct strategies this run attempted, IN ORDER, never repeated. */
+  readonly strategies: readonly ReadStrategy[]
+}
+
+/**
+ * READ MANEUVER — runs as an OBSERVATION, never an actuation. It issues the loop's
+ * own cheap (no-screenshot) observation and resolves the named attributes through
+ * their labels. PIXEL/OCR IS A LAST RESORT, AND ONLY WITH A FRESH CAPTURE: only when
+ * the text is genuinely absent from the tree does it establish a FRESH screenshot
+ * frame (`frameEstablishingRead`) first, and every geometry is derived from THAT
+ * capture — a stale frame's coordinates are never reused.
+ * A STRATEGY argument runs ONLY that strategy (the loop drives the sequence one
+ * strategy at a time); with no argument it runs the whole sequence in order.
+ * hardcode-guard:allow the driver tool names and the live refusal are the interface under repair
+ * LIVE FAILURE AS ONE INSTANCE: the pixel click failed because the loop's observations
+ * request `include_screenshot:false`, so no frame existed after window 3041 changed size.
+ * UNSEEN CASE COVERED: any second sensor-dependent read that needs a screenshot
+ * establishes it on demand the same way, leaving the observer payload untouched.
+ */
+export const runReadManeuver = (
+  call: DriverCall,
+  window: WindowRef,
+  tokens: readonly string[],
+  strategy?: ReadStrategy,
+): Effect.Effect<ReadRun> =>
+  Effect.gen(function* () {
+    const calls: string[] = []
+    // CAPTURE-ONLY STRATEGY: establish a FRESH frame, then resolve from it.
+    if (strategy === "observation-fallback") {
+      const capture = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
+      calls.push("cua-driver_get_window_state:capture")
+      const captured = capture.ok ? (decodeObservation(capture.result.structuredContent)?.elements ?? []) : []
+      const resolved = resolveRead(captured, tokens)
+      return { evidence: resolved.evidence, unbound: resolved.unbound, calls, captured: true, strategies: ["observation-fallback"] }
+    }
+    // TREE-FIRST strategies (and the whole sequence when no strategy is named):
+    // the read resolves from the CURRENT observation.
+    const read = yield* call("cua-driver_get_window_state", observationArgs(window))
+    calls.push("cua-driver_get_window_state")
+    const elements = read.ok ? (decodeObservation(read.result.structuredContent)?.elements ?? []) : []
+    if (strategy === "direct-token" || strategy === "label-pairing") {
+      const resolved = strategy === "direct-token" ? resolveDirect(elements, tokens) : resolvePairing(elements, tokens)
+      return { evidence: resolved.evidence, unbound: resolved.unbound, calls, captured: false, strategies: [strategy] }
+    }
+    const resolved = resolveRead(elements, tokens)
+    if (resolved.evidence.length > 0 || tokens.length === 0)
+      return { evidence: resolved.evidence, unbound: resolved.unbound, calls, captured: false, strategies: ["direct-token", "label-pairing"] }
+    // CAPTURE FALLBACK — only when the text is genuinely absent from the tree, and
+    // only after a FRESH capture is established. Geometry derives from this capture.
+    const capture = yield* call("cua-driver_get_window_state", frameEstablishingRead(window))
+    calls.push("cua-driver_get_window_state:capture")
+    const captured = capture.ok ? (decodeObservation(capture.result.structuredContent)?.elements ?? []) : []
+    const fromCapture = resolveRead(captured, tokens)
+    return {
+      evidence: fromCapture.evidence,
+      unbound: fromCapture.unbound,
+      calls,
+      captured: true,
+      strategies: [...READ_STRATEGIES],
+    }
+  })
+
+/**
  * The plan-driven core: commit a plan, measure progress over the Scene, take the
  * next subgoal, derive maneuvers, choose ONE, execute it, repeat — terminating only
  * on a predicate proved over the Scene. `observe`/`choosePlan`/`chooseManeuver`/
@@ -1393,7 +1726,17 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
     const telemetry: PlanLoopTelemetry[] = []
     const offers: OfferRecord[] = []
     const history: StepRecord[] = []
-    let maneuverRepeat: ManeuverRepeatState = initialManeuverRepeat()
+    // PER-SUBGOAL LEDGER — owned by the LOOP, not the executor: the strategies
+    // consumed for each subgoal (so the offer set DEPLETES) and every attempt's
+    // provenance. An identical re-pick is impossible by construction.
+    const ledger = new Map<number, { readonly consumed: ReadStrategyName[]; readonly attempts: AttemptProvenance[] }>()
+    const ledgerOf = (index: number) => {
+      const entry = ledger.get(index)
+      if (entry !== undefined) return entry
+      const created = { consumed: [] as ReadStrategyName[], attempts: [] as AttemptProvenance[] }
+      ledger.set(index, created)
+      return created
+    }
     let plan: Plan | undefined
     let planId: string | undefined
     let lastProgress: Progress | undefined
@@ -1414,6 +1757,23 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       ...(consent !== undefined ? { consent } : {}),
       ...(evidence !== undefined ? { evidence } : {}),
     })
+    // THE NAMED READ STOP — which subgoal/attribute blocked, what predicate was
+    // demanded, which strategies were tried, and a per-strategy summary. Never a
+    // repeat budget.
+    const readExhausted = (
+      subgoal: PlanSubgoal,
+      index: number,
+      entry: { readonly consumed: readonly ReadStrategyName[]; readonly attempts: readonly AttemptProvenance[] },
+    ): PlanLoopResult => {
+      const attribute = readTokens(subgoal).join(", ")
+      const summary = entry.attempts
+        .map((attempt) => `${attempt.strategy ?? attempt.option}:${attempt.predicate ? "satisfied" : "no-evidence"}(${attempt.evidence})`)
+        .join("; ")
+      return result(
+        STATUS_UNREADABLE,
+        `target-unreadable: subgoal ${index} (${subgoal.kind}) names "${attribute}" predicate ${subgoal.success.op}; strategies tried [${entry.consumed.join(", ")}]; ${summary}; cannot proceed`,
+      )
+    }
 
     // SETTLE: perception must CONVERGE before it is judged. Poll the one
     // non-state-changing action (the observation itself, so nothing mutates),
@@ -1504,10 +1864,27 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
           STATUS_UNREADABLE,
           `target-unreadable: the goal names "${missing}" but no element observed in the settled scene carries it`,
         )
-      const set = deriveManeuvers(subgoal.params, scene)
+      const ledgerEntry = ledgerOf(current.nextSubgoal)
+      // NAMED STOP: a read whose ENTIRE strategy sequence is consumed ends here,
+      // naming the subgoal, the attribute, the predicate and the strategies tried —
+      // a repeat budget is unreachable for a read.
+      if (isReadSubgoal(subgoal) && ledgerEntry.consumed.length >= READ_STRATEGY_NAMES.length)
+        return readExhausted(subgoal, current.nextSubgoal, ledgerEntry)
+      const set = deriveManeuvers(subgoal.params, scene, ledgerEntry.consumed)
+      // ZERO APPLICABLE IS ITS OWN OUTCOME: nothing to offer ends HERE, naming the
+      // subgoal (and, for a read, the attribute it was for) — the decider is never
+      // consulted, so this can never be confused with a decider failure.
       if (set.options.length === 0) {
         offers.push({ subgoalIndex: current.nextSubgoal, kind: subgoal.kind, offered: [] })
-        return result(STATUS_NO_MANEUVER, set.reason ?? STATUS_NO_MANEUVER)
+        if (isReadSubgoal(subgoal) && ledgerEntry.attempts.length > 0)
+          return readExhausted(subgoal, current.nextSubgoal, ledgerEntry)
+        const attribute = readTokens(subgoal)
+        return result(
+          STATUS_NO_APPLICABLE,
+          `nothing-applicable: no maneuver can advance subgoal ${current.nextSubgoal} (${subgoal.kind})${
+            attribute.length > 0 ? ` for attribute "${attribute.join(", ")}"` : ""
+          }; ${set.reason ?? ""}`,
+        )
       }
       const eligible = deps.readOnly ? set.options.filter((option) => !deps.stateChanging(option, scene)) : set.options
       frontier = eligible.map((option) => option.label)
@@ -1515,14 +1892,25 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
         offers.push({ subgoalIndex: current.nextSubgoal, kind: subgoal.kind, offered: [] })
         return result(STATUS_READ_ONLY, "read-only goal: every derived maneuver mutates state")
       }
-      const choice = yield* deps.chooseManeuver(subgoal, eligible, scene)
+      // SINGLE-APPLICABLE: exactly ONE applicable maneuver is not a DECISION — it is
+      // the only thing the subgoal admits, so the loop TAKES it on applicability and
+      // never consults the decider (no fabricated strength/probability; provenance
+      // marks the path `single-applicable`). TWO OR MORE is a real choice: the
+      // decider is consulted EXACTLY ONCE, and only a verdict matching no offered
+      // label is an actual decider failure (`choice-unusable`).
+      const singleton = eligible.length === 1 ? eligible[0] : undefined
+      const choice: ManeuverChoice = singleton !== undefined ? {} : yield* deps.chooseManeuver(subgoal, eligible, scene)
       offers.push({
         subgoalIndex: current.nextSubgoal,
         kind: subgoal.kind,
         offered: eligible.map((option) => option.label),
-        ...(choice.label !== undefined ? { chosen: choice.label } : {}),
+        ...(singleton !== undefined
+          ? { chosen: singleton.label }
+          : choice.label !== undefined
+            ? { chosen: choice.label }
+            : {}),
       })
-      const option = eligible.find((entry) => entry.label === choice.label)
+      const option = singleton ?? eligible.find((entry) => entry.label === choice.label)
       // The decider returned a label that matches no offered maneuver. This is NOT
       // "nothing was offered" — record the raw choice + the offered set and stop with
       // a distinct status that names the unusable choice.
@@ -1555,13 +1943,9 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
             `state-changing maneuver below the gate floor (${choice.strength} < ${gateFloor}); nothing executed`,
           )
       }
-      // MANEUVER REPEAT BOUND: an identical deliberate maneuver re-issued past the
-      // bound stops the run rather than hammering (counted independently of any
-      // screen change a redirect keeps producing).
-      const key = `${option.name}\u0000${subgoal.params.value ?? subgoal.params.matching ?? ""}`
-      const repeat = maneuverRepeatStep(maneuverRepeat, key)
-      if (repeat.exceeded) return result(REASON_MANEUVER_REPEAT, `maneuver ${option.name} re-issued ${maneuverRepeat.runs}× unresolved`)
-      maneuverRepeat = repeat.next
+      // The OFFERED option carries the strategy; the loop never records it after
+      // the fact. Only a readiness strategy option is a "read attempt".
+      const readAttempt = isReadManeuver(option)
       const execution = yield* deps.execute(option, subgoal, scene)
       // SETTLE AFTER ACTION: the maneuver may have changed the page; wait for the
       // result to arrive (bounded) before judging it. The settle's observation
@@ -1569,12 +1953,27 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
       const post = yield* settle()
       const afterScene = post?.scene ?? scene
       history.push({
-        maneuver: key,
+        maneuver: `${option.name}${option.strategy !== undefined ? `\u0000${option.strategy}` : ""}`,
         scene: afterScene,
         subgoalIndex: current.nextSubgoal,
       })
       const after = measureProgress(plan, afterScene, history, post?.settled ?? false)
       lastProgress = after
+      // PROVENANCE: how selected, which path was entered, the predicate result and
+      // the evidence count — a path never reached is visible here, never inferred.
+      const provenance: AttemptProvenance = {
+        option: option.name,
+        ...(option.strategy !== undefined ? { strategy: option.strategy } : {}),
+        selection: singleton !== undefined ? "single-applicable" : "decider",
+        path: MANEUVER_REGISTRY[option.name].category,
+        predicate: after.perSubgoal[current.nextSubgoal]?.success ?? false,
+        evidence: execution.read?.length ?? 0,
+      }
+      ledgerEntry.attempts.push(provenance)
+      // CONSUME: an unsatisfied read attempt SPENDS its strategy, so the next offer
+      // set excludes it — an identical re-pick is impossible by construction.
+      if (readAttempt && option.strategy !== undefined && !provenance.predicate)
+        ledgerEntry.consumed.push(option.strategy)
       telemetry.push({
         planId: planId ?? "plan",
         subgoalIndex: current.nextSubgoal,
@@ -1585,13 +1984,20 @@ export function planLoop(deps: PlanLoopDeps): Effect.Effect<PlanLoopResult> {
         ...(execution.paste !== undefined ? { paste: execution.paste } : {}),
         ...(execution.navigate !== undefined ? { navigate: execution.navigate } : {}),
         ...(execution.scope !== undefined ? { scope: execution.scope } : {}),
+        ...(execution.read !== undefined ? { read: execution.read } : {}),
         ...(post !== undefined ? { settle: { observations: post.observations, settled: post.settled } } : {}),
         progress: {
           done: after.done,
           total: after.total,
           reasons: after.reason !== undefined ? [after.reason] : [],
         },
-        reason: execution.failure !== undefined ? `failed: ${execution.failure}` : "executed",
+        provenance,
+        // A READ THAT BOUND NOTHING IS A FAILED ATTEMPT, NEVER AN EXECUTED SUCCESS.
+        reason: execution.failure !== undefined
+          ? `failed: ${execution.failure}`
+          : readAttempt && (execution.unbound?.length ?? 0) > 0
+            ? `read-unbound: ${execution.unbound!.join(", ")}`
+            : "executed",
       })
       if (execution.failure !== undefined) return result("failed", execution.failure)
       if (post !== undefined && !post.settled)
@@ -2331,8 +2737,126 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
           // sub-sequence via executeSkill; the kinds with no skill yet
           // (open_item / activate / read_items / back) run as step sequences over
           // the SAME helpers (runClickRungs / keyPress / the observation).
-          const executeManeuver = (option: ManeuverOption, subgoal: PlanSubgoal): Effect.Effect<ManeuverExecution> =>
+          const executeManeuver = (
+            option: ManeuverOption,
+            subgoal: PlanSubgoal,
+          ): Effect.Effect<ManeuverExecution> =>
             Effect.gen(function* () {
+              // THE SHARED-RUNNER CLICK PATH — shared by the actuate maneuvers and by a
+              // skill option whose skill did not match (unchanged behavior). OPEN_ITEM /
+              // ACTIVATE / SELECT_OPTION: a click through the SHARED rung runner, aimed
+              // at the ACTUATOR — the element that carries the action, not merely the row
+              // that was named. ITEM SELECTION comes FIRST (prefer a structured
+              // row/cell/container with an activating descendant over a bare label
+              // match), then the actuator WITHIN it.
+              const actuate = (): Effect.Effect<ManeuverExecution> =>
+                Effect.gen(function* () {
+                  const candidates = option.targets
+                    .map((entry) => resolveTargetElement(entry.id))
+                    .filter((element): element is Element => element !== undefined)
+                  const selection = selectItem(candidates, lastElements)
+                  if (selection === undefined) return { deliveryModes: [], failure: "no resolvable maneuver target" }
+                  const named = selection.item
+                  // WINDOW+CONTAINER-SCOPED telemetry: the target, its clipped visible
+                  // rect and containment path, the actuator used, the container a reveal
+                  // was scoped to, the reveal route, the item-selection reason, the
+                  // authorization supplied, and the verification result.
+                  const scopeOf = (
+                    actuator: Element,
+                    elements: readonly Element[],
+                    attempts: readonly RevealAttempt[],
+                    lastResort: boolean,
+                  ): ActuationScope => {
+                    const vis = visibilityOf(actuator, elements)
+                    const verified = [...attempts].reverse().find((attempt) => attempt.verified !== undefined)
+                    const route = attempts[attempts.length - 1]?.route
+                    return {
+                      window: { pid: params.window.pid, window_id: params.window.window_id },
+                      target: named.element_token ?? option.targets[0]?.id ?? "target",
+                      actuator: actuator.element_token ?? actuator.role ?? "actuator",
+                      containment: ancestorChain(actuator, elements).map((ancestor) => ancestor.role ?? ""),
+                      ...(vis.visibleRect !== undefined ? { visibleRect: vis.visibleRect } : {}),
+                      ...(verified?.container !== undefined ? { container: verified.container } : {}),
+                      ...(route !== undefined ? { route } : {}),
+                      itemReason: selection.reason,
+                      ...(selection.weak ? { weak: true } : {}),
+                      ...(params.authorizeCoordinateClick === true ? { authorization: AUTHORIZATION_FLAG } : {}),
+                      ...(verified?.verified !== undefined ? { verified: verified.verified } : {}),
+                      ...(lastResort ? { lastResort: true } : {}),
+                    }
+                  }
+                  const target = selection.actuator
+                  // ENSURE-VISIBLE-BEFORE-ACT: reveal an off-screen actuator and click
+                  // from the POST-reveal observation, else stop with the distinct status.
+                  const reveal = yield* ensureVisible(
+                    (name, args) => callDriver(tools, name, args, ctx.abort),
+                    params.window,
+                    target,
+                    lastElements,
+                    lastSignature,
+                  )
+                  observations += reveal.observations
+                  if (!reveal.visible)
+                    return {
+                      deliveryModes: reveal.attempts.map((attempt) => attempt.mode),
+                      failure: revealFailure(reveal.attempts),
+                      scope: scopeOf(target, lastElements, reveal.attempts, selection.lastResort),
+                    }
+                  const binding = actuatorBinding(reveal.target, reveal.elements)
+                  const clickOn = binding.actuator
+                  const actionPlan = actuationPlan(clickOn, params.window, params.authorizeCoordinateClick === true)
+                  const fallback = reveal.signature
+                  const run = yield* runClickRungs(
+                    (name, args) => callDriver(tools, name, args, ctx.abort),
+                    params.window,
+                    clickOn,
+                    actionPlan,
+                    clickSignals(fallback, clickOn, reveal.elements),
+                    fallback,
+                  )
+                  observations += run.observations
+                  executed++
+                  return {
+                    // EVERY attempted rung is recorded, never only the delivered/last
+                    // one — the live `modes=[declared]` lie hid the un-tried modes.
+                    deliveryModes: run.attempts.map((attempt) => attempt.mode),
+                    ...(run.outcome.worked ? {} : { failure: clickFailure(run.attempts) }),
+                    scope: scopeOf(clickOn, reveal.elements, reveal.attempts, binding.lastResort),
+                  }
+                })
+              // EXHAUSTIVE DISPATCH over the SHARED registry name: a name the deriver
+              // emits but this switch cannot route is a compile error (`never` default),
+              // never a silent fall-through. No literal string comparison gates a path.
+              switch (option.name) {
+                // READS ARE OBSERVATIONS: a read resolves its target from the CURRENT
+                // observation and takes the text from the accessibility tree — no click,
+                // no actuation rung and no delivery requirement. It never enters the
+                // skill/click path, so it can never walk the click ladder. The STRATEGY
+                // comes from the OFFERED option (the loop's depleting ledger).
+                case "read_items":
+                case "read_text": {
+                const read = yield* runReadManeuver(
+                  (name, args) => callDriver(tools, name, args, ctx.abort),
+                  params.window,
+                  readTokens(subgoal),
+                  option.strategy,
+                )
+                observations += read.calls.length
+                return {
+                  deliveryModes: ["read"],
+                  ...(read.evidence.length > 0
+                    ? { read: read.evidence }
+                    : read.unbound.length > 0
+                      ? { unbound: read.unbound }
+                      : {}),
+                }
+              }
+              case "go_to_url":
+              case "type_into":
+              case "search_within":
+              case "scroll_to":
+              case "switch_window_or_tab":
+              case "dismiss_dialog": {
               // The maneuver was DERIVED from the subgoal's own value; the skill
               // must be matched with that SAME value, never a re-extraction that
               // can disagree (the goal-value extraction is scheme-limited, so a
@@ -2340,28 +2864,26 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               // bare address-bar CLICK with no consumer to defer to).
               const matches = matchSkills(lastElements, subgoal.params.value ?? extractGoalValue(goal))
               const skillMatch = matches.find((match) => match.skill.name === option.name)
-              if (skillMatch !== undefined) {
-                const execution = yield* executeSkill(skillMatch, lastSignature, lastElements)
-                observations += execution.observations
-                executed += execution.substeps.length
-                const navigateStep = execution.substeps.find((sub) => sub.arrival !== undefined)
-                return {
-                  deliveryModes: execution.substeps.map((sub) => sub.mode),
-                  ...(navigateStep?.arrival !== undefined && subgoal.params.value !== undefined
-                    ? {
-                        navigate: {
-                          requested: subgoal.params.value,
-                          ...(navigateStep.arrival.landedUrl !== undefined
-                            ? { landed: navigateStep.arrival.landedUrl }
-                            : {}),
-                        },
-                      }
-                    : {}),
-                  ...(execution.failure !== undefined ? { failure: execution.failure } : {}),
-                }
+              if (skillMatch === undefined) return yield* actuate()
+              const execution = yield* executeSkill(skillMatch, lastSignature, lastElements)
+              observations += execution.observations
+              executed += execution.substeps.length
+              const navigateStep = execution.substeps.find((sub) => sub.arrival !== undefined)
+              return {
+                deliveryModes: execution.substeps.map((sub) => sub.mode),
+                ...(navigateStep?.arrival !== undefined && subgoal.params.value !== undefined
+                  ? {
+                      navigate: {
+                        requested: subgoal.params.value,
+                        ...(navigateStep.arrival.landedUrl !== undefined
+                          ? { landed: navigateStep.arrival.landedUrl }
+                          : {}),
+                      },
+                    }
+                  : {}),
+                ...(execution.failure !== undefined ? { failure: execution.failure } : {}),
               }
-              // READ_ITEMS: no actuation — the observation IS the result.
-              if (option.name === "read_items") return { deliveryModes: ["read"] }
+              }
               // OPEN_APP: launch or activate the application the goal named. The app
               // name comes from the subgoal (never invented in the executor). The
               // driver's launch interface declares these argument names — the source
@@ -2374,7 +2896,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
               //    bundle_id, creates_new_application_instance, name, urls,
               //    webkit_inspector_port".
               // hardcode-guard:allow the accepted-argument list and error are the driver's declared interface under repair
-              if (option.name === "open_app") {
+              case "open_app": {
                 const app = subgoal.params.value ?? extractGoalValue(goal)
                 if (app === undefined || app.length === 0) return { deliveryModes: [], failure: "open_app named no application" }
                 const opened = yield* callDriver(tools, "cua-driver_launch_app", launchAppArgs(app), ctx.abort)
@@ -2383,7 +2905,7 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 return { deliveryModes: ["declared"] }
               }
               // BACK: the navigation-chrome affordance — one Escape key event.
-              if (option.name === "back") {
+              case "back": {
                 const args = keyPress("escape", params.window, [])
                 const pressed = yield* callDriver(tools, "cua-driver_press_key", args, ctx.abort)
                 observations++
@@ -2401,82 +2923,15 @@ export const UiRunTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
                 if (!pressed.ok) return { deliveryModes: ["key"], failure: pressed.error }
                 return { deliveryModes: ["key"] }
               }
-              // OPEN_ITEM / ACTIVATE / SELECT_OPTION: a click through the SHARED
-              // rung runner, aimed at the ACTUATOR — the element that carries the
-              // action, not merely the row that was named. ITEM SELECTION comes
-              // FIRST (prefer a structured row/cell/container with an activating
-              // descendant over a bare label match), then the actuator WITHIN it.
-              const candidates = option.targets
-                .map((entry) => resolveTargetElement(entry.id))
-                .filter((element): element is Element => element !== undefined)
-              const selection = selectItem(candidates, lastElements)
-              if (selection === undefined) return { deliveryModes: [], failure: "no resolvable maneuver target" }
-              const named = selection.item
-              // WINDOW+CONTAINER-SCOPED telemetry: the target, its clipped visible
-              // rect and containment path, the actuator used, the container a reveal
-              // was scoped to, the reveal route, the item-selection reason, the
-              // authorization supplied, and the verification result.
-              const scopeOf = (
-                actuator: Element,
-                elements: readonly Element[],
-                attempts: readonly RevealAttempt[],
-                lastResort: boolean,
-              ): ActuationScope => {
-                const vis = visibilityOf(actuator, elements)
-                const verified = [...attempts].reverse().find((attempt) => attempt.verified !== undefined)
-                const route = attempts[attempts.length - 1]?.route
-                return {
-                  window: { pid: params.window.pid, window_id: params.window.window_id },
-                  target: named.element_token ?? option.targets[0]?.id ?? "target",
-                  actuator: actuator.element_token ?? actuator.role ?? "actuator",
-                  containment: ancestorChain(actuator, elements).map((ancestor) => ancestor.role ?? ""),
-                  ...(vis.visibleRect !== undefined ? { visibleRect: vis.visibleRect } : {}),
-                  ...(verified?.container !== undefined ? { container: verified.container } : {}),
-                  ...(route !== undefined ? { route } : {}),
-                  itemReason: selection.reason,
-                  ...(selection.weak ? { weak: true } : {}),
-                  ...(params.authorizeCoordinateClick === true ? { authorization: AUTHORIZATION_FLAG } : {}),
-                  ...(verified?.verified !== undefined ? { verified: verified.verified } : {}),
-                  ...(lastResort ? { lastResort: true } : {}),
-                }
+              // OPEN_ITEM / ACTIVATE / SELECT_OPTION: the shared-rung click path.
+              case "open_item":
+              case "activate":
+              case "select_option":
+                return yield* actuate()
+              default: {
+                const unhandled: never = option.name
+                return { deliveryModes: [], failure: `unhandled maneuver ${String(unhandled)}` }
               }
-              const target = selection.actuator
-              // ENSURE-VISIBLE-BEFORE-ACT: reveal an off-screen actuator and click
-              // from the POST-reveal observation, else stop with the distinct status.
-              const reveal = yield* ensureVisible(
-                (name, args) => callDriver(tools, name, args, ctx.abort),
-                params.window,
-                target,
-                lastElements,
-                lastSignature,
-              )
-              observations += reveal.observations
-              if (!reveal.visible)
-                return {
-                  deliveryModes: reveal.attempts.map((attempt) => attempt.mode),
-                  failure: revealFailure(reveal.attempts),
-                  scope: scopeOf(target, lastElements, reveal.attempts, selection.lastResort),
-                }
-              const binding = actuatorBinding(reveal.target, reveal.elements)
-              const clickOn = binding.actuator
-              const plan = actuationPlan(clickOn, params.window, params.authorizeCoordinateClick === true)
-              const fallback = reveal.signature
-              const run = yield* runClickRungs(
-                (name, args) => callDriver(tools, name, args, ctx.abort),
-                params.window,
-                clickOn,
-                plan,
-                clickSignals(fallback, clickOn, reveal.elements),
-                fallback,
-              )
-              observations += run.observations
-              executed++
-              return {
-                // EVERY attempted rung is recorded, never only the delivered/last
-                // one — the live `modes=[declared]` lie hid the un-tried modes.
-                deliveryModes: run.attempts.map((attempt) => attempt.mode),
-                ...(run.outcome.worked ? {} : { failure: clickFailure(run.attempts) }),
-                scope: scopeOf(clickOn, reveal.elements, reveal.attempts, binding.lastResort),
               }
             })
 

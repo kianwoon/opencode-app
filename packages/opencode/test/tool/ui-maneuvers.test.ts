@@ -3,7 +3,13 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { decodeObservation, type Element } from "@/tool/ui-eyes"
 import { buildScene } from "@/tool/ui-scene"
-import { MAX_OPTIONS, deriveManeuvers, type ManeuverOption, type Subgoal } from "@/tool/ui-maneuvers"
+import {
+  MAX_OPTIONS,
+  assertDistinctOptionLabels,
+  deriveManeuvers,
+  type ManeuverOption,
+  type Subgoal,
+} from "@/tool/ui-maneuvers"
 import type { Scene, SceneItem } from "@/tool/ui-scene"
 
 const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
@@ -227,6 +233,91 @@ describe("ui-maneuvers — (a) reads are offered over observed labelled elements
   test("(a) with no matching token the pane's labelled elements are still readable", () => {
     const set = deriveManeuvers({ kind: "read_items", count: 3 }, pane())
     expect(set.options.some((entry) => entry.name === READ_ITEMS)).toBe(true)
+  })
+})
+
+// GENERALIZATION — INVARIANT: no two options offered together for one subgoal may
+// share a label — the decider matches an option BY LABEL, so a collision is a
+// degenerate, undecidable choice space and must fail LOUDLY. LIVE INSTANCE: the read
+// offer set degenerated into three near-duplicate `read_text [strategy]` labels.
+// UNSEEN INPUT: any future maneuver pair that would emit the same label throws here.
+describe("ui-maneuvers — (c) the option space is label-distinct or it fails loudly", () => {
+  test("(c) a colliding offer set throws rather than offering an unusable choice", () => {
+    const option = (label: string): ManeuverOption => ({
+      name: "read_text",
+      label,
+      targets: [],
+      preconditions: [],
+      success: { predicate: "readFound", detail: "x" },
+      inputs: [],
+    })
+    expect(() => assertDistinctOptionLabels([option("same"), option("same")])).toThrow(/label-distinct/)
+    expect(() => assertDistinctOptionLabels([option("a"), option("b")])).not.toThrow()
+  })
+})
+
+// GENERALIZATION — INVARIANT (locate, then navigate): a navigation candidate is a row
+// that LEADS to the target — its own label carries the token, or its SUBTREE does.
+// Position in the offered list is never a reason to activate anything, and a target no
+// row leads to is NOT navigated to blindly.
+// hardcode-guard:allow the fixture row labels are the enumerable navigation inputs under test
+describe("ui-maneuvers — (a) locate, then navigate: only a row that leads to the target", () => {
+  const row = (
+    label: string,
+    nested?: { readonly element_index: number; readonly parent_index?: number },
+  ): SceneItem => ({
+    id: label,
+    role: nested?.parent_index === undefined ? "AXRow" : "AXStaticText",
+    label,
+    affordances: nested?.parent_index === undefined ? ["activatable"] : ["readonly"],
+    stateChanging: false,
+    enabled: true,
+    element: { element_token: `t:${label}`, role: "AXRow", label, ...(nested ?? {}) },
+  })
+  const navScene = (items: SceneItem[]): Scene => ({
+    snapshot: "s-nav",
+    // only TOP-LEVEL rows are listed navigation rows — a nested child belongs to a
+    // row's own subtree, it is not a row of the surface
+    regions: [
+      {
+        id: "r0:list",
+        kind: "list",
+        itemIds: items.filter((item) => item.element.parent_index === undefined).map((item) => item.id),
+        textIds: [],
+      },
+    ],
+    items,
+    texts: [],
+  })
+
+  test("(a) run #9 REGRESSION: with NO row leading to the target, nothing is offered to activate", () => {
+    // The recorded live run took the FIRST listed row (`listed.slice(0, count)`) and the
+    // surface went Accessibility -> VoiceOver while the target sat nowhere near it.
+    const set = deriveManeuvers(
+      { kind: "open_item", matching: "About", selectable: true },
+      navScene([row("Wi-Fi"), row("Accessibility"), row("General")]),
+    )
+    expect(set.options.some((entry) => entry.name === "open_item")).toBe(false)
+    expect(set.options.some((entry) => entry.name === "activate")).toBe(false)
+    expect(set.options.some((entry) => entry.name === "open_app")).toBe(false)
+  })
+
+  test("(a) a row whose SUBTREE carries the target is the candidate — and the path is measured", () => {
+    // The real app keeps About INSIDE the General group, so General is what leads there.
+    const set = deriveManeuvers(
+      { kind: "open_item", matching: "About", selectable: true },
+      navScene([
+        row("Wi-Fi"),
+        row("General", { element_index: 2 }),
+        row("About", { element_index: 9, parent_index: 2 }),
+      ]),
+    )
+    const open = set.options.find((entry) => entry.name === "open_item")
+    expect(open).toBeDefined()
+    expect(open?.targets.map((target) => target.label)).toEqual(["General"])
+    const path = open?.preconditions.find((entry) => entry.name === "navigable-path-present")
+    expect(path?.met).toBe(true)
+    expect(set.options.some((entry) => entry.name === "open_app")).toBe(false)
   })
 })
 

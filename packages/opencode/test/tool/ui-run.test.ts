@@ -17,13 +17,13 @@ import {
   FOCUS_CONSUMER_KINDS,
   FRONTIER_HARD_MAX,
   GATE_FLOOR,
-  MAX_MANEUVER_REPEATS,
   OFF_VIEWPORT,
   Parameters,
   REVEAL_BUDGET,
   STATUS_UNSETTLED,
   STATUS_UNREADABLE,
   STATUS_UNUSABLE_CHOICE,
+  STATUS_NO_APPLICABLE,
   UiRunTool,
   actuatorBinding,
   actuatorOf,
@@ -35,18 +35,22 @@ import {
   ensureVisible,
   extractGoalValue,
   focusConsumerAhead,
-  initialManeuverRepeat,
   isDestructive,
   loginWall,
-  maneuverRepeatStep,
   minePlan,
   mineTrace,
   needsForegroundDelivery,
   nextAmbiguity,
   normalizeExpect,
+  isReadManeuver,
   planLoop,
   planSummary,
+  READ_STRATEGIES,
+  readEvidence,
+  readTokens,
+  resolveRead,
   resolveTarget,
+  runReadManeuver,
   revealFailure,
   runClickRungs,
   runTypeDelivery,
@@ -61,7 +65,7 @@ import {
   type PlanLoopTelemetry,
   type StepTrace,
 } from "@/tool/ui-run"
-import type { ManeuverOption } from "@/tool/ui-maneuvers"
+import { MANEUVER_NAMES, READ_STRATEGY_NAMES, type ManeuverName, type ManeuverOption } from "@/tool/ui-maneuvers"
 import type { Progress } from "@/tool/ui-progress"
 import type { Scene, SceneItem, SceneRegion, SceneText } from "@/tool/ui-scene"
 import { affordancesOf } from "@/tool/ui-scene"
@@ -1075,45 +1079,20 @@ describe("executeSkill — clipboard paste wiring", () => {
   })
 })
 
-// GENERALIZATION — INVARIANT: a repeated DELIBERATE maneuver is not progress even
-// when the screen changes. The live go_to_url re-issued 3-4× because a same-host
-// redirect kept changing the screen (resetting the no-op bound) is ONE instance.
-// An unseen case it covers: any maneuver (dismiss/scroll/search) that keeps
-// "succeeding" without resolving — the SAME bound stops it, no loop change.
-// hardcode-guard:allow the maneuver vocabulary is the loop's own contract under test
-describe("maneuver-repeat bound", () => {
-  test("(b) MAX_MANEUVER_REPEATS + 1 identical issues run; the next is refused, not a fourth", () => {
-    const key = "go_to_url\u0000https://www.linkedin.com/messaging/"
-    let state = initialManeuverRepeat()
-    const runs: number[] = []
-    const exceeded: boolean[] = []
-    for (let i = 0; i < 5; i++) {
-      const step = maneuverRepeatStep(state, key)
-      state = step.next
-      runs.push(step.runs)
-      exceeded.push(step.exceeded)
-    }
-    expect(runs.slice(0, 3)).toEqual([1, 2, 3])
-    expect(exceeded.slice(0, 3)).toEqual([false, false, false])
-    expect(exceeded[3]).toBe(true)
-    expect(MAX_MANEUVER_REPEATS).toBe(2)
-  })
-
-  test("(b) a DIFFERENT maneuver resets the count", () => {
-    const a = "go_to_url\u0000https://a.test/"
-    const b = "dismiss_dialog\u0000"
-    let state = initialManeuverRepeat()
-    state = maneuverRepeatStep(state, a).next
-    state = maneuverRepeatStep(state, a).next
-    const switched = maneuverRepeatStep(state, b)
-    expect(switched.runs).toBe(1)
-    expect(switched.exceeded).toBe(false)
-  })
-
-  test("(b) the loop stops with maneuver-repeat-limit and records the chain", async () => {
+// GENERALIZATION — INVARIANT: the maneuver-name-keyed repeat counter is DELETED.
+// A repeated maneuver is made impossible by construction (depleting offers), not
+// bounded by a counter. The live read_text re-issued identically 3× then stopped
+// on maneuver-repeat-limit is the instance this closes; an unseen case it covers:
+// any maneuver whose option is consumed is no longer offered, so it cannot re-pick.
+// hardcode-guard:allow the deleted-counter vocabulary is the contract under test
+describe("maneuver-repeat counter is deleted", () => {
+  test("(d) no maneuver-name-keyed repeat counter remains in the source", async () => {
     const src = await Bun.file(path.join(import.meta.dir, "..", "..", "src", "tool", "ui-run.ts")).text()
-    expect(src.includes("maneuverRepeatStep(")).toBe(true)
-    expect(src.includes('"maneuver-repeat-limit"')).toBe(true)
+    expect(src.includes("maneuverRepeatStep(")).toBe(false)
+    expect(src.includes("maneuverRepeatStep")).toBe(false)
+    expect(src.includes("MAX_MANEUVER_REPEATS")).toBe(false)
+    expect(src.includes("ManeuverRepeatState")).toBe(false)
+    expect(src.includes('"maneuver-repeat-limit"')).toBe(false)
   })
 })
 
@@ -1441,7 +1420,7 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
 
   test("(e) the boundary generalises: an activating maneuver over an unseen irreversible label stops, a read over it does not", () => {
     const scene: Scene = { snapshot: "s", regions: [], items: [row("Unsubscribe"), row("Details")], texts: [] }
-    const option = (name: string, target: SceneItem): ManeuverOption => ({
+    const option = (name: ManeuverName, target: SceneItem): ManeuverOption => ({
       name,
       label: `${name}: x`,
       targets: [{ kind: "item", id: target.id, role: target.role, label: target.label }],
@@ -1564,9 +1543,11 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
   })
 
   test("(d) oscillation drives a bounded replan to a distinct stop reason", async () => {
-    const toolbar = (snapshot: string): SceneRegion => ({ id: `${snapshot}:toolbar`, kind: "toolbar", itemIds: [], textIds: [] })
-    const a = listScene(["m1"], "s-a", [toolbar("s-a")])
-    const b = listScene(["m1"], "s-b", [toolbar("s-b")])
+    // A genuine A↔B oscillation is a WORLD-MODEL diff (item content), not a region-id
+    // change: region ids are snapshot-scoped and never part of the Scene fingerprint,
+    // so a region-only difference is not an oscillation at all.
+    const a = listScene(["alpha"], "s-a")
+    const b = listScene(["beta"], "s-b")
     const views = [a, b]
     let index = 0
     const result = await Effect.runPromise(
@@ -1584,10 +1565,11 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
         }),
       ),
     )
-    // bounded replan: the run never reports the goal completed and stops on a
-    // distinct no-progress reason, not on jev's say-so.
+    // bounded replan: the run never reports the goal completed and stops on the
+    // distinct oscillation reason that survives the deleted repeat bound.
     expect(result.status).not.toBe("completed")
-    expect(["scene-oscillation", "maneuver-repeat-limit", "no-maneuver"]).toContain(result.status)
+    expect(result.status).toBe("scene-oscillation")
+    expect(result.reason).toBe("scene-oscillation")
     expect(result.telemetry.length).toBeGreaterThan(0)
   })
 
@@ -1633,10 +1615,12 @@ describe("ui_run — plan loop (plan-driven execution over one executor)", () =>
   })
 
   // hardcode-guard:allow the empty scene is the unadvanceable shape under test
-  test("(d) a subgoal whose option space is empty stops with the distinct no-maneuver status + reason", async () => {
+  test("(c) a subgoal whose option space is empty stops with the distinct nothing-applicable outcome, never the decider-failure stop", async () => {
     const empty: Scene = { snapshot: "s-empty", regions: [], items: [], texts: [] }
     const result = await Effect.runPromise(planLoop(base({ observe: () => Effect.succeed(empty) })))
-    expect(result.status).toBe("no-maneuver")
+    expect(result.status).toBe(STATUS_NO_APPLICABLE)
+    expect(result.status).not.toBe(STATUS_UNUSABLE_CHOICE)
+    expect(result.reason).toContain("nothing-applicable")
     expect(result.reason).toContain("no maneuver can advance subgoal")
     expect(result.telemetry).toHaveLength(0)
   })
@@ -1805,6 +1789,7 @@ describe("ui_run — plan telemetry in the returned summary, and mining over it"
     label: `${over.maneuver}: a maneuver`,
     deliveryModes: ["read"],
     progress: { done: 1, total: 3, reasons: [] },
+    provenance: { option: "read_items", selection: "decider", path: "read", predicate: true, evidence: 1 },
     reason: "executed",
     ...over,
   })
@@ -2989,6 +2974,116 @@ describe("ui_run — a report goal over a reached surface reads its named attrib
     expect(executed).toContain("open_item")
   })
 
+  // hardcode-guard:allow the live goal and its pane names are the inputs under repair
+  const accessibilityPane = (): Scene => ({
+    snapshot: "s-accessibility",
+    regions: [
+      { id: "s:list", kind: "list", itemIds: ["Wi-Fi", "Accessibility", "General", "Wallpaper"], textIds: [] },
+      { id: "s:content", kind: "content", itemIds: [], textIds: ["s:head"] },
+    ],
+    items: [
+      row("Wi-Fi", "Wi-Fi", { element_token: "t:wifi", role: "AXRow", label: "Wi-Fi" }),
+      row("Accessibility", "Accessibility", { element_token: "t:acc", role: "AXRow", label: "Accessibility" }),
+      row("General", "General", { element_token: "t:gen", role: "AXRow", label: "General", element_index: 2 }),
+      row("Wallpaper", "Wallpaper", { element_token: "t:wall", role: "AXRow", label: "Wallpaper" }),
+      // hardcode-guard:allow fixture row labels are the enumerable navigation inputs under repair
+      // The observed app keeps the target INSIDE a group row, so that row LEADS to it: the
+      // path exists in the structure, never in list position.
+      row("About", "About", {
+        element_token: "t:about",
+        role: "AXStaticText",
+        label: "About",
+        element_index: 9,
+        parent_index: 2,
+      }),
+    ],
+    texts: [
+      { id: "s:head", role: "AXHeading", text: "Accessibility", owner: "s:content", element: { element_token: "t:head", role: "AXHeading", label: "Accessibility" } },
+    ],
+  })
+
+  test("(a) LIVE DEFECT REPLAY: a pane of the frontmost app is navigated INSIDE the app, never launched", async () => {
+    // THE RECORDED RUN (verbatim): the frontmost app (System Settings) showed a
+    // DIFFERENT pane ("Accessibility") while the goal named "About". The whole plan
+    // collapsed to ONE option `open_app: launch or activate "About"`, taken on
+    // `selection: "single-applicable"` (decider deliberately not consulted), entered
+    // path `open_app`, predicate false, evidence 0, and failed
+    // `failed: launch_app failed: No installed macOS app found for name 'About'.`
+    // "About" is a PANE of the same app, reachable inside it — NOT an application.
+    let observed: Scene = accessibilityPane()
+    const executed: string[] = []
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "open the About pane and report the macOS version, chip and total memory",
+        observe: () => Effect.succeed(observed),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: (option) => {
+          executed.push(option.name)
+          if (option.name === "open_item") observed = aboutPane()
+          return Effect.succeed({ deliveryModes: ["read"] })
+        },
+        stateChanging: () => false,
+        readOnly: false,
+        maxSteps: 8,
+      }),
+    )
+    // NO application-launch option is offered for the target's name; the loop
+    // proceeds by navigating inside the app and then reads the attribute values.
+    expect((result.offers ?? []).every((offer) => offer.offered.every((label) => !label.startsWith("open_app")))).toBe(
+      true,
+    )
+    expect(executed).not.toContain("open_app")
+    expect(executed).toContain("open_item")
+    expect(result.status).toBe("completed")
+    expect((result.evidence ?? []).join(" | ")).toContain("Apple M3 Max")
+  })
+
+  // hardcode-guard:allow the fixture row labels are the enumerable navigation inputs under repair
+  test("(a) LIVE REGRESSION: when NO row leads to the target, nothing is activated at all", async () => {
+    // THE RECORDED LIVE RUN (verbatim): the frontmost app showed a DIFFERENT pane and the
+    // loop activated the FIRST listed row — the surface went Accessibility -> VoiceOver —
+    // because the deriver targeted `listed.slice(0, count)` without checking that any row
+    // led to the goal's target, which the tree did not hold anywhere.
+    const rowsOnly = (): Scene => ({
+      snapshot: "s-rows-only",
+      regions: [
+        { id: "s:list", kind: "list", itemIds: ["Wi-Fi", "Accessibility", "General", "Wallpaper"], textIds: [] },
+      ],
+      items: [
+        row("Wi-Fi", "Wi-Fi", { element_token: "t:wifi", role: "AXRow", label: "Wi-Fi" }),
+        row("Accessibility", "Accessibility", { element_token: "t:acc", role: "AXRow", label: "Accessibility" }),
+        row("General", "General", { element_token: "t:gen", role: "AXRow", label: "General" }),
+        row("Wallpaper", "Wallpaper", { element_token: "t:wall", role: "AXRow", label: "Wallpaper" }),
+      ],
+      texts: [],
+    })
+    const executed: string[] = []
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "open the About pane and report the macOS version, chip and total memory",
+        observe: () => Effect.succeed(rowsOnly()),
+        choosePlan: () => Effect.succeed(undefined),
+        // even a decider that would pick the first option must not be able to select an actuation
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: (option) => {
+          executed.push(option.name)
+          return Effect.succeed({ deliveryModes: ["declared"] })
+        },
+        stateChanging: () => false,
+        readOnly: false,
+        maxSteps: 8,
+      }),
+    )
+    // NO blind navigation: no row is activated, no launch is attempted, and the run does
+    // not report success.
+    expect(executed.filter((name) => name === "open_item" || name === "activate" || name === "open_app")).toEqual([])
+    const firstOffers = (result.offers ?? [])[0]?.offered ?? []
+    expect(firstOffers.some((label) => label.startsWith("open_item"))).toBe(false)
+    expect(firstOffers.some((label) => label.startsWith("open_app"))).toBe(false)
+    expect(result.status).not.toBe("completed")
+  })
+
   test("(b) each subgoal attempt records the maneuver set it was offered, in order", async () => {
     const urlText = (text: string): SceneText => ({
       id: "u",
@@ -3070,7 +3165,7 @@ describe("ui_run — a report goal over a reached surface reads its named attrib
     expect(result.status).toBe(STATUS_UNREADABLE)
     expect(result.reason).toContain("chartreuse")
     expect(result.status).not.toBe("no-choice")
-    expect(result.status).not.toBe("no-maneuver")
+    expect(result.status).not.toBe(STATUS_NO_APPLICABLE)
 
     // the SAME distinct outcome is NOT taken when the target IS present
     // hardcode-guard:allow the synthetic label is the unseen-input target token under test, not a named case
@@ -3134,10 +3229,386 @@ describe("ui_run — a report goal over a reached surface reads its named attrib
         maxSteps: 4,
       }),
     )
-    // genuinely nothing offered → no-maneuver (NOT choice-unusable), and the empty
-    // offered set is still recorded so the two stops are distinguishable.
-    expect(nothing.status).toBe("no-maneuver")
+    // genuinely nothing applicable → nothing-applicable (NOT choice-unusable), and
+    // the empty offered set is still recorded so the two stops are distinguishable.
+    expect(nothing.status).toBe(STATUS_NO_APPLICABLE)
     expect((nothing.offers ?? [])[0]?.offered).toEqual([])
+  })
+})
+
+// GENERALIZATION — INVARIANT: a READ is an OBSERVATION. It resolves its target from
+// the CURRENT observation and takes the text straight from the accessibility tree
+// (the element's own label/value/displayed text) — no click, no scroll, no pixel and
+// no delivery requirement. It never walks the click ladder, and "no effect" can
+// never fail a read; pixel/OCR is a last resort, taken only with a FRESH capture.
+// LIVE INSTANCE (verbatim): pid 24372 / window 3041 — the About pane exposed
+// "Apple M3 Max", "128 GB", "macOS Golden Gate" and "Version 27.2 Beta (26B5112a)"
+// as plain AXStaticText; the read subgoal's `read_text` option walked the click
+// ladder and failed "click undelivered on every rung ... No screenshot frame for
+// window 3041". UNSEEN INPUTS: a value exposed as a standalone static text with no
+// list region; and a read whose text is only reachable through a fresh capture.
+// hardcode-guard:allow the live pane text and window id are the inputs under repair
+describe("ui_run — a read is an observation, never an actuation", () => {
+  const win = { pid: 24372, window_id: 3041 }
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s-about",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      value: element.value,
+      frame: element.frame,
+    })),
+  })
+  const staticText = (
+    token: string,
+    text: string,
+    rect: { x: number; y: number; width: number; height: number },
+  ): Element => ({ element_token: token, role: "AXStaticText", label: text, frame: rect })
+  const aboutPane = (): readonly Element[] => [
+    staticText("s00000294", "Apple M3 Max", { x: 5911, y: 51, width: 411, height: 52 }),
+    staticText("s00000295", "128 GB", { x: 5911, y: 110, width: 411, height: 24 }),
+    staticText("s00000296", "macOS Golden Gate", { x: 5911, y: 140, width: 411, height: 24 }),
+    staticText("s00000297", "Version 27.2 Beta (26B5112a)", { x: 5911, y: 170, width: 411, height: 24 }),
+  ]
+  const makeDriver = (observations: readonly unknown[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      const next = observations[calls.length - 1]
+      return Effect.succeed(
+        next === undefined
+          ? { ok: false, error: "unscripted" }
+          : { ok: true, result: { content: [], structuredContent: next } },
+      )
+    }
+    return { call, calls }
+  }
+
+  test("(a) a settled pane's static text yields evidence for each named attribute with ZERO actuation calls", async () => {
+    const driver = makeDriver([wire(aboutPane())])
+    const run = await Effect.runPromise(runReadManeuver(driver.call, win, ["apple", "128", "macos", "26b5112a"]))
+    const cited = run.evidence.map((entry) => entry.text).join(" | ")
+    expect(cited).toContain("Apple M3 Max")
+    expect(cited).toContain("128 GB")
+    expect(cited).toContain("macOS Golden Gate")
+    expect(cited).toContain("Version 27.2 Beta (26B5112a)")
+    // the evidence carries the element's identity + geometry, taken from the tree
+    const chip = run.evidence.find((entry) => entry.text === "Apple M3 Max")!
+    expect(chip.identity).toBe("s00000294")
+    expect(chip.role).toBe("AXStaticText")
+    expect(chip.rect).toEqual({ x: 5911, y: 51, width: 411, height: 52 })
+    // ZERO actuation: every driver call is an observation, never a click/scroll/pixel
+    expect(driver.calls.every((entry) => entry.name === "cua-driver_get_window_state")).toBe(true)
+    expect(run.captured).toBe(false)
+  })
+
+  test("(b) a value absent from the tree takes the CAPTURE path only after a fresh capture", async () => {
+    const treeLacks = [staticText("s00000294", "Apple M3 Max", { x: 5911, y: 51, width: 411, height: 52 })]
+    const captured = [staticText("s00000296", "Version 27.2 Beta (26B5112a)", { x: 4500, y: 400, width: 300, height: 24 })]
+    const driver = makeDriver([wire(treeLacks), wire(captured)])
+    const run = await Effect.runPromise(runReadManeuver(driver.call, win, ["26b5112a"]))
+    // the first call is the cheap tree read; the second ESTABLISHES a fresh frame
+    expect(driver.calls.map((entry) => entry.name)).toEqual([
+      "cua-driver_get_window_state",
+      "cua-driver_get_window_state",
+    ])
+    expect(driver.calls[0]!.args).toMatchObject({ include_screenshot: false })
+    expect(driver.calls[1]!.args).toMatchObject({ include_screenshot: true })
+    expect(run.captured).toBe(true)
+    // geometry derives from the NEW capture, never the stale frame
+    expect(run.evidence[0]!.text).toBe("Version 27.2 Beta (26B5112a)")
+    expect(run.evidence[0]!.rect).toEqual({ x: 4500, y: 400, width: 300, height: 24 })
+    expect(driver.calls.every((entry) => entry.name === "cua-driver_get_window_state")).toBe(true)
+  })
+
+  test("(c) a read with no matching tree text still returns as a read — never a click failure", async () => {
+    const driver = makeDriver([wire(aboutPane()), wire(aboutPane())])
+    const run = await Effect.runPromise(runReadManeuver(driver.call, win, ["chartreuse-token"]))
+    expect(run.evidence).toEqual([])
+    // the fallback capture ran, but NO click/scroll/pixel was ever issued
+    expect(driver.calls.every((entry) => entry.name === "cua-driver_get_window_state")).toBe(true)
+  })
+
+  test("(a) read maneuvers are reads; open/activate/navigate are not", () => {
+    expect(isReadManeuver({ name: "read_items" } as ManeuverOption)).toBe(true)
+    expect(isReadManeuver({ name: "read_text" } as ManeuverOption)).toBe(true)
+    expect(isReadManeuver({ name: "open_item" } as ManeuverOption)).toBe(false)
+    expect(isReadManeuver({ name: "activate" } as ManeuverOption)).toBe(false)
+    expect(isReadManeuver({ name: "go_to_url" } as ManeuverOption)).toBe(false)
+  })
+
+  test("(a) a report goal over a settled static-text pane completes with the cited values", async () => {
+    const cell = (id: string, text: string, token: string): SceneText => ({
+      id,
+      role: "AXStaticText",
+      text,
+      owner: "a:detail",
+      element: { element_token: token, role: "AXStaticText", label: text },
+    })
+    const scene: Scene = {
+      snapshot: "s-about",
+      regions: [{ id: "a:detail", kind: "detail", itemIds: [], textIds: ["t1", "t2", "t3", "t4"] }],
+      items: [],
+      texts: [
+        cell("t1", "Apple M3 Max", "s00000294"),
+        cell("t2", "128 GB", "s00000295"),
+        cell("t3", "macOS Golden Gate", "s00000296"),
+        cell("t4", "Version 27.2 Beta (26B5112a)", "s00000297"),
+      ],
+    }
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "report the Apple M3 Max and 128 GB",
+        observe: () => Effect.succeed(scene),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => Effect.succeed({ label: options[0]?.label }),
+        execute: () => Effect.succeed({ deliveryModes: [] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 6,
+      }),
+    )
+    expect(result.status).toBe("completed")
+    const cited = (result.evidence ?? []).join(" | ")
+    expect(cited).toContain("Apple M3 Max")
+    expect(cited).toContain("128 GB")
+  })
+})
+
+// GENERALIZATION — INVARIANT: an ATTRIBUTE is bound through its LABEL to its VALUE.
+// The read uses the attribute NAME to find the LABEL element, then binds the VALUE
+// that belongs to it (a structural sibling in the same row/group, falling back to
+// geometric adjacency), citing BOTH elements; a label with no adjacent value is
+// UNREADABLE, and an EMPTY read never repeats identically — it ends in the distinct
+// `target-unreadable` outcome naming the attribute.
+// LIVE INSTANCE (verbatim): System Settings window 3178's About pane exposed the
+// values as standalone static text ("Apple M3 Max", "128 GB", "macOS Golden Gate",
+// "Version 27.2 Beta (26B5112a)") while the goal asked for "the chip", "total
+// memory", "the macOS version"; the read_text entry repeated three times with
+// `evidence=[]` and stopped on `maneuver-repeat-limit`. UNSEEN INPUTS: a value whose
+// label sits in the same row band but a different container (geometric adjacency),
+// and a read naming an attribute present only as a bare label with no value.
+// hardcode-guard:allow the live pane text and window id are the inputs under repair
+describe("ui_run — a named attribute is bound through its label to its value", () => {
+  const win = { pid: 24372, window_id: 3178 }
+  const paneElements = (): readonly Element[] => [
+    { element_index: 0, element_token: "g0", role: "AXGroup", label: "", depth: 0, frame: { x: 0, y: 0, width: 600, height: 400 } },
+    { element_index: 1, element_token: "l1", role: "AXStaticText", label: "Chip", depth: 1, parent_index: 0, frame: { x: 20, y: 60, width: 80, height: 20 } },
+    { element_index: 2, element_token: "v1", role: "AXStaticText", label: "Apple M3 Max", depth: 1, parent_index: 0, frame: { x: 300, y: 60, width: 200, height: 20 } },
+    { element_index: 3, element_token: "l2", role: "AXStaticText", label: "Memory", depth: 1, parent_index: 0, frame: { x: 20, y: 100, width: 80, height: 20 } },
+    { element_index: 4, element_token: "v2", role: "AXStaticText", label: "128 GB", depth: 1, parent_index: 0, frame: { x: 300, y: 100, width: 200, height: 20 } },
+    { element_index: 5, element_token: "l3", role: "AXStaticText", label: "macOS", depth: 1, parent_index: 0, frame: { x: 20, y: 140, width: 80, height: 20 } },
+    { element_index: 6, element_token: "v3", role: "AXStaticText", label: "Version 27.2 Beta (26B5112a)", depth: 1, parent_index: 0, frame: { x: 300, y: 140, width: 260, height: 20 } },
+  ]
+  const wire = (elements: readonly Element[]) => ({
+    snapshot_id: "s-about",
+    elements: elements.map((element) => ({
+      token: element.element_token,
+      role: element.role,
+      label: element.label,
+      frame: element.frame,
+      element_index: element.element_index,
+      parent_index: element.parent_index,
+    })),
+  })
+  const makeDriver = (observations: readonly unknown[]) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = []
+    const call: DriverCall = (name, args) => {
+      calls.push({ name, args })
+      const next = observations[Math.min(calls.length - 1, observations.length - 1)]
+      return Effect.succeed({ ok: true, result: { content: [], structuredContent: next } })
+    }
+    return { call, calls }
+  }
+
+  test("(a) each named attribute binds to the value beside its label and cites BOTH elements", () => {
+    const { evidence, unbound } = resolveRead(paneElements(), ["chip", "memory", "macos"])
+    expect(unbound).toEqual([])
+    const byName = (token: string) => evidence.find((entry) => entry.token === token)!
+    const chip = byName("chip")
+    expect(chip.text).toBe("Apple M3 Max")
+    expect(chip.identity).toBe("v1")
+    expect(chip.label).toMatchObject({ text: "Chip", identity: "l1", role: "AXStaticText" })
+    const memory = byName("memory")
+    expect(memory.text).toBe("128 GB")
+    expect(memory.label?.text).toBe("Memory")
+    const os = byName("macos")
+    expect(os.text).toBe("Version 27.2 Beta (26B5112a)")
+    expect(os.label?.text).toBe("macOS")
+  })
+
+  test("(a) a bound read over the live pane shape records label+value evidence with ZERO actuation", async () => {
+    const driver = makeDriver([wire(paneElements())])
+    const run = await Effect.runPromise(runReadManeuver(driver.call, win, ["chip", "memory", "macos"]))
+    const cited = run.evidence.map((entry) => `${entry.label?.text}=${entry.text}`).join(" | ")
+    expect(cited).toContain("Chip=Apple M3 Max")
+    expect(cited).toContain("Memory=128 GB")
+    expect(cited).toContain("macOS=Version 27.2 Beta (26B5112a)")
+    expect(run.captured).toBe(false)
+    expect(driver.calls.every((entry) => entry.name === "cua-driver_get_window_state")).toBe(true)
+  })
+
+  // hardcode-guard:allow the recorded live token/strategy names are the contract replayed under test
+  test("(a) LIVE-TRACE REPLAY (round 2): a SINGLE read option is taken on applicability — the decider is never consulted", async () => {
+    // THE MEASURED LIVE ROUND-2 SHAPE (verbatim): the decider was offered EXACTLY ONE
+    // option — `read_text: … [direct-token]` — and returned no maneuver:
+    // `choice-unusable: the decider returned no maneuver among 1 offered option(s)`,
+    // 0 read attempts, the run ended there. The next read STRATEGY is not a decision —
+    // it is exhaustion order the loop already owns — and a choice needs alternatives.
+    // PRE-FIX this replay (single option + a decider returning nothing) stopped
+    // immediately at `choice-unusable` with zero read attempts. NOW the single
+    // applicable option is TAKEN on applicability and the strategies deplete.
+    //
+    // The token lives only in a text OWNED by an item, so no standalone readable or
+    // list row matches it: `read_items`/`open_item`/`activate` are not applicable and
+    // exactly ONE read option is applicable per round.
+    const owned: Scene = {
+      snapshot: "s-owned-read",
+      regions: [{ id: "s:detail", kind: "detail", itemIds: ["r:proc"], textIds: ["v:chip"] }],
+      items: [
+        {
+          id: "r:proc",
+          role: "AXGroup",
+          label: "Processor",
+          affordances: ["readonly"],
+          stateChanging: false,
+          enabled: true,
+          element: { element_token: "t:r:proc", role: "AXGroup", label: "Processor" },
+        },
+      ],
+      texts: [
+        {
+          id: "v:chip",
+          role: "AXStaticText",
+          text: "Chip: Apple M3 Max",
+          owner: "r:proc",
+          element: { element_token: "t:v:chip", role: "AXStaticText", label: "Chip: Apple M3 Max" },
+        },
+      ],
+    }
+    let deciderCalls = 0
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "read the text about chip",
+        observe: () => Effect.succeed(owned),
+        choosePlan: () => Effect.succeed(undefined),
+        // The live decider's verdict: NOTHING. It must never be consulted here.
+        chooseManeuver: () => {
+          deciderCalls++
+          return Effect.succeed({})
+        },
+        execute: (option) =>
+          option.name === "read_text"
+            ? Effect.succeed({ deliveryModes: ["read"], unbound: ["chip"] })
+            : Effect.succeed({ deliveryModes: [] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 8,
+      }),
+    )
+    // (a) ONE applicable maneuver → the decider is NOT consulted at all.
+    expect(deciderCalls).toBe(0)
+    // (a) EXACTLY ONE read option offered per round, its strategy payload advancing.
+    const readRounds = (result.offers ?? [])
+      .filter((offer) => offer.kind === "read_items")
+      .map((offer) => offer.offered)
+    expect(readRounds.map((round) => round.length)).toEqual([1, 1, 1])
+    expect(readRounds.map((round) => round[0]?.match(/\[([^\]]+)\]$/)?.[1])).toEqual([
+      "direct-token",
+      "label-pairing",
+      "observation-fallback",
+    ])
+    // (b) NO strategy is ever repeated for the subgoal.
+    const strategies = readRounds.flat()
+    expect(new Set(strategies).size).toBe(strategies.length)
+    // (a) PROVENANCE marks the path taken on APPLICABILITY (never a fabricated strength).
+    const provenance = result.telemetry.filter((entry) => entry.provenance.path === "read")
+    expect(provenance.length).toBe(3)
+    expect(provenance.every((entry) => entry.provenance.selection === "single-applicable")).toBe(true)
+    expect(provenance.map((entry) => entry.provenance.strategy)).toEqual([
+      "direct-token",
+      "label-pairing",
+      "observation-fallback",
+    ])
+    expect(provenance.every((entry) => entry.provenance.option === "read_text")).toBe(true)
+    // (a) the NAMED stop — subgoal, attribute, strategies tried
+    expect(result.status).toBe(STATUS_UNREADABLE)
+    expect(result.reason).toContain("chip")
+    expect(result.reason).toContain("direct-token")
+    expect(result.reason).toContain("observation-fallback")
+  })
+
+  // hardcode-guard:allow fixture labels/tokens are the enumerable input under test
+  test("(b) TWO OR MORE applicable maneuvers DO consult the decider — exactly once", async () => {
+    const list: Scene = {
+      snapshot: "s-two",
+      regions: [{ id: "s:list", kind: "list", itemIds: ["m1"], textIds: [] }],
+      items: [
+        {
+          id: "m1",
+          role: "AXLink",
+          label: "m1",
+          affordances: ["activatable"],
+          stateChanging: false,
+          enabled: true,
+          element: { element_token: "t:m1", role: "AXLink", label: "m1" },
+        },
+      ],
+      texts: [],
+    }
+    let deciderCalls = 0
+    const result = await Effect.runPromise(
+      planLoop({
+        goal: "read the last 3 messages",
+        observe: () => Effect.succeed(list),
+        choosePlan: () => Effect.succeed(undefined),
+        chooseManeuver: (_subgoal, options) => {
+          deciderCalls++
+          return Effect.succeed({ label: options[0]?.label })
+        },
+        execute: () => Effect.succeed({ deliveryModes: ["read"] }),
+        stateChanging: () => false,
+        readOnly: true,
+        maxSteps: 1,
+      }),
+    )
+    // read_items + open_item are both applicable → a REAL choice, consulted once.
+    expect(deciderCalls).toBe(1)
+    const chosen = result.telemetry.find((entry) => entry.provenance.path === "read")
+    expect(chosen?.provenance.selection).toBe("decider")
+  })
+
+  test("(c) the shared registry is the ONE source of option/strategy names", () => {
+    expect(MANEUVER_NAMES).toContain("read_text")
+    expect(MANEUVER_NAMES).toContain("read_items")
+    expect(new Set(READ_STRATEGY_NAMES).size).toBe(READ_STRATEGY_NAMES.length)
+    expect(READ_STRATEGY_NAMES).toEqual(["direct-token", "label-pairing", "observation-fallback"])
+  })
+
+  test("(c) a read dispatches through the registry with the OFFERED strategy, never an after-the-fact field", async () => {
+    const driver = makeDriver([wire(paneElements()), wire(paneElements())])
+    const direct = await Effect.runPromise(runReadManeuver(driver.call, win, ["absent-token"], "direct-token"))
+    expect(direct.strategies).toEqual(["direct-token"])
+    const fallback = await Effect.runPromise(
+      runReadManeuver(driver.call, win, ["absent-token"], "observation-fallback"),
+    )
+    expect(fallback.strategies).toEqual(["observation-fallback"])
+  })
+
+  test("(c) a label with no adjacent value is UNREADABLE, never a success", async () => {
+    const lone: readonly Element[] = [
+      { element_index: 0, element_token: "l1", role: "AXStaticText", label: "Chip", depth: 0, frame: { x: 20, y: 60, width: 80, height: 20 } },
+    ]
+    const { evidence, unbound } = resolveRead(lone, ["chip"])
+    expect(evidence).toEqual([])
+    expect(unbound).toEqual(["chip"])
+
+    const driver = makeDriver([wire(lone)])
+    const run = await Effect.runPromise(runReadManeuver(driver.call, win, ["chip"]))
+    expect(run.evidence).toEqual([])
+    expect(run.unbound).toEqual(["chip"])
+    expect(driver.calls.every((entry) => entry.name === "cua-driver_get_window_state")).toBe(true)
   })
 })
 

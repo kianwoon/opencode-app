@@ -45,6 +45,7 @@
 
 import type { Element } from "./ui-eyes"
 import type { ActuationMode } from "./ui-hands"
+import type { ManeuverName } from "./ui-maneuvers"
 
 /** A fixed hand action a skill's sub-sequence performs. */
 export type SkillStep =
@@ -175,7 +176,8 @@ export interface SkillSubstepEvidence {
 }
 
 export interface Skill {
-  readonly name: string
+  /** The maneuver name — drawn from the shared registry (`ManeuverName`). */
+  readonly name: ManeuverName
   /** The single frontier option jev is offered for this maneuver. */
   readonly option: string
   /** Pure precondition over the observation; `value` is the goal's extracted value (may be absent). */
@@ -570,8 +572,12 @@ export const readText: Skill = {
   name: "read_text",
   option: "read_text: read the on-screen text matching the goal's token",
   applies: (elements, value) => value !== undefined && value.length > 0 && readText.select(elements, value) !== undefined,
+  // Case-insensitive: a goal-derived token is lower-cased, an on-screen label is not —
+  // the same token match the deriver's `includesToken` uses, so a read is offered.
   select: (elements, value) =>
-    elements.find((element) => usable(element) && value !== undefined && (element.label ?? "").includes(value)),
+    elements.find(
+      (element) => usable(element) && value !== undefined && (element.label ?? "").toLowerCase().includes(value.toLowerCase()),
+    ),
   steps: (match) => [{ kind: "read", label: `read ${match.value}`, match: match.value }],
   succeeded: readFound,
 }

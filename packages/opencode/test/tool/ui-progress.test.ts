@@ -4,13 +4,13 @@ import path from "path"
 import { decodeObservation, type Element } from "@/tool/ui-eyes"
 import { buildScene, type Scene, type SceneItem, type SceneRegion, type SceneText } from "@/tool/ui-scene"
 import { evalPredicate, plan, type Plan, type StepRecord } from "@/tool/ui-plan"
-import { MANEUVER_REPEAT_LIMIT, progress } from "@/tool/ui-progress"
+// hardcode-guard:allow the progress reason vocabulary is the module contract asserted here
+import { progress } from "@/tool/ui-progress"
 
 const CAPTURE = path.join(import.meta.dir, "fixtures", "brave-window-capture.json")
 
 const READ_GOAL = "read the last 3 messages"
 const REASON_OSCILLATION = "scene-oscillation"
-const REASON_REPEAT = "maneuver-repeat-limit"
 const REASON_BUDGET = "budget-exhausted"
 
 const readFixture = async (): Promise<Scene> => {
@@ -85,15 +85,15 @@ describe("ui-progress — (b) measured progress over the world model", () => {
     expect(result.exhausted).toBe(false)
   })
 
-  test("a repeated identical maneuver reports the repeat reason", () => {
-    const history: StepRecord[] = Array.from({ length: MANEUVER_REPEAT_LIMIT + 1 }, () => ({
+  test("a repeated identical maneuver is NOT a stop reason (the name-keyed bound is deleted)", () => {
+    const history: StepRecord[] = Array.from({ length: 4 }, () => ({
       maneuver: "same",
       scene: viewA,
       subgoalIndex: 0,
     }))
     const result = progress(destinationPlan(10), viewA, history)
-    expect(result.shouldReplan).toBe(true)
-    expect(result.reason).toBe(REASON_REPEAT)
+    expect(result.reason).not.toBe("maneuver-repeat-limit")
+    expect(result.shouldReplan).toBe(false)
   })
 
   test("step budget exhaustion reports the budget reason", () => {

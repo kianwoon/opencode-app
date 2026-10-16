@@ -410,6 +410,57 @@ describe("ui-plan — (a) scene-first maneuver choice: navigation before launch"
     // a pure launch is just the launch — no bogus navigation step
     expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_item")).toBe(false)
   })
+
+  // hardcode-guard:allow the live goal and its pane names are the inputs under repair
+  const differentPaneScene = (): Scene => ({
+    snapshot: "s-accessibility",
+    regions: [
+      { id: "r0:list", kind: "list", itemIds: ["Wi-Fi", "Accessibility", "General", "Wallpaper"], textIds: [] },
+      { id: "r1:content", kind: "content", itemIds: [], textIds: ["h"] },
+    ],
+    items: [
+      rowItem("Wi-Fi", el("Wi-Fi", "AXRow", 0)),
+      rowItem("Accessibility", el("Accessibility", "AXRow", 0)),
+      rowItem("General", el("General", "AXRow", 0)),
+      rowItem("Wallpaper", el("Wallpaper", "AXRow", 0)),
+    ],
+    texts: [
+      { id: "h", role: "AXHeading", text: "Accessibility", owner: "r1:content", element: el("Accessibility", "AXStaticText") },
+    ],
+  })
+
+  test("(a) a pane of the FRONTMOST app absent from the scene yields navigation inside, never a launch", () => {
+    // PRE-FIX: the plan collapsed to ONE subgoal `open_app {value:"About"}` (entered
+    // path open_app, `failed: launch_app failed: No installed macOS app found for
+    // name 'About'.`). The frontmost app shows a DIFFERENT pane (Accessibility) while
+    // the target "About" lives inside the SAME app's navigation surface.
+    const decision = plan(
+      "open the About pane and report the macOS version, chip and total memory",
+      differentPaneScene(),
+    )
+    expect(decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_app")).toBe(false)
+    expect(
+      decision.commit.subgoals.some((subgoal) => subgoal.kind === "open_item" && subgoal.params.matching === "About"),
+    ).toBe(true)
+  })
+
+  test("(b) a plain name that is not an application is never a launch (no open_app subgoal at all)", () => {
+    // No navigation surface at all: an unknown bare name still never launches.
+    const bare: Scene = {
+      snapshot: "s-bare",
+      regions: [],
+      items: [rowItem("Accessibility", el("Accessibility", "AXRow", 0))],
+      texts: [],
+    }
+    expect(plan("open the Frobnicator pane", bare).commit.subgoals.some((subgoal) => subgoal.kind === "open_app")).toBe(
+      false,
+    )
+    // a launch VERB still names an application, and a genuinely absent one is launched
+    const launched = plan("launch the Calculator app", bare).commit.subgoals.find(
+      (subgoal) => subgoal.kind === "open_app",
+    )
+    expect(launched?.params.value).toBe("Calculator")
+  })
 })
 
 // GENERALIZATION — INVARIANT: a goal that NAMES attribute values to report over a

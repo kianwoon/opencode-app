@@ -590,6 +590,28 @@ export function goalApp(goal: string): string | undefined {
   return launched?.[1]
 }
 
+/**
+ * Whether the goal EXPLICITLY NAMES AN APPLICATION — the only shape in which a
+ * launch is warranted. A goal that says "<Name> app/application", or that uses a
+ * real LAUNCH verb (launch/activate/start/run) on a capitalized name, names an
+ * application; a bare capitalized noun after a pure NAVIGATION verb (`open`/`go`/
+ * `navigate`) names a TARGET — a pane, section or item of the frontmost app — and
+ * must be reached by navigation, never launched (an unknown bare name is never a
+ * launch).
+ * INVARIANT: a launch requires the goal to name an application; a pane is not an app.
+ * LIVE INSTANCE: the goal "open the About pane and report the macOS version, chip and
+ * total memory" classified "About" as an app and launched it: verbatim
+ * `failed: launch_app failed: No installed macOS app found for name 'About'.`
+ * UNSEEN INPUT: any bare capitalized target after open/go/navigate is navigated to
+ * (or explored) inside the frontmost app, never launched.
+ * hardcode-guard:allow the launch-verb family is a general goal-reading grammar (an intent input), not case literals
+ */
+export function goalExplicitApp(goal: string): string | undefined {
+  const explicit = goal.match(/\bthe\s+([A-Za-z][\w .-]*?)\s+(?:app|application)\b/i)
+  if (explicit?.[1]?.trim()) return explicit[1].trim()
+  return goal.match(/\b(?:launch|activate|start|run)\s+(?:the\s+)?([A-Z][\w.-]*)/)?.[1]
+}
+
 function firstInteger(goal: string): number | undefined {
   // A COUNT is a bare integer in the goal's PROSE. Digits inside a goal VALUE (a
   // URL path/port, a quoted token) are part of the destination, never a count —
@@ -721,10 +743,19 @@ function navigateSuccess(value: string): Predicate {
 function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
   const app = goalApp(goal)
   const appInScene = app === undefined ? undefined : resolveNamedItem(scene, app)
+  // A LAUNCH IS FOR AN APPLICATION THE GOAL EXPLICITLY NAMES AND THE SCENE DOES NOT
+  // HOLD. A bare capitalized target (a pane/section/item of the FRONTMOST app) is
+  // reached by navigating INSIDE that app, never by launching — an unknown name must
+  // never yield a launch.
+  // The goal's WORDING is a HINT only (it may name an application or a bare target);
+  // the LIVE verdict is the observed scene — the check below. A name the tree already
+  // holds is navigated to inside the app; only a name the scene does NOT hold may be
+  // launched, and the hint can never override the observed structure.
+  const appHintedByGoal = goalExplicitApp(goal) !== undefined
   const surface = targetTerm(goal)
   const value = mutationValue(goal)
   const openAppSub =
-    app === undefined || appInScene !== undefined
+    app === undefined || appInScene !== undefined || !appHintedByGoal
       ? undefined
       : plannedSubgoal(
           "open_app",
@@ -742,11 +773,24 @@ function mutationSubgoals(goal: string, scene: Scene): PlanSubgoal[] {
           { op: "text_present", text: app, regionKind: CONTENT_KIND },
           DEFAULT_BUDGET,
         )
+  // PANE-INSIDE-THE-FRONTMOST-APP: a bare named target absent from the scene is
+  // navigated to through the app's OWN navigation surface (a sidebar/outline/list),
+  // never launched. The deriver offers the option only when such a surface exists.
+  const navigateInsideSub =
+    app === undefined || appInScene !== undefined || appHintedByGoal
+      ? undefined
+      : plannedSubgoal(
+          "open_item",
+          { kind: "open_item", matching: app, selectable: true },
+          { op: "text_present", text: app, regionKind: CONTENT_KIND },
+          DEFAULT_BUDGET,
+        )
   // A pure launch goal ("open the Calculator app") is just the launch.
   if (openAppSub !== undefined && !MUTATE_INTENT.test(goal)) return [openAppSub]
   const subs: PlanSubgoal[] = []
   if (openAppSub !== undefined) subs.push(openAppSub)
   if (existingSub !== undefined) subs.push(existingSub)
+  if (navigateInsideSub !== undefined) subs.push(navigateInsideSub)
   // REPORT OVER A REACHED SURFACE: when the goal names attributes to report and has
   // NO mutation VALUE to set, the surface reach is followed by one goal-anchored
   // READ per attribute — never the bogus `open_item`/`apply` pair for a term that is
@@ -830,9 +874,13 @@ export function plan(goal: string, scene: Scene, prior?: Plan): PlanDecision {
   // the goal names ANCHORS the read is bound to them, so a dense page of unrelated
   // items can never satisfy it.
   const anchors = goalAnchors(goal)
+  // The read's attribute token is BOUND into its params so the maneuver deriver can
+  // offer the READ STRATEGIES for it: an anchored read must carry its token exactly as
+  // a report read does, else `read_text` is never derived and the ladder is dead.
+  const anchor = anchors[0]
   const readSub = plannedSubgoal(
     "read_items",
-    { kind: "read_items", count },
+    { kind: "read_items", count, ...(anchor !== undefined ? { matching: anchor } : {}) },
     { op: "read_count", n: count, ...(anchors.length > 0 ? { anchors } : {}) },
     DEFAULT_BUDGET,
   )

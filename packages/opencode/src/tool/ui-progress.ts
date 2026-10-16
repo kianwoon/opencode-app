@@ -1,4 +1,4 @@
-// hardcode-guard:allow the reason tokens (scene-oscillation, maneuver-repeat-limit, budget-exhausted) are this module's own contract vocabulary asserted by tests, not case literals
+// hardcode-guard:allow the reason tokens (scene-oscillation, budget-exhausted) are this module's own contract vocabulary asserted by tests, not case literals
 /**
  * PROGRESS organ — the feedback / progress controller.
  *
@@ -10,10 +10,10 @@
  *
  * INVARIANT OWNED: `done` counts satisfied predicate units over the world model,
  * so issuing maneuvers advances nothing by itself; no-progress is reported with a
- * DISTINCT reason token for each shape — a repeated identical maneuver
- * (`maneuver-repeat-limit`, the loop's existing bound mirrored), a Scene
- * oscillating A↔B without predicate progress (`scene-oscillation`), and step
- * budget exhaustion (`budget-exhausted`).
+ * DISTINCT reason token for each shape — a Scene oscillating A↔B without predicate
+ * progress (`scene-oscillation`) and step budget exhaustion
+ * (`budget-exhausted`). A repeated identical maneuver is not a reason: the loop's
+ * depleting offer set makes an identical re-pick impossible by construction.
  * NO JUDGEMENT ON A MOVING SCENE: predicate evaluation against a Scene that has
  * not SETTLED yields `unknown` (pending) for every subgoal — never `true` — so a
  * still-rendering page can never satisfy a read or report completion.
@@ -46,12 +46,9 @@ export interface Progress {
   readonly reason: string | undefined
 }
 
-/** Mirrors the loop's existing MAX_MANEUVER_REPEATS bound (same maneuver, N+1 times). */
-export const MANEUVER_REPEAT_LIMIT = 2
 export const OSCILLATION_WINDOW = 6
 
 const REASON_OSCILLATION = "scene-oscillation"
-const REASON_REPEAT = "maneuver-repeat-limit"
 const REASON_BUDGET = "budget-exhausted"
 
 /** Evidence recorded for a predicate WITHHELD because the Scene has not settled. */
@@ -105,13 +102,6 @@ function oscillating(plan: Plan, history: readonly StepRecord[]): boolean {
   return Math.max(...dones) === Math.min(...dones)
 }
 
-function repeatedManeuver(history: readonly StepRecord[]): boolean {
-  if (history.length < MANEUVER_REPEAT_LIMIT + 1) return false
-  const tail = history.slice(-(MANEUVER_REPEAT_LIMIT + 1))
-  const key = tail[tail.length - 1].maneuver
-  return tail.every((step) => step.maneuver === key)
-}
-
 function budgetExceeded(plan: Plan, history: readonly StepRecord[]): boolean {
   return plan.subgoals.some(
     (subgoal, index) => history.filter((step) => (step.subgoalIndex ?? 0) === index).length >= subgoal.budget,
@@ -153,7 +143,6 @@ export function progress(plan: Plan, scene: Scene, history: readonly StepRecord[
   if (nextSubgoal === undefined) return { ...base, shouldReplan: false, exhausted: false, reason: undefined }
   if (!settled) return { ...base, shouldReplan: false, exhausted: false, reason: undefined }
   if (oscillating(plan, history)) return { ...base, shouldReplan: true, exhausted: false, reason: REASON_OSCILLATION }
-  if (repeatedManeuver(history)) return { ...base, shouldReplan: true, exhausted: false, reason: REASON_REPEAT }
   if (budgetExceeded(plan, history)) return { ...base, shouldReplan: false, exhausted: true, reason: REASON_BUDGET }
   return { ...base, shouldReplan: false, exhausted: false, reason: undefined }
 }
