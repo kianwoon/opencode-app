@@ -69,6 +69,8 @@ Calling `jev_decide` as an extra LLM tool on every step adds round trips. I’d 
 
 It returns on completion, uncertainty, cancellation, permission requirements, or a configurable step/time limit. Use one shared controller for both adapters.
 
+> Note: the `ui_run` tool proposed here was later retired and replaced by `ui_nav`, the thin tool over the validated `axnav` sensor.
+
 Your running app is the Electron desktop, so integrate orchestration through the **V1 tool path**. Also verify exact `owned_tools` exposure: registration and permission alone do not make a tool available to the agent.
 
 ## 5. Fix these prototype gaps first

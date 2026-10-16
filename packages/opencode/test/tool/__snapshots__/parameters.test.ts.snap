@@ -273,6 +273,10 @@ exports[`tool parameters JSON Schema (wire shape) read 1`] = `
       "minimum": 0,
       "type": "integer",
     },
+    "symbol": {
+      "description": "A declaration name to read: resolves to that symbol's line range (mutually exclusive with offset/limit)",
+      "type": "string",
+    },
   },
   "required": [
     "filePath",
