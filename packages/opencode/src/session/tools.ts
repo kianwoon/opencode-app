@@ -33,8 +33,8 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 // tool can never park the session forever. Individual tools keep their own,
 // tighter timeouts (shell, MCP, etc.); this is a ceiling, not a behavior change.
 // The tool's abort signal still cancels earlier when present.
-// Exempt: the `task` subagent tool — it has its own 30-min foreground join
-// bound (FOREGROUND_SUBAGENT_TIMEOUT_MS) and background tasks are unbounded.
+// Exempt: the `task` subagent tool — foreground task joins are unbounded by
+// design (like background tasks), so this ceiling must not cap them.
 export const TOOL_EXECUTION_TIMEOUT_MS = 10 * 60_000
 
 const MCP_RESOURCE_TOOLS = {

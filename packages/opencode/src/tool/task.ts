@@ -46,11 +46,6 @@ const BACKGROUND_UPDATED = [
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
 
-// Bounds the foreground parent join so one never-settling child (dead drain
-// fiber, silent provider, stuck tool dispatch) can't park the session forever.
-// Background tasks stay unbounded; the user polls those intentionally.
-export const FOREGROUND_SUBAGENT_TIMEOUT_MS = 30 * 60_000
-
 // Breadth bound for a single assistant turn's task fan-out. `subagent_depth`
 // bounds nesting, not parallelism — a model looping on fan-out emitted 9161
 // identical task parts (one turn, ~4ms apart) and minted a child session per
@@ -687,19 +682,9 @@ export const TaskTool = Tool.define(
       }).pipe(
         Effect.scoped,
         // Only spawn/stream failures fall back to the in-fiber path; the caller
-        // treats None as "isolation unavailable". A timeout is a real failure and
-        // is raised below, not converted to a fallback (which would silently run
-        // another 30 minutes in-process).
+        // treats None as "isolation unavailable", not converted to a fallback
+        // (which would silently rerun the task in-process).
         Effect.catch(() => Effect.succeed(Option.none<string>())),
-        Effect.timeoutOrElse({
-          duration: FOREGROUND_SUBAGENT_TIMEOUT_MS,
-          orElse: () =>
-            Effect.fail(
-              new Error(
-                `Isolated subagent timed out after 30 minutes (task_id: ${nextSession.id}). The child process was killed; retry the task.`,
-              ),
-            ),
-        }),
       )
 
       const dispatch = Effect.gen(function* () {
@@ -796,17 +781,6 @@ export const TaskTool = Tool.define(
               const result = yield* Effect.raceFirst(
                 background.wait({ id: nextSession.id }).pipe(Effect.map((waited) => waited.info)),
                 background.waitForPromotion(nextSession.id),
-              ).pipe(
-                Effect.timeoutOption(FOREGROUND_SUBAGENT_TIMEOUT_MS),
-                Effect.flatMap((option) =>
-                  option._tag === "Some"
-                    ? Effect.succeed(option.value)
-                    : Effect.fail(
-                        new Error(
-                          `Subagent timed out after 30 minutes without settling (task_id: ${nextSession.id}). The child session may still be running; check its session or retry.`,
-                        ),
-                      ),
-                ),
               )
               if (result?.metadata?.background === true) return backgroundResult()
               if (result?.status === "error") return yield* Effect.fail(new Error(result.error ?? "Task failed"))
