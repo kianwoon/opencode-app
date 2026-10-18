@@ -17,6 +17,12 @@ import { testEffect } from "../lib/effect"
 const context = Context.empty() as Context.Context<unknown>
 const testPty = process.platform === "win32" ? test.skip : test
 
+// Every test here spawns a real PTY and observes process exit or socket output.
+// Under full-suite CPU contention that observation can lag well past bun's 5s
+// default (observed: exit status still "running" at ~21s), so each test declares
+// its own generous budget instead of relying on the default.
+const PTY_TIMEOUT_MS = 120_000
+
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   headers.set("x-opencode-directory", directory)
@@ -81,7 +87,11 @@ describe("v2 pty HttpApi", () => {
     expect(body.data.title).toBe("v2")
 
     // The canonical surface keeps exited sessions observable with their exit code.
-    const deadline = Date.now() + 20_000
+    // The child is a trivial `exit 4`, but the native pty exit callback can be
+    // delayed for many seconds when the whole suite saturates the machine (observed
+    // still "running" at ~21s under `bun test`), so allow a generous ceiling and
+    // declare a matching runner timeout below.
+    const deadline = Date.now() + 90_000
     let info: { status: string; exitCode?: number } | undefined
     while (Date.now() < deadline) {
       const found = await request(`/api/pty/${body.data.id}`, tmp.path)
@@ -98,7 +108,7 @@ describe("v2 pty HttpApi", () => {
     const missing = await request(`/api/pty/${body.data.id}`, tmp.path)
     expect(missing.status).toBe(404)
     expect(await missing.json()).toMatchObject({ _tag: "PtyNotFoundError", ptyID: body.data.id })
-  })
+  }, PTY_TIMEOUT_MS)
 
   testPty("rejects connect tokens without the CSRF header and connects with a valid ticket", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
@@ -128,7 +138,7 @@ describe("v2 pty HttpApi", () => {
     } finally {
       await request(`/api/pty/${info.id}`, tmp.path, { method: "DELETE" })
     }
-  })
+  }, PTY_TIMEOUT_MS)
   ;(process.platform === "win32" ? effectIt.live.skip : effectIt.live)(
     "serves PTY websocket output and input through the canonical route",
     () =>
@@ -173,6 +183,7 @@ describe("v2 pty HttpApi", () => {
         )
         expect(removed.status).toBe(204)
       }),
+    PTY_TIMEOUT_MS,
   )
   ;(process.platform === "win32" ? effectIt.live.skip : effectIt.live)(
     "applies plugin shell environment before forced PTY values",
@@ -246,5 +257,6 @@ describe("v2 pty HttpApi", () => {
         yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
         yield* HttpClientRequest.delete(`/api/pty/${info.id}`).pipe(directoryHeader(dir), HttpClient.execute)
       }),
+    PTY_TIMEOUT_MS,
   )
 })
