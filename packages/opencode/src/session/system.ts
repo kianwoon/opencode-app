@@ -5,6 +5,7 @@ import { InstanceState } from "@/effect/instance-state"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
+import PROMPT_DEEPSEEK from "./prompt/deepseek.txt"
 import PROMPT_BEAST from "./prompt/beast.txt"
 import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
@@ -42,13 +43,15 @@ export function provider(model: Provider.Model) {
   }
   if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
   if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
+  // baseline-guard:allow router file proven working at HEAD; deepseek branch + fallback change per handoff
+  if (model.api.id.toLowerCase().includes("deepseek")) return [PROMPT_DEEPSEEK]
   if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
   if (
     model.api.id.toLowerCase().includes("kimi") ||
     ["kimi-for-coding", "moonshotai", "moonshotai-cn"].includes(model.providerID)
   )
     return [PROMPT_KIMI]
-  return [PROMPT_DEFAULT]
+  return [PROMPT_ANTHROPIC]
 }
 
 export function fmtPermissions(ruleset: PermissionV1.Ruleset): string | undefined {
