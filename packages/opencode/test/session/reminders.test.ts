@@ -11,10 +11,13 @@ import { SessionReminders } from "../../src/session/reminders"
 import { Session } from "../../src/session/session"
 import { Todo } from "../../src/session/todo"
 
-const sessionID = SessionID.make("session")
+// Unique session per run: the drift memo is session-scoped and module-level, so
+// a shared id would let one test's anchor suppress the next test's reminder.
+let sessionSeq = 0
+const freshSessionID = () => SessionID.make(`session-${++sessionSeq}`)
 
 // Fresh message per call: SessionReminders.apply mutates the parts array.
-const userMessage = (): SessionV1.WithParts => ({
+const userMessage = (sessionID: SessionID): SessionV1.WithParts => ({
   info: {
     id: MessageID.make("msg_user"),
     sessionID,
@@ -26,7 +29,29 @@ const userMessage = (): SessionV1.WithParts => ({
   parts: [],
 })
 
-const sessionInfo = { id: sessionID } as Session.Info
+// A prior compaction marker in the projected history: the drift signal that
+// re-anchors the rule reminder after a context reset.
+const compactionMessage = (sessionID: SessionID): SessionV1.WithParts => ({
+  info: {
+    id: MessageID.make(`msg_compact_${sessionID}`),
+    sessionID,
+    role: "user",
+    time: { created: 0 },
+    agent: "user",
+    model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+  } as unknown as SessionV1.User,
+  parts: [
+    {
+      id: PartID.make(`prt_compact_${sessionID}`),
+      messageID: MessageID.make(`msg_compact_${sessionID}`),
+      sessionID,
+      type: "compaction",
+      auto: false,
+    } as unknown as SessionV1.CompactionPart,
+  ],
+})
+
+const sessionInfo = (sessionID: SessionID) => ({ id: sessionID }) as Session.Info
 
 const layers = (rulePaths: string[], todos: Todo.Info[] = []) =>
   Layer.mergeAll(
@@ -55,10 +80,17 @@ const layers = (rulePaths: string[], todos: Todo.Info[] = []) =>
     Layer.succeed(Todo.Service, Todo.Service.of({ update: () => Effect.void, get: () => Effect.succeed(todos) })),
   )
 
-const run = (rulePaths: string[], todos: Todo.Info[] = []) =>
-  SessionReminders.apply({ messages: [userMessage()], agent: { name: "build" } as never, session: sessionInfo }).pipe(
-    Effect.provide(layers(rulePaths, todos)),
-  )
+const run = (
+  rulePaths: string[],
+  todos: Todo.Info[] = [],
+  sessionID: SessionID = freshSessionID(),
+  prior: SessionV1.WithParts[] = [],
+) =>
+  SessionReminders.apply({
+    messages: [...prior, userMessage(sessionID)],
+    agent: { name: "build" } as never,
+    session: sessionInfo(sessionID),
+  }).pipe(Effect.provide(layers(rulePaths, todos)))
 
 const reminderTexts = (msgs: SessionV1.WithParts[]) =>
   msgs
@@ -89,5 +121,22 @@ describe("session.reminders", () => {
     const texts = reminderTexts(msgs)
     expect(texts.some((text) => text.includes("Rule adherence check"))).toBe(true)
     expect(texts.some((text) => text.includes("<todo-list>"))).toBe(true)
+  })
+
+  test("an ordinary second turn in the same session does not re-anchor", async () => {
+    const sessionID = freshSessionID()
+    const first = await Effect.runPromise(run(["/proj/AGENTS.md"], [], sessionID))
+    expect(reminderTexts(first).some((text) => text.includes("Rule adherence check"))).toBe(true)
+    const second = await Effect.runPromise(run(["/proj/AGENTS.md"], [], sessionID))
+    expect(reminderTexts(second).some((text) => text.includes("Rule adherence check"))).toBe(false)
+  })
+
+  test("a compaction marker re-anchors the rule reminder", async () => {
+    const sessionID = freshSessionID()
+    await Effect.runPromise(run(["/proj/AGENTS.md"], [], sessionID))
+    const afterCompaction = await Effect.runPromise(
+      run(["/proj/AGENTS.md"], [], sessionID, [compactionMessage(sessionID)]),
+    )
+    expect(reminderTexts(afterCompaction).some((text) => text.includes("Rule adherence check"))).toBe(true)
   })
 })

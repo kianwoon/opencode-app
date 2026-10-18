@@ -14,6 +14,30 @@ import PROMPT_PLAN from "./prompt/plan.txt"
 import BUILD_SWITCH from "./prompt/build-switch.txt"
 import PLAN_MODE from "./prompt/plan-mode.txt"
 
+/**
+ * Per-session drift memo for the rule-adherence anchor. The value is the
+ * identity of the compaction markers visible in the session's projected history
+ * at the last anchor ("" = none). The anchor is re-asserted only when this
+ * identity changes — the session's FIRST turn, or a resumed/compacted session
+ * whose visible context no longer carries the anchor. Ordinary consecutive
+ * turns keep the same identity and are skipped. Capped to bound memory; an
+ * eviction only costs a harmless extra re-anchor.
+ */
+const RULE_ANCHOR_MAX = 200
+const ruleAnchors = new Map<string, string>()
+
+/**
+ * Drift signal: the concatenated `id`s of every `type: "compaction"` part in
+ * the projected history. `MessageV2.filterCompacted` retains the compaction
+ * marker on its user message, so its presence (and id) is observable in the
+ * transform input; a new marker means the visible context was reset.
+ */
+const compactionSignal = (messages: SessionV1.WithParts[]): string =>
+  messages
+    .flatMap((message) => message.parts)
+    .flatMap((part) => (part.type === "compaction" ? [part.id] : []))
+    .join(",")
+
 export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   messages: SessionV1.WithParts[]
   agent: Agent.Info
@@ -33,10 +57,13 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   // content and never reaches the transcript.
   const items = yield* todos.get(input.session.id)
 
-  // Per-turn rule adherence: the binding-rules anchor lives at the end of the
-  // system prompt, but attention decays as a long conversation accumulates, so
-  // re-assert obedience at the user-turn position every turn. Synthetic part,
-  // never persisted. No-op when no instruction files are in effect.
+  // Drift-triggered rule adherence: the binding-rules anchor lives at the end
+  // of the system prompt, but attention decays as a long conversation
+  // accumulates. Re-assert obedience only when the session re-exposes drift —
+  // its FIRST turn, or a resumed/compacted session whose visible context no
+  // longer carries the anchor. Ordinary consecutive turns are skipped.
+  // Synthetic part, never persisted. No-op when no instruction files are in
+  // effect.
   const ruleCount = yield* (yield* Instruction.Service)
     .systemPaths()
     .pipe(
@@ -44,18 +71,37 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
       Effect.catch(() => Effect.succeed(0)),
     )
   if (ruleCount > 0) {
-    userMessage.parts.push({
-      id: PartID.ascending(),
-      messageID: userMessage.info.id,
-      sessionID: userMessage.info.sessionID,
-      type: "text",
-      text: [
-        "<system-reminder>",
-        "Rule adherence check: the instruction files in this session are BINDING. Re-check your plan and output against every stated rule before acting; honor style, testing, permission, safety, and scope constraints with no exceptions. If you cannot satisfy a rule, say so explicitly instead of silently deviating.",
-        "</system-reminder>",
-      ].join("\n"),
-      synthetic: true,
-    })
+    const signal = compactionSignal(input.messages)
+    // Fail-open: a memo fault falls through to anchoring, never suppresses it.
+    let anchored = false
+    try {
+      anchored = ruleAnchors.get(input.session.id) === signal
+    } catch {
+      anchored = false
+    }
+    if (!anchored) {
+      userMessage.parts.push({
+        id: PartID.ascending(),
+        messageID: userMessage.info.id,
+        sessionID: userMessage.info.sessionID,
+        type: "text",
+        text: [
+          "<system-reminder>",
+          "Rule adherence check: the instruction files in this session are BINDING. Re-check your plan and output against every stated rule before acting; honor style, testing, permission, safety, and scope constraints with no exceptions. If you cannot satisfy a rule, say so explicitly instead of silently deviating.",
+          "</system-reminder>",
+        ].join("\n"),
+        synthetic: true,
+      })
+      try {
+        ruleAnchors.set(input.session.id, signal)
+        if (ruleAnchors.size > RULE_ANCHOR_MAX) {
+          const oldest = ruleAnchors.keys().next().value
+          if (oldest !== undefined) ruleAnchors.delete(oldest)
+        }
+      } catch {
+        // Memo is best-effort; the reminder is already appended.
+      }
+    }
   }
 
   if (items.some((item) => item.status !== "completed")) {
