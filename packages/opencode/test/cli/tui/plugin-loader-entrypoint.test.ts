@@ -10,6 +10,14 @@ import { Npm } from "@opencode-ai/core/npm"
 
 const { TuiPluginRuntime } = await import("../../../src/plugin/tui/runtime")
 
+// PluginLoader keeps failed npm resolutions in a process-wide cache for 60s,
+// keyed by spec. Two fixtures that share a spec would alias each other's
+// failures (a "no tui entrypoint" result from one leaking into another), so
+// every npm-backed fixture must own a distinct spec. The package name stays
+// `acme-plugin` so the id-from-package-name assertions are unaffected.
+let npmPluginSpecSequence = 0
+const nextNpmPluginSpec = () => `acme-plugin@1.0.${++npmPluginSpecSequence}`
+
 test("loads npm tui plugin from package ./tui export", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
@@ -40,7 +48,7 @@ test("loads npm tui plugin from package ./tui export", async () => {
 `,
       )
 
-      return { mod, marker, spec: "acme-plugin@1.0.0" }
+      return { mod, marker, spec: nextNpmPluginSpec() }
     },
   })
 
@@ -101,7 +109,7 @@ test("does not use npm package exports dot for tui entry", async () => {
 `,
       )
 
-      return { mod, marker, spec: "acme-plugin@1.0.0" }
+      return { mod, marker, spec: nextNpmPluginSpec() }
     },
   })
 
@@ -163,7 +171,7 @@ test("rejects npm tui export that resolves outside plugin directory", async () =
       )
       await fs.symlink(outside, path.join(mod, "escape"), process.platform === "win32" ? "junction" : "dir")
 
-      return { mod, marker, spec: "acme-plugin@1.0.0" }
+      return { mod, marker, spec: nextNpmPluginSpec() }
     },
   })
 
@@ -225,7 +233,7 @@ test("rejects npm tui plugin that exports server and tui together", async () => 
 `,
       )
 
-      return { mod, marker, spec: "acme-plugin@1.0.0" }
+      return { mod, marker, spec: nextNpmPluginSpec() }
     },
   })
 
@@ -283,7 +291,7 @@ test("does not use npm package main for tui entry", async () => {
 `,
       )
 
-      return { mod, marker, spec: "acme-plugin@1.0.0" }
+      return { mod, marker, spec: nextNpmPluginSpec() }
     },
   })
 
@@ -452,7 +460,7 @@ test("uses npm package name when tui plugin id is omitted", async () => {
 `,
       )
 
-      return { mod, marker, spec: "acme-plugin@1.0.0" }
+      return { mod, marker, spec: nextNpmPluginSpec() }
     },
   })
 
