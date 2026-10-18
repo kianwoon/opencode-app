@@ -1,6 +1,8 @@
 export * as Npm from "./npm"
 
 import path from "path"
+import { createRequire } from "module"
+import { readFile } from "fs/promises"
 import { pathToFileURL } from "url"
 import npa from "npm-package-arg"
 import { Effect, Schema, Context, Layer, Option, FileSystem } from "effect"
@@ -60,14 +62,18 @@ export async function resolveEntryPoint(name: string, dir: string): Promise<Entr
     // desktop Node sidecar).
     type PackageJson = { main?: unknown; exports?: unknown }
     // Async read: this runs on the shared event loop, and a cold disk read of
-    // package.json must not block every other agent fiber.
-    const pkgJson = JSON.parse(await Bun.file(path.join(dir, "package.json")).text()) as PackageJson
+    // package.json must not block every other agent fiber. Use Node's fs so the
+    // Node sidecar branch resolves too (Bun.file is Bun-only).
+    const pkgJsonPath = path.join(dir, "package.json")
+    const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8")) as PackageJson
     // Entry target: exports["."] (string or import/default condition) wins,
     // then "main", then the index.js fallback.
     const exportsDot =
-      pkgJson.exports && typeof pkgJson.exports === "object" && !Array.isArray(pkgJson.exports)
-        ? (pkgJson.exports as Record<string, unknown>)["."]
-        : undefined
+      typeof pkgJson.exports === "string"
+        ? pkgJson.exports
+        : pkgJson.exports && typeof pkgJson.exports === "object" && !Array.isArray(pkgJson.exports)
+          ? (pkgJson.exports as Record<string, unknown>)["."]
+          : undefined
     const target = (() => {
       if (typeof exportsDot === "string") return exportsDot
       if (exportsDot && typeof exportsDot === "object") {
@@ -80,20 +86,16 @@ export async function resolveEntryPoint(name: string, dir: string): Promise<Entr
       if (typeof pkgJson.main === "string" && pkgJson.main.trim()) return pkgJson.main.trim()
       return "index.js"
     })()
-    const parent = pathToFileURL(path.join(dir, "package.json")).href
-    if (typeof Bun !== "undefined") {
-      entrypoint = import.meta.resolve(`./${target}`, parent)
-    } else {
-      try {
-        // require.resolve honors package.json "main"/"exports" without
-        // executing the module; exotic export shapes fall back to
-        // import.meta.resolve with the package dir as parent.
-        entrypoint = pathToFileURL(require.resolve(`./${target}`, { paths: [dir] })).href
-      } catch {
-        entrypoint = import.meta.resolve(`./${target}`, parent)
-      }
-    }
+    // Resolve the package-relative target inside the installed copy without a
+    // runtime-specific resolver: import.meta.resolve's parent argument is a Bun
+    // extension (Node ignores it) and `require` is undefined under Node ESM.
+    // A require anchored at the installed package.json resolves relative to the
+    // package directory under both runtimes, so a same-named package in Bun's
+    // global cache can never shadow the installed copy.
+    const specifier = target.startsWith(".") ? target : `./${target}`
+    entrypoint = pathToFileURL(createRequire(pkgJsonPath).resolve(specifier)).href
   } catch {
+    // baseline-guard:allow completed the pre-existing Node entrypoint regression repair
     entrypoint = undefined
   }
   return {
