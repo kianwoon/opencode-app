@@ -60,17 +60,27 @@ export class UpgradeFailedError extends Schema.TaggedErrorClass<UpgradeFailedErr
   }
 }
 
+// OpenCode 1 only updates within its own major version. OpenCode 2 is offered separately through
+// upgradeMajor, so package sources that already publish 2.x (such as Homebrew Core) must not be
+// reported as a normal update.
+export function isUpdate(current: string, latest: string) {
+  if (!semver.valid(latest)) return false
+  if (!semver.valid(current)) return semver.major(latest) === 1
+  return semver.major(latest) === semver.major(current) && semver.gt(latest, current)
+}
+
+// Every install method discovers OpenCode 1 releases from npm. opencode-ai only contains OpenCode 1;
+// OpenCode 2 ships as @opencode/cli. Preview builds follow their own dist-tag, source builds follow latest.
+const NPM_TAG = InstallationChannel === "local" ? "latest" : InstallationChannel
+
 // Response schemas for external version APIs
-const GitHubRelease = Schema.Struct({ tag_name: Schema.String })
 const NpmPackage = Schema.Struct({ version: Schema.String })
-const BrewFormula = Schema.Struct({ versions: Schema.Struct({ stable: Schema.String }) })
 const BrewInfoV2 = Schema.Struct({
   formulae: Schema.Array(Schema.Struct({ versions: Schema.Struct({ stable: Schema.String }) })),
 })
 const ChocoPackage = Schema.Struct({
   d: Schema.Struct({ results: Schema.Array(Schema.Struct({ Version: Schema.String })) }),
 })
-const ScoopManifest = NpmPackage
 
 export interface Interface {
   readonly info: () => Effect.Effect<Info>
@@ -226,6 +236,36 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
       return installed
     })
 
+    const npmLatest = Effect.fnUntraced(function* () {
+      const response = yield* httpOk.execute(
+        HttpClientRequest.get(`${yield* NpmConfig.registry(process.cwd())}/opencode-ai/${NPM_TAG}`).pipe(
+          HttpClientRequest.acceptJson,
+        ),
+      )
+      const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
+      return data.version
+    })
+
+    // Chocolatey can only install versions its moderated community feed has published.
+    const chocoHas = Effect.fnUntraced(function* (version: string) {
+      const response = yield* httpOk.execute(
+        HttpClientRequest.get(
+          `https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20Version%20eq%20%27${encodeURIComponent(version)}%27&$select=Version`,
+        ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
+      )
+      const data = yield* HttpClientResponse.schemaBodyJson(ChocoPackage)(response)
+      return data.d.results.length > 0
+    })
+
+    const tapVersion = Effect.fnUntraced(
+      function* (formula: string) {
+        const infoJson = yield* text(["brew", "info", "--json=v2", formula])
+        const info = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BrewInfoV2))(infoJson)
+        return info.formulae[0].versions.stable
+      },
+      Effect.orElseSucceed(() => undefined),
+    )
+
     const result: Interface = {
       info: Effect.fn("Installation.info")(function* () {
         return {
@@ -267,64 +307,24 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
 
         return "unknown" as Method
       }),
+      // Reports the installed version when there's no OpenCode 1 update this install method can deliver,
+      // so callers offer OpenCode 2 through the major upgrade instead.
       latest: Effect.fn("Installation.latest")(function* (installMethod?: Method) {
-        const detectedMethod = installMethod || (yield* result.method())
-
-        if (detectedMethod === "brew") {
-          const formula = yield* getBrewFormula()
-          if (formula.includes("/")) {
-            const infoJson = yield* text(["brew", "info", "--json=v2", formula])
-            const info = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BrewInfoV2))(infoJson)
-            return info.formulae[0].versions.stable
-          }
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get("https://formulae.brew.sh/api/formula/opencode.json").pipe(
-              HttpClientRequest.acceptJson,
-            ),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(BrewFormula)(response)
-          return data.versions.stable
-        }
-
-        if (detectedMethod === "npm" || detectedMethod === "bun" || detectedMethod === "pnpm") {
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get(
-              `${yield* NpmConfig.registry(process.cwd())}/opencode-ai/${InstallationChannel}`,
-            ).pipe(HttpClientRequest.acceptJson),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
-          return data.version
-        }
-
-        if (detectedMethod === "choco") {
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get(
-              "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
-            ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(ChocoPackage)(response)
-          return data.d.results[0].Version
-        }
-
-        if (detectedMethod === "scoop") {
-          const response = yield* httpOk.execute(
-            HttpClientRequest.get(
-              "https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json",
-            ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
-          )
-          const data = yield* HttpClientResponse.schemaBodyJson(ScoopManifest)(response)
-          return data.version
-        }
-
-        const response = yield* httpOk.execute(
-          HttpClientRequest.get("https://api.github.com/repos/anomalyco/opencode/releases/latest").pipe(
-            HttpClientRequest.acceptJson,
-          ),
-        )
-        const data = yield* HttpClientResponse.schemaBodyJson(GitHubRelease)(response)
-        return data.tag_name.replace(/^v/, "")
+        const method = installMethod || (yield* result.method())
+        // Homebrew Core's opencode formula is OpenCode 2, so `brew upgrade` can't deliver an OpenCode 1 update.
+        if (method === "brew" && !(yield* getBrewFormula()).includes("/")) return InstallationVersion
+        return yield* Effect.gen(function* () {
+          const found = yield* npmLatest()
+          if (!isUpdate(InstallationVersion, found)) return InstallationVersion
+          if (method === "choco" && !(yield* chocoHas(found))) return InstallationVersion
+          return found
+        }).pipe(Effect.timeout("10 seconds"))
       }, Effect.orDie),
       upgrade: Effect.fn("Installation.upgrade")(function* (m: Method, target: string) {
+        if (semver.valid(target) && semver.major(target) >= 2)
+          return yield* new UpgradeFailedError({
+            stderr: `OpenCode ${target} is OpenCode 2. Upgrade with \`opencode upgrade --major\` or see ${MAJOR_INSTRUCTIONS}`,
+          })
         let upgradeResult: { code: number; stdout: string; stderr: string } | undefined
         switch (m) {
           case "curl":
@@ -339,25 +339,36 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
           case "bun":
             upgradeResult = yield* run(["bun", "install", "-g", `opencode-ai@${target}`])
             break
+          case "yarn":
+            upgradeResult = yield* run(["yarn", "global", "add", `opencode-ai@${target}`])
+            break
           case "brew": {
             const formula = yield* getBrewFormula()
             const env = { HOMEBREW_NO_AUTO_UPDATE: "1" }
-            if (formula.includes("/")) {
-              const tap = yield* run(["brew", "tap", "anomalyco/tap"], { env })
-              if (tap.code !== 0) {
-                upgradeResult = tap
+            if (!formula.includes("/"))
+              return yield* new UpgradeFailedError({
+                stderr: `Homebrew Core's opencode formula is OpenCode 2, so Homebrew can't install OpenCode ${target}. Upgrade with \`opencode upgrade --major\`, or reinstall from anomalyco/tap/opencode to stay on OpenCode 1.`,
+              })
+            const tap = yield* run(["brew", "tap", "anomalyco/tap"], { env })
+            if (tap.code !== 0) {
+              upgradeResult = tap
+              break
+            }
+            const repo = yield* text(["brew", "--repo", "anomalyco/tap"])
+            const dir = repo.trim()
+            if (dir) {
+              const pull = yield* run(["git", "pull", "--ff-only"], { cwd: dir, env })
+              if (pull.code !== 0) {
+                upgradeResult = pull
                 break
               }
-              const repo = yield* text(["brew", "--repo", "anomalyco/tap"])
-              const dir = repo.trim()
-              if (dir) {
-                const pull = yield* run(["git", "pull", "--ff-only"], { cwd: dir, env })
-                if (pull.code !== 0) {
-                  upgradeResult = pull
-                  break
-                }
-              }
             }
+            // The tap is updated shortly after npm, so a just-published release may not be installable yet.
+            const available = yield* tapVersion(formula)
+            if (!available || semver.major(available) !== semver.major(target) || semver.lt(available, target))
+              return yield* new UpgradeFailedError({
+                stderr: `Homebrew can't install OpenCode ${target} yet: ${formula} is at ${available ?? "an unknown version"}. Try again in a few minutes.`,
+              })
             upgradeResult = yield* run(["brew", "upgrade", formula], { env })
             break
           }

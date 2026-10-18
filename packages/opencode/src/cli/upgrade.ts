@@ -14,7 +14,7 @@ export function shouldNotify(input: {
 }) {
   if (input.autoupdate === false || input.disabled) return false
   if (input.always) return true
-  return input.current !== input.latest
+  return Installation.isUpdate(input.current, input.latest)
 }
 
 // Returns undefined when checks are disabled or fail, so the TUI only suggests OpenCode 2 after a successful check.

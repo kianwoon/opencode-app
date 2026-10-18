@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core"
 import { createEffect, createMemo, createResource, createSignal, For, Match, Show, Switch } from "solid-js"
 import { useTheme } from "../context/theme"
-import type { UpdateState, UpdateTarget } from "../context/update-notification"
+import { isVersionGreater, type UpdateState, type UpdateTarget } from "../context/update-notification"
 import { useDialog } from "../ui/dialog"
 import { useBindings } from "../keymap"
 import { errorMessage } from "../util/error"
@@ -14,8 +14,14 @@ type Version = { current: string; latest?: string }
 
 // A newer OpenCode 1 release uses the normal update flow; OpenCode 2.0 is only offered when OpenCode 1 is current.
 export function updateTarget(version: Version): UpdateTarget {
-  if (version.latest && version.latest !== version.current) return { type: "latest", version: version.latest }
+  if (version.latest && isUpdate(version.current, version.latest)) return { type: "latest", version: version.latest }
   return { type: "major" }
+}
+
+// Only a newer release in the installed major version is a normal update. OpenCode 2 has its own offer.
+export function isUpdate(current: string, latest: string) {
+  const major = (value: string) => value.replace(/^v/, "").split(".")[0]
+  return major(latest) === major(current) && isVersionGreater(latest, current)
 }
 
 export function DialogUpdate(props: {
