@@ -232,7 +232,10 @@ describe("ModelsDev Service", () => {
       const final = yield* Ref.get(state)
       expect(final.calls.length).toBe(1)
       expect(final.calls[0].url).toContain("/api.json")
-      expect(final.calls[0].userAgent).toContain("/cli")
+      // User-Agent embeds the ambient client id (Flag.OPENCODE_CLIENT, default
+      // "cli", but "desktop" when the sidecar exports it) — pin the contract
+      // without assuming a particular ambient client.
+      expect(final.calls[0].userAgent).toContain(`/${Flag.OPENCODE_CLIENT}`)
     }),
   )
 

@@ -73,6 +73,8 @@ describe("InstructionContext", () => {
           const initialized = yield* SystemContext.initialize(yield* load)
           expect(initialized.baseline).toBe(
             [
+              "Every project inherits the global rules; project-level rules extend them.",
+              "Instructions are listed global-first. On conflict, the global rules ALWAYS take precedence over project-level rules.",
               `Instructions from: ${globalFile}\nglobal`,
               `Instructions from: ${packageFile}\npackage`,
               `Instructions from: ${projectFile}\nproject`,
@@ -92,6 +94,8 @@ describe("InstructionContext", () => {
             _tag: "Updated",
             text: [
               "These instructions replace all previously loaded ambient instructions.",
+              "Every project inherits the global rules; project-level rules extend them.",
+              "Instructions are listed global-first. On conflict, the global rules ALWAYS take precedence over project-level rules.",
               `Instructions from: ${globalFile}\nglobal`,
               `Instructions from: ${projectFile}\nproject`,
             ].join("\n\n"),
@@ -131,7 +135,13 @@ describe("InstructionContext", () => {
             ),
           )
 
-          expect((yield* SystemContext.initialize(context)).baseline).toBe(`Instructions from: ${file}\n`)
+          expect((yield* SystemContext.initialize(context)).baseline).toBe(
+            [
+              "Every project inherits the global rules; project-level rules extend them.",
+              "Instructions are listed global-first. On conflict, the global rules ALWAYS take precedence over project-level rules.",
+              `Instructions from: ${file}\n`,
+            ].join("\n\n"),
+          )
         }),
       ),
     ),

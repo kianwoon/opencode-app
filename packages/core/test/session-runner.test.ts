@@ -1366,7 +1366,10 @@ describe("SessionRunnerLLM", () => {
       while (requests.length < 2) yield* Effect.yieldNow
 
       yield* session.interrupt(sessionID)
-      expect(yield* Fiber.await(run)).toMatchObject({ _tag: "Failure" })
+      // A user stop is scoped to the drain: the resume joiner observes a
+      // successful partial end (the interrupted assistant is finalized as an
+      // abort upstream), not the interrupt.
+      expect(Exit.isSuccess(yield* Fiber.await(run))).toBeTrue()
       streamGate = undefined
       expect(requests).toHaveLength(2)
       expect((yield* session.context(sessionID)).some((message) => message.type === "compaction")).toBe(false)
@@ -2028,7 +2031,7 @@ describe("SessionRunnerLLM", () => {
         delivery: "queue",
       })
       yield* session.interrupt(sessionID)
-      expect(yield* Fiber.await(run)).toMatchObject({ _tag: "Failure" })
+      expect(Exit.isSuccess(yield* Fiber.await(run))).toBeTrue()
       expect(requests).toHaveLength(1)
       expect(yield* SessionInput.hasPending(db, sessionID, "queue")).toBe(true)
       const resumed = yield* session.resume(sessionID).pipe(Effect.forkChild)
@@ -2119,7 +2122,7 @@ describe("SessionRunnerLLM", () => {
         prompt: Prompt.make({ text: "Steer after interrupt" }),
       })
       yield* session.interrupt(sessionID)
-      expect(yield* Fiber.await(run)).toMatchObject({ _tag: "Failure" })
+      expect(Exit.isSuccess(yield* Fiber.await(run))).toBeTrue()
       expect(requests).toHaveLength(1)
       expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(true)
 
@@ -3076,7 +3079,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.interrupt(sessionID)
       toolExecutionGate = undefined
 
-      expect(yield* Fiber.await(run)).toMatchObject({ _tag: "Failure" })
+      expect(Exit.isSuccess(yield* Fiber.await(run))).toBeTrue()
       yield* session.interrupt(sessionID)
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Interrupt blocked tool" },
@@ -3123,7 +3126,7 @@ describe("SessionRunnerLLM", () => {
       streamGate = undefined
       streamStarted = undefined
 
-      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
+      expect(Exit.isSuccess(exit)).toBeTrue()
       expect(requests).toHaveLength(1)
       yield* session.interrupt(sessionID)
     }),
