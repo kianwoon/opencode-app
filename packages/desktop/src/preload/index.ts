@@ -74,6 +74,7 @@ const api: ElectronAPI = {
   storeKeys: (name) => ipcRenderer.invoke("store-keys", name),
   storeLength: (name) => ipcRenderer.invoke("store-length", name),
   vacuumDatabase: () => ipcRenderer.invoke("vacuum-database"),
+  housekeepDatabase: (days) => ipcRenderer.invoke("housekeep-database", days),
   draftGet: (key) => ipcRenderer.invoke("draft-get", key),
   draftSet: (key, value) => ipcRenderer.invoke("draft-set", key, value),
   draftDelete: (key) => ipcRenderer.invoke("draft-delete", key),

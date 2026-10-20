@@ -43,6 +43,8 @@ import { type Session } from "@opencode-ai/sdk/v2/client"
 import { makeFolderDrop } from "@/utils/folder-drop"
 import { SidebarTasksV2 } from "./sidebar-tasks-v2"
 import { DialogNewTask } from "@/components/dialog-new-task"
+import { DialogHousekeep } from "@/components/dialog-housekeep"
+import { pruneSessions } from "./housekeep"
 
 const SIDEBAR_RAIL_WIDTH = 44
 const SIDEBAR_PANEL_WIDTH = 264
@@ -152,6 +154,11 @@ export function NewSidebar() {
     } catch {
       showToast({ title: language.t("sidebar.vacuum.error") })
     }
+  }
+  // Time-based retention: delete sessions older than the requested window
+  // (messages/parts cascade) then compact. Desktop-only IPC.
+  function housekeepDatabase() {
+    void dialog.show(() => <DialogHousekeep onConfirm={(days) => pruneSessions(language.t, days)} />)
   }
   const serverSync = useServerSync()
   const platform = usePlatform()
@@ -464,6 +471,7 @@ export function NewSidebar() {
               onAddProject={addProject}
               onOpenSettings={openSettings}
               onVacuum={vacuumDatabase}
+              onHousekeep={housekeepDatabase}
               onReloadConfigs={reloadConfigs}
               onOpenHelp={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
             />
@@ -500,6 +508,7 @@ function RailSidebar(props: {
   onAddProject: (conn: ServerConnection.Any) => void
   onOpenSettings: () => void
   onVacuum: () => void
+  onHousekeep: () => void
   onReloadConfigs: () => void
   onOpenHelp: () => void
 }) {
@@ -544,6 +553,7 @@ function RailSidebar(props: {
       <div class="mt-auto flex flex-col items-center gap-1 pb-2">
         <RailAction icon="outline-refresh" label={language.t("sidebar.reload")} onClick={props.onReloadConfigs} />
         <RailAction icon="outline-reset" label={language.t("sidebar.vacuum")} onClick={props.onVacuum} />
+        <RailAction icon="archive" label={language.t("sidebar.housekeep")} onClick={props.onHousekeep} />
         <RailAction icon="settings-gear" label={language.t("sidebar.settings")} onClick={props.onOpenSettings} />
         <RailAction icon="help" label={language.t("sidebar.help")} onClick={props.onOpenHelp} />
       </div>
@@ -600,6 +610,7 @@ function ExpandedSidebar(props: SidebarActions) {
   const language = useLanguage()
   const openSettings = useSettingsCommand()
   const serverSDK = useServerSDK()
+  const dialog = useDialog()
   async function reloadConfigs() {
     try {
       showToast({ title: language.t("sidebar.reload.started") })
@@ -640,6 +651,9 @@ function ExpandedSidebar(props: SidebarActions) {
     } catch {
       showToast({ title: language.t("sidebar.vacuum.error") })
     }
+  }
+  function housekeepDatabase() {
+    void dialog.show(() => <DialogHousekeep onConfirm={(days) => pruneSessions(language.t, days)} />)
   }
 
   const expandedFor = (project: LocalProject) => props.expandedFor(project)
@@ -726,6 +740,16 @@ function ExpandedSidebar(props: SidebarActions) {
             icon={<IconV2 name="outline-reset" />}
             aria-label={language.t("sidebar.vacuum")}
             onClick={vacuumDatabase}
+          />
+        </TooltipV2>
+        <TooltipV2 placement="top" value={language.t("sidebar.housekeep")}>
+          <IconButtonV2
+            type="button"
+            variant="ghost-muted"
+            size="small"
+            icon={<IconV2 name="archive" />}
+            aria-label={language.t("sidebar.housekeep")}
+            onClick={housekeepDatabase}
           />
         </TooltipV2>
         <TooltipV2 placement="top" value={language.t("sidebar.settings")}>

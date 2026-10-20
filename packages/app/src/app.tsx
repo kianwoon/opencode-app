@@ -275,6 +275,7 @@ declare global {
       setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
       exportDebugLogs?: () => Promise<string>
       vacuumDatabase?: () => Promise<{ before: number; after: number }>
+      housekeepDatabase?: (days: number) => Promise<{ before: number; after: number; pruned: number }>
     }
   }
 }

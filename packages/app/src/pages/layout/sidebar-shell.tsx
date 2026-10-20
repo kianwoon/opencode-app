@@ -30,6 +30,8 @@ export const SidebarContent = (props: {
   onOpenSettings: () => void
   vacuumLabel: Accessor<string>
   onVacuum: () => void
+  housekeepLabel: Accessor<string>
+  onHousekeep: () => void
   reloadLabel: Accessor<string>
   onReloadConfigs: () => void
   helpLabel: Accessor<string>
@@ -110,6 +112,15 @@ export const SidebarContent = (props: {
               size="large"
               onClick={props.onVacuum}
               aria-label={props.vacuumLabel()}
+            />
+          </Tooltip>
+          <Tooltip placement={placement()} value={props.housekeepLabel()}>
+            <IconButton
+              icon="archive"
+              variant="ghost"
+              size="large"
+              onClick={props.onHousekeep}
+              aria-label={props.housekeepLabel()}
             />
           </Tooltip>
           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>

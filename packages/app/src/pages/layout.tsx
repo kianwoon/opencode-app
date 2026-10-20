@@ -76,6 +76,7 @@ import {
   drainPendingDeepLinks,
 } from "./layout/deep-links"
 import { createInlineEditorController } from "./layout/inline-editor"
+import { pruneSessions } from "./layout/housekeep"
 import {
   LocalWorkspace,
   SortableWorkspace,
@@ -1140,6 +1141,14 @@ export default function LegacyLayout(props: ParentProps) {
     } catch {
       showToast({ title: language.t("sidebar.vacuum.error") })
     }
+  }
+
+  function housekeepDatabase() {
+    const run = ++dialogRun
+    void import("@/components/dialog-housekeep").then((x) => {
+      if (dialogDead || dialogRun !== run) return
+      dialog.show(() => <x.DialogHousekeep onConfirm={(days) => pruneSessions(language.t, days)} />)
+    })
   }
 
   // Reload global + project configs (AGENTS.md, opencode.json, etc.) without
@@ -2338,6 +2347,8 @@ export default function LegacyLayout(props: ParentProps) {
       onOpenSettings={openSettings}
       vacuumLabel={() => language.t("sidebar.vacuum")}
       onVacuum={vacuumDatabase}
+      housekeepLabel={() => language.t("sidebar.housekeep")}
+      onHousekeep={housekeepDatabase}
       reloadLabel={() => language.t("sidebar.reload")}
       onReloadConfigs={reloadConfigs}
       helpLabel={() => language.t("sidebar.help")}

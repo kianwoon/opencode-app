@@ -11,6 +11,7 @@ import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../prel
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { setForceFocus } from "./debug"
 import { vacuumDatabase } from "./database-vacuum"
+import { housekeepDatabase } from "./database-housekeep"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import {
@@ -163,6 +164,13 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("vacuum-database", async () => {
     const dbPath = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "opencode", "opencode.db")
     return vacuumDatabase(dbPath)
+  })
+  // Time-based retention: delete sessions older than `days` (cascading to
+  // messages/parts), checkpoint the WAL, then VACUUM. The renderer only passes
+  // a validated positive number of days.
+  ipcMain.handle("housekeep-database", async (_event, days: number) => {
+    const dbPath = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "opencode", "opencode.db")
+    return housekeepDatabase(dbPath, days)
   })
   ipcMain.handle("draft-get", (_event, key: string) => drafts.get(key))
   ipcMain.handle("draft-set", (_event, key: string, value: string) => drafts.set(key, value))
