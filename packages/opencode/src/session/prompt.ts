@@ -945,8 +945,32 @@ const layer = Layer.effect(
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
       // The part is settled either way inside runSubagentTask; hard failures
-      // (unknown agent) throw, soft ones are already persisted on the part.
-      yield* runSubagentTask({ task, fallbackModel: model, lastUser, sessionID, session, msgs })
+      // (unknown agent) throw and surface as session errors, while soft ones
+      // return ok:false and must be handed back to the parent conversation.
+      const result = yield* runSubagentTask({ task, fallbackModel: model, lastUser, sessionID, session, msgs })
+
+      // A failed subagent never silently disappears: the parent loop has to see
+      // the reason to choose retry / do-it-itself / report. Cancellations are
+      // failures too (their reason text says so) and follow the same path.
+      if (!result.ok) {
+        const failureUserMsg: SessionV1.User = {
+          id: MessageID.ascending(),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: lastUser.agent,
+          model: lastUser.model,
+        }
+        yield* sessions.updateMessage(failureUserMsg)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: failureUserMsg.id,
+          sessionID,
+          type: "text",
+          text: `Subagent task "${task.description}" failed: ${result.reason}. Decide: retry the task, do the work yourself, or report the failure — do not silently continue.`,
+          synthetic: true,
+        } satisfies SessionV1.TextPart)
+      }
 
       if (!task.command) return
 
