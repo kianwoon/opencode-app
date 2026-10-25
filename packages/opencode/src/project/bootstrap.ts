@@ -9,6 +9,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Effect, Layer } from "effect"
 import { Config } from "@/config/config"
 import { Service } from "./bootstrap-service"
+import { StaleSubagentTask } from "@/session/stale-task"
 
 export { Service } from "./bootstrap-service"
 export type { Interface } from "./bootstrap-service"
@@ -25,6 +26,7 @@ const layer = Layer.effect(
     // InstanceStore imports only the lightweight tag from bootstrap-service.ts,
     // so it can depend on bootstrap without importing this implementation graph.
     const config = yield* Config.Service
+    const stale = yield* StaleSubagentTask.Service
     const format = yield* Format.Service
     const lsp = yield* LSP.Service
     const plugin = yield* Plugin.Service
@@ -48,6 +50,9 @@ const layer = Layer.effect(
       yield* config.get()
       // Plugin can mutate config so it has to be initialized before anything else.
       yield* plugin.init()
+      // Boot reconciliation + the periodic stale-subagent sweep. Best-effort:
+      // `boot` only forks the loop and never surfaces a failure into boot.
+      yield* stale.boot
       // Each service self-manages its own slow work via Effect.forkScoped against
       // its per-instance state scope. We just await materialization here.
       yield* Effect.forEach(
@@ -64,7 +69,7 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer: layer,
-  deps: [Config.node, Format.node, LSP.node, Plugin.node, Project.node, Snapshot.node, Vcs.node],
+  deps: [Config.node, Format.node, LSP.node, Plugin.node, Project.node, Snapshot.node, Vcs.node, StaleSubagentTask.node],
 })
 
 export * as InstanceBootstrap from "./bootstrap"

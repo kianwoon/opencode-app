@@ -514,6 +514,8 @@ export const TaskTool = Tool.define(
       }
       const metadata = {
         parentSessionId: ctx.sessionID,
+        // Durable pointer the stale-subagent sweep binds its heartbeat to.
+        childSessionId: nextSession.id,
         sessionId: nextSession.id,
         model,
         ...(runInBackground ? { background: true } : {}),

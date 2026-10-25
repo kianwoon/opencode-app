@@ -110,10 +110,22 @@ async function resolveLoadedPlugins<T extends { plugin?: ConfigPluginV1.Spec[] }
   return config
 }
 
+// Extends the core config with opencode-local knobs. The decoder must know
+// them or `onExcessProperty: "ignore"` silently drops them at load.
+const InfoSchema = Schema.Struct({
+  ...ConfigV1.Info.fields,
+  subagent_stale_timeout_ms: Schema.optional(Schema.Finite).annotate({
+    description:
+      "Quiet time in milliseconds before a running subagent task is finalized as stale. Defaults to 900000 (15 minutes).",
+  }),
+})
+
 type Info = ConfigV1.Info & {
   // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
   // with the file and scope it came from so later runtime code can make location-sensitive decisions.
   plugin_origins?: ConfigPlugin.Origin[]
+  // Local extension decoded by InfoSchema (core Info does not declare it).
+  subagent_stale_timeout_ms?: number
 }
 
 type State = {
@@ -200,7 +212,7 @@ const layer = Layer.effect(
           action: diagnostic.message,
         }),
       )
-      return ConfigParse.schema(ConfigV1.Info, result.value, source)
+      return ConfigParse.schema(InfoSchema, result.value, source)
     })
 
     const fetchRemoteJson = Effect.fnUntraced(function* <S extends Schema.Top>(
@@ -691,7 +703,7 @@ const layer = Layer.effect(
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.jsonc(before, file)
-        ConfigParse.schema(ConfigV1.Info, ConfigV2Compat.lower(normalizeLoadedConfig(existing), file).value, file)
+        ConfigParse.schema(InfoSchema, ConfigV2Compat.lower(normalizeLoadedConfig(existing), file).value, file)
         const merged = mergeDeep(isRecord(existing) ? existing : {}, patch)
         const serialized = JSON.stringify(merged, null, 2)
         next = yield* decodeConfig(merged, file)
