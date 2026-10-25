@@ -4,6 +4,7 @@ import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ORPHAN_ERROR } from "@opencode-ai/core/session/projector"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Session } from "./session"
+import { SessionRunState } from "./run-state"
 import { Config } from "@/config/config"
 import { MessageID, PartID, type SessionID } from "./schema"
 import type { MessageID as MessageIDType, PartID as PartIDType } from "./schema"
@@ -120,6 +121,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     const sessions = yield* Session.Service
+    const runState = yield* SessionRunState.Service
     const config = yield* Config.Service
     const scope = yield* Scope.Scope
 
@@ -209,6 +211,9 @@ const layer = Layer.effect(
 
       let finalized = 0
       let escalated = 0
+      // One WARN per unlinked part per sweep window: the sweep runs every
+      // minute, so an unlinked-but-live part must not spam the log forever.
+      const warnedUnlinked = new Set<PartIDType>()
 
       for (const row of rows as Candidate[]) {
         const state = stateOf(row.data)
@@ -226,10 +231,24 @@ const layer = Layer.effect(
                 .pipe(Effect.orDie)
             : undefined
 
+          // Fail open: a subagent is declared stale ONLY on positive evidence
+          // of child-session silence. Without a resolved child row there is no
+          // heartbeat to prove silence (the part's own start time is not a
+          // heartbeat), so skip — never finalize on missing linkage.
+          if (!child) {
+            if (!warnedUnlinked.has(row.id)) {
+              warnedUnlinked.add(row.id)
+              yield* Effect.logWarning("stale subagent sweep skipped part without a linked child session", {
+                partID: row.id,
+                sessionID: row.session_id,
+              })
+            }
+            continue
+          }
           // Never fire on a child with recent durable activity.
-          if (child && now - child.time_updated <= timeoutMs) continue
+          if (now - child.time_updated <= timeoutMs) continue
           const start = asNumber((state.time as Record<string, unknown> | undefined)?.start) ?? row.time_created
-          const quiet = child ? now - child.time_updated : now - start
+          const quiet = now - child.time_updated
           if (quiet <= timeoutMs) continue
 
           const reason = `subagent stale: no activity for ${Math.floor(quiet / 1_000)}s`
@@ -260,6 +279,15 @@ const layer = Layer.effect(
           if (!claimed) continue
           yield* sessions.updatePart(asPart({ ...row, data: nextData })).pipe(Effect.ignore)
           finalized++
+          // Finalizing the part must also stop the orphan: otherwise the child
+          // keeps streaming (and burning tokens) with no owner. Reuse the
+          // existing session-abort path; a failure here must not abort the sweep.
+          if (childID)
+            yield* runState.cancel(childID).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("stale subagent child abort failed", { sessionID: childID, cause }),
+              ),
+            )
           if (
             yield* injectFailure({
               parentID: row.session_id,
@@ -348,7 +376,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Database.node, Session.node, Config.node],
+  deps: [Database.node, Session.node, SessionRunState.node, Config.node],
 })
 
 export * as StaleSubagentTask from "./stale-task"

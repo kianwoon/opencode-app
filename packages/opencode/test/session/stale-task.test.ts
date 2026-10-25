@@ -6,12 +6,14 @@ import { ORPHAN_ERROR, SessionProjector } from "@opencode-ai/core/session/projec
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { eq } from "drizzle-orm"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Logger } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
 import { StaleSubagentTask } from "@/session/stale-task"
 import { Session } from "@/session/session"
+import { SessionRunState } from "@/session/run-state"
+import { SessionStatus } from "@/session/status"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Config } from "@/config/config"
 import { BackgroundJob } from "@/background/job"
@@ -26,6 +28,8 @@ const it = testEffect(
     LayerNode.group([
       StaleSubagentTask.node,
       Session.node,
+      SessionRunState.node,
+      SessionStatus.node,
       EventV2Bridge.node,
       SessionProjector.node,
       CrossSpawnSpawner.node,
@@ -52,7 +56,8 @@ const seed = (input: {
   now: number
   start: number
   childUpdated: number
-  metadata?: Record<string, unknown>
+  /** `null` seeds a metadata-less part (no child pointer at all). */
+  metadata?: Record<string, unknown> | null
 }) =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
@@ -80,7 +85,15 @@ const seed = (input: {
         status: "running",
         input: { prompt: "do the thing", description: "investigate the flake", subagent_type: "general" },
         title: "investigate the flake",
-        metadata: { childSessionId: child.id, sessionId: child.id, model: { providerID: "test", modelID: "test-model" } },
+        ...(input.metadata === null
+          ? {}
+          : {
+              metadata: input.metadata ?? {
+                childSessionId: child.id,
+                sessionId: child.id,
+                model: { providerID: "test", modelID: "test-model" },
+              },
+            }),
         time: { start: input.start },
       },
     } satisfies SessionV1.ToolPart)
@@ -226,6 +239,59 @@ describe("stale subagent sweep", () => {
       const result = yield* sweep.sweep({ now, timeoutMs: TIMEOUT })
       expect(result.scanned).toBe(0)
       expect(result.finalized).toBe(0)
+    }),
+  )
+
+  it.instance("fails open on a metadata-less part older than the timeout instead of finalizing it", () =>
+    Effect.gen(function* () {
+      const now = Date.now()
+      // The 2026-10-25 18:33Z false positive: a healthy child was streaming,
+      // but the part carried no child pointer. Created age alone must never
+      // be read as silence.
+      const seeded = yield* seed({ now, start: now - 20 * MINUTE, childUpdated: now - MINUTE, metadata: null })
+      const sweep = yield* StaleSubagentTask.Service
+      const logs: unknown[] = []
+
+      const result = yield* sweep.sweep({ now, timeoutMs: TIMEOUT }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make<unknown, void>((options) => {
+              logs.push(options.message)
+            }),
+          ]),
+        ),
+      )
+
+      expect(result.finalized).toBe(0)
+      expect(result.escalated).toBe(0)
+      const part = yield* seeded.sessions.getPart({
+        sessionID: seeded.parent.id,
+        messageID: seeded.message.id,
+        partID: seeded.partID,
+      })
+      expect(part?.type).toBe("tool")
+      if (part?.type !== "tool") throw new Error("expected tool part")
+      expect(part.state.status).toBe("running")
+      expect(logs).toContainEqual([
+        "stale subagent sweep skipped part without a linked child session",
+        expect.objectContaining({ partID: seeded.partID }),
+      ])
+    }),
+  )
+
+  it.instance("aborts the child session when a genuinely stale linked part is finalized", () =>
+    Effect.gen(function* () {
+      const now = Date.now()
+      const seeded = yield* seed({ now, start: now - 20 * MINUTE, childUpdated: now - 16 * MINUTE })
+      const sweep = yield* StaleSubagentTask.Service
+      const runState = yield* SessionRunState.Service
+
+      expect(yield* runState.lastCancelledAt(seeded.child.id)).toBe(0)
+      const result = yield* sweep.sweep({ now, timeoutMs: TIMEOUT })
+
+      expect(result.finalized).toBe(1)
+      // Finalizing the part must stop the orphan, not leave it streaming.
+      expect(yield* runState.lastCancelledAt(seeded.child.id)).toBeGreaterThan(0)
     }),
   )
 })

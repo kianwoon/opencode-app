@@ -319,6 +319,42 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("fresh spawn persists childSessionId on the task part before the child runs", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const seen: Array<Record<string, unknown> | undefined> = []
+
+      const result = yield* def.execute(
+        {
+          description: "inspect bug",
+          prompt: "look into the cache key path",
+          subagent_type: "general",
+          reuse: false,
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps({ text: "done" }) },
+          messages: [],
+          metadata: (val) =>
+            Effect.sync(() => {
+              seen.push(val.metadata)
+            }),
+          ask: () => Effect.void,
+        },
+      )
+
+      // The durable pointer the stale sweep binds to must be written for a
+      // fresh spawn exactly as it is for a re-adopted child, not only at the
+      // completion write.
+      expect(seen.some((metadata) => metadata?.childSessionId === result.metadata.sessionId)).toBe(true)
+    }),
+  )
+
   it.instance("execute refuses to re-dispatch an identical task orphaned by restart", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

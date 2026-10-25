@@ -460,21 +460,52 @@ export const TaskTool = Tool.define(
       const nextSession =
         session ??
         reused ??
-        (yield* sessions.create({
-          parentID: ctx.sessionID,
-          title: params.description + ` (@${next.name} subagent)`,
-          agent: next.name,
-          permission: [
-            ...childPermission,
-            ...childToolDenies.filter(
-              (deny) =>
-                !childPermission.some(
-                  (rule) =>
-                    rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
+        (yield* Effect.uninterruptible(
+          sessions.create({
+            parentID: ctx.sessionID,
+            title: params.description + ` (@${next.name} subagent)`,
+            agent: next.name,
+            permission: [
+              ...childPermission,
+              ...childToolDenies.filter(
+                (deny) =>
+                  !childPermission.some(
+                    (rule) =>
+                      rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
+                  ),
+              ),
+            ],
+          })
+            // Persist the child pointer in the SAME uninterruptible continuation
+            // as the create. The task part is already running before dispatch; an
+            // abort between create and the model-dependent metadata write below
+            // would otherwise leave a live child with no heartbeat link, and the
+            // sweep would have no positive evidence to bind to.
+            .pipe(
+              Effect.tap((child) =>
+                // Claim before the metadata yield: the claim must stay in the
+                // same continuation as the create or a parallel reuse scan can
+                // adopt this live-but-unregistered child.
+                Effect.sync(() => adoptedInFlight.add(child.id)).pipe(
+                  Effect.andThen(
+                    ctx.metadata({
+                      title: params.description,
+                      metadata: {
+                        parentSessionId: ctx.sessionID,
+                        childSessionId: child.id,
+                        sessionId: child.id,
+                        ...(next.model ? { model: next.model } : {}),
+                      },
+                    }),
+                  ),
+                  Effect.catchCause((cause) =>
+                    Effect.sync(() => adoptedInFlight.delete(child.id)).pipe(Effect.andThen(Effect.failCause(cause))),
+                  ),
                 ),
+              ),
             ),
-          ],
-        }))
+          )
+        )
 
       // Claim in the same synchronous continuation as the create: any yield here
       // would let a parallel call's reuse scan adopt the live-but-unregistered child.
