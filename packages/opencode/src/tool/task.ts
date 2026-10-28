@@ -517,6 +517,24 @@ export const TaskTool = Tool.define(
           title: params.description + ` (@${next.name} subagent)`,
         })
 
+      // The fresh-spawn tap above only covers the create path. A resume/reuse
+      // (params.task_id or a reuse hit) skips it, so an abort before the full
+      // metadata write below leaves the running part with no child pointer.
+      // Persist the pointer uninterruptibly here as well; the write at :555
+      // later replaces it with the model-bearing metadata.
+      if (session || reused)
+        yield* Effect.uninterruptible(
+          ctx.metadata({
+            title: params.description,
+            metadata: {
+              parentSessionId: ctx.sessionID,
+              childSessionId: nextSession.id,
+              sessionId: nextSession.id,
+              ...(next.model ? { model: next.model } : {}),
+            },
+          }),
+        )
+
       const reuseNotice = reused
         ? `Reusing subagent session ${nextSession.id} — re-running inside it; pass reuse as the boolean false for a fresh spawn.`
         : undefined

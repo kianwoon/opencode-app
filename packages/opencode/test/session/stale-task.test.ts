@@ -58,6 +58,8 @@ const seed = (input: {
   childUpdated: number
   /** `null` seeds a metadata-less part (no child pointer at all). */
   metadata?: Record<string, unknown> | null
+  /** `"child"` seeds input.task_id with the real child id; any other string is used verbatim. */
+  taskID?: string
 }) =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
@@ -83,7 +85,12 @@ const seed = (input: {
       tool: "task",
       state: {
         status: "running",
-        input: { prompt: "do the thing", description: "investigate the flake", subagent_type: "general" },
+        input: {
+          prompt: "do the thing",
+          description: "investigate the flake",
+          subagent_type: "general",
+          ...(input.taskID === undefined ? {} : { task_id: input.taskID === "child" ? child.id : input.taskID }),
+        },
         title: "investigate the flake",
         ...(input.metadata === null
           ? {}
@@ -249,6 +256,89 @@ describe("stale subagent sweep", () => {
       // but the part carried no child pointer. Created age alone must never
       // be read as silence.
       const seeded = yield* seed({ now, start: now - 20 * MINUTE, childUpdated: now - MINUTE, metadata: null })
+      const sweep = yield* StaleSubagentTask.Service
+      const logs: unknown[] = []
+
+      const result = yield* sweep.sweep({ now, timeoutMs: TIMEOUT }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make<unknown, void>((options) => {
+              logs.push(options.message)
+            }),
+          ]),
+        ),
+      )
+
+      expect(result.finalized).toBe(0)
+      expect(result.escalated).toBe(0)
+      const part = yield* seeded.sessions.getPart({
+        sessionID: seeded.parent.id,
+        messageID: seeded.message.id,
+        partID: seeded.partID,
+      })
+      expect(part?.type).toBe("tool")
+      if (part?.type !== "tool") throw new Error("expected tool part")
+      expect(part.state.status).toBe("running")
+      expect(logs).toContainEqual([
+        "stale subagent sweep skipped part without a linked child session",
+        expect.objectContaining({ partID: seeded.partID }),
+      ])
+    }),
+  )
+
+  it.instance("resolves the child from input.task_id when the metadata carries no pointer", () =>
+    Effect.gen(function* () {
+      const now = Date.now()
+      // The live 2026-10-28 incident: the task part lost the metadata write to
+      // an abort, so it carried no childSessionId — only input.task_id.
+      const seeded = yield* seed({ now, start: now - 20 * MINUTE, childUpdated: now - 16 * MINUTE, metadata: null, taskID: "child" })
+      const sweep = yield* StaleSubagentTask.Service
+
+      const result = yield* sweep.sweep({ now, timeoutMs: TIMEOUT })
+
+      expect(result.finalized).toBe(1)
+      expect(result.escalated).toBe(1)
+      const part = yield* seeded.sessions.getPart({
+        sessionID: seeded.parent.id,
+        messageID: seeded.message.id,
+        partID: seeded.partID,
+      })
+      expect(part?.type).toBe("tool")
+      if (part?.type !== "tool") throw new Error("expected tool part")
+      expect(part.state.status).toBe("error")
+      if (part.state.status !== "error") throw new Error("expected error state")
+      expect(part.state.error).toContain("subagent stale")
+      expect(part.state.metadata?.staleEscalated).toBe(true)
+      expect(yield* staleTextCount(seeded.parent.id)).toBe(1)
+    }),
+  )
+
+  it.instance("resolves the child from input.task_id when metadata exists but has no child pointer", () =>
+    Effect.gen(function* () {
+      const now = Date.now()
+      // Same part shape the processor's abort handler leaves behind: metadata
+      // present ({ interrupted: true }) but no durable child pointer.
+      const seeded = yield* seed({
+        now,
+        start: now - 20 * MINUTE,
+        childUpdated: now - 16 * MINUTE,
+        metadata: { interrupted: true },
+        taskID: "child",
+      })
+      const sweep = yield* StaleSubagentTask.Service
+
+      const result = yield* sweep.sweep({ now, timeoutMs: TIMEOUT })
+
+      expect(result.finalized).toBe(1)
+      expect(result.escalated).toBe(1)
+      expect(yield* staleTextCount(seeded.parent.id)).toBe(1)
+    }),
+  )
+
+  it.instance("ignores an input.task_id that is not session-id shaped", () =>
+    Effect.gen(function* () {
+      const now = Date.now()
+      const seeded = yield* seed({ now, start: now - 20 * MINUTE, childUpdated: now - 16 * MINUTE, metadata: null, taskID: "not-a-session" })
       const sweep = yield* StaleSubagentTask.Service
       const logs: unknown[] = []
 

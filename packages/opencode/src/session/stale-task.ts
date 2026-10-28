@@ -68,15 +68,26 @@ const asPart = (row: Candidate): SessionV1.ToolPart =>
 const asSessionID = (value: unknown): SessionID | undefined =>
   typeof value === "string" && value.length > 0 ? (value as SessionID) : undefined
 
+// `input.task_id` is model-supplied. Adopt it only when it has the session-id
+// shape, so an arbitrary string is ignored instead of probed as a session row.
+const asTaskID = (value: unknown): SessionID | undefined =>
+  typeof value === "string" && value.startsWith("ses_") ? (value as SessionID) : undefined
+
 const asNumber = (value: unknown): number | undefined => (typeof value === "number" ? value : undefined)
 
 const childOf = (state: StoredState): SessionID | undefined => {
   const metadata = metadataOf(state)
+  const input = typeof state.input === "object" && state.input !== null ? (state.input as Record<string, unknown>) : {}
   return (
     asSessionID(metadata.childSessionId) ??
     asSessionID(metadata.sessionId) ??
     asSessionID(metadata.jobId) ??
-    asSessionID(metadata.taskSessionId)
+    asSessionID(metadata.taskSessionId) ??
+    // Durable pointer for the reuse/resume path: the task part records the
+    // requested task_id in its input, and it survives when the metadata write
+    // loses the race with an abort (the live part carried only
+    // `{ interrupted: true }`).
+    asTaskID(input.task_id)
   )
 }
 
@@ -86,7 +97,11 @@ const descriptionOf = (state: StoredState, metadata: Record<string, unknown>): s
   return typeof description === "string" && description.length > 0 ? description : "task"
 }
 
-type ChildRow = { time_updated: number; model: { id: string; providerID: string; variant?: string } | null }
+type ChildRow = {
+  parent_id: string | null
+  time_updated: number
+  model: { id: string; providerID: string; variant?: string } | null
+}
 
 const modelOf = (
   metadata: Record<string, unknown>,
@@ -224,9 +239,13 @@ const layer = Layer.effect(
         if (status === "pending" || status === "running") {
           const child: ChildRow | undefined = childID
             ? yield* db
-                .select({ time_updated: SessionTable.time_updated, model: SessionTable.model })
+                .select({
+                  parent_id: SessionTable.parent_id,
+                  time_updated: SessionTable.time_updated,
+                  model: SessionTable.model,
+                })
                 .from(SessionTable)
-                .where(eq(SessionTable.id, childID))
+                .where(and(eq(SessionTable.id, childID), eq(SessionTable.parent_id, row.session_id)))
                 .get()
                 .pipe(Effect.orDie)
             : undefined
@@ -235,7 +254,11 @@ const layer = Layer.effect(
           // of child-session silence. Without a resolved child row there is no
           // heartbeat to prove silence (the part's own start time is not a
           // heartbeat), so skip — never finalize on missing linkage.
-          if (!child) {
+          // A model-supplied pointer (input.task_id) can name any session; only
+          // a child this same session owns is a valid heartbeat. Probe scoped by
+          // parent_id, and belt-and-braces on the returned row: a mismatch is
+          // unlinked, never silently treated as a live child.
+          if (!child || child.parent_id !== row.session_id) {
             if (!warnedUnlinked.has(row.id)) {
               warnedUnlinked.add(row.id)
               yield* Effect.logWarning("stale subagent sweep skipped part without a linked child session", {
