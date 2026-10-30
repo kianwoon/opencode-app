@@ -1,4 +1,6 @@
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
+import { AbsolutePath } from "@opencode/core/schema"
+import { Location } from "@opencode/core/location"
 import { HttpApiBuilder, OpenApi } from "effect/http-api"
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/http"
 import * as Socket from "effect/socket/Socket"
@@ -50,6 +52,7 @@ import { Storage } from "@/storage/storage"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Worktree } from "@/worktree"
+import { Worktree as WorktreeV2 } from "@opencode/core/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@/compat/move-session"
 import { Database } from "@opencode/core/database/database"
@@ -60,10 +63,9 @@ import { EventV2 } from "@opencode/core/event"
 import { ModelsDev } from "@opencode/core/models-dev"
 import { Npm } from "@opencode/util/npm"
 import { PermissionSaved } from "@opencode/core/permission/saved"
-import { ProjectV2, WorkspaceV2 } from "@/compat/core-namespaces"
+import { ProjectV2 } from "@/compat/core-namespaces"
 import { ProjectCopy } from "@/compat/project-copy"
 import { PtyTicket } from "@opencode/core/pty/ticket"
-import { Ripgrep } from "@opencode/core/ripgrep"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionV2 } from "@/compat/core-namespaces"
 import { SessionExecution } from "@opencode/core/session/execution"
@@ -79,44 +81,19 @@ import { Api } from "@opencode/server/api"
 import { ServerInfo } from "@opencode/server/server-info"
 import { ServerPairing } from "@opencode/server/pairing"
 import { Global } from "@opencode/util/global"
-import { Artifact } from "@opencode/core/artifact"
-import { Agent as AgentV2 } from "@opencode/core/agent"
-import { Config as ConfigV2 } from "@opencode/core/config"
-import { Integration as IntegrationV2 } from "@opencode/core/integration"
-import { Permission as PermissionV2 } from "@opencode/core/permission"
-import { Plugin as PluginV2 } from "@opencode/core/plugin"
-import { Provider as ProviderV2 } from "@opencode/core/provider"
-import { Skill as SkillV2 } from "@opencode/core/skill"
-import { Vcs as VcsV2 } from "@opencode/core/vcs"
-import { Worktree as WorktreeV2 } from "@opencode/core/worktree"
 import { Bus } from "@opencode/core/bus"
 import { Credential } from "@opencode/core/credential"
 import { EventLogger } from "@opencode/core/event-logger"
-import { FileSystem } from "@opencode/core/filesystem"
 import { FileWatch } from "@opencode/core/filesystem/file-watch"
-import { Form } from "@opencode/core/form"
-import { Generate } from "@opencode/core/generate"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { Job } from "@opencode/core/job"
 import { KV } from "@opencode/core/kv"
-import { Location } from "@opencode/core/location"
-import { LocationActivity } from "@opencode/core/location-activity"
-import { Mcp } from "@opencode/core/mcp/index"
-import { Model } from "@opencode/core/model"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { PluginUpdate } from "@opencode/core/plugin/update"
-import { Pty } from "@opencode/core/pty"
-import { Rpc } from "@opencode/core/rpc"
 import { Schedule } from "@opencode/core/schedule"
 import { SdkPlugins } from "@opencode/core/plugin/sdk"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
-import { SessionTitle } from "@opencode/core/session/title"
 import { SessionTransfer } from "@opencode/core/session/transfer"
-import { Shell } from "@opencode/core/shell"
-import { ShellSelect } from "@opencode/core/shell/select"
-import { UsageLimits } from "@opencode/core/usage-limits"
-import { Voice } from "@opencode/core/voice"
-import { WebSearch } from "@opencode/core/websearch"
 import { WellKnown } from "@opencode/core/wellknown"
 import { PublicApi } from "./public"
 import {
@@ -268,7 +245,6 @@ const app = LayerNode.group([
   ConfigWatcher.node,
   Env.node,
   Git.node,
-  Ripgrep.node,
   Storage.node,
   Snapshot.node,
   Plugin.node,
@@ -320,46 +296,21 @@ const app = LayerNode.group([
   ProjectV2.sweepNode,
   ServerPairing.node,
   Global.node,
-  Artifact.node,
   Bus.node,
   Credential.node,
   EventLogger.node,
-  FileSystem.node.mapLayer(Layer.orDie),
   FileWatch.node,
-  Form.node,
-  Generate.node,
   InstructionEntry.node,
   Job.node,
   KV.node,
-  Location.node,
-  LocationActivity.node,
-  Mcp.node,
-  Model.node,
   PersistentPty.node,
   PluginUpdate.node,
-  Pty.node,
-  Rpc.node,
   Schedule.node,
   SdkPlugins.node,
   SessionRestart.node,
-  SessionTitle.node,
   SessionTransfer.node,
-  Shell.node,
-  ShellSelect.node,
-  UsageLimits.node,
-  Voice.node,
-  WebSearch.node,
   WellKnown.node,
-  AgentV2.node,
-  ConfigV2.node,
-  IntegrationV2.node,
-  PermissionV2.node,
-  PluginV2.node,
-  ProviderV2.node,
-  SkillV2.node,
-  VcsV2.node,
   WorktreeV2.node,
-  WorkspaceV2.node,
 ])
 
 
@@ -400,7 +351,11 @@ export function createRoutes(
     ),
     Layer.provide(locationServiceMapV2),
 
-    Layer.provide(AppNodeBuilderV1.build(app).pipe(Layer.orDie)),
+    Layer.provide(
+      AppNodeBuilderV1.build(app, [
+        Location.node.replace(Location.boundNode(Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) }))),
+      ]).pipe(Layer.orDie),
+    ),
     // Must stay last: layers provided later in this pipe build beneath earlier ones,
     // so Observability must come after every service graph. Otherwise eagerly forked
     // fibers (e.g. the ModelsDev background refresh) capture Effect's default stdout
