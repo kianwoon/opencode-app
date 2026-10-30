@@ -7,7 +7,7 @@ import { statics } from "@opencode/schema/schema"
 import { SessionID } from "@opencode/schema/session-id"
 import { SessionV1 } from "@opencode/schema/v1/session"
 
-export const ID = Schema.String.check(Schema.isStartsWith("que")).pipe(
+export const ID = Schema.String.check(Schema.isStartingWith("que")).pipe(
   Schema.brand("QuestionV1.ID"),
   statics((schema) => ({ ascending: (id?: string) => schema.make(id ?? "que_" + ascending()) })),
 )

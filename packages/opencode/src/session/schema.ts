@@ -7,7 +7,7 @@ import { statics } from "@opencode/core/schema"
 export const SessionID = Session.ID
 export type SessionID = Schema.Schema.Type<typeof SessionID>
 
-export const MessageID = Schema.String.check(Schema.isStartsWith("msg")).pipe(
+export const MessageID = Schema.String.check(Schema.isStartingWith("msg")).pipe(
   Schema.brand("SessionV1.MessageID"),
   statics((s) => ({
     ascending: (id?: string) => s.make(Identifier.ascending("message", id)),
@@ -16,7 +16,7 @@ export const MessageID = Schema.String.check(Schema.isStartsWith("msg")).pipe(
 
 export type MessageID = Schema.Schema.Type<typeof MessageID>
 
-export const PartID = Schema.String.check(Schema.isStartsWith("prt")).pipe(
+export const PartID = Schema.String.check(Schema.isStartingWith("prt")).pipe(
   Schema.brand("SessionV1.PartID"),
   statics((s) => ({
     ascending: (id?: string) => s.make(Identifier.ascending("part", id)),

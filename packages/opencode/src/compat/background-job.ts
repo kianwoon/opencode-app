@@ -202,7 +202,7 @@ export const make = Effect.gen(function* () {
   const start: Interface["start"] = Effect.fn("BackgroundJob.start")(function* (input) {
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        const id = input.id ?? Identifier.ascending("job")
+        const id = input.id ?? Identifier.ascending()
         const started_at = yield* Clock.currentTimeMillis
         const done = yield* Deferred.make<Info>()
         const promoted = yield* Deferred.make<Info>()
