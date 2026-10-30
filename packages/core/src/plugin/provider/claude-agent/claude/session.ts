@@ -15,6 +15,19 @@ interface Turn {
 
 export type Interface = Awaited<ReturnType<typeof start>>
 
+async function* toAsyncIterable<T>(stream: ReadableStream<T>): AsyncIterable<T> {
+  const reader = stream.getReader()
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) return
+      yield next.value
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export async function start(options: Options) {
   const { query } = await ClaudeSDK.load()
   let input!: ReadableStreamDefaultController<SDKUserMessage>
@@ -23,7 +36,7 @@ export async function start(options: Options) {
       input = controller
     },
   })
-  const session = query({ prompt, options })
+  const session = query({ prompt: toAsyncIterable(prompt), options })
   let turn: Turn | undefined
   let initialized = false
   let ended = false
