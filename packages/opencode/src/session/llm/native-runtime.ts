@@ -10,13 +10,13 @@ import * as Stream from "effect/Stream"
 import { FetchHttpClient } from "effect/http"
 import {
   LLMRequest,
-  Tool as NativeTool,
   ToolFailure,
   ToolRuntime,
+  tool,
   toDefinitions,
   type JsonSchema,
   type LLMEvent,
-} from "@opencode/ai"
+} from "@opencode/ai/effect"
 import type { LLMClientShape } from "@opencode/ai/route"
 import { LLMNative } from "./native-request"
 
@@ -225,7 +225,7 @@ export function nativeTools(tools: Record<string, Tool>, input: Pick<StreamInput
       name,
       // Tool execution remains opencode-owned. The native runtime only adapts
       // the @opencode/llm tool call back into the AI SDK Tool.execute shape.
-      NativeTool.make({
+      tool({
         description: item.description ?? "",
         jsonSchema: nativeSchema(item.inputSchema),
         execute: (args: unknown, ctx) =>
