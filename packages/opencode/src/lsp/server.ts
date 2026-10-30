@@ -11,7 +11,6 @@ import { Process } from "@/util/process"
 import { which } from "@opencode/core/util/which"
 import { Module } from "@/util/module"
 import { spawn } from "./launch"
-import { Npm } from "@opencode/util/npm"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
 
 const pathExists = async (p: string) =>
@@ -122,7 +121,7 @@ export const Typescript: Info = {
   async spawn(root, ctx) {
     const tsserver = Module.resolve("typescript/lib/tsserver.js", ctx.directory)
     if (!tsserver) return
-    const bin = await Npm.which("typescript-language-server")
+    const bin = which("typescript-language-server")
     if (!bin) return
     const proc = spawn(bin, ["--stdio"], {
       cwd: root,
@@ -150,7 +149,7 @@ export const Vue: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("@vue/language-server")
+      const resolved = which("@vue/language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -337,7 +336,7 @@ export const Biome: Info = {
     if (!bin) {
       const resolved = Module.resolve("biome", root)
       if (!resolved) return
-      bin = await Npm.which("biome")
+      bin = which("biome")
       if (!bin) return
       args = ["lsp-proxy", "--stdio"]
     }
@@ -491,7 +490,7 @@ export const Pyright: Info = {
     const args = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("pyright", "pyright-langserver")
+      const resolved = which("pyright", undefined, "pyright-langserver")
       if (!resolved) return
       binary = resolved
     }
@@ -1075,7 +1074,7 @@ export const Svelte: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("svelte-language-server")
+      const resolved = which("svelte-language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1108,7 +1107,7 @@ export const Astro: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("@astrojs/language-server")
+      const resolved = which("@astrojs/language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1367,7 +1366,7 @@ export const YamlLS: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("yaml-language-server")
+      const resolved = which("yaml-language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1521,7 +1520,7 @@ export const PHPIntelephense: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("intelephense")
+      const resolved = which("intelephense")
       if (!resolved) return
       binary = resolved
     }
@@ -1602,7 +1601,7 @@ export const BashLS: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("bash-language-server")
+      const resolved = which("bash-language-server")
       if (!resolved) return
       binary = resolved
     }
@@ -1780,7 +1779,7 @@ export const DockerfileLS: Info = {
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("dockerfile-language-server-nodejs")
+      const resolved = which("dockerfile-language-server-nodejs")
       if (!resolved) return
       binary = resolved
     }

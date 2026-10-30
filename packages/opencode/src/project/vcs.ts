@@ -2,7 +2,7 @@ import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Effect, Layer, Context, Schema, Scope } from "effect"
 import { formatPatch, structuredPatch } from "diff"
 import { InstanceState } from "@/effect/instance-state"
-import { Watcher } from "@opencode/core/filesystem/watcher"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { Git } from "@/git"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode/core/event"
@@ -317,9 +317,9 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const value = { current, root }
 
         const unsubscribe = yield* events.listen((event) => {
-          if (event.type !== Watcher.Event.Updated.type || event.location?.directory !== ctx.directory)
+          if (event.type !== FileSystemWatcher.Event.Updated.type || event.location?.directory !== ctx.directory)
             return Effect.void
-          const data = event.data as EventV2.Data<typeof Watcher.Event.Updated>
+          const data = event.data as EventV2.Data<typeof FileSystemWatcher.Event.Updated>
           if (!data.file.endsWith("HEAD")) return Effect.void
           return Effect.gen(function* () {
             const next = yield* get()

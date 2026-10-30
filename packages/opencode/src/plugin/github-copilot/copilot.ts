@@ -370,44 +370,25 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         output.headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
       }
 
-      const parts = await sdk.session
-        .message({
-          path: {
-            id: incoming.message.sessionID,
-            messageID: incoming.message.id,
-          },
-          query: {
-            directory: input.directory,
-          },
-          throwOnError: true,
+      const message = await sdk.session.message
+        .get({
+          sessionID: incoming.message.sessionID,
+          messageID: incoming.message.id,
         })
         .catch(() => undefined)
 
       if (
-        parts?.data.parts?.some(
-          (part) =>
-            part.type === "compaction" ||
-            // Auto-compaction resumes via a synthetic user text part. Treat only
-            // that marked followup as agent-initiated so manual prompts stay user-initiated.
-            (part.type === "text" && part.synthetic && part.metadata?.compaction_continue === true),
-        )
+        message?.type === "compaction" ||
+        // Auto-compaction resumes via a synthetic user followup. Treat only that
+        // marked followup as agent-initiated so manual prompts stay user-initiated.
+        message?.metadata?.compaction_continue === true
       ) {
         output.headers["x-initiator"] = "agent"
         return
       }
 
-      const session = await sdk.session
-        .get({
-          path: {
-            id: incoming.sessionID,
-          },
-          query: {
-            directory: input.directory,
-          },
-          throwOnError: true,
-        })
-        .catch(() => undefined)
-      if (!session || !session.data.parentID) return
+      const session = await sdk.session.get({ sessionID: incoming.sessionID }).catch(() => undefined)
+      if (!session?.parentID) return
       // mark subagent sessions as agent initiated matching standard that other copilot tools have
       output.headers["x-initiator"] = "agent"
     },

@@ -1,5 +1,5 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
-import { path } from "@opencode/core/effect/app-node-platform"
+import { path } from "@opencode/util/effect/app-node-platform"
 import { Global } from "@opencode/util/global"
 import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"

@@ -6,8 +6,8 @@ import { LSP } from "@/lsp/lsp"
 import { createTwoFilesPatch } from "diff"
 import DESCRIPTION from "./write.txt"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { FileSystem } from "@opencode/core/filesystem"
-import { Watcher } from "@opencode/core/filesystem/watcher"
+import { FileSystemV1 } from "@opencode/schema/filesystem-v1"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { Format } from "../format"
 import { FSUtil } from "@opencode/util/fs-util"
 import { InstanceState } from "@/effect/instance-state"
@@ -65,8 +65,8 @@ export const WriteTool = Tool.define(
           if (yield* format.file(filepath)) {
             yield* Bom.syncFile(fs, filepath, desiredBom)
           }
-          yield* events.publish(FileSystem.Event.Edited, { file: filepath })
-          yield* events.publish(Watcher.Event.Updated, {
+          yield* events.publish(FileSystemV1.Event.Edited, { file: filepath })
+          yield* events.publish(FileSystemWatcher.Event.Updated, {
             file: filepath,
             event: exists ? "change" : "add",
           })

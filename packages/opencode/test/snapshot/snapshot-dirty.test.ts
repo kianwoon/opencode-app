@@ -1,6 +1,6 @@
 import { afterEach, expect } from "bun:test"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
-import { Watcher } from "@opencode/core/filesystem/watcher"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { FSUtil } from "@opencode/util/fs-util"
 import path from "path"
@@ -36,7 +36,7 @@ const bootstrap = Effect.fn("SnapshotDirtyTest.bootstrap")(function* () {
 
 const publishChange = Effect.fn("SnapshotDirtyTest.publishChange")(function* (file: string) {
   const events = yield* EventV2Bridge.Service
-  yield* events.publish(Watcher.Event.Updated, { file, event: "change" })
+  yield* events.publish(FileSystemWatcher.Event.Updated, { file, event: "change" })
 })
 
 // Poll patch() until every mustHave file shows up and none of mustNotHave does.

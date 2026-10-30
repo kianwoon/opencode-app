@@ -1,6 +1,6 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { httpClient } from "@opencode/core/effect/app-node-platform"
+import { httpClient } from "@opencode/util/effect/app-node-platform"
 import { Effect, Layer, Schema, Context, Stream } from "effect"
 import { serviceUse } from "@opencode/core/effect/service-use"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"

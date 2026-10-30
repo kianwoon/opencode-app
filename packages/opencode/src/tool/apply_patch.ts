@@ -2,7 +2,7 @@ import * as path from "path"
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { Watcher } from "@opencode/core/filesystem/watcher"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { InstanceState } from "@/effect/instance-state"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
@@ -11,7 +11,7 @@ import { trimDiff } from "./edit"
 import { LSP } from "@/lsp/lsp"
 import { FSUtil } from "@opencode/util/fs-util"
 import DESCRIPTION from "./apply_patch.txt"
-import { FileSystem } from "@opencode/core/filesystem"
+import { FileSystemV1 } from "@opencode/schema/filesystem-v1"
 import { Format } from "../format"
 import * as Bom from "@/util/bom"
 
@@ -253,13 +253,13 @@ export const ApplyPatchTool = Tool.define(
           if (yield* format.file(edited)) {
             yield* Bom.syncFile(afs, edited, change.bom)
           }
-          yield* events.publish(FileSystem.Event.Edited, { file: edited })
+          yield* events.publish(FileSystemV1.Event.Edited, { file: edited })
         }
       }
 
       // Publish file change events
       for (const update of updates) {
-        yield* events.publish(Watcher.Event.Updated, update)
+        yield* events.publish(FileSystemWatcher.Event.Updated, update)
       }
 
       // Notify LSP of file changes and collect diagnostics

@@ -9,8 +9,8 @@ import * as Tool from "./tool"
 import { LSP } from "@/lsp/lsp"
 import { createTwoFilesPatch, diffLines } from "diff"
 import DESCRIPTION from "./edit.txt"
-import { FileSystem } from "@opencode/core/filesystem"
-import { Watcher } from "@opencode/core/filesystem/watcher"
+import { FileSystemV1 } from "@opencode/schema/filesystem-v1"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Format } from "../format"
 import { InstanceState } from "@/effect/instance-state"
@@ -112,8 +112,8 @@ export const EditTool = Tool.define(
                 if (yield* format.file(filePath)) {
                   contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
                 }
-                yield* events.publish(FileSystem.Event.Edited, { file: filePath })
-                yield* events.publish(Watcher.Event.Updated, {
+                yield* events.publish(FileSystemV1.Event.Edited, { file: filePath })
+                yield* events.publish(FileSystemWatcher.Event.Updated, {
                   file: filePath,
                   event: "add",
                 })
@@ -156,8 +156,8 @@ export const EditTool = Tool.define(
               if (yield* format.file(filePath)) {
                 contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
               }
-              yield* events.publish(FileSystem.Event.Edited, { file: filePath })
-              yield* events.publish(Watcher.Event.Updated, {
+              yield* events.publish(FileSystemV1.Event.Edited, { file: filePath })
+              yield* events.publish(FileSystemWatcher.Event.Updated, {
                 file: filePath,
                 event: "change",
               })

@@ -5,7 +5,7 @@ import fuzzysort from "fuzzysort"
 import { Config } from "@/config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
-import { Npm } from "@opencode/util/npm"
+import { add } from "@/util/npm"
 import { Hash } from "@opencode/util/hash"
 import { Plugin } from "../plugin"
 import { serviceUse } from "@opencode/core/effect/service-use"
@@ -24,6 +24,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@opencode/util/fs-util"
 import { isRecord } from "@opencode/util/record"
+import { resolveModule } from "@opencode/util/runtime-import"
 import { optional } from "@opencode/core/schema"
 import { protocolFromNpm, suggestProtocolFromBaseURL } from "./protocol"
 import { ProviderTransform } from "./transform"
@@ -2155,9 +2156,8 @@ const layer = Layer.effect(
           if (model.api.npm.startsWith("file://")) {
             return model.api.npm
           }
-          const item = await Npm.add(model.api.npm)
-          if (!item.entrypoint) throw new Error(`Package ${model.api.npm} has no import entrypoint`)
-          return item.entrypoint
+          const item = await add(model.api.npm)
+          return resolveModule(model.api.npm, item.directory)
         })()
 
         // `installedPath` is a local entry path or an existing `file://` URL. Normalize

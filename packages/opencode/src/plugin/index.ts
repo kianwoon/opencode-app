@@ -239,7 +239,9 @@ const layer = Layer.effect(
           headers: ServerAuth.headers(),
           ...(serverUrl
             ? {}
-            : { fetch: async (request: Request) => Server.Default().app.fetch(request) }),
+            : {
+                fetch: (async (request: Request) => Server.Default().app.fetch(request)) as typeof globalThis.fetch,
+              }),
         })
         const cfg = yield* config.get()
         const input: PluginInput = {

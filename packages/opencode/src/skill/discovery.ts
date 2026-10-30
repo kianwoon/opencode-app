@@ -1,5 +1,5 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
-import { httpClient, path } from "@opencode/core/effect/app-node-platform"
+import { httpClient, path } from "@opencode/util/effect/app-node-platform"
 import { NodePath } from "@effect/platform-node"
 import { Effect, Layer, Path, Schema, Context } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"

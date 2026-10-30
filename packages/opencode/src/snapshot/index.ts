@@ -5,7 +5,7 @@ import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import { AppProcess } from "@opencode/util/process"
 import { gitExecutable } from "@opencode/core/util/git-executable"
-import { Watcher } from "@opencode/core/filesystem/watcher"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { EventV2 } from "@opencode/core/event"
 import { InstanceState } from "@/effect/instance-state"
 import { FSUtil } from "@opencode/util/fs-util"
@@ -93,7 +93,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         const args = (cmd: string[]) => ["--git-dir", state.gitdir, "--work-tree", state.worktree, ...cmd]
 
         // Dirty-set tracking: opencode's own edit/write/apply_patch tools publish
-        // Watcher.Event.Updated, and the native file watcher (when enabled) mirrors
+        // FileSystemWatcher.Event.Updated, and the native file watcher (when enabled) mirrors
         // external changes onto the same bus. Collecting those paths lets add()
         // stage only changed files instead of scanning the whole worktree.
         const dirty = new Set<string>()
@@ -107,13 +107,13 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         if (bridge) {
           dirtyConsumer = true
           const unsubscribe = yield* bridge.listen((event) => {
-            if (event.type !== Watcher.Event.Updated.type) return Effect.void
+            if (event.type !== FileSystemWatcher.Event.Updated.type) return Effect.void
             // Events without a location (published outside an instance scope, e.g.
             // from a drain fiber) cannot be attributed to this worktree — and
             // trusting them here once spun the server forever when worktree was
             // "/" (2026-09-09 halt). Same strict filter as project/vcs.ts.
             if (event.location?.directory !== ctx.directory) return Effect.void
-            const data = event.data as EventV2.Data<typeof Watcher.Event.Updated>
+            const data = event.data as EventV2.Data<typeof FileSystemWatcher.Event.Updated>
             const file = path.isAbsolute(data.file) ? data.file : path.resolve(state.worktree, data.file)
             markDirty(file)
             return Effect.void

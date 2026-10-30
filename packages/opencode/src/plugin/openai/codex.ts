@@ -365,12 +365,14 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
 
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
+            let access = currentAuth.access
+            let accountId = authWithAccount.accountId
 
-            if (!currentAuth.access || currentAuth.expires < Date.now()) {
+            if (!access || currentAuth.expires < Date.now()) {
               if (!refreshPromise) {
                 refreshPromise = refreshAccessToken(currentAuth.refresh, issuer)
                   .then(async (tokens) => {
-                    const accountId = extractAccountId(tokens) || authWithAccount.accountId
+                    const nextAccountId = extractAccountId(tokens) || authWithAccount.accountId
                     await input.client.auth.set({
                       path: { id: "openai" },
                       body: {
@@ -378,12 +380,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                         refresh: tokens.refresh_token,
                         access: tokens.access_token,
                         expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                        ...(accountId && { accountId }),
+                        ...(nextAccountId && { accountId: nextAccountId }),
                       },
                     })
                     return {
                       access: tokens.access_token,
-                      accountId,
+                      accountId: nextAccountId,
                     }
                   })
                   .finally(() => {
@@ -392,8 +394,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               }
 
               const refreshed = await refreshPromise
-              currentAuth.access = refreshed.access
-              authWithAccount.accountId = refreshed.accountId
+              access = refreshed.access
+              accountId = refreshed.accountId
             }
 
             const headers = new Headers()
@@ -410,9 +412,9 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 }
               }
             }
-            headers.set("authorization", `Bearer ${currentAuth.access}`)
-            if (authWithAccount.accountId) {
-              headers.set("ChatGPT-Account-Id", authWithAccount.accountId)
+            headers.set("authorization", `Bearer ${access}`)
+            if (accountId) {
+              headers.set("ChatGPT-Account-Id", accountId)
             }
 
             const parsed =
@@ -422,7 +424,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             const rewrite = parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
             const url = rewrite ? new URL(codexApiEndpoint) : parsed
             if (rewrite) {
-              const residency = extractResidency(currentAuth.access)
+              const residency = extractResidency(access)
               if (residency) headers.set("x-openai-internal-codex-residency", residency)
             }
 

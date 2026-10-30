@@ -4,7 +4,7 @@ import npa from "npm-package-arg"
 import semver from "semver"
 import { Filesystem } from "@/util/filesystem"
 import { isRecord } from "@opencode/util/record"
-import { Npm } from "@opencode/util/npm"
+import { add } from "@/util/npm"
 
 // Old npm package names for plugins that are now built-in
 export const DEPRECATED_PLUGIN_PACKAGES = ["opencode-openai-codex-auth", "opencode-copilot-auth"]
@@ -245,7 +245,7 @@ export async function resolvePluginTarget(spec: string) {
   const normalized = normalizePluginSpec(spec)
   const hit = parse(normalized)
   const pkg = hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : normalized
-  const result = await Npm.add(pkg)
+  const result = await add(pkg)
   return result.directory
 }
 

@@ -1,5 +1,5 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
-import { httpClient } from "@opencode/core/effect/app-node-platform"
+import { httpClient } from "@opencode/util/effect/app-node-platform"
 import { Ripgrep } from "@opencode/core/ripgrep"
 import { PlanExitTool } from "./plan"
 import { Session } from "@/session/session"
