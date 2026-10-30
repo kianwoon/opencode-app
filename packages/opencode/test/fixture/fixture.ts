@@ -8,26 +8,40 @@ import type * as PlatformError from "effect/PlatformError"
 import type * as Scope from "effect/Scope"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { Location } from "@opencode/core/location"
+import { Project } from "@opencode/core/project"
+import { AbsolutePath } from "@opencode/core/schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { Config } from "@/config/config"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { InstanceBootstrap } from "../../src/project/bootstrap-service"
 import type { InstanceContext } from "../../src/project/instance-context"
-import { InstanceRuntime } from "../../src/project/instance-runtime"
 import { InstanceStore } from "../../src/project/instance-store"
 import { TestLLMServer } from "../lib/llm-server"
 
 const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
-export const testInstanceStoreLayer = LayerNode.compile(InstanceStore.node, [
-  [InstanceStore.bootstrapNode, noopBootstrap],
-])
+const testLocation = AbsolutePath.make("/tmp")
+export const testBootstrapReplacement = InstanceStore.bootstrapNode.replace(noopBootstrap)
+export const testLocationReplacement = Location.node.replace(
+  Layer.succeed(
+    Location.Service,
+    Location.Service.of({
+      directory: testLocation,
+      project: { id: Project.ID.global, directory: testLocation, canonical: testLocation },
+    }),
+  ),
+)
+export const testInstanceStoreLayer = LayerNode.compile(InstanceStore.node, {
+  replacements: [testBootstrapReplacement],
+})
 
 export async function provideTestInstance<R>(input: {
   directory: string
   init?: Effect.Effect<void>
   fn: (ctx: InstanceContext) => R
 }) {
+  const { InstanceRuntime } = await import("../../src/project/instance-runtime")
   const ctx = await InstanceRuntime.load({ directory: input.directory })
   try {
     if (input.init) await Effect.runPromise(input.init.pipe(Effect.provideService(InstanceRef, ctx)))
@@ -38,15 +52,17 @@ export async function provideTestInstance<R>(input: {
 }
 
 export async function withTestInstance<R>(input: { directory: string; fn: (ctx: InstanceContext) => R }) {
+  const { InstanceRuntime } = await import("../../src/project/instance-runtime")
   return input.fn(await InstanceRuntime.load({ directory: input.directory }))
 }
 
 export async function reloadTestInstance(input: { directory: string }) {
+  const { InstanceRuntime } = await import("../../src/project/instance-runtime")
   return InstanceRuntime.reloadInstance(input)
 }
 
 export async function disposeAllInstances() {
-  await InstanceRuntime.disposeAllInstances()
+  await Effect.runPromise(disposeAllInstancesEffect.pipe(Effect.provide(testInstanceStoreLayer)))
 }
 
 // Strip null bytes from paths (defensive fix for CI environment issues)
