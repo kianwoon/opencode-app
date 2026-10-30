@@ -1,8 +1,8 @@
 // baseline-guard:allow new file, no prior baseline exists
 import { createSignal, Show } from "solid-js"
-import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { ButtonV2 } from "@opencode/ui/button"
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode/ui/dialog"
+import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/context/language"
 
 const MAX_DAYS = 3650

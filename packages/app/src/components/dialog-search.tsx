@@ -2,9 +2,9 @@ import { Component, createMemo } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
+import { useDialog } from "@opencode/ui/context/dialog"
+import { Dialog } from "@opencode/ui/dialog"
+import { List } from "@opencode/ui/list"
 import type { Part, TextPart } from "@opencode-ai/sdk/v2"
 
 export interface SessionSearchItem {

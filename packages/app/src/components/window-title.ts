@@ -1,4 +1,4 @@
-import { getFilename } from "@opencode-ai/core/util/path"
+import { getFilename } from "@opencode/util/path"
 
 const APP_TITLE = "OpenCode"
 const SEPARATOR = " — "
