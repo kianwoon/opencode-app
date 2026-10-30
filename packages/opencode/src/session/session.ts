@@ -46,6 +46,10 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@/compat/core-namespaces"
 import { ModelV2 } from "@/compat/core-namespaces"
 import { SessionMessage } from "@opencode/schema/session-message"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { Location } from "@opencode/core/location"
+import { AbsolutePath, RelativePath } from "@opencode/core/schema"
+import { Agent } from "@opencode/schema/agent"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -565,7 +569,29 @@ const layer: Layer.Layer<
       }
       yield* Effect.logInfo("created", result)
 
-      yield* publishGuarded(SessionV1.Event.Created, { sessionID: result.id, info: result })
+      // The projector (and every other Bus consumer) subscribes to the v2
+      // SessionEvent.Created contract, not the legacy SessionV1 shape.
+      yield* publish(SessionEvent.Created, {
+        sessionID: result.id,
+        projectID: Project.ID.make(ctx.project.id),
+        location: Location.Ref.make({
+          directory: AbsolutePath.make(input.directory),
+          ...(input.workspaceID ? { workspaceID: input.workspaceID } : {}),
+        }),
+        subpath: RelativePath.make(path.relative(ctx.worktree, input.directory).replaceAll("\\", "/")),
+        parentID: input.parentID,
+        slug: result.slug,
+        title: result.title,
+        agent: result.agent ? Agent.ID.make(result.agent) : undefined,
+        model: input.model as unknown as Schema.Schema.Type<typeof SessionEvent.Created>["data"]["model"],
+        metadata: result.metadata,
+        permissions: input.permission?.map((rule) => ({
+          action: rule.pattern,
+          resource: rule.permission,
+          effect: rule.action,
+        })),
+        version: result.version,
+      })
 
       return result
     })
