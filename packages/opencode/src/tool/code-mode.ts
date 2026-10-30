@@ -62,7 +62,9 @@ export function describeCatalog(mcpTools: Record<string, MCP.McpTool>, servers: 
       [...groupByServer(mcpTools, servers).values()].flat(),
       () => () => Effect.fail(toolError("Tool preview is not executable.")),
     ),
-  }).instructions()
+  })
+    .catalog.map((tool) => tool.signature)
+    .join("\n")
 }
 
 const lastSegment = (uri: string) => {
@@ -119,14 +121,15 @@ function projectMcpResult(result: CallToolResult, collect: (attachment: Attachme
 type Run = (input: unknown) => Effect.Effect<unknown, unknown>
 
 function toolTree(catalog: readonly CatalogEntry[], run: (entry: CatalogEntry) => Run) {
-  const tree: Record<string, Record<string, SandboxTool.Definition>> = {}
+  const tree: Record<string, Record<string, SandboxTool.Tool>> = {}
   for (const entry of catalog) {
     const namespace = (tree[entry.server] ??= {})
+    const output = entry.tool.def.outputSchema as SandboxTool.JsonSchema | undefined
     namespace[entry.local] = SandboxTool.make({
       description: entry.tool.def.description ?? "",
       input: entry.tool.def.inputSchema as SandboxTool.JsonSchema,
-      output: entry.tool.def.outputSchema as SandboxTool.JsonSchema | undefined,
-      run: run(entry),
+      ...(output ? { output } : {}),
+      execute: run(entry),
     })
   }
   return tree
@@ -148,7 +151,7 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
     yield* input.ctx.ask({ permission: input.entry.key, metadata: {}, patterns: ["*"], always: ["*"] })
     // Deliberately mirrors McpCatalog.convertTool's transport call so the MCP service stays free of tool-loop concerns.
     return yield* Effect.promise(async () => {
-      const raw = await input.entry.tool.client.callTool(
+      const raw = (await input.entry.tool.client.callTool(
         { name: input.entry.tool.def.name, arguments: input.args },
         CallToolResultSchema,
         {
@@ -158,7 +161,7 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
           // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
           onprogress: () => {},
         },
-      )
+      )) as CallToolResult
       if (raw.isError)
         throw new Error(
           raw.content
@@ -250,25 +253,32 @@ export const CodeModeTool = Tool.define(
 
         const runtime = CodeMode.make({
           tools: toolTree(catalog, callTool),
-          onToolCallStart: ({ index, name, input }) =>
-            Effect.suspend(() => {
-              const shown = (() => {
-                if (input === null || input === undefined) return
-                if (typeof input === "object" && !Array.isArray(input)) {
-                  const value = input as Record<string, unknown>
-                  return Object.keys(value).length > 0 ? value : undefined
+          hooks: {
+            "tool.before": (call) =>
+              Effect.suspend(() => {
+                const shown = (() => {
+                  if (call.input === null || call.input === undefined) return
+                  if (typeof call.input === "object" && !Array.isArray(call.input)) {
+                    const value = call.input as Record<string, unknown>
+                    return Object.keys(value).length > 0 ? value : undefined
+                  }
+                  return { input: call.input }
+                })()
+                calls.push({ tool: call.name, status: "running", ...(shown ? { input: shown } : {}) })
+                return publish()
+              }),
+            "tool.after": (call, outcome) =>
+              Effect.suspend(() => {
+                const index = calls.findLastIndex((entry) => entry.tool === call.name && entry.status === "running")
+                if (index >= 0) {
+                  calls[index] = {
+                    ...calls[index]!,
+                    status: outcome.status === "success" ? "completed" : "error",
+                  }
                 }
-                return { input }
-              })()
-              calls[index] = { tool: name, status: "running", ...(shown ? { input: shown } : {}) }
-              return publish()
-            }),
-          onToolCallEnd: ({ index, outcome }) =>
-            Effect.suspend(() => {
-              const current = calls[index]
-              if (current) calls[index] = { ...current, status: outcome === "success" ? "completed" : "error" }
-              return publish()
-            }),
+                return publish()
+              }),
+          },
         })
 
         const abort = Effect.callback<void>((resume) => {
