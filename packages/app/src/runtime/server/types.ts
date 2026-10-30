@@ -40,6 +40,9 @@ export type Agent = {
   prompt?: string
   options: Record<string, unknown>
   steps?: number
+  /** File-backed agent metadata, when the server reports it. */
+  origin?: "md" | "config" | "native"
+  originPath?: string
 }
 
 type Model = {

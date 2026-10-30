@@ -1,10 +1,14 @@
 import { Component, Show, createMemo, createResource } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
+import { Button } from "@opencode/ui/button"
 import { Select } from "@opencode/ui/select"
 import { Switch } from "@opencode/ui/switch"
 import { TimelineDetailControl } from "@/settings/timeline-detail"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
+import { useDialog } from "@opencode/ui/context/dialog"
+import { DialogHousekeep } from "@/components/dialog-housekeep"
+import { pruneSessions } from "./housekeep"
 import { PluginSettingsSections } from "@/runtime/plugin/settings-page-view"
 import {
   type BackgroundActivity,
@@ -228,6 +232,39 @@ const LanguageSetting = () => {
   )
 }
 
+const HousekeepSetting: Component = () => {
+  const language = useLanguage()
+  const platform = usePlatform()
+  const dialog = useDialog()
+  const housekeep = () => platform.housekeepDatabase
+
+  return (
+    <SettingsRow
+      title={language.t("sidebar.housekeep.title")}
+      description={language.t("sidebar.housekeep.description")}
+    >
+      <div data-action="settings-housekeep">
+        <Button
+          variant="neutral"
+          onClick={() => {
+            const run = housekeep()
+            if (!run) return
+            void dialog.show(() => (
+              <DialogHousekeep
+                onConfirm={async (days) => {
+                  await pruneSessions(language.t, (value) => run(value), days)
+                }}
+              />
+            ))
+          }}
+        >
+          {language.t("sidebar.housekeep.confirm")}
+        </Button>
+      </div>
+    </SettingsRow>
+  )
+}
+
 export const SettingsGeneral: Component = () => {
   const language = useLanguage()
   const platform = usePlatform()
@@ -301,6 +338,10 @@ export const SettingsGeneral: Component = () => {
               <Switch checked={spellcheck.latest} onChange={onSpellcheckChange} />
             </div>
           </SettingsRow>
+        </Show>
+
+        <Show when={"housekeepDatabase" in platform && !!platform.housekeepDatabase}>
+          <HousekeepSetting />
         </Show>
 
         <PluginSettingsSections page="general" section="general" />

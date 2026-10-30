@@ -24,6 +24,9 @@ import { SettingsWorkspaces } from "./workspaces/workspaces"
 import { useWorkspacesPrefetch } from "./workspaces/queries"
 import { SettingsProjects } from "./workspaces/projects"
 import { SettingsExtensions } from "./providers/extensions"
+import { SettingsPermissionsV2 } from "./general/permissions"
+import { SettingsOrchestrationV2 } from "./general/orchestration"
+import { SettingsSubagentV2 } from "./general/subagent"
 import { SettingsAbout } from "./about/about"
 import { SettingsServerDataScope } from "./server-scope"
 import { SettingsNavigation, type SettingsNavGroup } from "./navigation"
@@ -47,6 +50,9 @@ const serverTabs = [
   { value: "providers", icon: pageIcons.providers, label: "settings.providers.title" },
   { value: "models", icon: pageIcons.models, label: "settings.models.title" },
   { value: "extensions", icon: pageIcons.extensions, label: "settings.tab.extensions" },
+  { value: "permissions", icon: pageIcons.permissions, label: "settings.permissions.title" },
+  { value: "subagent", icon: pageIcons.subagent, label: "settings.subagent.title" },
+  { value: "orchestration", icon: pageIcons.orchestration, label: "settings.orchestration.title" },
   { value: "projects", icon: pageIcons.projects, label: "settings.tab.projects" },
   { value: "workspaces", icon: pageIcons.workspaces, label: "settings.tab.workspaces" },
 ] as const
@@ -56,6 +62,9 @@ const serverPages = {
   providers: { title: "settings.providers.title", description: "settings.providers.description" },
   models: { title: "settings.models.title", description: "settings.models.description" },
   extensions: { title: "settings.tab.extensions", description: "settings.extensions.description" },
+  permissions: { title: "settings.permissions.title", description: "settings.permissions.description" },
+  subagent: { title: "settings.subagent.title", description: "settings.subagent.description" },
+  orchestration: { title: "settings.orchestration.title", description: "settings.orchestration.description" },
   projects: { title: "settings.projects.title", description: "settings.projects.description" },
   workspaces: { title: "settings.tab.workspaces", description: "settings.workspaces.description" },
 } as const
@@ -373,6 +382,15 @@ function RootSettings() {
                 headerAction={<SettingsServerSwitcher />}
                 onSubtab={(value) => surface.subtab(value)}
               />
+            </Tabs.Content>
+            <Tabs.Content value="permissions" class="settings-panel">
+              <SettingsPermissionsV2 directory={() => undefined} />
+            </Tabs.Content>
+            <Tabs.Content value="subagent" class="settings-panel">
+              <SettingsSubagentV2 directory={() => undefined} />
+            </Tabs.Content>
+            <Tabs.Content value="orchestration" class="settings-panel">
+              <SettingsOrchestrationV2 />
             </Tabs.Content>
             <Tabs.Content value="projects" class="settings-panel">
               <SettingsProjects

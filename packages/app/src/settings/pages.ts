@@ -15,6 +15,9 @@ export const pageIcons = {
   servers: "server",
   experimental: "flask",
   about: "info",
+  permissions: "lock",
+  orchestration: "outline-brain",
+  subagent: "branch",
 } as const satisfies Record<SettingsRootTab, IconProps["name"]>
 
 export const pageLabels = {
@@ -30,4 +33,7 @@ export const pageLabels = {
   servers: "settings.section.server",
   experimental: "settings.tab.experimental",
   about: "settings.tab.about",
+  permissions: "settings.permissions.title",
+  orchestration: "settings.orchestration.title",
+  subagent: "settings.subagent.title",
 } as const satisfies Record<SettingsRootTab, Parameters<ReturnType<typeof useLanguage>["t"]>[0]>

@@ -1,0 +1,1221 @@
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, type Accessor, type Component } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
+import { Button } from "@opencode/ui/button"
+import { Checkbox } from "@opencode/ui/checkbox"
+import { Icon } from "@opencode/ui/icon"
+import { ProviderIcon } from "@opencode/ui/provider-icon"
+import { Select } from "@opencode/ui/select"
+import { Switch } from "@opencode/ui/switch"
+import { Textarea } from "@opencode/ui/textarea"
+import { TextInput } from "@opencode/ui/text-input"
+import { Wildcard } from "./wildcard"
+import { useLanguage } from "@/runtime/i18n/language"
+import { useModels } from "@/providers/models/models"
+import { usePlatform } from "@/runtime/platform/platform"
+import type { ModelKey } from "@/providers/models/selection"
+import { useServerSDK } from "@/runtime/server/client"
+import { useServer } from "@/runtime/server/current"
+import { normalizeAgentList } from "@/runtime/server/global-sync/utils"
+import { ModelSelectorDrawer } from "@/providers/models/select-dialog"
+import { showToast } from "@/shell/notifications/toast"
+import { SettingsList } from "@/settings/list"
+import { SettingsRow } from "@/settings/row"
+import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
+import { fetchToolInventory } from "./tool-inventory"
+import "@/settings/settings.css"
+
+type Action = "allow" | "ask" | "deny"
+type PermissionRule = Action | { [pattern: string]: Action }
+type AgentBlock = {
+  description?: string
+  mode?: "subagent" | "primary" | "all"
+  model?: string
+  owned_tools?: string[]
+  skills?: string[]
+  capabilities?: string[]
+  permission?: { [tool: string]: PermissionRule }
+  steps?: number
+  temperature?: number
+  top_p?: number
+  hidden?: boolean
+  // A rename copies the RESOLVED prompt/description/mode onto the new key, so
+  // the moved block must carry them; `disable` is the tombstone left behind on
+  // the old key (updateConfig deep-merges and cannot delete).
+  prompt?: string
+  disable?: boolean
+}
+
+// Defined locally rather than imported: the tool inventory must be able to
+// diverge from the Permissions tab without coupling two settings panels.
+/**
+ * A group either lists its members or CLAIMS them by predicate. The JEV family is
+ * claimed by prefix, so a tool added server-side (or a plugin registering a
+ * `jev_*` id) appears in this group with zero edits to this file.
+ */
+const isJevTool = (id: string) => id.startsWith("jev_")
+
+const OWNS_GROUPS = [
+  {
+    label: "settings.subagent.owns.group.general",
+    tools: ["read", "list", "glob", "grep", "edit", "write", "apply_patch", "bash", "external_directory"],
+  },
+  {
+    label: "settings.subagent.owns.group.planning",
+    tools: ["task", "plan", "plan_enter", "plan_exit", "question", "todowrite", "todoread", "workflow", "doom_loop"],
+  },
+  {
+    label: "settings.subagent.owns.group.webDynamic",
+    tools: ["webfetch", "websearch", "skill", "lsp", "tool_search", "cua_batch", "ui_nav", "session_rename"],
+  },
+  {
+    label: "settings.subagent.owns.group.jev",
+    match: isJevTool,
+  },
+] as const
+
+// Only pattern-bearing tools get a pattern input; the rest stay canonical bare
+// actions. Copy permissions.tsx — a shared map here would silently couple the
+// two tabs' canonical form.
+const PATTERN_TOOLS: readonly string[] = ["bash", "read", "edit", "external_directory", "package_install"]
+
+const actionOptions: Action[] = ["allow", "ask", "deny"]
+const modeOptions = ["subagent", "primary", "all"] as const
+
+export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefined> }> = (props) => {
+  const language = useLanguage()
+  const serverSdk = useServerSDK()
+  const server = useServer()
+  const updateConfig = (patch: Record<string, unknown>) => serverSdk.api.experimental.config.update(patch as never)
+  const models = useModels()
+
+  const config = createMemo(() => server.ctx.sync.data.config ?? {})
+  const agents = createMemo<Record<string, AgentBlock | undefined>>(
+    () => (config().agent ?? {}) as Record<string, AgentBlock | undefined>,
+  )
+  const [agentList, { refetch: refetchAgents }] = createResource(
+    () => props.directory(),
+    async (directory) =>
+      normalizeAgentList((await serverSdk.api.agent.list({ location: { directory } })).data),
+  )
+  // Subagent panel only: the primary agent is the Orchestration tab's business,
+  // and config-only entries are unioned in so a hand-written block never
+  // disappears from the list. A `disable: true` tombstone (left behind by a
+  // rename, since updateConfig cannot delete a key) is not selectable. Mode is
+  // read off the runtime entry when there is one, else the config block, so a
+  // config-only `mode: primary` cannot slip into this tab either.
+  const agentOptions = createMemo(() => {
+    const runtime = agentList.latest ?? []
+    const mode = new Map(runtime.map((item) => [item.name, item.mode]))
+    const effectiveMode = (name: string) => mode.get(name) ?? agents()[name]?.mode
+    const names = [...new Set([...runtime.map((item) => item.name), ...Object.keys(agents())])].filter(
+      (name) =>
+        !runtime.some((item) => item.name === name && item.mode === "primary") &&
+        agents()[name]?.disable !== true &&
+        effectiveMode(name) !== "primary",
+    )
+    return names.sort((a, b) => a.localeCompare(b)).map((name) => ({ name }))
+  })
+  const [selected, setSelected] = createSignal<string>("")
+  // Empty list is possible when the runtime has not published agents and config
+  // has no agent block; the row read sites deref this, so keep it total.
+  const active = createMemo(
+    () => agentOptions().find((item) => item.name === selected()) ?? agentOptions()[0] ?? { name: "" },
+  )
+
+  const block = (key: string) => agents()[key] ?? {}
+
+  const [skills, { refetch: refetchSkills }] = createResource(
+    () => props.directory(),
+    async (directory) => {
+      const result = await serverSdk.api.skill.list({ location: { directory } })
+      return (result.data ?? []) as { name: string }[]
+    },
+  )
+
+  // Assignable tools the curated OWNS_GROUPS do not cover, plus every MCP tool
+  // grouped by its server. The endpoint lives on the experimental HttpApi, which
+  // the generated client contract does not include, hence the plain fetch.
+  const [inventory] = createResource(() => fetchToolInventory(serverSdk.server.http))
+  const registryEntries = createMemo(() => inventory.latest?.registry ?? [])
+  const groupTools = (group: (typeof OWNS_GROUPS)[number]) =>
+    "tools" in group ? [...group.tools] : registryEntries().filter((tool) => group.match(tool.id)).map((tool) => tool.id)
+  // Every member of every group, so "+ Tools" can offer only what no group
+  // already claims and the section total counts the auto-discovered jev_* ids.
+  const ownedGroupTools = createMemo(() => OWNS_GROUPS.flatMap(groupTools))
+  const discoveredRegistry = createMemo(() => registryEntries().filter((tool) => !ownedGroupTools().includes(tool.id)))
+  const registryDescription = (tool: string) => registryEntries().find((entry) => entry.id === tool)?.description
+  // A jev_* row is described by the registry the server actually serves, so a
+  // new tool needs no i18n entry; the curated keys stay as the fallback and the
+  // bare id is the last resort. Non-jev groups keep their i18n copy verbatim.
+  const rowTitle = (tool: string) => (isJevTool(tool) ? tool : (language.t(`settings.permissions.tool.${tool}.title`) ?? tool))
+  const rowDescription = (tool: string) =>
+    isJevTool(tool)
+      ? (registryDescription(tool) ?? language.t(`settings.permissions.tool.${tool}.description`) ?? tool)
+      : language.t(`settings.permissions.tool.${tool}.description`)
+  const exposedIds = createMemo(() => new Set((inventory.latest?.registry ?? []).map((tool) => tool.id)))
+  // Before the inventory resolves everything counts as exposed, so no row flickers.
+  const isExposed = (tool: string) => inventory.latest === undefined || exposedIds().has(tool)
+
+  // THE single write path: every control funnels through here, so there is
+  // exactly one updateConfig call shape for the tab.
+  const commit = (name: string, patch: AgentBlock) => {
+    // An empty list makes active() the {name:""} fallback; writing it would
+    // create a malformed config key.
+    if (name === "") return
+    const next = { ...config() }
+    const agent = { ...agents() }
+    agent[name] = { ...block(name), ...patch }
+    next.agent = agent
+    void updateConfig(next)
+      .then(() => refetchSkills())
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+      })
+  }
+
+  const currentModel = createMemo(() => {
+    const value = block(active().name).model ?? ""
+    const [providerID, ...rest] = value.split("/")
+    const modelID = rest.join("/")
+    if (!providerID || !modelID) return
+    return models.find({ providerID, modelID })
+  })
+  const modelState = createMemo(() => ({
+    ready: models.ready,
+    list: models.list,
+    current: currentModel,
+    set(item: ModelKey | undefined) {
+      commit(active().name, { model: item ? `${item.providerID}/${item.modelID}` : "" })
+    },
+    visible: (item: ModelKey) => models.visible(item),
+    setVisibility: (item: ModelKey, visible: boolean) => models.setVisibility(item, visible),
+    recent: models.recent,
+  }))
+
+  // An absent owned_tools means every tool, matching resolveTools in
+  // packages/opencode/src/session/llm/request.ts.
+  const owns = (tool: string) => block(active().name).owned_tools?.includes(tool) ?? true
+  const toggleOwns = (tool: string, checked: boolean) => {
+    const current = block(active().name).owned_tools
+    // INVARIANT: unchecking must never materialize a tool id this build does not
+    // expose, so `known` is filtered to the registry the server actually serves.
+    const known = [
+      ...ownedGroupTools(),
+      ...(current ?? []),
+      ...discoveredRegistry().map((tool) => tool.id),
+    ].filter(isExposed)
+    const owned_tools = checked
+      ? [...new Set([...(current ?? known.filter((name) => owns(name))), tool])]
+      : (current ?? known).filter((name) => name !== tool)
+    commit(active().name, { owned_tools })
+  }
+
+  // One commit flips a whole group, reusing toggleOwns's owned_tools shape so
+  // the write path cannot diverge. It always acts on the group's FULL tool
+  // list: the search filter narrows what is rendered, never what is written.
+  const toggleGroupOwns = (tools: readonly string[], checked: boolean) => {
+    const current = block(active().name).owned_tools
+    // INVARIANT: unchecking must never materialize a tool id this build does not
+    // expose, so `known` is filtered to the registry the server actually serves.
+    const known = [
+      ...ownedGroupTools(),
+      ...(current ?? []),
+      ...discoveredRegistry().map((tool) => tool.id),
+    ].filter(isExposed)
+    const owned_tools = checked
+      ? [...new Set([...(current ?? known.filter((name) => owns(name))), ...tools])]
+      : (current ?? known).filter((name) => !tools.includes(name))
+    commit(active().name, { owned_tools })
+  }
+
+  // Session-local catalog search, never persisted. An empty query renders every
+  // group whole; a group whose rows all filter out drops out entirely.
+  const [ownsQuery, setOwnsQuery] = createSignal("")
+  const visibleOwnsGroups = createMemo(() => {
+    const query = ownsQuery().trim().toLowerCase()
+    return OWNS_GROUPS.map((group) => {
+      const members = groupTools(group)
+      return {
+        ...group,
+        // The group master and the count badge read allTools, keeping their
+        // owned/total meaning independent of the active search.
+        allTools: members,
+        tools:
+          query === "" ? members : members.filter((tool) => `${rowTitle(tool)} ${rowDescription(tool)}`.toLowerCase().includes(query)),
+      }
+    }).filter((group) => group.tools.length > 0)
+  })
+
+  // Every section starts COLLAPSED: the store records only the sections the
+  // user explicitly expanded; an absent key stays folded. A non-empty search
+  // forces the curated groups open so results stay visible.
+  const [expanded, setExpanded] = createStore({
+    groups: {} as Record<string, boolean>,
+    servers: {} as Record<string, boolean>,
+    sections: {} as Record<string, boolean>,
+  })
+  const ownsExpanded = (group: string) => ownsQuery().trim() !== "" || expanded.groups[group] === true
+  const serverExpanded = (server: string) => expanded.servers[server] === true
+  const sectionExpanded = (key: string) => expanded.sections[key] === true
+
+  const selectedSkills = createMemo(() => block(active().name).skills ?? [])
+  const toggleSkill = (skill: string) => {
+    const current = selectedSkills()
+    commit(active().name, { skills: current.includes(skill) ? current.filter((item) => item !== skill) : [...current, skill] })
+  }
+
+  const capabilities = createMemo(() => block(active().name).capabilities ?? [])
+
+  // The evaluator flattens the agent block into ONE ruleset and findLast picks
+  // the last match, so an earlier catch-all still governs every later key — the
+  // UI must resolve rules the same way or it shows grants the agent never gets.
+  const effectiveAction = (tool: string, fallback: Action) => {
+    const ruleset = Object.entries(block(active().name).permission ?? {}).flatMap(([permission, value]) =>
+      typeof value === "string"
+        ? [{ permission, pattern: "*", action: value }]
+        : Object.entries(value).map(([pattern, action]) => ({ permission, pattern, action })),
+    )
+    return (
+      ruleset.findLast((rule) => Wildcard.match(tool, rule.permission) && Wildcard.match(tool, rule.pattern))
+        ?.action ?? fallback
+    )
+  }
+
+  const howEntry = (tool: string) => {
+    const value = block(active().name).permission?.[tool]
+    if (!value) return { action: effectiveAction(tool, "ask"), pattern: "*" }
+    if (typeof value === "string") return { action: value, pattern: "*" }
+    const [pattern, action] = Object.entries(value)[0] ?? ["*", "ask" as Action]
+    return { action, pattern }
+  }
+  const setHow = (tool: string, action: Action, pattern: string) => {
+    const permission = { ...block(active().name).permission }
+    // The bare-action form keeps the config canonical for the "*" pattern;
+    // anything else needs the pattern map. Action-only keys (todowrite,
+    // question, webfetch, websearch, doom_loop) MUST stay bare — the object
+    // form fails the config decode with ConfigInvalidError.
+    permission[tool] = pattern.trim() === "" || pattern === "*" ? action : { [pattern.trim()]: action }
+    commit(active().name, { permission })
+  }
+
+  // One commit flips every tool of a server, reusing the bare-action entry
+  // shape setHow writes for the "*" pattern so evaluation is identical.
+  const setAllForServer = (tools: { name: string }[], action: "allow" | "deny") => {
+    const permission = {
+      ...block(active().name).permission,
+      ...Object.fromEntries(tools.map((tool) => [tool.name, action])),
+    }
+    commit(active().name, { permission })
+  }
+
+  // Unset means allowed, so the checkbox is inverted: checked = allowed.
+  const denied = (tool: string) => effectiveAction(tool, "allow") === "deny"
+
+  // Numeric budgets commit on `change` (blur/Enter), never per keystroke, so a
+  // partially typed value never persists. A blank or non-finite blob is ignored
+  // rather than written: Number("") === 0 is finite, so clearing the field would
+  // otherwise persist a silent 0.
+  const commitNumber = (field: "steps" | "temperature", raw: string) => {
+    if (raw.trim() === "") return
+    const value = Number(raw)
+    if (!Number.isFinite(value)) return
+    commit(active().name, { [field]: value })
+  }
+
+  // One inline editor serves both create and rename, so the draft name and its
+  // error live in a single store rather than a signal per field.
+  // The delete confirm joins the create/rename draft store rather than owning a
+  // signal: it is the same two-step "open, then confirm or cancel" state, so
+  // closeEditor resets all three at once.
+  const [editor, setEditor] = createStore<{ kind: "" | "create" | "rename" | "delete"; name: string; error: string }>({
+    kind: "",
+    name: "",
+    error: "",
+  })
+  const closeEditor = () => setEditor({ kind: "", name: "", error: "" })
+
+  // agentOptions() deliberately hides primary agents, so it is the WRONG set for
+  // a duplicate check: creating or renaming to build/plan/brain would otherwise
+  // pass and clobber that agent's config block. Every existing name counts here,
+  // primary and native included; only a disabled tombstone is free to reuse.
+  const reservedNames = createMemo(
+    () =>
+      new Set(
+        [...(agentList.latest ?? []).map((item) => item.name), ...Object.keys(agents())].filter(
+          (name) => agents()[name]?.disable !== true,
+        ),
+      ),
+  )
+
+  // task.ts resolves a subagent by config KEY (agent.get(name)), so a rename has
+  // to move the key itself; both flows share this one validator.
+  const nameError = (raw: string) => {
+    const name = raw.trim()
+    if (name === "") return language.t("settings.subagent.name.error.empty")
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) return language.t("settings.subagent.name.error.invalid")
+    if (reservedNames().has(name)) return language.t("settings.subagent.name.error.duplicate")
+    return ""
+  }
+
+  // Create and rename must move the selection only once the write lands, so they
+  // await it; the row controls keep commit()'s fire-and-forget path. The agent
+  // map is deep-merged, so a partial patch adds or overwrites without restating
+  // untouched keys. Resolves false so the caller can skip setSelected.
+  const commitAgentPatch = (patch: Record<string, AgentBlock>) =>
+    updateConfig({ agent: patch })
+      .then(
+        () => true,
+        (err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err)
+          showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+          return false
+        },
+      )
+
+  const confirmCreate = async () => {
+    const error = nameError(editor.name)
+    if (error !== "") return setEditor("error", error)
+    const name = editor.name.trim()
+    if (!(await commitAgentPatch({ [name]: { mode: "subagent" } }))) return
+    setSelected(name)
+    closeEditor()
+  }
+
+  const resolvedPrompt = createMemo(
+    () => agentList.latest?.find((item) => item.name === active().name)?.prompt ?? "",
+  )
+
+  // `.md` frontmatter wins over opencode.json (config.ts merges md as the 2nd
+  // arg), so a config write to a key the md declares is silently dead.
+  const mdBacked = createMemo(
+    () => agentList.latest?.find((item) => item.name === active().name)?.origin === "md",
+  )
+
+  // The md BODY is the prompt, so the panel can edit it in place -- but only
+  // through the desktop bridge, whose main-process guard scopes writes to the
+  // agent roots. Web (and config/native agents) keep the read-only view.
+  const platform = usePlatform()
+  const promptEditable = createMemo(() => mdBacked() && !!platform.readFile && !!platform.writeFile)
+  const [promptEditor, setPromptEditor] = createSignal<{ name: string; body: string } | null>(null)
+  // A file read is async, so a save can land before it returns. Retaining the
+  // saved body keeps the row and the next Edit prefill correct immediately; the
+  // file read is the source of truth and takes over again on a refetch.
+  const [promptOverride, setPromptOverride] = createStore<Record<string, string>>({})
+  createEffect(
+    on(
+      () => active().name,
+      () => setPromptOverride(reconcile({})),
+    ),
+  )
+  // For an md agent the `.md` body IS the prompt, so it is read from the file
+  // rather than the server's cached copy -- the file is already correct the
+  // moment a save lands. A config or native agent has no file, keeps the server
+  // value, and never triggers a read.
+  const [mdPrompt, { refetch: refetchMdPrompt }] = createResource(
+    () => {
+      const item = agentList.latest?.find((entry) => entry.name === active().name)
+      return item?.origin === "md" ? item.originPath : undefined
+    },
+    async (path) => {
+      const read = platform.readFile
+      if (!path || !read) return undefined
+      return promptBody(await read(path))
+    },
+  )
+  const shownPrompt = createMemo(() =>
+    resolvePrompt({
+      override: promptOverride[active().name],
+      file: mdBacked() ? mdPrompt() : undefined,
+      server: resolvedPrompt(),
+    }),
+  )
+
+  // The body is written through `writePromptBody`, which preserves the leading
+  // frontmatter byte-for-byte. Deliberately no config write here: a
+  // `PATCH /config` makes `Config.updateGlobal` fork
+  // `disposeAllInstancesAndEmitGlobalDisposed`, disposing every instance and
+  // killing the very run that clicked Save.
+  const savePrompt = () => {
+    const draft = promptEditor()
+    const path = agentList.latest?.find((item) => item.name === draft?.name)?.originPath
+    const read = platform.readFile
+    const write = platform.writeFile
+    if (!draft || !path || !read || !write) return
+    return writePromptBody({ readFile: read, writeFile: write }, path, draft.body)
+      .then(() => {
+        // A save can land after the user moved on: only close the editor it
+        // saved, and only retain that agent's body.
+        if (promptEditor()?.name === draft.name) {
+          setPromptOverride(draft.name, draft.body)
+          setPromptEditor(null)
+        }
+        return Promise.all([refetchMdPrompt(), refetchAgents()])
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+      })
+  }
+
+  // A native agent is provided by the runtime and its key must not move. There is
+  // no brain clause any more: brain dispatch is registry-driven and brain no
+  // longer owns any other agent's model.
+  const renameBlock = createMemo(() => {
+    const runtime = agentList.latest?.find((item) => item.name === active().name)
+    if (runtime?.native) return language.t("settings.subagent.rename.disabled.native")
+    return ""
+  })
+
+  const confirmRename = async () => {
+    const from = active().name
+    if (from === "" || renameBlock() !== "") return
+    const error = nameError(editor.name)
+    if (error !== "") return setEditor("error", error)
+    const to = editor.name.trim()
+    const runtime = agentList.latest?.find((item) => item.name === from)
+    // Carry the RESOLVED values onto the new key: once the old key is
+    // tombstoned the runtime no longer resolves its prompt/description/mode.
+    const moved: AgentBlock = { ...agents()[from] }
+    if (moved.prompt === undefined) moved.prompt = runtime?.prompt
+    if (moved.description === undefined) moved.description = runtime?.description
+    if (moved.mode === undefined) moved.mode = runtime?.mode ?? "subagent"
+    delete moved.disable
+    // Selecting `to` before the write lands would leave the panel pointing at a
+    // key that does not exist yet, so the selection waits on the tombstone.
+    if (!(await commitAgentPatch({ [to]: moved, [from]: { disable: true } }))) return
+    setSelected(to)
+    closeEditor()
+  }
+
+  // Deleting a subagent is a tombstone write: the config API deep-merges and has
+  // no delete, so the key survives with `disable: true`, the runtime drops it
+  // (agent.ts honours the tombstone) and the list filters it out. No brain/native
+  // guard: brain dispatch is registry-driven (`task: {"*":"allow"}`), so a brain
+  // wired agent disappears from the runtime as a whole rather than half-existing.
+  const confirmDelete = async () => {
+    const name = active().name
+    if (name === "") return
+    if (!(await commitAgentPatch({ [name]: { disable: true } }))) return
+    setSelected(agentOptions()[0]?.name ?? "")
+    closeEditor()
+  }
+
+  const actionLabel = (action: Action) => language.t(`settings.permissions.action.${action}`)
+  const current = createMemo(() => currentModel() as { provider?: { id: string }; name?: string } | undefined)
+
+  return (
+    <>
+      <div class="settings-v2-tab-header">
+        <h2 class="settings-v2-tab-title">{language.t("settings.subagent.title")}</h2>
+      </div>
+
+      <div class="settings-v2-tab-body" data-action="settings-subagent">
+        <div class="settings-v2-section">
+          <SettingsList>
+            <SettingsRow
+              title={language.t("settings.subagent.agent.title")}
+              description={language.t("settings.subagent.agent.description")}
+            >
+              <div class="w-full sm:w-[220px] flex items-center gap-2">
+                <Select
+                  data-action="settings-subagent-agent"
+                  options={agentOptions()}
+                  current={active()}
+                  placement="bottom-end"
+                  gutter={6}
+                  value={(option) => option.name}
+                  label={(option) => option.name}
+                  onSelect={(option) => option && setSelected(option.name)}
+                />
+                <Button
+                  variant="ghost"
+                  size="small"
+                  data-action="settings-subagent-new"
+                  onClick={() => setEditor({ kind: "create", name: "", error: "" })}
+                >
+                  {language.t("settings.subagent.create.title")}
+                </Button>
+              </div>
+            </SettingsRow>
+            <Show when={editor.kind === "create"}>
+              <div class="w-full flex flex-col gap-2" data-action="settings-subagent-create">
+                <div class="w-full sm:w-[320px] flex items-center gap-2">
+                  <TextInput
+                    type="text"
+                    appearance="base"
+                    value={editor.name}
+                    invalid={editor.error !== ""}
+                    aria-label={language.t("settings.subagent.create.title")}
+                    onChange={(event) => setEditor({ name: event.currentTarget.value, error: "" })}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-create-confirm"
+                    onClick={confirmCreate}
+                  >
+                    {language.t("settings.subagent.create.confirm")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-create-cancel"
+                    onClick={closeEditor}
+                  >
+                    {language.t("settings.subagent.create.cancel")}
+                  </Button>
+                </div>
+                <Show when={editor.error !== ""}>
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-create-error">
+                    {editor.error}
+                  </p>
+                </Show>
+              </div>
+            </Show>
+            <p class="settings-v2-plugins-hint" data-action="settings-subagent-summary">
+              {language.t("settings.subagent.summary", {
+                owned: ownedGroupTools().filter(isExposed).filter((tool) => owns(tool)).length,
+                total: ownedGroupTools().filter(isExposed).length,
+                skills: selectedSkills().length,
+              })}
+            </p>
+          </SettingsList>
+        </div>
+
+        {/* No selectable agent means active() is the {name:""} fallback, so these
+        controls have no real target; the write paths refuse it too. */}
+        <Show when={agentOptions().length > 0}>
+        <div class="settings-v2-section">
+          <SettingsList>
+            <SettingsRow
+              title={language.t("settings.subagent.row.model.title")}
+              description={language.t("settings.subagent.row.model.description")}
+            >
+              <div class="w-full sm:w-[260px]" data-action="settings-subagent-model">
+                <ModelSelectorDrawer
+                  model={modelState() as never}
+                  trigger={(triggerProps) => (
+                    <Button
+                      {...triggerProps}
+                      variant="ghost-muted"
+                      size="normal"
+                      style={{ height: "28px" }}
+                      class="min-w-0 w-full justify-start ![font-weight:440] group"
+                      data-control-type="popover"
+                    >
+                      <Show
+                        when={current()}
+                        fallback={<span class="truncate leading-4">{language.t("common.default")}</span>}
+                      >
+                        {(item) => (
+                          <>
+                            <Show when={item().provider}>
+                              {(provider) => (
+                                <ProviderIcon
+                                  id={provider().id}
+                                  class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
+                                />
+                              )}
+                            </Show>
+                            <span class="truncate leading-4">{item().name}</span>
+                            <span class="-ml-0.5 -mr-1 flex shrink-0">
+                              <Icon name="chevron-down" />
+                            </span>
+                          </>
+                        )}
+                      </Show>
+                    </Button>
+                  )}
+                />
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.row.capabilities.title")}
+              description={language.t("settings.subagent.row.capabilities.description")}
+            >
+              <div class="w-full sm:w-[320px]" data-action="settings-subagent-capabilities">
+                <TextInput
+                  type="text"
+                  appearance="base"
+                  value={capabilities().join(", ")}
+                  aria-label={language.t("settings.subagent.row.capabilities.title")}
+                  onChange={(event) =>
+                    commit(active().name, {
+                      capabilities: event.currentTarget.value
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.row.description.title")}
+              description={language.t("settings.subagent.row.description.description")}
+            >
+              <Show
+                when={!mdBacked()}
+                fallback={
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-description-md">
+                    {language.t("settings.subagent.mdBacked", { file: `agent/${active().name}.md` })}
+                  </p>
+                }
+              >
+                <div class="w-full sm:w-[320px]" data-action="settings-subagent-description">
+                  <Textarea
+                    rows={3}
+                    value={block(active().name).description ?? ""}
+                    aria-label={language.t("settings.subagent.row.description.title")}
+                    onChange={(event) => commit(active().name, { description: event.currentTarget.value })}
+                  />
+                </div>
+              </Show>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.prompt.title")}
+              description={language.t(
+                promptEditable()
+                  ? "settings.subagent.prompt.editableDescription"
+                  : "settings.subagent.prompt.description",
+              )}
+            >
+              <div class="w-full sm:w-[420px]">
+                <Show
+                  when={promptEditor()?.name === active().name ? promptEditor() : undefined}
+                  fallback={
+                    <>
+                      <Show
+                        when={shownPrompt()}
+                        fallback={
+                          <p class="settings-v2-plugins-hint" data-action="settings-subagent-prompt-empty">
+                            {language.t("settings.subagent.prompt.empty")}
+                          </p>
+                        }
+                      >
+                        {(prompt) => (
+                          <pre
+                            class="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-12-regular"
+                            data-action="settings-subagent-prompt"
+                          >
+                            {prompt()}
+                          </pre>
+                        )}
+                      </Show>
+                      <Show when={promptEditable()}>
+                        <div class="mt-2">
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            data-action="settings-subagent-prompt-edit"
+                            onClick={() => setPromptEditor({ name: active().name, body: shownPrompt() })}
+                          >
+                            {language.t("settings.subagent.prompt.edit")}
+                          </Button>
+                        </div>
+                      </Show>
+                    </>
+                  }
+                >
+                  {(draft) => (
+                    <div class="w-full flex flex-col gap-2">
+                      <Textarea
+                        rows={8}
+                        value={draft().body}
+                        aria-label={language.t("settings.subagent.prompt.title")}
+                        onChange={(event) => setPromptEditor({ name: active().name, body: event.currentTarget.value })}
+                      />
+                      <div class="flex items-center gap-2">
+                        <Button size="small" data-action="settings-subagent-prompt-save" onClick={() => savePrompt()}>
+                          {language.t("settings.subagent.prompt.save")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="small"
+                          data-action="settings-subagent-prompt-cancel"
+                          onClick={() => setPromptEditor(null)}
+                        >
+                          {language.t("settings.subagent.prompt.cancel")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </Show>
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.rename.title")}
+              description={language.t("settings.subagent.rename.description")}
+            >
+              <Show
+                when={renameBlock()}
+                fallback={
+                  <div class="w-full sm:w-[320px] flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      data-action="settings-subagent-rename"
+                      onClick={() => setEditor({ kind: "rename", name: active().name, error: "" })}
+                    >
+                      {language.t("settings.subagent.rename.action")}
+                    </Button>
+                    <Show when={editor.kind === "rename"}>
+                      <TextInput
+                        type="text"
+                        appearance="base"
+                        value={editor.name}
+                        invalid={editor.error !== ""}
+                        aria-label={language.t("settings.subagent.rename.title")}
+                        onChange={(event) => setEditor({ name: event.currentTarget.value, error: "" })}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        data-action="settings-subagent-rename-confirm"
+                        onClick={confirmRename}
+                      >
+                        {language.t("settings.subagent.rename.confirm")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        data-action="settings-subagent-rename-cancel"
+                        onClick={closeEditor}
+                      >
+                        {language.t("settings.subagent.rename.cancel")}
+                      </Button>
+                    </Show>
+                  </div>
+                }
+              >
+                {(reason) => (
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-rename-blocked">
+                    {reason()}
+                  </p>
+                )}
+              </Show>
+            </SettingsRow>
+            <Show when={editor.kind === "rename"}>
+              <div class="w-full flex flex-col gap-2">
+                <Show when={editor.error !== ""}>
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-rename-error">
+                    {editor.error}
+                  </p>
+                </Show>
+                <p class="settings-v2-plugins-hint" data-action="settings-subagent-rename-tombstone">
+                  {language.t("settings.subagent.rename.tombstone", { from: active().name })}
+                </p>
+              </div>
+            </Show>
+            <SettingsRow
+              title={language.t("settings.subagent.delete.title")}
+              description={language.t("settings.subagent.delete.description")}
+            >
+              <div class="w-full sm:w-[320px] flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="small"
+                  data-action="settings-subagent-delete"
+                  onClick={() => setEditor({ kind: "delete", name: "", error: "" })}
+                >
+                  {language.t("settings.subagent.delete.action")}
+                </Button>
+                <Show when={editor.kind === "delete"}>
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-delete-confirm"
+                    onClick={confirmDelete}
+                  >
+                    {language.t("settings.subagent.delete.confirm")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    data-action="settings-subagent-delete-cancel"
+                    onClick={closeEditor}
+                  >
+                    {language.t("settings.subagent.delete.cancel")}
+                  </Button>
+                </Show>
+              </div>
+            </SettingsRow>
+            <Show when={editor.kind === "delete"}>
+              <div class="w-full flex flex-col gap-2">
+                <p class="settings-v2-plugins-hint" data-action="settings-subagent-delete-hint">
+                  {language.t("settings.subagent.delete.hint", { name: active().name })}
+                </p>
+              </div>
+            </Show>
+            <SettingsRow
+              title={language.t("settings.subagent.row.mode.title")}
+              description={language.t("settings.subagent.row.mode.description")}
+            >
+              <Show
+                when={!mdBacked()}
+                fallback={
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-mode-md">
+                    {language.t("settings.subagent.mdBacked", { file: `agent/${active().name}.md` })}
+                  </p>
+                }
+              >
+                <div class="w-full sm:w-[220px]">
+                  <Select
+                      data-action="settings-subagent-mode"
+                    options={modeOptions.map((mode) => ({ mode }))}
+                    current={{ mode: block(active().name).mode ?? "subagent" }}
+                    placement="bottom-end"
+                    gutter={6}
+                    value={(option) => option.mode}
+                    label={(option) => language.t(`settings.subagent.mode.${option.mode}`)}
+                    onSelect={(option) => option && commit(active().name, { mode: option.mode })}
+                  />
+                </div>
+              </Show>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.row.hidden.title")}
+              description={language.t("settings.subagent.row.hidden.description")}
+            >
+              <div data-action="settings-subagent-hidden">
+                <Switch
+                  checked={block(active().name).hidden ?? false}
+                  onChange={(checked: boolean) => commit(active().name, { hidden: checked })}
+                >
+                  {language.t("settings.subagent.row.hidden.title")}
+                </Switch>
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.row.steps.title")}
+              description={language.t("settings.subagent.row.steps.description")}
+            >
+              <div class="w-full sm:w-[160px]" data-action="settings-subagent-steps">
+                <TextInput
+                  type="text"
+                  appearance="base"
+                  numeric
+                  value={block(active().name).steps ?? ""}
+                  aria-label={language.t("settings.subagent.row.steps.title")}
+                  onChange={(event) => commitNumber("steps", event.currentTarget.value)}
+                />
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.row.temperature.title")}
+              description={language.t("settings.subagent.row.temperature.description")}
+            >
+              <div class="w-full sm:w-[160px]" data-action="settings-subagent-temperature">
+                <TextInput
+                  type="text"
+                  appearance="base"
+                  numeric
+                  value={block(active().name).temperature ?? ""}
+                  aria-label={language.t("settings.subagent.row.temperature.title")}
+                  onChange={(event) => commitNumber("temperature", event.currentTarget.value)}
+                />
+              </div>
+            </SettingsRow>
+          </SettingsList>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">{language.t("settings.subagent.section.owns.title")}</h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.owns.description")}</p>
+          <div class="settings-v2-plugins-search">
+            <TextInput
+              type="search"
+              appearance="base"
+              value={ownsQuery()}
+              onInput={(event) => setOwnsQuery(event.currentTarget.value)}
+              placeholder={language.t("settings.subagent.owns.search")}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              aria-label={language.t("settings.subagent.owns.search")}
+            />
+          </div>
+          <For each={visibleOwnsGroups()}>
+            {(group) => (
+              <div
+                class="settings-v2-section"
+                data-component="settings-subagent-owns-group"
+                data-expanded={ownsExpanded(group.label) ? "" : undefined}
+              >
+                <h4 class="settings-v2-section-title">
+                  <button
+                    type="button"
+                    class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                    data-action={`settings-subagent-owns-group-toggle-${group.label.split(".").pop()}`}
+                    aria-expanded={ownsExpanded(group.label)}
+                    onClick={() => setExpanded("groups", group.label, !ownsExpanded(group.label))}
+                  >
+                    <Icon name={ownsExpanded(group.label) ? "chevron-down" : "chevron-right"} size="small" />
+                    {language.t(group.label)}
+                  </button>{" "}
+                  <span class="settings-v2-permissions-count">
+                    {language.t("settings.subagent.owns.count", {
+                      owned: group.allTools.filter(isExposed).filter((tool) => owns(tool)).length,
+                      total: group.allTools.filter(isExposed).length,
+                    })}
+                  </span>{" "}
+                  <div
+                    class="inline-flex align-middle"
+                    data-action={`settings-subagent-owns-all-${group.label.split(".").pop()}`}
+                  >
+                    <Checkbox
+                      label={language.t("settings.subagent.owns.groupToggle")}
+                      checked={group.allTools.filter(isExposed).every((tool) => owns(tool))}
+                      indeterminate={
+                        group.allTools.filter(isExposed).some((tool) => owns(tool)) &&
+                        !group.allTools.filter(isExposed).every((tool) => owns(tool))
+                      }
+                      onChange={(checked) => toggleGroupOwns(group.allTools.filter(isExposed), checked === true)}
+                      hideLabel
+                    />
+                  </div>
+                </h4>
+                <Show when={ownsExpanded(group.label)}>
+                <SettingsList>
+                  <For each={group.tools}>
+                    {(tool) => (
+                      <SettingsRow
+                        title={rowTitle(tool)}
+                        description={
+                          rowDescription(tool) + (isExposed(tool) ? "" : ` — ${language.t("settings.permissions.owns.notExposed")}`)
+                        }
+                      >
+                        <div
+                          class="settings-v2-permissions-row-controls"
+                          classList={{ "settings-v2-permissions-row-dim": !isExposed(tool) }}
+                          data-action={`settings-subagent-owns-${tool}`}
+                        >
+                          <Checkbox
+                            label={language.t("settings.subagent.owns.toggle")}
+                            checked={owns(tool)}
+                            // A stale owned entry stays checkable so it can be pruned.
+                            disabled={!owns(tool) && !isExposed(tool)}
+                            onChange={(checked) => toggleOwns(tool, checked === true)}
+                          />
+                        </div>
+                      </SettingsRow>
+                    )}
+                  </For>
+                </SettingsList>
+                </Show>
+              </div>
+            )}
+          </For>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-subagent-section-tools-toggle"
+              aria-expanded={sectionExpanded("tools")}
+              onClick={() => setExpanded("sections", "tools", !sectionExpanded("tools"))}
+            >
+              <Icon name={sectionExpanded("tools") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.permissions.section.tools.title")}
+            </button>
+          </h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.tools.description")}</p>
+          <Show when={sectionExpanded("tools")}>
+          <Show
+            when={!inventory.loading && !inventory.error}
+            fallback={
+              <p class="settings-v2-plugins-hint">
+                {language.t(
+                  inventory.error ? "settings.permissions.section.tools.error" : "settings.permissions.section.tools.loading",
+                )}
+              </p>
+            }
+          >
+            <Show when={discoveredRegistry().length > 0}>
+              <h4 class="settings-v2-section-title">
+                <button
+                  type="button"
+                  class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                  data-action="settings-subagent-section-discovered-toggle"
+                  aria-expanded={sectionExpanded("discovered")}
+                  onClick={() => setExpanded("sections", "discovered", !sectionExpanded("discovered"))}
+                >
+                  <Icon name={sectionExpanded("discovered") ? "chevron-down" : "chevron-right"} size="small" />
+                  {language.t("settings.permissions.section.discovered.title")}
+                  <span class="settings-v2-permissions-count">{discoveredRegistry().length}</span>
+                </button>
+              </h4>
+              <Show when={sectionExpanded("discovered")}>
+                <For each={discoveredRegistry()}>
+                  {(tool) => (
+                    <SettingsList>
+                      <SettingsRow title={tool.id} description={tool.description ?? ""}>
+                        <div data-action={`settings-subagent-tool-${tool.id}`}>
+                          <Checkbox
+                            label={language.t("settings.subagent.owns.toggle")}
+                            checked={owns(tool.id)}
+                            onChange={(checked) => toggleOwns(tool.id, checked === true)}
+                          />
+                        </div>
+                      </SettingsRow>
+                    </SettingsList>
+                  )}
+                </For>
+              </Show>
+            </Show>
+            <For each={inventory.latest?.mcp ?? []}>
+              {(server) => (
+                <div
+                  class="settings-v2-section"
+                  data-component="settings-subagent-mcp-server"
+                  data-expanded={serverExpanded(server.server) ? "" : undefined}
+                >
+                  <div class="flex items-center gap-2">
+                    <h4 class="settings-v2-section-title settings-v2-permissions-row-dim">
+                      <button
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+                        data-action={`settings-subagent-mcp-toggle-${server.server}`}
+                        aria-expanded={serverExpanded(server.server)}
+                        onClick={() => setExpanded("servers", server.server, !serverExpanded(server.server))}
+                      >
+                        <Icon name={serverExpanded(server.server) ? "chevron-down" : "chevron-right"} size="small" />
+                        {server.server}
+                      </button>
+                    </h4>
+                    <div data-action={`settings-subagent-mcp-all-${server.server}`}>
+                      <Checkbox
+                        label={language.t("settings.subagent.owns.toggle")}
+                        checked={server.tools.every((tool) => !denied(tool.name))}
+                        indeterminate={
+                          !server.tools.every((tool) => !denied(tool.name)) && server.tools.some((tool) => !denied(tool.name))
+                        }
+                        onChange={(checked) => setAllForServer(server.tools, checked === true ? "allow" : "deny")}
+                        hideLabel
+                      />
+                    </div>
+                  </div>
+                  <Show when={serverExpanded(server.server)}>
+                  <SettingsList>
+                    <For each={server.tools}>
+                      {(tool) => (
+                        <SettingsRow title={tool.name} description={tool.description ?? ""}>
+                          <div data-action={`settings-subagent-mcp-${tool.name}`}>
+                            <Checkbox
+                              label={language.t("settings.subagent.owns.toggle")}
+                              checked={!denied(tool.name)}
+                              onChange={(checked) => setHow(tool.name, checked === true ? "allow" : "deny", "*")}
+                              hideLabel
+                            />
+                          </div>
+                        </SettingsRow>
+                      )}
+                    </For>
+                  </SettingsList>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </Show>
+          </Show>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-skills-toggle"
+              aria-expanded={sectionExpanded("skills")}
+              onClick={() => setExpanded("sections", "skills", !sectionExpanded("skills"))}
+            >
+              <Icon name={sectionExpanded("skills") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.subagent.section.skills.title")}
+              <span class="settings-v2-permissions-count">{skills.latest?.length ?? 0}</span>
+            </button>
+          </h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.skills.description")}</p>
+          <Show when={sectionExpanded("skills")}>
+            <Show
+              when={skills.latest?.length}
+              fallback={<p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.skills.empty")}</p>}
+            >
+              <SettingsList>
+                <For each={skills.latest}>
+                  {(skill) => (
+                    <SettingsRow title={skill.name} description="">
+                      <div data-action={`settings-subagent-skill-${skill.name}`}>
+                        <Checkbox
+                          label={language.t("settings.subagent.section.skills.row.toggle", { name: skill.name })}
+                          checked={selectedSkills().includes(skill.name)}
+                          onChange={() => toggleSkill(skill.name)}
+                          hideLabel
+                        />
+                      </div>
+                    </SettingsRow>
+                  )}
+                </For>
+              </SettingsList>
+            </Show>
+          </Show>
+        </div>
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">
+            <button
+              type="button"
+              class="inline-flex cursor-pointer items-center gap-1 rounded-sm hover:bg-surface-raised-base-hover"
+              data-action="settings-permissions-section-how-toggle"
+              aria-expanded={sectionExpanded("how")}
+              onClick={() => setExpanded("sections", "how", !sectionExpanded("how"))}
+            >
+              <Icon name={sectionExpanded("how") ? "chevron-down" : "chevron-right"} size="small" />
+              {language.t("settings.subagent.section.how.title")}
+            </button>
+          </h3>
+          <p class="settings-v2-plugins-hint">{language.t("settings.subagent.section.how.description")}</p>
+          <Show when={sectionExpanded("how")}>
+          <SettingsList>
+            <For each={PATTERN_TOOLS}>
+              {(tool) => (
+                <SettingsRow
+                  title={language.t(`settings.permissions.tool.${tool}.title`)}
+                  description={language.t(`settings.permissions.tool.${tool}.description`)}
+                >
+                  <div class="settings-v2-permissions-row-controls">
+                    <div data-action={`settings-subagent-how-${tool}`}>
+                      <Select
+                              options={actionOptions}
+                        current={howEntry(tool).action}
+                        placement="bottom-end"
+                        gutter={6}
+                        value={(option) => option}
+                        label={actionLabel}
+                        onSelect={(option) => option && setHow(tool, option, howEntry(tool).pattern)}
+                      />
+                    </div>
+                    <div data-action={`settings-subagent-pattern-${tool}`}>
+                      <TextInput
+                        type="text"
+                        appearance="base"
+                        value={howEntry(tool).pattern}
+                        aria-label={language.t("settings.subagent.pattern.label")}
+                        onChange={(event) => setHow(tool, howEntry(tool).action, event.currentTarget.value)}
+                      />
+                    </div>
+                  </div>
+                </SettingsRow>
+              )}
+            </For>
+          </SettingsList>
+          </Show>
+        </div>
+        </Show>
+      </div>
+    </>
+  )
+}

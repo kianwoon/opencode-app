@@ -129,6 +129,15 @@ type PlatformBase = {
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>
 
+  /** Delete sessions older than N days and compact the database (desktop only) */
+  housekeepDatabase?(days: number): Promise<{ before: number; after: number; pruned: number }>
+
+  /** Read a workspace file as text (desktop only) */
+  readFile?(path: string): Promise<string>
+
+  /** Write a workspace file as text (desktop only) */
+  writeFile?(path: string, content: string): Promise<void>
+
   /** Force focus styles on interactive elements through desktop devtools (desktop only) */
   setForceFocus?(enabled: boolean): Promise<void>
 
