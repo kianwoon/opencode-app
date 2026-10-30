@@ -1,5 +1,6 @@
 import { ServerAuth } from "@/server/auth"
-import { Effect, Encoding, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted } from "effect"
+import { Base64 } from "effect/encoding"
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiError, HttpApiMiddleware } from "effect/http-api"
 import { hasPtyConnectTicketURL } from "@/server/shared/pty-ticket"
@@ -55,7 +56,7 @@ function validateCredential<A, E, R>(
 }
 
 function decodeCredential(input: string) {
-  return Effect.fromResult(Encoding.decodeBase64String(input)).pipe(
+  return Effect.fromResult(Base64.decodeString(input)).pipe(
     Effect.match({
       onFailure: emptyCredential,
       onSuccess: (header) => {

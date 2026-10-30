@@ -1,6 +1,7 @@
 import * as InstanceState from "@/effect/instance-state"
 import { Project } from "@/project/project"
 import { ProjectV2 } from "@/compat/core-namespaces"
+import { ProjectDirectories } from "@/compat/directories"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { InstanceHttpApi } from "../api"
@@ -10,7 +11,7 @@ import { markInstanceForReload } from "../lifecycle"
 export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", (handlers) =>
   Effect.gen(function* () {
     const svc = yield* Project.Service
-    const project = yield* ProjectV2.Service
+    const projectDirectories = yield* ProjectDirectories.Service
 
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
       return yield* svc.list()
@@ -23,7 +24,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     const initGit = Effect.fn("ProjectHttpApi.initGit")(function* () {
       const ctx = yield* InstanceState.context
       const next = yield* svc.initGit({ directory: ctx.directory, project: ctx.project })
-      if (next.id === ctx.project.id && next.vcs === ctx.project.vcs && next.worktree === ctx.project.worktree)
+      if (next.id === ctx.project.id && next.vcs === ctx.project.vcs && next.canonical === ctx.project.canonical)
         return next
       yield* markInstanceForReload(ctx, {
         directory: ctx.directory,
@@ -50,7 +51,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     })
 
     const directories = Effect.fn("ProjectHttpApi.directories")((ctx: { params: { projectID: ProjectV2.ID } }) =>
-      project.directories({ projectID: ctx.params.projectID }),
+      projectDirectories.list(ctx.params.projectID),
     )
 
     return handlers

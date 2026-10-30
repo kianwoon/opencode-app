@@ -1,5 +1,6 @@
 import type { JsonSchema, LLMRequest, ProviderMetadata } from "@opencode/ai"
-import { LLM, Message, SystemPart, ToolCallPart, ToolDefinition, ToolResultPart } from "@opencode/ai"
+import { Media, Message, SystemPart, ToolCallPart, ToolDefinition, ToolResultPart } from "@opencode/ai"
+import { ai } from "@opencode/ai/effect"
 import {
   AmazonBedrock,
   Anthropic,
@@ -54,14 +55,12 @@ const textPart = (part: Record<string, unknown>) => ({
 })
 
 const mediaPart = (part: Record<string, unknown>) => {
-  if (typeof part.data !== "string" && !(part.data instanceof Uint8Array))
-    throw new Error("Native LLM request adapter only supports file parts with string or Uint8Array data")
-  return {
-    type: "media" as const,
-    mediaType: typeof part.mediaType === "string" ? part.mediaType : "application/octet-stream",
-    data: part.data,
-    filename: typeof part.filename === "string" ? part.filename : undefined,
-  }
+  const mediaType = typeof part.mediaType === "string" ? part.mediaType : "application/octet-stream"
+  const filename = typeof part.filename === "string" ? part.filename : undefined
+  if (part.data instanceof Uint8Array) return { type: "media" as const, media: Media.bytes(part.data, mediaType), filename }
+  if (typeof part.data === "string")
+    return { type: "media" as const, media: Media.base64(part.data, mediaType), filename }
+  throw new Error("Native LLM request adapter only supports file parts with string or Uint8Array data")
 }
 
 const toolResult = (part: Record<string, unknown>) => {
@@ -186,7 +185,7 @@ export const request = (input: RequestInput) => {
   const converted = messages(input.messages)
   // This is the only native adapter boundary that should construct canonical
   // @opencode/llm request objects from opencode's session/AI SDK-shaped data.
-  return LLM.request({
+  return ai.request({
     model: model(input, input.headers),
     system: [...(input.system ?? []).map(SystemPart.make), ...converted.system],
     messages: converted.messages,

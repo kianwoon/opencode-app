@@ -11,6 +11,12 @@ import { Effect } from "effect"
 const DEFAULT_TIMEOUT = 30_000
 const MAX_LIST_PAGES = 1_000
 
+type CallToolOutput = {
+  content: Array<{ type: string; text?: string }>
+  structuredContent?: unknown
+  isError?: boolean
+}
+
 const TolerantListToolsResultSchema = ListToolsResultSchema.extend({
   tools: ToolSchema.omit({ outputSchema: true }).array(),
 })
@@ -61,7 +67,7 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(inputSchema),
     execute: async (args: unknown, options) => {
-      const result = await client.callTool(
+      const result = (await client.callTool(
         {
           name: mcpTool.name,
           arguments: (args || {}) as Record<string, unknown>,
@@ -74,11 +80,11 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
           // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
           onprogress: () => {},
         },
-      )
+      )) as CallToolOutput
       if (result.isError)
         throw new Error(
           result.content
-            .flatMap((item) => (item.type === "text" ? [item.text] : []))
+            .flatMap((item) => (item.type === "text" && typeof item.text === "string" ? [item.text] : []))
             .filter((text) => text.trim())
             .join("\n\n") || "MCP tool returned an error",
         )

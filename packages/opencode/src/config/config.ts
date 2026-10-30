@@ -484,9 +484,18 @@ const layer = Layer.effect(
             )
           deps.push(dep)
 
-          result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          result.command = mergeDeep(
+            result.command ?? {},
+            yield* Effect.promise(() => ConfigCommand.load(dir)),
+          ) as Info["command"]
+          result.agent = mergeDeep(
+            result.agent ?? {},
+            yield* Effect.promise(() => ConfigAgent.load(dir)),
+          ) as Info["agent"]
+          result.agent = mergeDeep(
+            result.agent ?? {},
+            yield* Effect.promise(() => ConfigAgent.loadMode(dir)),
+          ) as Info["agent"]
           // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
@@ -579,16 +588,16 @@ const layer = Layer.effect(
         }
 
         if (result.tools) {
-          const perms: Record<string, ConfigPermissionV1.Action> = {}
+          const perms: [string, ConfigPermissionV1.Rule][] = []
           for (const [tool, enabled] of Object.entries(result.tools)) {
             const action: ConfigPermissionV1.Action = enabled ? "allow" : "deny"
             if (tool === "write" || tool === "edit" || tool === "patch") {
-              perms.edit = action
+              perms.push(["edit", action])
               continue
             }
-            perms[tool] = action
+            perms.push([tool, action])
           }
-          result.permission = mergeDeep(perms, result.permission ?? {})
+          result.permission = mergeDeep(perms, result.permission ?? []) as Info["permission"]
         }
 
         ConfigBrain.expand(result)

@@ -8,7 +8,20 @@ import { AccountStateTable, AccountTable } from "@opencode/core/account/sql"
 import { AccessToken, AccountID, AccountRepoError, Info, OrgID, RefreshToken } from "./schema"
 import { normalizeServerUrl } from "./url"
 
-export type AccountRow = (typeof AccountTable)["$inferSelect"]
+export type AccountRow = Omit<(typeof AccountTable)["$inferSelect"], "id" | "access_token" | "refresh_token"> & {
+  id: AccountID
+  access_token: AccessToken
+  refresh_token: RefreshToken
+}
+
+// SQLite columns carry plain strings; brand the credential fields once at the
+// repository boundary so callers never re-brand.
+const brandRow = (row: (typeof AccountTable)["$inferSelect"]): AccountRow => ({
+  ...row,
+  id: AccountID.make(row.id),
+  access_token: AccessToken.make(row.access_token),
+  refresh_token: RefreshToken.make(row.refresh_token),
+})
 
 const ACCOUNT_STATE_ID = 1
 
@@ -78,7 +91,7 @@ const layer = Layer.effect(
           .select()
           .from(AccountTable)
           .all()
-          .pipe(Effect.map((rows) => rows.map((row: AccountRow) => decode({ ...row, active_org_id: null })))),
+          .pipe(Effect.map((rows) => rows.map((row) => decode({ ...row, active_org_id: null })))),
       ),
     )
 
@@ -103,7 +116,7 @@ const layer = Layer.effect(
 
     const getRow = Effect.fn("AccountRepo.getRow")((accountID: AccountID) =>
       query(db.select().from(AccountTable).where(eq(AccountTable.id, accountID)).get()).pipe(
-        Effect.map(Option.fromNullishOr),
+        Effect.map((row) => (row ? Option.some(brandRow(row)) : Option.none())),
       ),
     )
 

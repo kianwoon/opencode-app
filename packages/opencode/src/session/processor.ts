@@ -481,11 +481,11 @@ const layer = Layer.effect(
               usage: value.usage ?? new Usage({}),
               metadata: value.providerMetadata,
             })
-            ctx.assistantMessage.finish = value.reason
+            ctx.assistantMessage.finish = value.reason.normalized
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
             logCacheHitRatio(ctx.sessionID, ctx.assistantMessage.id, ctx.model, usage.tokens)
-            if (value.reason === "length") {
+            if (value.reason.normalized === "length") {
               yield* Effect.logWarning("output token limit reached", {
                 "session.id": ctx.sessionID,
                 messageID: ctx.assistantMessage.id,
@@ -495,7 +495,7 @@ const layer = Layer.effect(
             }
             yield* session.updatePart({
               id: PartID.ascending(),
-              reason: value.reason,
+              reason: value.reason.normalized,
               snapshot: completedSnapshot,
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.assistantMessage.sessionID,
@@ -654,7 +654,7 @@ const layer = Layer.effect(
           stack: e instanceof Error ? e.stack : undefined,
         })
         const error = parse(e)
-        if (SessionV1.ContextOverflowError.isInstance(error)) {
+        if (Schema.is(SessionV1.ContextOverflowError.Schema)(error)) {
           if ((yield* config.get()).compaction?.auto === false && !ctx.assistantMessage.summary) {
             ctx.assistantMessage.error = error
             ctx.assistantMessage.finish = "error"

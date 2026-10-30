@@ -9,6 +9,12 @@ import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware
 import { described } from "./metadata"
 
 const root = "/project"
+const Directories = Schema.Array(
+  Schema.Struct({
+    directory: Schema.String,
+    strategy: Schema.optional(Schema.String),
+  }),
+).annotate({ identifier: "Project.Directories" })
 const UpdatePayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   icon: Schema.optional(Project.Info.fields.icon),
@@ -65,7 +71,7 @@ export const ProjectApi = HttpApi.make("project")
         HttpApiEndpoint.get("directories", `${root}/:projectID/directories`, {
           params: { projectID: ProjectV2.ID },
           query: WorkspaceRoutingQuery,
-          success: described(ProjectV2.Directories, "Project directories"),
+          success: described(Directories, "Project directories"),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "project.directories",
