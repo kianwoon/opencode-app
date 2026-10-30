@@ -1,5 +1,5 @@
 import type { Config, Path, Project, ProviderAuthResponse } from "@/runtime/server/types"
-import type { LocationGetInput, LocationGetOutput, ProjectListOutput } from "@opencode/client/promise"
+import type { ConfigGetOutput, LocationGetInput, LocationGetOutput, ProjectListOutput } from "@opencode/client/promise"
 import { showToast } from "@/shell/notifications/toast"
 import { getFilename } from "@opencode/util/path"
 import { retry } from "@opencode/util/retry"
@@ -49,11 +49,16 @@ function runAll(list: Array<() => Promise<unknown>>) {
   return Promise.allSettled(list.map((item) => item()))
 }
 
-export const loadGlobalConfigQuery = (scope: ServerScope) =>
+export const loadGlobalConfigQuery = (scope: ServerScope, config: { readonly get: () => Promise<ConfigGetOutput> }) =>
   queryOptions({
     queryKey: [scope, "config"],
-    // TODO: Restore config loading when the V2 client exposes a config API.
-    queryFn: async (): Promise<Config> => ({}),
+    // Settings writes are read-modify-write. Panels edit from the live documents, highest priority
+    // last, so an edit starts from real state instead of a possibly-empty cache.
+    queryFn: async (): Promise<Config> =>
+      Object.assign(
+        {},
+        ...(await config.get()).flatMap((entry) => (entry.type === "document" ? [entry.info] : [])),
+      ) as Config,
   })
 
 type ProjectApi = {
@@ -95,13 +100,14 @@ export async function bootstrapGlobal(input: {
   serverAPI: {
     readonly location: LocationApi
     readonly project: ProjectApi
+    readonly config: { readonly get: () => Promise<ConfigGetOutput> }
   }
   scope: ServerScope
   setGlobalStore: SetStoreFunction<GlobalStore>
   queryClient: QueryClient
 }) {
   const slow = [
-    () => input.queryClient.fetchQuery(loadGlobalConfigQuery(input.scope)),
+    () => input.queryClient.fetchQuery(loadGlobalConfigQuery(input.scope, input.serverAPI.config)),
     () =>
       input.queryClient
         .fetchQuery(loadPathQuery(input.scope, null, input.serverAPI.location))

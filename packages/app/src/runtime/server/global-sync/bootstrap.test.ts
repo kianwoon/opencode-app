@@ -24,6 +24,7 @@ test("bootstraps projects through the native store setter and preserves subseque
 
         if (url.pathname === "/api/project")
           return Response.json([{ id: "project", canonical: "/repo", time: { created: 1, updated: 1 }, sandboxes: [] }])
+        if (url.pathname === "/api/config") return Response.json([])
         throw new Error(`Unexpected request: ${url.pathname}`)
       },
       { preconnect() {} },
