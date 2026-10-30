@@ -1,12 +1,12 @@
-export * as Task from "./task"
+export * as Task from "./task.js"
 
 import { Schema } from "effect"
-import { durable, inventory } from "./event"
-import { optional } from "./schema"
-import { ascending } from "./identifier"
-import { NonNegativeInt, statics } from "./schema"
-import { SessionID } from "./session-id"
-import { AbsolutePath } from "./schema"
+import { durable, inventory } from "./event.js"
+import { optional } from "./schema.js"
+import { ascending } from "./identifier.js"
+import { NonNegativeInt, statics } from "./schema.js"
+import { SessionID } from "./session-id.js"
+import { AbsolutePath } from "./schema.js"
 
 export const ID = Schema.String.pipe(
   Schema.brand("Task.ID"),
