@@ -1,7 +1,7 @@
 export * as Task from "./task"
 
 import { Schema } from "effect"
-import { define, inventory } from "./event"
+import { durable, inventory } from "./event"
 import { optional } from "./schema"
 import { ascending } from "./identifier"
 import { NonNegativeInt, statics } from "./schema"
@@ -92,7 +92,7 @@ export const UpdateInput = Schema.Struct({
 }).annotate({ identifier: "Task.UpdateInput" })
 export interface UpdateInput extends Schema.Schema.Type<typeof UpdateInput> {}
 
-const Updated = define({
+const Updated = durable({
   type: "task.updated",
   durable: { version: 1, aggregate: "taskID" },
   schema: {
@@ -100,7 +100,7 @@ const Updated = define({
     task: Info,
   },
 })
-const Removed = define({
+const Removed = durable({
   type: "task.removed",
   durable: { version: 1, aggregate: "taskID" },
   schema: {

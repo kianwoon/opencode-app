@@ -1,7 +1,10 @@
+export * as SessionRenameTool from "./session-rename.js"
+
+import { ToolFailure } from "@opencode/ai/effect"
+import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import { Effect, Schema } from "effect"
-import * as Tool from "./tool"
-import { Session } from "../session/session"
-import { InstanceState } from "../effect/instance-state"
+import { Location } from "../location.js"
+import { Session } from "../session.js"
 
 export const Parameters = Schema.Struct({
   title: Schema.String.annotate({
@@ -9,39 +12,44 @@ export const Parameters = Schema.Struct({
   }),
 })
 
-type Metadata = {}
+type Params = Schema.Schema.Type<typeof Parameters>
 
-export const SessionRenameTool = Tool.define<typeof Parameters, Metadata, Session.Service>(
-  "session_rename",
-  Effect.gen(function* () {
+export const Plugin = {
+  id: "opencode.tool.session_rename",
+  effect: Effect.fn("SessionRenameTool.Plugin")(function* (ctx: PluginContext) {
     const session = yield* Session.Service
+    const location = yield* Location.Service
 
-    return {
-      description:
-        "Rename only the current root/main session in the active project. This tool cannot target a subagent, another session, or another project.",
-      parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
-        Effect.gen(function* () {
-          const current = yield* session.get(ctx.sessionID).pipe(Effect.orDie)
-          const context = yield* InstanceState.context
-          if (current.parentID) {
-            return yield* Effect.die(
-              new Error("Session rename is only allowed for the current root/main session; subagent sessions cannot be renamed."),
-            )
-          }
-          if (current.projectID !== context.project.id) {
-            return yield* Effect.die(
-              new Error("Session rename is only allowed for the active project; refusing a session from another project."),
-            )
-          }
-          yield* session.setTitle({ sessionID: ctx.sessionID, title: params.title })
-
-          return {
-            title: "Renamed session",
-            output: params.title,
-            metadata: {},
-          }
-        }),
-    }
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "session_rename",
+        options: { codemode: false },
+        description:
+          "Rename only the current root/main session in the active project. This tool cannot target a subagent, another session, or another project.",
+        input: Parameters,
+        execute: (params: Params, context) =>
+          Effect.gen(function* () {
+            const current = yield* session.get(context.sessionID).pipe(Effect.orDie)
+            if (current.parentID) {
+              return yield* Effect.fail(
+                new ToolFailure({
+                  message:
+                    "Session rename is only allowed for the current root/main session; subagent sessions cannot be renamed.",
+                }),
+              )
+            }
+            if (`${current.projectID}` !== `${location.project.id}`) {
+              return yield* Effect.fail(
+                new ToolFailure({
+                  message:
+                    "Session rename is only allowed for the active project; refusing a session from another project.",
+                }),
+              )
+            }
+            yield* session.rename({ sessionID: context.sessionID, title: params.title }).pipe(Effect.orDie)
+            return { content: params.title, metadata: {} }
+          }),
+      }),
+    )
   }),
-)
+}

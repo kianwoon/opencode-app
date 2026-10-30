@@ -2,9 +2,9 @@ export * as JobRecord from "./job-record"
 
 import { desc, eq, inArray, sql } from "drizzle-orm"
 import { Effect } from "effect"
-import { Database } from "./database/database"
+import { Database } from "./database/database.js"
 import { BackgroundJobTable } from "./background-job-record.sql"
-import type { Status } from "./background-job"
+import type { Job } from "./job.js"
 
 type Row = typeof BackgroundJobTable.$inferSelect
 
@@ -12,7 +12,7 @@ type RecordedInfo = {
   id: string
   type: string
   title?: string
-  status: Status
+  status: Job.Status
   started_at: number
   completed_at?: number
   output?: string
@@ -24,7 +24,7 @@ const fromRow = (row: Row): RecordedInfo => ({
   id: row.id,
   type: row.type,
   ...(row.title === null ? {} : { title: row.title }),
-  status: row.status as Status,
+  status: row.status as Job.Status,
   started_at: row.started_at,
   ...(row.completed_at === null ? {} : { completed_at: row.completed_at }),
   ...(row.output === null ? {} : { output: row.output }),
@@ -54,7 +54,7 @@ export type BoundOps = {
 
 export const ops: Ops = {
   /**
-   * Insert or overwrite the record for one job. Status transitions are
+   * Insert or overwrite the record for one job. Job.Status transitions are
    * serialized: a "running" record never overwrites a terminal row (guards
    * against a slow start-record landing after the completion-record from a
    * different fiber). Preserve-on-update keeps fields written by earlier

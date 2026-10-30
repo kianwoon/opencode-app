@@ -1,13 +1,13 @@
 export * as Symbols from "./symbols"
 
-import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
-import { Context, Effect, Layer, Scope, Stream } from "effect"
+import { FileSystem } from "@opencode/schema/filesystem"
+import { Context, Effect, Layer, Schema, Scope, Stream } from "effect"
 import path from "path"
 import { fileURLToPath } from "url"
 import type { Node, Parser, Tree } from "web-tree-sitter"
-import { EventV2 } from "../event"
-import { makeLocationNode } from "../effect/app-node"
-import { FileSystemSearch } from "../filesystem/search"
+import { Bus } from "../bus.js"
+import { makeLocationNode } from "@opencode/util/effect/app-node"
+import { FileSystemSearch } from "../filesystem/search.js"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "../location"
 import { Ripgrep } from "../ripgrep"
@@ -212,7 +212,7 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const ripgrep = yield* Ripgrep.Service
     const search = yield* FileSystemSearch.Service
-    const events = yield* EventV2.Service
+    const events = yield* Bus.Service
     const scope = yield* Scope.Scope
 
     const index = new Map<string, Hit[]>()
@@ -233,8 +233,11 @@ const layer = Layer.effect(
 
     const populate = Effect.gen(function* () {
       const parsers = yield* Effect.promise(() => loadParsers())
-      const listed = yield* search.list({ limit: SYMBOLS_MAX_FILES })
-      const files = listed.paths.filter((file) => SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext)))
+      const listed = yield* search.find({ query: "", limit: SYMBOLS_MAX_FILES })
+      const files = listed
+        .filter((entry) => entry.type === "file")
+        .map((entry) => entry.path)
+        .filter((file) => SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext)))
       let total = 0
       for (const file of files) {
         if (total >= SYMBOLS_TOTAL_CAP) break
@@ -278,14 +281,15 @@ const layer = Layer.effect(
     // deleted file can never re-enter through the drain.
     yield* Effect.forkScoped(
       events
-        .subscribe(FileSystemWatcher.Event.Updated)
+        .subscribe(FileSystem.Event.Changed)
         .pipe(
           Stream.runForEach((event) =>
             Effect.sync(() => {
               if (event.location?.directory !== location.directory) return
-              const relative = path.relative(location.directory, event.data.file)
+              const data = Schema.decodeUnknownSync(FileSystem.Event.Changed.data)(event.data)
+              const relative = path.relative(location.directory, data.file)
               if (relative === "" || relative.startsWith("..")) return
-              if (event.data.event === "unlink") {
+              if (data.event === "unlink") {
                 index.delete(relative)
                 dirty.delete(relative)
                 return
@@ -334,5 +338,5 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [FSUtil.node, Location.node, Ripgrep.node, FileSystemSearch.node, EventV2.node],
+  deps: [FSUtil.node, Location.node, Ripgrep.node, FileSystemSearch.node, Bus.node],
 })

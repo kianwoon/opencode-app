@@ -1,11 +1,10 @@
 export * as RepoIndexContext from "./repo-index-context"
 
 import { Effect, Layer, Schema } from "effect"
-import { FileSystem } from "./filesystem"
-import { Location } from "./location"
+import { FileSystem } from "./filesystem.js"
 import { SystemContext } from "./system-context/index"
 import { SystemContextRegistry } from "./system-context/registry"
-import { makeLocationNode } from "./effect/app-node"
+import { makeLocationNode } from "@opencode/util/effect/app-node"
 
 /**
  * A cheap filename -> purpose map of the workspace, advertised to the model so
@@ -85,10 +84,9 @@ const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const registry = yield* SystemContextRegistry.Service
     const filesystem = yield* FileSystem.Service
-    const location = yield* Location.Service
 
     const observe = Effect.fn("RepoIndexContext.observe")(function* () {
-      const entries = yield* filesystem.glob({ pattern: "**/*", limit: MAX_ENTRIES }).pipe(Effect.option)
+      const entries = yield* filesystem.find({ query: "", limit: MAX_ENTRIES }).pipe(Effect.option)
       if (entries._tag === "None") return SystemContext.unavailable
       return entries.value
         .filter((entry) => entry.type === "file")
@@ -116,5 +114,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "repo-index-context",
   layer,
-  deps: [FileSystem.node, Location.node, SystemContextRegistry.node],
+  deps: [FileSystem.node, SystemContextRegistry.node],
 })

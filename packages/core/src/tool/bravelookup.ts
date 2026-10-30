@@ -2,8 +2,9 @@ import { spawn, spawnSync } from "child_process"
 import { mkdirSync } from "fs"
 import { homedir } from "os"
 import path from "path"
+import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Result, Schema } from "effect"
-import * as Tool from "./tool"
+import { Permission } from "../permission"
 
 // Answer extraction is a direct port of Pop's Swift web-lookup extractor
 // (~/Downloads/pop/Sources/Pop/WebLookup.swift). The JS below is the SAME
@@ -546,95 +547,101 @@ const DESCRIPTION = [
   "natural language.",
 ].join(" ")
 
-export const BraveLookupTool = Tool.define(
-  "bravelookup",
-  Effect.gen(function* () {
-    return {
-      get description() {
-        return DESCRIPTION
-      },
-      parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
-        Effect.gen(function* () {
-          yield* ctx.ask({
-            permission: "websearch",
-            patterns: [params.query],
-            always: ["*"],
-            metadata: { query: params.query },
-          })
+export const Plugin = {
+  id: "opencode.tool.bravelookup",
+  effect: Effect.fn("BraveLookupTool.Plugin")(function* (ctx: Context) {
+    const permission = yield* Permission.Service
 
-          const port = cdpPort()
-
-          // INVARIANT: a browser session may only be terminated by the code path
-          // that created it. The three paths below are each self-contained — a path
-          // terminates a browser ONLY if it, and no other path, brought that browser
-          // into existence. Consequently `osascript` (which can match the USER's
-          // Brave) is reachable ONLY from path 2, the single branch that proved
-          // Brave was down before it launched anything.
-          //
-          // The lookup itself is identical on every path; only readiness and teardown
-          // differ, so the shared body is `lookup()` and each path wraps it in exactly
-          // the ensuring IT owns. `closeBrowser` is true ONLY for the instance a path
-          // created and must end (path 3).
-          const lookup = (closeBrowser: boolean) =>
-            Effect.gen(function* () {
-              if (!(yield* waitForCdp(port)))
-                return yield* Effect.die(new Error(`bravelookup: CDP endpoint unavailable on ${port}`))
-              // CDP: createTarget → attachToTarget(flatten) → Page.enable → navigate
-              // → Page.loadEventFired (not domcontentloaded, so the SERP has fired its
-              // subresources, matching WKWebView's didFinish) → Pop's 5s settle
-              // (settleDelay, WebLookup.swift:173) → Runtime.evaluate(extractScript).
-              const { raw, url } = yield* Effect.promise(() => cdpLookup(port, params.query, closeBrowser))
-              const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Extraction))(raw)
-
-              // modelText contract (WebLookup.swift L78-96) + honest provenance (L488-502):
-              // an EMPTY answer is decided first so a wall is never dressed up as a result.
-              const provenance = parsed.answer.length
-                ? parsed.hasPrice
-                  ? `listed fares ("starting from"), not live availability${parsed.priceSample ? ` (${parsed.priceSample})` : ""} — query: "${params.query}"`
-                  : `search result text, not verified live — query: "${params.query}"`
-                : parsed.blocked
-                  ? `a wall page was served, not a result — query: "${params.query}"`
-                  : `no extractable result text — query: "${params.query}"`
-              const host = sourceHost(url)
-              const lines = [
-                `web: ${sourcePath(url)} — ${parsed.answer.length} chars`,
-                `source: ${host} — "${parsed.title}"`,
-                `answer: ${parsed.answer.length ? parsed.answer : "(no extractable answer)"}`,
-                `provenance: ${provenance}`,
-                ...(parsed.wall ? [`wall: ${parsed.wall}`] : []),
-              ]
-              yield* ctx.metadata({ title: `BraveLookup: ${params.query}`, metadata: { blocked: parsed.blocked } })
-
-              return {
-                output: lines.join("\n"),
-                title: `BraveLookup: ${params.query}`,
-                metadata: { blocked: parsed.blocked },
-              }
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "bravelookup",
+        options: { codemode: false },
+        description: DESCRIPTION,
+        input: Parameters,
+        execute: (params, context) =>
+          Effect.gen(function* () {
+            yield* permission.assert({
+              action: "websearch",
+              resources: [params.query],
+              save: ["*"],
+              metadata: { query: params.query },
+              sessionID: context.sessionID,
+              agent: context.agent,
+              source: { type: "tool", messageID: context.messageID, id: context.id },
             })
 
-          // PATH 1 — an endpoint is already live: the user opted in. We did NOT
-          // create this session, so there is no teardown; Brave is left as found.
-          if (yield* cdpAlive(port)) return yield* lookup(false)
+            const port = cdpPort()
 
-          // PATH 2 — Brave is NOT running: nothing of the user's is open, so this
-          // branch owns the default-profile instance it launches. Its counterpart
-          // (flagless relaunch) restores Brave and is safe precisely because Brave
-          // was down. relaunchBrave is BOTH the creator and the destructor here.
-          if (!(yield* braveRunning)) {
-            yield* Effect.logInfo("bravelookup: Brave not running; launching it with remote debugging")
-            yield* relaunchBrave(port)
-            return yield* lookup(false).pipe(Effect.ensuring(relaunchBrave(undefined)))
-          }
+            // INVARIANT: a browser session may only be terminated by the code path
+            // that created it. The three paths below are each self-contained — a path
+            // terminates a browser ONLY if it, and no other path, brought that browser
+            // into existence. Consequently `osascript` (which can match the USER's
+            // Brave) is reachable ONLY from path 2, the single branch that proved
+            // Brave was down before it launched anything.
+            //
+            // The lookup itself is identical on every path; only readiness and teardown
+            // differ, so the shared body is `lookup()` and each path wraps it in exactly
+            // the ensuring IT owns. `closeBrowser` is true ONLY for the instance a path
+            // created and must end (path 3).
+            const lookup = (closeBrowser: boolean) =>
+              Effect.gen(function* () {
+                if (!(yield* waitForCdp(port)))
+                  return yield* Effect.die(new Error(`bravelookup: CDP endpoint unavailable on ${port}`))
+                // CDP: createTarget → attachToTarget(flatten) → Page.enable → navigate
+                // → Page.loadEventFired (not domcontentloaded, so the SERP has fired its
+                // subresources, matching WKWebView's didFinish) → Pop's 5s settle
+                // (settleDelay, WebLookup.swift:173) → Runtime.evaluate(extractScript).
+                const { raw, url } = yield* Effect.promise(() => cdpLookup(port, params.query, closeBrowser))
+                const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Extraction))(raw)
 
-          // PATH 3 — the user's Brave IS running but without our port. NEVER quit
-          // it. Launch a SECOND, concurrent instance on a dedicated profile; its
-          // teardown is the CDP Browser.close over its own endpoint (in cdpLookup),
-          // reachable only via this branch. The user's browser is untouched.
-          yield* Effect.logInfo("bravelookup: Brave running without CDP; launching a separate automation instance")
-          yield* launchAutomationBrave(port, automationProfileDir())
-          return yield* lookup(true)
-        }).pipe(Effect.orDie),
-    }
+                // modelText contract (WebLookup.swift L78-96) + honest provenance (L488-502):
+                // an EMPTY answer is decided first so a wall is never dressed up as a result.
+                const provenance = parsed.answer.length
+                  ? parsed.hasPrice
+                    ? `listed fares ("starting from"), not live availability${parsed.priceSample ? ` (${parsed.priceSample})` : ""} — query: "${params.query}"`
+                    : `search result text, not verified live — query: "${params.query}"`
+                  : parsed.blocked
+                    ? `a wall page was served, not a result — query: "${params.query}"`
+                    : `no extractable result text — query: "${params.query}"`
+                const host = sourceHost(url)
+                const lines = [
+                  `web: ${sourcePath(url)} — ${parsed.answer.length} chars`,
+                  `source: ${host} — "${parsed.title}"`,
+                  `answer: ${parsed.answer.length ? parsed.answer : "(no extractable answer)"}`,
+                  `provenance: ${provenance}`,
+                  ...(parsed.wall ? [`wall: ${parsed.wall}`] : []),
+                ]
+                yield* context.progress({ title: `BraveLookup: ${params.query}`, metadata: { blocked: parsed.blocked } })
+
+                return {
+                  content: lines.join("\n"),
+                  metadata: { title: `BraveLookup: ${params.query}`, blocked: parsed.blocked },
+                }
+              })
+
+            // PATH 1 — an endpoint is already live: the user opted in. We did NOT
+            // create this session, so there is no teardown; Brave is left as found.
+            if (yield* cdpAlive(port)) return yield* lookup(false)
+
+            // PATH 2 — Brave is NOT running: nothing of the user's is open, so this
+            // branch owns the default-profile instance it launches. Its counterpart
+            // (flagless relaunch) restores Brave and is safe precisely because Brave
+            // was down. relaunchBrave is BOTH the creator and the destructor here.
+            if (!(yield* braveRunning)) {
+              yield* Effect.logInfo("bravelookup: Brave not running; launching it with remote debugging")
+              yield* relaunchBrave(port)
+              return yield* lookup(false).pipe(Effect.ensuring(relaunchBrave(undefined)))
+            }
+
+            // PATH 3 — the user's Brave IS running but without our port. NEVER quit
+            // it. Launch a SECOND, concurrent instance on a dedicated profile; its
+            // teardown is the CDP Browser.close over its own endpoint (in cdpLookup),
+            // reachable only via this branch. The user's browser is untouched.
+            yield* Effect.logInfo("bravelookup: Brave running without CDP; launching a separate automation instance")
+            yield* launchAutomationBrave(port, automationProfileDir())
+            return yield* lookup(true)
+          }).pipe(Effect.orDie),
+      }),
+    )
   }),
-)
+}

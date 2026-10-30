@@ -3,13 +3,13 @@ import { Effect } from "effect"
 import { eq } from "drizzle-orm"
 import { Task } from "@opencode/core/task"
 import { AbsolutePath } from "@opencode/core/schema"
-import { ProjectV2 } from "@opencode/core/project"
+import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
 import { SessionTable } from "@opencode/core/session/sql"
 import { Database } from "@opencode/core/database/database"
 import { SessionID } from "@opencode/schema/session-id"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, Task.node])))
@@ -56,7 +56,7 @@ describe("Task", () => {
       const tasks = yield* Task.Service
       const { db } = yield* Database.Service
 
-      const projectID = ProjectV2.ID.make("task_test_project")
+      const projectID = Project.ID.make("task_test_project")
       yield* db
         .insert(ProjectTable)
         .values({ id: projectID, worktree: directory, sandboxes: [], time_created: 1, time_updated: 1 })

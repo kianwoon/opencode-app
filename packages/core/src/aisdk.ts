@@ -62,7 +62,7 @@ export interface LanguageEvent {
   language?: LanguageModelV3
 }
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
+export function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res

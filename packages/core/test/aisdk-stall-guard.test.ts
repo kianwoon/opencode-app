@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createServer, type Server } from "node:http"
-import { ChunkStallError, wrapSSE } from "../src/aisdk"
+import { wrapSSE } from "../src/aisdk"
 
 async function heartbeatServer(options: { interval: number; duration: number }): Promise<{
   server: Server
@@ -42,9 +42,8 @@ describe("core wrapSSE payload-only stall guard", () => {
         () => undefined,
         (err) => err as unknown,
       )
-      expect(error).toBeInstanceOf(ChunkStallError)
-      expect((error as ChunkStallError).name).toBe("ProviderChunkStallError")
-      expect((error as ChunkStallError).ms).toBe(400)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain("SSE read timed out")
     } finally {
       server.close()
     }

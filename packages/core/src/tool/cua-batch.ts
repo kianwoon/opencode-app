@@ -1,10 +1,8 @@
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
+import type { Context } from "@opencode/plugin/effect/plugin"
 import { Cause, Effect, Exit, Schema } from "effect"
-import { MCP } from "../mcp"
-import * as Tool from "./tool"
+import { Mcp } from "../mcp"
 
 const MAX_ACTIONS = 30
-const DEFAULT_TIMEOUT = 30_000
 const MAX_TEXT_CHARS = 200
 
 // This Effect build's `Schema.Literal` accepts a single value, so a closed set
@@ -137,9 +135,8 @@ export const Parameters = Schema.Struct({
   }),
 })
 
-type Metadata = {}
 
-type ContentItem = { type: string; text?: string }
+type ContentItem = Mcp.ToolResultContent
 
 function textOf(content: readonly ContentItem[]): string {
   return content
@@ -154,92 +151,84 @@ function summaryOf(content: readonly ContentItem[]): string {
   const parts = content.flatMap((item) =>
     item.type === "text" && item.text
       ? [item.text.trim().slice(0, MAX_TEXT_CHARS)]
-      : item.type === "image" || item.type === "audio"
-        ? [`[${item.type} omitted]`]
+      : item.type === "media"
+        ? ["[media omitted]"]
         : [],
   )
   return parts.length ? ` — ${parts.join(" | ")}` : ""
 }
 
-export const CuaBatchTool = Tool.define<typeof Parameters, Metadata, MCP.Service>(
-  "cua_batch",
-  Effect.gen(function* () {
-    const mcp = yield* MCP.Service
+export const Plugin = {
+  id: "opencode.tool.cua_batch",
+  effect: Effect.fn("CuaBatchTool.Plugin")(function* (ctx: Context) {
+    const mcp = yield* Mcp.Service
 
-    return {
-      description:
-        "Run a typed script of cua-driver actuator actions in ONE call: one decision, many GUI actions, no model turn between them. Supported `use` values: click, bring_to_front, hotkey, press_key, clipboard_write, type_text, scroll, drag, set_value, plus a local `wait` that sleeps `ms` between actions. Each action's remaining fields must match the input schema of the matching `cua-driver_<use>` tool. Actions run in order and each reports [ok]/[fail]; stop_on_error (default true) skips the remainder after a failure. Actuator effects are usually unverifiable by the driver — observe before and after with cua-driver_get_desktop_state or cua-driver_get_window_state. Requires the cua-driver MCP server; returns a not-connected notice otherwise.",
-      parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
-        Effect.gen(function* () {
-          const tools = yield* mcp.tools()
-          if (!Object.keys(tools).some((key) => key.startsWith("cua-driver_"))) {
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "cua_batch",
+        options: { codemode: false },
+        description:
+          "Run a typed script of cua-driver actuator actions in ONE call: one decision, many GUI actions, no model turn between them. Supported `use` values: click, bring_to_front, hotkey, press_key, clipboard_write, type_text, scroll, drag, set_value, plus a local `wait` that sleeps `ms` between actions. Each action's remaining fields must match the input schema of the matching `cua-driver_<use>` tool. Actions run in order and each reports [ok]/[fail]; stop_on_error (default true) skips the remainder after a failure. Actuator effects are usually unverifiable by the driver — observe before and after with cua-driver_get_desktop_state or cua-driver_get_window_state. Requires the cua-driver MCP server; returns a not-connected notice otherwise.",
+        input: Parameters,
+        execute: (params, context) =>
+          Effect.gen(function* () {
+            const available = yield* mcp.tools()
+            if (!available.some((tool) => tool.name.startsWith("cua-driver_"))) {
+              return { content: "cua-driver MCP server is not connected", metadata: { title: "cua_batch (unavailable)" } }
+            }
+            if (params.actions.length > MAX_ACTIONS) {
+              return {
+                content: `cua_batch accepts at most ${MAX_ACTIONS} actions per call; received ${params.actions.length}. Split the script across calls.`,
+                metadata: { title: "cua_batch (rejected)" },
+              }
+            }
+
+            const lines: string[] = []
+            for (const action of params.actions) {
+              if (params.stop_on_error !== false && lines.some((line) => line.startsWith("[fail]"))) {
+                lines.push(`[skip] ${action.use}`)
+                continue
+              }
+              if (action.use === "wait") {
+                yield* Effect.sleep(`${action.ms} millis`)
+                lines.push(`[ok] wait (${action.ms}ms)`)
+                continue
+              }
+              const tool = available.find((item) => item.name === `cua-driver_${action.use}`)
+              if (!tool) {
+                lines.push(`[fail] ${action.use}: tool not found on cua-driver server`)
+                continue
+              }
+              const { use, ...args } = action
+              const outcome = yield* Effect.exit(
+                mcp.callTool({
+                  server: tool.server,
+                  name: tool.name,
+                  args,
+                  sessionID: context.sessionID,
+                }),
+              )
+              if (Exit.isFailure(outcome)) {
+                const message = Cause.prettyErrors(outcome.cause)
+                  .map(String)
+                  .join("\n\n")
+                lines.push(`[fail] ${use}: ${message}`)
+                continue
+              }
+              lines.push(
+                outcome.value.isError
+                  ? `[fail] ${use}: ${textOf(outcome.value.content) || "MCP tool returned an error"}`
+                  : `[ok] ${use}${summaryOf(outcome.value.content)}`,
+              )
+            }
+
+            const skipped = lines.filter((line) => line.startsWith("[skip]")).length
             return {
-              title: "cua_batch (unavailable)",
-              metadata: {},
-              output: "cua-driver MCP server is not connected",
+              content: lines.join("\n"),
+              metadata: { title: `cua_batch (${lines.length - skipped}/${params.actions.length} executed)` },
             }
-          }
-          if (params.actions.length > MAX_ACTIONS) {
-            return {
-              title: "cua_batch (rejected)",
-              metadata: {},
-              output: `cua_batch accepts at most ${MAX_ACTIONS} actions per call; received ${params.actions.length}. Split the script across calls.`,
-            }
-          }
-
-          const lines: string[] = []
-          for (const action of params.actions) {
-            if (params.stop_on_error !== false && lines.some((line) => line.startsWith("[fail]"))) {
-              lines.push(`[skip] ${action.use}`)
-              continue
-            }
-            if (action.use === "wait") {
-              yield* Effect.sleep(`${action.ms} millis`)
-              lines.push(`[ok] wait (${action.ms}ms)`)
-              continue
-            }
-            const tool = tools[`cua-driver_${action.use}`]
-            if (!tool) {
-              lines.push(`[fail] ${action.use}: tool not found on cua-driver server`)
-              continue
-            }
-            const { use, ...args } = action
-            const outcome = yield* Effect.exit(
-              Effect.tryPromise(() =>
-                tool.client.callTool(
-                  { name: tool.def.name, arguments: args },
-                  CallToolResultSchema,
-                  {
-                    resetTimeoutOnProgress: true,
-                    signal: ctx.abort,
-                    timeout: tool.timeout ?? DEFAULT_TIMEOUT,
-                    onprogress: () => {},
-                  },
-                ),
-              ),
-            )
-            if (Exit.isFailure(outcome)) {
-              const message = Cause.prettyErrors(outcome.cause)
-                .map(String)
-                .join("\n\n")
-              lines.push(`[fail] ${use}: ${message}`)
-              continue
-            }
-            lines.push(
-              outcome.value.isError
-                ? `[fail] ${use}: ${textOf(outcome.value.content) || "MCP tool returned an error"}`
-                : `[ok] ${use}${summaryOf(outcome.value.content)}`,
-            )
-          }
-
-          const skipped = lines.filter((line) => line.startsWith("[skip]")).length
-          return {
-            title: `cua_batch (${lines.length - skipped}/${params.actions.length} executed)`,
-            metadata: {},
-            output: lines.join("\n"),
-          }
-        }),
-    }
+          }),
+      }),
+    )
   }),
-)
+}

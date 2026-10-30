@@ -1,88 +1,78 @@
 import { describe, expect } from "bun:test"
+import fs from "fs"
+import os from "os"
+import path from "path"
 import { Effect, Layer } from "effect"
-import { Database } from "@opencode/core/database/database"
-import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
-import { EventV2 } from "@opencode/core/event"
-import { Location } from "@opencode/core/location"
-import { LocationMutation } from "@opencode/core/location-mutation"
-import { PermissionV2 } from "@opencode/core/permission"
-import { Project } from "@opencode/core/project"
-import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
-import { SessionV2 } from "@opencode/core/session"
-import { SessionTable } from "@opencode/core/session/sql"
-import { Task } from "@opencode/core/task"
-import { ScheduleTaskTool } from "@opencode/core/tool/schedule-task"
-import { ToolRegistry } from "@opencode/core/tool/registry"
-import { ToolOutputStore } from "@opencode/core/tool-output-store"
-import { tempLocationLayer } from "./fixture/location"
+import { AppNodeBuilder } from "../src/effect/app-node-builder"
+import { Location } from "../src/location"
+import { AbsolutePath } from "../src/schema"
+import { LocationMutation } from "../src/location-mutation"
+import { Permission } from "../src/permission"
+import { Session } from "../src/session"
+import { Task } from "../src/task"
+import { Tool } from "../src/tool"
+import { ScheduleTaskTool } from "../src/tool/schedule-task"
 import { testEffect } from "./lib/effect"
-import { toolIdentity, executeTool, toolDefinitions } from "./lib/tool"
+import { permissionLayer } from "./lib/permission"
+import { executeTool, registerToolPlugin, toolDefinitions, toolIdentity } from "./lib/tool"
 
-const sessionID = SessionV2.ID.make("ses_schedule_task_tool_test")
-const assertions: PermissionV2.AssertInput[] = []
+const sessionID = Session.ID.make("ses_schedule_task_tool_test")
+const assertions: Permission.AssertInput[] = []
 let deny = false
 
-const permission = Layer.succeed(
-  PermissionV2.Service,
-  PermissionV2.Service.of({
-    assert: (input) =>
-      Effect.sync(() => assertions.push(input)).pipe(
-        Effect.andThen(deny ? Effect.fail(new PermissionV2.BlockedError({ rules: [] })) : Effect.void),
+const permission = permissionLayer({
+  assert: (input) =>
+    Effect.sync(() => assertions.push(input)).pipe(
+      Effect.andThen(
+        deny
+          ? Effect.fail(
+              new Permission.BlockedError({
+                rules: [],
+                permission: input.action,
+                resources: input.resources,
+              }),
+            )
+          : Effect.void,
       ),
-    ask: () => Effect.die("unused"),
-    reply: () => Effect.die("unused"),
-    get: () => Effect.die("unused"),
-    forSession: () => Effect.die("unused"),
-    list: () => Effect.die("unused"),
-  }),
+    ),
+})
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), "schedule-task-"))
+const locationLayer = Layer.succeed(
+  Location.Service,
+  Location.Service.of({
+    directory: AbsolutePath.make(directory),
+    workspaceID: undefined,
+    projectDirectory: AbsolutePath.make(directory),
+    vcs: undefined,
+  } as never),
 )
 
+const created: (typeof Task.CreateInput.Type)[] = []
+const tasks = Layer.mock(Task.Service, {
+  create: (input) => {
+    created.push(input)
+    return Effect.succeed({ id: Task.ID.make("tsk_test"), ...input } as never)
+  },
+})
+const mutation = Layer.mock(LocationMutation.Service, {
+  resolve: () => Effect.succeed({ absolute: directory, canonical: directory } as never),
+})
+
 const it = testEffect(
-  AppNodeBuilder.build(
-    LayerNode.group([
-      Database.node,
-      EventV2.node,
-      Task.node,
-      Location.node,
-      LocationMutation.node,
-      ToolRegistry.node,
-      ToolRegistry.toolsNode,
-      ScheduleTaskTool.node,
-    ]),
-    [
-      [Location.node, tempLocationLayer],
-      [PermissionV2.node, permission],
-      [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
-    ],
+  Layer.mergeAll(
+    AppNodeBuilder.build(Tool.node, [Location.node.replace(locationLayer), Permission.node.replace(permission)]),
+    tasks,
+    mutation,
   ),
 )
 
 const setup = Effect.gen(function* () {
   assertions.length = 0
+  created.length = 0
   deny = false
-  const locationService = yield* Location.Service
-  const directory = locationService.directory
-  const { db } = yield* Database.Service
-  yield* db
-    .insert(ProjectTable)
-    .values({ id: Project.ID.global, worktree: directory, sandboxes: [] })
-    .run()
-    .pipe(Effect.orDie)
-  yield* db
-    .insert(SessionTable)
-    .values({
-      id: sessionID,
-      project_id: Project.ID.global,
-      slug: "schedule-task",
-      directory,
-      title: "schedule-task",
-      version: "test",
-    })
-    .run()
-    .pipe(Effect.orDie)
-  return directory
+  yield* registerToolPlugin(ScheduleTaskTool.Plugin).pipe(Effect.provide(permission))
+  return { registry: yield* Tool.Service, directory }
 })
 
 const call = (input: typeof ScheduleTaskTool.Input.Type, id = "call-schedule-task") => ({
@@ -92,61 +82,48 @@ const call = (input: typeof ScheduleTaskTool.Input.Type, id = "call-schedule-tas
 })
 
 describe("ScheduleTaskTool", () => {
-  it.live("creates a task in the current directory and returns its identity", () =>
+  it.live("registers and creates a task for the current directory", () =>
     Effect.gen(function* () {
-      const directory = yield* setup
-      const registry = yield* ToolRegistry.Service
-      const tasks = yield* Task.Service
+      const { registry } = yield* setup
 
-      expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([ScheduleTaskTool.name])
+      expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([ScheduleTaskTool.name, "execute"])
 
-      const result = yield* executeTool(
-        registry,
-        call({ title: "Nightly", prompt: "run checks", cron: "daily" }),
-      )
-      const taskID = Task.ID.make(JSON.parse(String(result.value)).taskID)
-      const stored = yield* tasks.get(taskID)
+      const result = yield* executeTool(registry, call({ title: "Nightly", prompt: "run checks", cron: "daily" }))
 
-      expect(stored?.title).toBe("Nightly")
-      expect(stored?.prompt.text).toBe("run checks")
-      expect(stored?.cron).toBe("0 0 * * *")
-      expect(stored?.directory).toBe(directory)
-      expect(stored?.enabled).toBe(true)
-      expect(stored?.next_run_at).toBeUndefined()
-      expect(assertions).toMatchObject([
-        { sessionID, action: "schedule_task", resources: ["*"], save: ["*"] },
-      ])
+      expect(result.status).toBe("completed")
+      expect(result.output).toMatchObject({ taskID: "tsk_test" })
+      expect(created).toHaveLength(1)
+      expect(created[0]).toMatchObject({
+        title: "Nightly",
+        prompt: { text: "run checks" },
+        cron: "0 0 * * *",
+        directory,
+      })
+      expect(assertions).toMatchObject([{ sessionID, action: "schedule_task", resources: ["*"], save: ["*"] }])
     }),
   )
 
   it.live("rejects invalid cron with a tool error", () =>
     Effect.gen(function* () {
-      yield* setup
-      const registry = yield* ToolRegistry.Service
-      const tasks = yield* Task.Service
+      const { registry } = yield* setup
 
       const result = yield* executeTool(
         registry,
         call({ title: "Broken", prompt: "never fires", cron: "not a schedule" }),
       )
-      expect(result.type).toBe("error")
-      expect((yield* tasks.all())).toHaveLength(0)
+      expect(result.status).toBe("error")
+      expect(created).toHaveLength(0)
     }),
   )
 
   it.live("does not create a task when permission is denied", () =>
     Effect.gen(function* () {
-      yield* setup
-      const registry = yield* ToolRegistry.Service
-      const tasks = yield* Task.Service
+      const { registry } = yield* setup
       deny = true
 
-      const result = yield* executeTool(
-        registry,
-        call({ title: "Blocked", prompt: "nope", cron: "hourly" }),
-      )
-      expect(result.type).toBe("error")
-      expect((yield* tasks.all())).toHaveLength(0)
+      const result = yield* executeTool(registry, call({ title: "Blocked", prompt: "nope", cron: "hourly" }))
+      expect(result.status).toBe("error")
+      expect(created).toHaveLength(0)
     }),
   )
 })

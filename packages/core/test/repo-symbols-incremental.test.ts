@@ -1,17 +1,18 @@
 import { $ } from "bun"
-import { describe, expect, test } from "bun:test"
+import { describe, expect } from "bun:test"
 import path from "path"
 import { ConfigProvider, Deferred, Effect, Fiber, Layer, Option, Stream } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
+import { Bus } from "@opencode/core/bus"
 import { Config } from "@opencode/core/config"
-import { EventV2 } from "@opencode/core/event"
 // Import order matters: filesystem.ts dereferences `FileSystemSearch.node` at
 // module-evaluation time, so filesystem must be entered before search.ts (as the
 // app does) or the namespace is still in TDZ.
 import "../src/filesystem"
 import { Watcher } from "@opencode/core/filesystem/watcher"
-import { FSUtil } from "@opencode/core/fs-util"
+import { FileSystem } from "@opencode/schema/filesystem"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "@opencode/core/location"
 import { Symbols } from "../src/repo/symbols"
 import { AbsolutePath } from "@opencode/core/schema"
@@ -29,10 +30,11 @@ const configLayer = Layer.succeed(
   Config.Service,
   Config.Service.of({
     entries: () => Effect.succeed([]),
+    changes: () => Stream.empty,
   }),
 )
 
-const itSymbols = testEffect(AppNodeBuilder.build(LayerNode.group([FSUtil.node, EventV2.node])))
+const itSymbols = testEffect(AppNodeBuilder.build(LayerNode.group([FSUtil.node, Bus.node])))
 
 function provide(directory: string, vcs: Location.Interface["vcs"]) {
   const locationLayer = Layer.succeed(
@@ -40,9 +42,9 @@ function provide(directory: string, vcs: Location.Interface["vcs"]) {
     Location.Service.of(location({ directory: AbsolutePath.make(directory) }, { vcs })),
   )
   return Effect.provide(
-    AppNodeBuilder.build(LayerNode.group([Watcher.node, Symbols.node]), [
-      [Config.node, configLayer],
-      [Location.node, locationLayer],
+    AppNodeBuilder.build(LayerNode.group([Watcher.node, Symbols.node, Bus.node]), [
+      Config.node.replace(configLayer),
+      Location.node.replace(locationLayer),
     ]).pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(ENABLED)))),
   )
 }
@@ -69,10 +71,10 @@ function withGit<A, E, R>(f: (directory: string, vcs: Location.Interface["vcs"])
 function nextUpdate<E>(check: (event: WatcherEvent) => boolean, trigger: Effect.Effect<void, E>) {
   return Effect.acquireUseRelease(
     Effect.gen(function* () {
-      const events = yield* EventV2.Service
+      const events = yield* Bus.Service
       const deferred = yield* Deferred.make<WatcherEvent>()
       const fiber = yield* events
-        .subscribe(Watcher.Event.Updated)
+        .subscribe(FileSystem.Event.Changed)
         .pipe(
           Stream.runForEach((event) =>
             check(event.data) ? Deferred.succeed(deferred, event.data).pipe(Effect.asVoid) : Effect.void,

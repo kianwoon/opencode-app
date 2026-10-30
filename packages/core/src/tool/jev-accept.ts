@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import * as Tool from "./tool"
+import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import { jevKey } from "../jev/controller"
 import { jevAccept, type JevAcceptDecision } from "../jev/accept"
 
@@ -12,7 +12,6 @@ export const Parameters = Schema.Struct({
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
-type Metadata = {}
 
 export function toAcceptInput(params: Params, key: string) {
   return {
@@ -38,23 +37,28 @@ export function formatUnavailable(): { title: string; output: string } {
   }
 }
 
-export const JevAcceptTool = Tool.define<typeof Parameters, Metadata, never>(
-  "jev_accept",
-  Effect.gen(function* () {
-    return {
-      description:
-        "Measured acceptance gate for a returned handoff: scores `result` against `gate` with a noul 0-1 prefilter plus an accept/refire choice verdict. Fail-open — an unmeasured result means 'fall back to the prompt-level two-strike rule', never auto-accept.",
-      parameters: Parameters,
-      execute: (params: Params) =>
-        Effect.gen(function* () {
-          const key = jevKey()
-          if (!key) return { ...formatUnavailable(), metadata: {} }
-          const decision = yield* Effect.promise(() => jevAccept(toAcceptInput(params, key))).pipe(
-            Effect.catch(() => Effect.succeed(undefined)),
-          )
-          if (!decision) return { ...formatUnavailable(), metadata: {} }
-          return { ...formatAccept(decision), metadata: {} }
-        }),
-    }
+export const Plugin = {
+  id: "opencode.tool.jev_accept",
+  effect: Effect.fn("JevAcceptTool.Plugin")(function* (ctx: PluginContext) {
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "jev_accept",
+        options: { codemode: false },
+        description:
+          "Measured acceptance gate for a returned handoff: scores `result` against `gate` with a noul 0-1 prefilter plus an accept/refire choice verdict. Fail-open — an unmeasured result means 'fall back to the prompt-level two-strike rule', never auto-accept.",
+        input: Parameters,
+        execute: (params: Params) =>
+          Effect.gen(function* () {
+            const key = jevKey()
+            if (!key) return { content: formatUnavailable().output, metadata: {} }
+            const decision = yield* Effect.promise(() => jevAccept(toAcceptInput(params, key))).pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            )
+            if (!decision) return { content: formatUnavailable().output, metadata: {} }
+            const formatted = formatAccept(decision)
+            return { content: formatted.output, metadata: { title: formatted.title } }
+          }),
+      }),
+    )
   }),
-)
+}

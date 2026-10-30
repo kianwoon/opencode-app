@@ -416,11 +416,11 @@ permissions:
 
   it.effect("maps agent tools catalog visibility onto agent state", () =>
     Effect.gen(function* () {
-      const agents = yield* AgentV2.Service
+      const agents = yield* Agent.Service
       const config = Config.Service.of({
         entries: () =>
           Effect.succeed([
-            new Config.Document({
+            new Document({
               type: "document",
               info: decode({
                 agents: {
@@ -432,13 +432,14 @@ permissions:
               }),
             }),
           ]),
+        changes: () => Stream.empty,
       })
 
       yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) })).pipe(
         Effect.provideService(Config.Service, config),
       )
 
-      const reviewer = yield* agents.get(AgentV2.ID.make("reviewer"))
+      const reviewer = yield* agents.get(Agent.ID.make("reviewer"))
       expect(reviewer?.tools).toEqual({ webfetch: false, bash: false })
       expect(reviewer?.budget).toBe(8_192)
     }),

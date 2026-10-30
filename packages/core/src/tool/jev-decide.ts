@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import * as Tool from "./tool"
+import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import {
   CONTROLS_MAX,
   LABEL_MAX,
@@ -33,7 +33,6 @@ export const Parameters = Schema.Struct({
 type Params = Schema.Schema.Type<typeof Parameters>
 type Control = Params["controls"][number]
 
-type Metadata = {}
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : s.slice(0, max))
 
@@ -102,25 +101,33 @@ export function formatBelowGate(
   }
 }
 
-export const JevDecideTool = Tool.define<typeof Parameters, Metadata, never>(
-  "jev_decide",
-  Effect.gen(function* () {
-    return {
-      description:
-        "Categorical decision over an indexed control table via the jev SystemOne endpoint — UI steering, option-space rating, routing/plan/next call shapes; fail-open by design.",
-      parameters: Parameters,
-      execute: (params: Params) =>
-        Effect.gen(function* () {
-          const key = jevKey()
-          if (!key) return { ...formatUnavailable(), metadata: {} }
-          const outcome = yield* Effect.promise(() => jevControlDetailed(toControllerInput(params, key))).pipe(
-            Effect.catch(() => Effect.succeed({ verdict: "unmeasured" } as const)),
-          )
-          if (outcome.verdict === "below_gate")
-            return { ...formatBelowGate(outcome, truncationMarker(params.controls)), metadata: {} }
-          if (outcome.verdict !== "accepted") return { ...formatUnavailable(), metadata: {} }
-          return { ...formatDecision(outcome.decision, truncationMarker(params.controls)), metadata: {} }
-        }),
-    }
+export const Plugin = {
+  id: "opencode.tool.jev_decide",
+  effect: Effect.fn("opencode.tool.jev_decide.Plugin")(function* (ctx: PluginContext) {
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "jev_decide",
+        options: { codemode: false },
+        description:
+          "Categorical decision over an indexed control table via the jev SystemOne endpoint — UI steering, option-space rating, routing/plan/next call shapes; fail-open by design.",
+        input: Parameters,
+        execute: (params: Params) =>
+          Effect.gen(function* () {
+            const key = jevKey()
+            if (!key) return { content: formatUnavailable().output, metadata: {} }
+            const outcome = yield* Effect.promise(() => jevControlDetailed(toControllerInput(params, key))).pipe(
+              Effect.catch(() => Effect.succeed({ verdict: "unmeasured" } as const)),
+            )
+            const marker = truncationMarker(params.controls)
+            if (outcome.verdict === "below_gate") {
+              const formatted = formatBelowGate(outcome, marker)
+              return { content: formatted.output, metadata: { title: formatted.title } }
+            }
+            if (outcome.verdict !== "accepted") return { content: formatUnavailable().output, metadata: {} }
+            const formatted = formatDecision(outcome.decision, marker)
+            return { content: formatted.output, metadata: { title: formatted.title } }
+          }),
+      }),
+    )
   }),
-)
+}

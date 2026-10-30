@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Effect, Exit, Layer, Schema } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { FileSystem } from "@opencode/core/filesystem"
 import { Location } from "@opencode/core/location"
 import { AbsolutePath, RelativePath } from "@opencode/core/schema"
@@ -35,8 +35,8 @@ const failingFs = Layer.succeed(
 const build = (filesystem: Layer.Layer<FileSystem.Service>) =>
   testEffect(
     AppNodeBuilder.build(LayerNode.group([RepoIndexContext.node, SystemContextRegistry.node]), [
-      [Location.node, locationLayer],
-      [FileSystem.node, filesystem],
+      Location.node.replace(locationLayer),
+      FileSystem.node.replace(filesystem),
     ]),
   )
 

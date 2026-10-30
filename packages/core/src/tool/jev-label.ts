@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import * as Tool from "./tool"
+import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import { jevKey } from "../jev/controller"
 import { jevLabel, type JevLabelResult } from "../jev/label"
 import { buildSessionSnapshot } from "../jev/snapshot"
@@ -23,7 +23,6 @@ export const Parameters = Schema.Struct({
 
 type Params = Schema.Schema.Type<typeof Parameters>
 type LabelParams = Params & { readonly snapshot: string }
-type Metadata = {}
 
 export function toLabelInput(params: LabelParams, key: string) {
   return {
@@ -51,38 +50,43 @@ export function formatUnavailable(): { title: string; output: string } {
   }
 }
 
-export const JevLabelTool = Tool.define<typeof Parameters, Metadata, never>(
-  "jev_label",
-  Effect.gen(function* () {
-    return {
-      description:
-        "Session state labeling: classifies a telemetry snapshot as thrive|stall|bloat|drift via one JEV decide call (choice + probabilities). Advisory predictive features, never a gate; fails open unlabeled.",
-      parameters: Parameters,
-      execute: (params: Params) =>
-        Effect.gen(function* () {
-          const key = jevKey()
-          if (!key) return { ...formatUnavailable(), metadata: {} }
-          const built =
-            params.sessionID === undefined
-              ? undefined
-              : yield* Effect.promise(async () => {
-                  const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-                  return await buildSessionSnapshot(dbPath, params.sessionID!)
-                }).pipe(Effect.catch(() => Effect.succeed(undefined)))
-          if (params.sessionID !== undefined && !built) return { ...formatUnavailable(), metadata: {} }
-          const snapshot = built?.snapshot ?? params.snapshot
-          if (snapshot === undefined) return { ...formatUnavailable(), metadata: {} }
-          const labelParams: LabelParams = {
-            ...params,
-            snapshot,
-            objective: params.objective ?? built?.title,
-          }
-          const result = yield* Effect.promise(() => jevLabel(toLabelInput(labelParams, key))).pipe(
-            Effect.catch(() => Effect.succeed(undefined)),
-          )
-          if (!result) return { ...formatUnavailable(), metadata: {} }
-          return { ...formatLabel(result), metadata: {} }
-        }),
-    }
+export const Plugin = {
+  id: "opencode.tool.jev_label",
+  effect: Effect.fn("JevLabelTool.Plugin")(function* (ctx: PluginContext) {
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "jev_label",
+        options: { codemode: false },
+        description:
+          "Session state labeling: classifies a telemetry snapshot as thrive|stall|bloat|drift via one JEV decide call (choice + probabilities). Advisory predictive features, never a gate; fails open unlabeled.",
+        input: Parameters,
+        execute: (params: Params) =>
+          Effect.gen(function* () {
+            const key = jevKey()
+            if (!key) return { content: formatUnavailable().output, metadata: {} }
+            const built =
+              params.sessionID === undefined
+                ? undefined
+                : yield* Effect.promise(async () => {
+                    const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
+                    return await buildSessionSnapshot(dbPath, params.sessionID!)
+                  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            if (params.sessionID !== undefined && !built) return { content: formatUnavailable().output, metadata: {} }
+            const snapshot = built?.snapshot ?? params.snapshot
+            if (snapshot === undefined) return { content: formatUnavailable().output, metadata: {} }
+            const labelParams: LabelParams = {
+              ...params,
+              snapshot,
+              objective: params.objective ?? built?.title,
+            }
+            const result = yield* Effect.promise(() => jevLabel(toLabelInput(labelParams, key))).pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            )
+            if (!result) return { content: formatUnavailable().output, metadata: {} }
+            const formatted = formatLabel(result)
+            return { content: formatted.output, metadata: { title: formatted.title } }
+          }),
+      }),
+    )
   }),
-)
+}

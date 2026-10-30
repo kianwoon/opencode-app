@@ -5,7 +5,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { Task } from "@opencode/schema/task"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Database } from "./database/database"
-import { makeGlobalNode } from "./effect/app-node"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { EventV2 } from "./event"
 import { TaskRunTable, TaskTable } from "./task/sql"
 

@@ -1,8 +1,8 @@
 import { spawnSync } from "child_process"
 import { homedir } from "os"
 import path from "path"
+import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Option, Schema } from "effect"
-import * as Tool from "./tool"
 
 /**
  * THIN TOOL over the ONE validated GUI sensor: the `axnav` CLI.
@@ -84,7 +84,7 @@ export function verdictFromRun(
   const line = stdout.trim()
   if (status !== 0) return error("nonzero_exit", `exit ${status}`, line || stderr.trim())
   if (!line) return error("empty_stdout", "empty stdout", stderr.trim())
-  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(line)
+  const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(line)
   if (Option.isNone(parsed)) return error("non_json", "stdout is not JSON", line)
   const effect = (parsed.value as { effect?: unknown }).effect
   return {
@@ -94,22 +94,28 @@ export function verdictFromRun(
   }
 }
 
-export const UiNavTool = Tool.define<typeof Parameters, Metadata, never>(
-  "ui_nav",
-  Effect.gen(function* () {
-    return {
-      description:
-        "Invoke the validated `axnav` GUI sensor and return its typed verdict (`effect` in {confirmed, refused, suspected_noop, unverifiable} plus `provenance`/`walk`). Verbs: `windows`/`map` (read-only enumeration), `find`/`sel` (read-only lookup), `press` (AXPress then read-back, judged by destination change). Parameters mirror the CLI: verb, app, optional label, optional index (press), optional window scope. The sensor refuses rather than guessing; a non-zero exit, empty stdout, or non-JSON output is returned as a typed error passthrough, never a fabricated success.",
-      parameters: Parameters,
-      execute: (params) =>
-        Effect.gen(function* () {
-          if (LABELLED.includes(params.verb) && params.label === undefined) {
-            return error("missing_label", `verb ${params.verb} requires a label`, "")
-          }
-          const args = buildArgs(params)
-          const proc = yield* Effect.sync(() => spawnSync(AXNAV, args, { encoding: "utf8" }))
-          return verdictFromRun(proc.status, proc.stdout ?? "", proc.stderr ?? "")
-        }),
-    }
+export const Plugin = {
+  id: "opencode.tool.ui_nav",
+  effect: Effect.fn("UiNavTool.Plugin")(function* (ctx: Context) {
+    yield* ctx.tool.transform((editor) =>
+      editor.add({
+        name: "ui_nav",
+        options: { codemode: false },
+        description:
+          "Invoke the validated `axnav` GUI sensor and return its typed verdict (`effect` in {confirmed, refused, suspected_noop, unverifiable} plus `provenance`/`walk`). Verbs: `windows`/`map` (read-only enumeration), `find`/`sel` (read-only lookup), `press` (AXPress then read-back, judged by destination change). Parameters mirror the CLI: verb, app, optional label, optional index (press), optional window scope. The sensor refuses rather than guessing; a non-zero exit, empty stdout, or non-JSON output is returned as a typed error passthrough, never a fabricated success.",
+        input: Parameters,
+        execute: (params) =>
+          Effect.gen(function* () {
+            if (LABELLED.includes(params.verb) && params.label === undefined) {
+              const result = error("missing_label", `verb ${params.verb} requires a label`, "")
+              return { content: result.output, metadata: { title: result.title } }
+            }
+            const args = buildArgs(params)
+            const proc = yield* Effect.sync(() => spawnSync(AXNAV, args, { encoding: "utf8" }))
+            const result = verdictFromRun(proc.status, proc.stdout ?? "", proc.stderr ?? "")
+            return { content: result.output, metadata: { title: result.title } }
+          }),
+      }),
+    )
   }),
-)
+}
