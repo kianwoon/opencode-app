@@ -636,7 +636,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                 <Show when={windows() || linux()}>
                   <WindowsAppMenu command={command} platform={platform} />
                 </Show>
-                <Show when={windows() && props.verticalTabs}>
+                <Show when={windows()}>
                   <SidebarToggle />
                 </Show>
                 <Show when={!mobile() && !props.verticalTabs}>

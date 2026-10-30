@@ -26,6 +26,7 @@ import {
 import { createPanelMotion, guardClosingFocus, panelOpacity } from "@/shell/panel-motion"
 import { createSidebarPeek } from "@/shell/sidebar-peek"
 import { windowDragEnabled } from "@/session/header/drag-area"
+import { NavSidebar } from "@/shell/nav/sidebar"
 
 // How far Home steps along a peek's header to clear the collapsed toggle: to the toggle's end, from the sidebar's 18px
 // start padding.
@@ -59,7 +60,9 @@ export default function Layout(props: ParentProps) {
     tabsPanel: undefined,
   })
 
-  const verticalTabs = () => preferences.appearance.tabLayout() !== "horizontal" && !mobile()
+  // The fork's project navigation owns the left rail on every wide window,
+  // independent of the tab layout chosen for the titlebar.
+  const navRail = () => !mobile()
 
   const toggleSidebar = () => preferences.appearance.setSidebarOpen(!preferences.appearance.sidebarOpen())
 
@@ -128,7 +131,7 @@ export default function Layout(props: ParentProps) {
   })
 
   const peek = createSidebarPeek({
-    available: () => verticalTabs() && !preferences.appearance.sidebarOpen() && !sidebarMotion.present(),
+    available: () => navRail() && !preferences.appearance.sidebarOpen() && !sidebarMotion.present(),
     open: preferences.appearance.sidebarOpen,
     aside: () => state.tabsAside,
     panel: () => state.tabsPanel,
@@ -150,7 +153,7 @@ export default function Layout(props: ParentProps) {
   })
 
   command.register("sidebar", () =>
-    verticalTabs()
+    navRail()
       ? [
           {
             ...sidebarToggleCommand,
@@ -221,7 +224,7 @@ export default function Layout(props: ParentProps) {
           : "max(0px, calc(8px - var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))",
       }}
     >
-      <Titlebar verticalTabs={verticalTabs() ? { mount: state.tabsMount } : undefined} />
+      <Titlebar />
       <div class="relative flex flex-1 min-h-0 min-w-0 flex-row">
         {/* The empty inset above the panels moves the window, as the titlebar does. */}
         <Show when={dragInset()}>
@@ -232,7 +235,7 @@ export default function Layout(props: ParentProps) {
             data-tauri-drag-region
           />
         </Show>
-        <Show when={verticalTabs()}>
+        <Show when={navRail()}>
           <aside
             id="vertical-tabs-sidebar"
             data-slot="vertical-tabs-sidebar"
@@ -262,12 +265,14 @@ export default function Layout(props: ParentProps) {
               <div
                 ref={(element) => setState("tabsMount", element)}
                 data-slot="vertical-tabs-mount"
-                class="absolute inset-y-0 end-0 contain-strict will-change-[opacity] flex min-h-0 flex-col bg-v2-background-bg-deep pe-2.5 ps-4.5 pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]"
+                class="absolute inset-y-0 end-0 contain-strict will-change-[opacity] flex min-h-0 flex-col bg-v2-background-bg-deep pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]"
                 style={{
                   width: `${state.tabsWidth}px`,
                   "padding-bottom": "max(10px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))",
                 }}
-              />
+              >
+                <NavSidebar expanded={() => preferences.appearance.sidebarOpen()} />
+              </div>
             </div>
             {/* Takes the pointer while the sidebar closes, without restyling its contents. */}
             <div
