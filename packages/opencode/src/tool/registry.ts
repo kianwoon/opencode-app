@@ -39,8 +39,8 @@ import { WebSearchTool } from "./websearch"
 import { BraveLookupTool } from "./bravelookup"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
+import { ShellSelect } from "@opencode/core/shell/select"
 import { ApplyPatchTool } from "./apply_patch"
-import { Glob } from "@opencode/util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, Context } from "effect"
@@ -204,12 +204,14 @@ const layer = Layer.effect(
 
         const dirs = yield* config.directories()
         const matches = dirs.flatMap((dir) =>
-          Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
+          [...new Bun.Glob("{tool,tools}/*.{js,ts}").scanSync({ cwd: dir, dot: true, onlyFiles: true, followSymlinks: true })].map(
+            (match) => path.join(dir, match),
+          ),
         )
         if (matches.length) yield* config.waitForDependencies()
         for (const match of matches) {
           const namespace = path.basename(match, path.extname(match))
-          // `match` is an absolute filesystem path from `Glob.scanSync(..., { absolute: true })`.
+          // `match` is an absolute filesystem path derived from the scan root.
           // Import it as `file://` so Node on Windows accepts the dynamic import.
           const mod = yield* Effect.promise(() => import(pathToFileURL(match).href))
           for (const [id, def] of Object.entries(mod)) {
@@ -488,6 +490,7 @@ export const node = LayerNode.make({
     MCP.node,
     Database.node,
     Ripgrep.node,
+    ShellSelect.node,
   ],
 })
 

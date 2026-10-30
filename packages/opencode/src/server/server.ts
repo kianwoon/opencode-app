@@ -36,7 +36,7 @@ type ListenOptions = CorsOptions & {
   mdnsDomain?: string
 }
 type ListenerState = {
-  scope: Scope.Scope
+  scope: Scope.Closeable
   server: Context.Service.Shape<typeof HttpServer.HttpServer>
   http: ListenerServer
   websockets: WebSocketTracker.Interface
@@ -139,7 +139,11 @@ function startListener(opts: ListenOptions, port: number) {
 
 function tcpAddress(state: ListenerState) {
   return Effect.gen(function* () {
-    if (state.server.address._tag === "TcpAddress") return state.server.address
+    if (
+      state.server.address._tag === "InetAddressV4" ||
+      state.server.address._tag === "InetAddressV6"
+    )
+      return state.server.address
     yield* Scope.close(state.scope, Exit.void).pipe(Effect.ignore)
     return yield* Effect.die(new Error(`Unexpected HttpServer address tag: ${state.server.address._tag}`))
   })

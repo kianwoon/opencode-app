@@ -30,7 +30,7 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
       const model =
         (yield* provider.getSmallModel(fallback.providerID)) ??
         (yield* provider.getModel(fallback.providerID, fallback.modelID))
-      const sessionID = SessionID.descending()
+      const sessionID = SessionID.create()
       const result = yield* llm
         .stream({
           agent: COPY_NAME_AGENT,

@@ -4,7 +4,7 @@ import { EventV2 } from "@opencode/core/event"
 import { EventManifest } from "@/event-manifest"
 import { Credential } from "@opencode/core/credential"
 import { Integration } from "@opencode/core/integration"
-import { SkillV2 } from "@opencode/core/skill"
+import { Skill } from "@opencode/core/skill"
 import { InstanceDisposed } from "@/server/event"
 import { Question } from "@/question"
 import { ConfigApi } from "./groups/config"
@@ -28,6 +28,7 @@ import { TuiApi } from "./groups/tui"
 import { WorkspaceApi } from "./groups/workspace"
 import { makeApi } from "@opencode/protocol/api"
 import { LocationMiddleware } from "@opencode/server/location"
+import { FormLocationMiddleware } from "@opencode/server/middleware/form-location"
 import { SessionLocationMiddleware } from "@opencode/server/middleware/session-location"
 import { GlobalApi } from "./groups/global"
 import { Authorization } from "./middleware/authorization"
@@ -49,6 +50,7 @@ const EventSchema = Schema.Union([
 export const ServerApi = makeApi({
   definitions: EventManifest.Latest.values().toArray(),
   locationMiddleware: LocationMiddleware,
+  formLocationMiddleware: FormLocationMiddleware,
   sessionLocationMiddleware: SessionLocationMiddleware,
 })
 
@@ -89,10 +91,9 @@ export const OpenCodeHttpApi = HttpApi.make("opencode")
     Question.Replied,
     Question.Rejected,
     Credential.Value,
-    Integration.Inputs,
     Integration.Method,
     Integration.Ref,
-    SkillV2.Source,
+    Skill.Source,
   ])
 
 export type RootHttpApiType = typeof RootHttpApi

@@ -162,7 +162,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       const chunk = yield* Effect.scoped(
         Effect.gen(function* () {
           const handle = yield* fs.open(file, { flag: "r" })
-          yield* handle.seek(Number(info.size) - tailBytes, "start")
+          yield* handle.seek(info.size - BigInt(tailBytes), "start")
           return Option.getOrElse(yield* handle.readAlloc(tailBytes), () => new Uint8Array())
         }),
       ).pipe(Effect.orElseSucceed(() => new Uint8Array()))

@@ -1,3 +1,5 @@
+export * as ProjectCopy from "./project-copy"
+
 import { Context, Effect, Layer, Schema } from "effect"
 import path from "path"
 import { AbsolutePath } from "@opencode/core/schema"

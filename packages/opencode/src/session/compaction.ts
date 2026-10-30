@@ -397,10 +397,9 @@ const layer = Layer.effect(
       const nextPrompt =
         compacting.prompt ??
         [
-          buildPrompt({
-            previousSummary,
-            context: [conversation],
-          }),
+          buildPrompt(previousSummary !== undefined),
+          "The following is the conversation history:",
+          conversation,
           ...compacting.context,
         ]
           .filter(Boolean)
@@ -464,11 +463,14 @@ const layer = Layer.effect(
       })
 
       if (result === "compact") {
-        processor.message.error = new SessionV1.ContextOverflowError({
-          message: replay
-            ? "Conversation history too large to compact - exceeds model context limit"
-            : "Session too large to compact - context exceeds model limit even after stripping media",
-        }).toObject()
+        processor.message.error = {
+          name: "ContextOverflowError",
+          data: {
+            message: replay
+              ? "Conversation history too large to compact - exceeds model context limit"
+              : "Session too large to compact - context exceeds model limit even after stripping media",
+          },
+        }
         processor.message.finish = "error"
         yield* session.updateMessage(processor.message)
         return "stop"

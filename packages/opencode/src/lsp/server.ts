@@ -336,7 +336,7 @@ export const Biome: Info = {
     if (!bin) {
       const resolved = Module.resolve("biome", root)
       if (!resolved) return
-      bin = which("biome")
+      bin = which("biome") ?? undefined
       if (!bin) return
       args = ["lsp-proxy", "--stdio"]
     }

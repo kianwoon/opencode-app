@@ -4,6 +4,7 @@ import { InstanceState } from "@/effect/instance-state"
 import type * as Tool from "./tool"
 import { containsPath } from "../project/instance-context"
 import { FSUtil } from "@opencode/util/fs-util"
+import { normalizePathPattern } from "@/util/filesystem"
 
 type Kind = "file" | "directory"
 
@@ -29,7 +30,7 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   const dir = kind === "directory" ? full : path.dirname(full)
   const glob =
     process.platform === "win32"
-      ? FSUtil.normalizePathPattern(path.join(dir, "*"))
+      ? normalizePathPattern(path.join(dir, "*"))
       : path.join(dir, "*").replaceAll("\\", "/")
 
   yield* ctx.ask({

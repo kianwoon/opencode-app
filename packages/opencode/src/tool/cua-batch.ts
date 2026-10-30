@@ -141,8 +141,17 @@ type Metadata = {}
 
 type ContentItem = { type: string; text?: string }
 
-function textOf(content: readonly ContentItem[]): string {
-  return content
+function contentItems(content: unknown): readonly ContentItem[] {
+  return Array.isArray(content)
+    ? content.filter(
+        (item): item is ContentItem =>
+          typeof item === "object" && item !== null && typeof (item as { type?: unknown }).type === "string",
+      )
+    : []
+}
+
+function textOf(content: unknown): string {
+  return contentItems(content)
     .flatMap((item) => (item.type === "text" && item.text ? [item.text] : []))
     .filter((text) => text.trim())
     .join("\n\n")
@@ -150,8 +159,8 @@ function textOf(content: readonly ContentItem[]): string {
 
 // Image and audio blocks would serialize as base64 into a model-visible tool
 // output, so only the block type is reported for them.
-function summaryOf(content: readonly ContentItem[]): string {
-  const parts = content.flatMap((item) =>
+function summaryOf(content: unknown): string {
+  const parts = contentItems(content).flatMap((item) =>
     item.type === "text" && item.text
       ? [item.text.trim().slice(0, MAX_TEXT_CHARS)]
       : item.type === "image" || item.type === "audio"

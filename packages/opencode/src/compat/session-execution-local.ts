@@ -3,13 +3,17 @@ import { EventV2 } from "@opencode/core/event"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { SessionEvent } from "@opencode/core/session/event"
+import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionRunCoordinator } from "@opencode/core/session/run-coordinator"
-import { SessionRunner } from "@opencode/core/session/runner"
+import { SessionRunner } from "@opencode/core/session/runner/index"
 import { SessionSchema } from "@opencode/core/session/schema"
 import { SessionStore } from "@opencode/core/session/store"
 import { SessionExecution } from "@opencode/core/session/execution"
 import { toSessionError } from "@opencode/core/session/to-session-error"
-import { UserInterruptedError } from "@opencode/core/session/error"
+
+// Core settles interruption through the coordinator's `reason`, so local marker
+// errors are only needed when a drain fails after being told to stop.
+class UserInterruptedError extends Error {}
 
 export function terminal(exit: Exit.Exit<void, SessionRunner.RunError>, reason?: "user" | "shutdown" | "superseded") {
   if (Exit.isSuccess(exit)) return { type: "succeeded" as const }
@@ -37,24 +41,38 @@ const layer = Layer.effect(
         ),
         Effect.asVoid,
       )
+    const drain = Effect.fnUntraced(function* (
+      sessionID: SessionSchema.ID,
+      force: boolean,
+      continuation?: SessionRunner.Continuation,
+      promotable: SessionInbox.Promotable = "input",
+      stepped = false,
+    ): Effect.fn.Return<void, SessionRunner.RunError> {
+      const session = yield* store.get(sessionID)
+      if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
+      const result = yield* SessionRunner.Service.use((runner) =>
+        runner.drain({ sessionID, force, continuation, promotable, stepped }),
+      ).pipe(
+        Effect.provide(locations.get(session.location)),
+        Effect.tapCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID })),
+        ),
+      )
+      return yield* SessionRunner.DrainResult.$match(result, {
+        Complete: () => Effect.void,
+        Moved: (result) => drain(sessionID, false, result.continuation, promotable, result.stepped),
+        Reloaded: (result) => drain(sessionID, result.force, result.continuation, promotable, result.stepped),
+      })
+    })
     const coordinator = yield* SessionRunCoordinator.make<
       SessionSchema.ID,
       SessionRunner.RunError,
       "user" | "shutdown" | "superseded"
     >({
       started: (sessionID) => reportLifecycle(sessionID, events.publish(SessionEvent.Execution.Started, { sessionID })),
-      drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
-        const session = yield* store.get(sessionID)
-        if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
-        return yield* SessionRunner.Service.use((runner) => runner.drain({ sessionID, force })).pipe(
-          Effect.provide(locations.get(session.location)),
-          Effect.tapCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID })),
-          ),
-        )
-      }),
+      drain: (sessionID, force, promotable) => drain(sessionID, force, undefined, promotable),
       // One terminal observation per busy period, covering every coalesced drain.
       settled: (sessionID, exit, reason) =>
         reportLifecycle(
@@ -79,6 +97,7 @@ const layer = Layer.effect(
 
     return SessionExecution.Service.of({
       active: coordinator.active,
+      isActive: coordinator.isActive,
       interrupt: (sessionID) => coordinator.interrupt(sessionID, "user"),
       resume: coordinator.run,
       wake: coordinator.wake,
@@ -93,4 +112,4 @@ export const node = makeGlobalNode({
   deps: [SessionStore.node, LocationServiceMap.node, EventV2.node],
 })
 
-export * as SessionExecutionLocal from "./local"
+export * as SessionExecutionLocal from "./session-execution-local"

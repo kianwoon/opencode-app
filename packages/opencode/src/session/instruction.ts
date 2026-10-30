@@ -100,7 +100,7 @@ const layer: Layer.Layer<
       if (s.nestedGuides) return s.nestedGuides
       const ctx = yield* InstanceState.context
       const found = yield* fs
-        .glob("**/AGENTS.md", { cwd: ctx.directory, absolute: true, include: "file", dot: true })
+        .scan("**/AGENTS.md", { cwd: ctx.directory, absolute: true, include: "file", dot: true })
         .pipe(Effect.catch(() => Effect.succeed([] as string[])))
       s.nestedGuides = found
         .map((item) => path.resolve(item))
@@ -181,7 +181,7 @@ const layer: Layer.Layer<
           const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
           const matches = yield* (
             path.isAbsolute(instruction)
-              ? fs.glob(path.basename(instruction), {
+              ? fs.scan(path.basename(instruction), {
                   cwd: path.dirname(instruction),
                   absolute: true,
                   include: "file",

@@ -60,7 +60,7 @@ import { EventV2 } from "@opencode/core/event"
 import { ModelsDev } from "@opencode/core/models-dev"
 import { Npm } from "@opencode/util/npm"
 import { PermissionSaved } from "@opencode/core/permission/saved"
-import { ProjectV2 } from "@/compat/core-namespaces"
+import { ProjectV2, WorkspaceV2 } from "@/compat/core-namespaces"
 import { ProjectCopy } from "@/compat/project-copy"
 import { PtyTicket } from "@opencode/core/pty/ticket"
 import { Ripgrep } from "@opencode/core/ripgrep"
@@ -70,10 +70,54 @@ import { SessionExecution } from "@opencode/core/session/execution"
 import * as SessionExecutionLocal from "@/compat/session-execution-local"
 import { lazy } from "@/util/lazy"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@opencode/server/cors"
+import { formLocationLayer } from "@opencode/server/middleware/form-location"
 import { serveUIEffect } from "@/server/shared/ui"
 import { ServerAuth } from "@/server/auth"
+import { Config as ServerAuthConfig } from "@opencode/server/auth"
 import { InstanceHttpApi, RootHttpApi } from "./api"
 import { Api } from "@opencode/server/api"
+import { ServerInfo } from "@opencode/server/server-info"
+import { ServerPairing } from "@opencode/server/pairing"
+import { Global } from "@opencode/util/global"
+import { Artifact } from "@opencode/core/artifact"
+import { Agent as AgentV2 } from "@opencode/core/agent"
+import { Config as ConfigV2 } from "@opencode/core/config"
+import { Integration as IntegrationV2 } from "@opencode/core/integration"
+import { Permission as PermissionV2 } from "@opencode/core/permission"
+import { Plugin as PluginV2 } from "@opencode/core/plugin"
+import { Provider as ProviderV2 } from "@opencode/core/provider"
+import { Skill as SkillV2 } from "@opencode/core/skill"
+import { Vcs as VcsV2 } from "@opencode/core/vcs"
+import { Worktree as WorktreeV2 } from "@opencode/core/worktree"
+import { Bus } from "@opencode/core/bus"
+import { Credential } from "@opencode/core/credential"
+import { EventLogger } from "@opencode/core/event-logger"
+import { FileSystem } from "@opencode/core/filesystem"
+import { FileWatch } from "@opencode/core/filesystem/file-watch"
+import { Form } from "@opencode/core/form"
+import { Generate } from "@opencode/core/generate"
+import { InstructionEntry } from "@opencode/core/session/instruction-entry"
+import { Job } from "@opencode/core/job"
+import { KV } from "@opencode/core/kv"
+import { Location } from "@opencode/core/location"
+import { LocationActivity } from "@opencode/core/location-activity"
+import { Mcp } from "@opencode/core/mcp/index"
+import { Model } from "@opencode/core/model"
+import { PersistentPty } from "@opencode/core/persistent-pty"
+import { PluginUpdate } from "@opencode/core/plugin/update"
+import { Pty } from "@opencode/core/pty"
+import { Rpc } from "@opencode/core/rpc"
+import { Schedule } from "@opencode/core/schedule"
+import { SdkPlugins } from "@opencode/core/plugin/sdk"
+import { SessionRestart } from "@opencode/core/session/execution/restart"
+import { SessionTitle } from "@opencode/core/session/title"
+import { SessionTransfer } from "@opencode/core/session/transfer"
+import { Shell } from "@opencode/core/shell"
+import { ShellSelect } from "@opencode/core/shell/select"
+import { UsageLimits } from "@opencode/core/usage-limits"
+import { Voice } from "@opencode/core/voice"
+import { WebSearch } from "@opencode/core/websearch"
+import { WellKnown } from "@opencode/core/wellknown"
 import { PublicApi } from "./public"
 import {
   authorizationLayer,
@@ -139,7 +183,7 @@ const cors = (corsOptions?: CorsOptions) =>
 const authOnlyRouterLayer = authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.layer))
 const httpApiAuthLayer = authorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
-const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
+const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuthConfig.layer))
 const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
   Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
@@ -180,6 +224,7 @@ const instanceRoutes = instanceApiRoutes.pipe(
 )
 const serverRoutes = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(handlers),
+  Layer.provide(ServerAuthConfig.layer),
   Layer.provide(PluginPtyEnvironment.layer),
   Layer.provide([serverHttpApiAuthLayer, v2SchemaErrorLayer]),
 )
@@ -272,6 +317,49 @@ const app = LayerNode.group([
   ProjectV2.node,
   ProjectCopy.node,
   PtyTicket.node,
+  ProjectV2.sweepNode,
+  ServerPairing.node,
+  Global.node,
+  Artifact.node,
+  Bus.node,
+  Credential.node,
+  EventLogger.node,
+  FileSystem.node.mapLayer(Layer.orDie),
+  FileWatch.node,
+  Form.node,
+  Generate.node,
+  InstructionEntry.node,
+  Job.node,
+  KV.node,
+  Location.node,
+  LocationActivity.node,
+  Mcp.node,
+  Model.node,
+  PersistentPty.node,
+  PluginUpdate.node,
+  Pty.node,
+  Rpc.node,
+  Schedule.node,
+  SdkPlugins.node,
+  SessionRestart.node,
+  SessionTitle.node,
+  SessionTransfer.node,
+  Shell.node,
+  ShellSelect.node,
+  UsageLimits.node,
+  Voice.node,
+  WebSearch.node,
+  WellKnown.node,
+  AgentV2.node,
+  ConfigV2.node,
+  IntegrationV2.node,
+  PermissionV2.node,
+  PluginV2.node,
+  ProviderV2.node,
+  SkillV2.node,
+  VcsV2.node,
+  WorktreeV2.node,
+  WorkspaceV2.node,
 ])
 
 
@@ -299,6 +387,8 @@ export function createRoutes(
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
+    Layer.provide(ServerInfo.layer(() => [], Global.Path.tmp)),
+    Layer.provide(formLocationLayer),
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
@@ -310,13 +400,16 @@ export function createRoutes(
     ),
     Layer.provide(locationServiceMapV2),
 
-    Layer.provide(AppNodeBuilderV1.build(app)),
+    Layer.provide(AppNodeBuilderV1.build(app).pipe(Layer.orDie)),
     // Must stay last: layers provided later in this pipe build beneath earlier ones,
     // so Observability must come after every service graph. Otherwise eagerly forked
     // fibers (e.g. the ModelsDev background refresh) capture Effect's default stdout
     // logger and corrupt the TUI (#34730).
-    Layer.provideMerge(Observability.layer),
-  )
+    Layer.provideMerge(Observability.layer()),
+    // LayerNode providers for the core server graph are built dynamically, so TS cannot
+    // prove the middleware requirements are satisfied here even though the build supplies
+    // them. Keep the public contract while asserting the resolved graph.
+  ) as Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements>
 }
 
 export const routes = createRoutes()

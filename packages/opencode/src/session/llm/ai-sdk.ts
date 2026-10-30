@@ -1,4 +1,4 @@
-import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue } from "@opencode/ai"
+import { FinishReason, FinishReasonDetails, LLMEvent, ProviderMetadata, ToolResultValue } from "@opencode/ai"
 import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { ProviderError } from "@/provider/error"
@@ -23,8 +23,11 @@ export function adapterState() {
   }
 }
 
-function finishReason(value: string | undefined): FinishReason {
-  return Schema.is(FinishReason)(value) ? value : "unknown"
+function finishReason(value: string | undefined, raw?: string): FinishReasonDetails {
+  return {
+    normalized: Schema.is(FinishReason)(value) ? value : "unknown",
+    ...(raw === undefined ? {} : { raw }),
+  }
 }
 
 function providerMetadata(value: unknown): ProviderMetadata | undefined {
@@ -119,7 +122,10 @@ export function toLLMEvents(
         return [
           LLMEvent.stepFinish({
             index: state.step++,
-            reason: missingReason && producedOutput ? "stop" : finishReason(event.finishReason),
+            reason:
+              missingReason && producedOutput
+                ? { normalized: "stop" as const }
+                : finishReason(event.finishReason, event.rawFinishReason),
             usage: usage(event.usage),
             providerMetadata: metadata,
           }),
@@ -130,7 +136,7 @@ export function toLLMEvents(
       return Effect.sync(() => {
         const events = [
           LLMEvent.finish({
-            reason: finishReason(event.finishReason),
+            reason: finishReason(event.finishReason, event.rawFinishReason),
             usage: usage(event.totalUsage),
             providerMetadata: "providerMetadata" in event ? providerMetadata(event.providerMetadata) : undefined,
           }),

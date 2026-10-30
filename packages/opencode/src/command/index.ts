@@ -9,14 +9,14 @@ import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
-import { LegacyEvent } from "@opencode/schema/legacy-event"
+import { LegacyEventV1 } from "@opencode/schema/legacy-event"
 
 type State = {
   commands: Record<string, Info>
 }
 
 export const Event = {
-  Executed: LegacyEvent.CommandExecuted,
+  Executed: LegacyEventV1.CommandExecuted,
 }
 
 export const Info = Schema.Struct({

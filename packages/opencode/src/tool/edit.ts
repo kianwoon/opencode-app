@@ -183,6 +183,7 @@ export const EditTool = Tool.define(
             patch: diff,
             additions,
             deletions,
+            status: "modified",
           }
 
           yield* ctx.metadata({

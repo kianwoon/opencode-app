@@ -390,7 +390,7 @@ const layer = Layer.effect(
         // process resolves those; permanent errors are not retried.
         Effect.retry({
           while: (error) => !isPermanentLocalError(error),
-          schedule: Schedule.exponential("200 millis", 2).pipe(Schedule.both(Schedule.recurs(2))),
+          schedule: Schedule.exponential("200 millis", 2).pipe(Schedule.upTo({ times: 2 })),
         }),
         Effect.map((client): { client: MCPClient | undefined; status: Status } => ({
           client,

@@ -134,11 +134,16 @@ const layer = Layer.effect(
       )
       if (!message || message.info.role !== "user") return []
       const diffs = message.info.summary?.diffs ?? []
-      return diffs.map((item) => {
-        if (item.file === undefined) return item
-        const file = unquoteGitPath(item.file)
-        if (file === item.file) return item
-        return { ...item, file }
+      return diffs.flatMap((item) => {
+        if (item.file === undefined) return []
+        return [
+          {
+            ...item,
+            file: unquoteGitPath(item.file),
+            patch: item.patch ?? "",
+            status: item.status ?? "modified",
+          },
+        ]
       })
     })
 

@@ -27,7 +27,11 @@ const layer = Layer.effect(
           location: new Location.Info({
             directory: AbsolutePath.make(ctx.directory),
             ...(workspaceID ? { workspaceID } : {}),
-            project: { id: Project.ID.make(ctx.project.id), directory: AbsolutePath.make(ctx.worktree) },
+            project: {
+              id: Project.ID.make(ctx.project.id),
+              directory: AbsolutePath.make(ctx.worktree),
+              canonical: AbsolutePath.make(ctx.project.canonical),
+            },
           }),
         })
       })
