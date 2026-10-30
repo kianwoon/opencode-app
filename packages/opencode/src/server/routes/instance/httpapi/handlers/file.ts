@@ -1,6 +1,6 @@
 import * as InstanceState from "@/effect/instance-state"
 import { FileSystem } from "@opencode/core/filesystem"
-import { LocationServiceMap, locationServiceMapLayer } from "@opencode/core/location-services"
+import { buildLocationServiceMap, LocationServiceMap } from "@opencode/core/location-services"
 import { Ripgrep } from "@opencode/core/ripgrep"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "@opencode/core/location"
@@ -136,4 +136,4 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("content", content)
       .handle("status", status)
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+).pipe(Layer.provide(buildLocationServiceMap()))
