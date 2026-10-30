@@ -928,6 +928,24 @@ const layer: Layer.Layer<
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
         yield* publishGuarded(SessionV1.Event.Updated, { sessionID, info: next })
+        // Legacy `SessionV1.Event.Updated` has no v2 projector, so a patch
+        // would otherwise only reach live subscribers. Persist the full row
+        // here: every session field the UI reads must be written on update.
+        yield* db
+          .update(SessionTable)
+          .set({
+            ...toRow(next),
+            agent: next.agent ? Agent.ID.make(next.agent) : null,
+            permission:
+              next.permission?.map((rule) => ({
+                action: rule.permission,
+                resource: rule.pattern,
+                effect: rule.action,
+              })) ?? null,
+          })
+          .where(eq(SessionTable.id, sessionID))
+          .run()
+          .pipe(Effect.orDie)
       })
 
     const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID) {
