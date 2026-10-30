@@ -384,10 +384,10 @@ function RootSettings() {
               />
             </Tabs.Content>
             <Tabs.Content value="permissions" class="settings-panel">
-              <SettingsPermissionsV2 directory={() => undefined} />
+              <SettingsPermissionsV2 directory={activeDirectory} />
             </Tabs.Content>
             <Tabs.Content value="subagent" class="settings-panel">
-              <SettingsSubagentV2 directory={() => undefined} />
+              <SettingsSubagentV2 directory={activeDirectory} />
             </Tabs.Content>
             <Tabs.Content value="orchestration" class="settings-panel">
               <SettingsOrchestrationV2 />
