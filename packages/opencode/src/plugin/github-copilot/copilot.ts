@@ -1,5 +1,5 @@
-import type { Hooks, PluginInput } from "@opencode/plugin"
-import type { Model } from "@opencode/sdk"
+import type { Hooks, PluginInput } from "@/plugin/compat"
+import type { Model } from "@/provider/provider"
 import { InstallationVersion } from "@/installation/version"
 import { iife } from "@/util/iife"
 import { setTimeout as sleep } from "node:timers/promises"

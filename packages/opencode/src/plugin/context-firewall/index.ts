@@ -20,7 +20,7 @@
 // may still REASON about the ideas in it (a README can legitimately explain how
 // a feature works). Egress control and the permission ruleset remain separate.
 
-import type { Hooks, PluginInput } from "@opencode/plugin"
+import type { Hooks, PluginInput } from "@/plugin/compat"
 import { NEUTRALIZED_PREFIX, isDirective, neutralize } from "./directives"
 import { trustForTool, type Trust } from "./provenance"
 

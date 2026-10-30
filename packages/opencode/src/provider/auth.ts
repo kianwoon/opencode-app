@@ -1,5 +1,5 @@
 import { LayerNode } from "@opencode/core/effect/layer-node"
-import type { AuthOAuthResult, Hooks } from "@opencode/plugin"
+import type { AuthOAuthResult, Hooks } from "@/plugin/compat"
 import { serviceUse } from "@opencode/core/effect/service-use"
 import { Auth } from "@/auth"
 import { InstanceState } from "@/effect/instance-state"

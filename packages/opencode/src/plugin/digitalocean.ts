@@ -1,5 +1,7 @@
-import type { Hooks, PluginInput } from "@opencode/plugin"
-import type { Model } from "@opencode/sdk"
+import type { Hooks, PluginInput } from "@/plugin/compat"
+import type { Model } from "@/provider/provider"
+import { Model as ModelSchema } from "@opencode/core/model"
+import { Provider as ProviderSchema } from "@opencode/core/provider"
 import { InstallationVersion } from "@/installation/version"
 import { OauthCallbackPage } from "@opencode/core/oauth/page"
 import { createServer } from "http"
@@ -184,8 +186,8 @@ async function listRouters(
 function routerModel(router: RouterEntry, providerID: string): Model {
   const id = `router:${router.name}`
   return {
-    id,
-    providerID,
+    id: ModelSchema.ID.make(id),
+    providerID: ProviderSchema.ID.make(providerID),
     name: router.name,
     family: "digitalocean-inference-routers",
     api: { id, url: DO_INFERENCE_BASE, npm: "@ai-sdk/openai-compatible" },

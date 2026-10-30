@@ -1,4 +1,4 @@
-import type { Hooks } from "@opencode/plugin"
+import type { Hooks } from "@/plugin/compat"
 import { ModalModels } from "./models"
 
 export async function ModalPlugin(): Promise<Hooks> {

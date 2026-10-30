@@ -1,6 +1,6 @@
 import { InstallationVersion } from "@/installation/version"
 import { which } from "@opencode/core/util/which"
-import type { Hooks } from "@opencode/plugin"
+import type { Hooks } from "@/plugin/compat"
 import { Schema } from "effect"
 import { OAUTH_DUMMY_KEY } from "../auth"
 import { Process } from "../util/process"

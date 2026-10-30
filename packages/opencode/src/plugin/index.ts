@@ -5,9 +5,9 @@ import type {
   Plugin as PluginInstance,
   PluginModule,
   WorkspaceAdapter as PluginWorkspaceAdapter,
-} from "@opencode/plugin"
+} from "@/plugin/compat"
 import { Config } from "@/config/config"
-import { createOpencodeClient } from "@opencode/sdk"
+import { OpenCode } from "@opencode/client"
 import { ServerAuth } from "@/server/auth"
 import { CodexAuthPlugin } from "./openai/codex"
 import { Session } from "@/session/session"
@@ -130,12 +130,12 @@ export function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker
     // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
     (input) =>
       CodexAuthPlugin(input, {
-        experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
+        experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: Boolean(flags.experimentalWebSockets) }),
       }),
     CopilotAuthPlugin,
     ModalPlugin,
-    GitlabAuthPlugin,
-    PoeAuthPlugin,
+    GitlabAuthPlugin as unknown as PluginInstance,
+    PoeAuthPlugin as unknown as PluginInstance,
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
     AzureAuthPlugin,
@@ -164,8 +164,8 @@ export function internalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker
 // a standalone broker can inject even when the built-in is disabled.
 export function tailInternalPlugins(flags: RuntimeFlags.Info, standaloneSecretBroker: boolean): PluginInstance[] {
   return shouldLoadExecutionGuard({
-    disableExecutionGuard: flags.disableExecutionGuard,
-    disableSecretBroker: flags.disableSecretBroker,
+    disableExecutionGuard: Boolean(flags.disableExecutionGuard),
+    disableSecretBroker: Boolean(flags.disableSecretBroker),
     standaloneSecretBroker,
   })
     ? [ExecutionGuardPlugin]
@@ -234,15 +234,16 @@ const layer = Layer.effect(
         const { Server } = yield* Effect.promise(() => import("../server/server"))
 
         const serverUrl = Server.url
-        const client = createOpencodeClient({
+        const client = OpenCode.make({
           baseUrl: serverUrl?.toString() ?? "http://localhost:4096",
-          directory: ctx.directory,
           headers: ServerAuth.headers(),
-          ...(serverUrl ? {} : { fetch: async (...args) => Server.Default().app.fetch(...args) }),
+          ...(serverUrl
+            ? {}
+            : { fetch: async (request: Request) => Server.Default().app.fetch(request) }),
         })
         const cfg = yield* config.get()
         const input: PluginInput = {
-          client,
+          client: client as PluginInput["client"],
           project: ctx.project,
           worktree: ctx.worktree,
           directory: ctx.directory,

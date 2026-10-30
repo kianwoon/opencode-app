@@ -1,4 +1,6 @@
-import type { Model } from "@opencode/sdk"
+import type { Model } from "@/provider/provider"
+import { Model as ModelSchema } from "@opencode/core/model"
+import { Provider as ProviderSchema } from "@opencode/core/provider"
 import { Option, Schema } from "effect"
 
 const item = Schema.Struct({
@@ -105,8 +107,8 @@ function build(key: string, remote: SelectableItem, url: string, prev?: Model): 
   const usdPerMillion = prices && prices.batch_size > 0 ? 10_000 / prices.batch_size : 0
 
   const model: CopilotModel = {
-    id: key,
-    providerID: "github-copilot",
+    id: ModelSchema.ID.make(key),
+    providerID: ProviderSchema.ID.make("github-copilot"),
     api: {
       id: remote.id,
       url: isMsgApi ? `${url}/v1` : url,

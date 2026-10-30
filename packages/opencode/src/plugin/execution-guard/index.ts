@@ -22,7 +22,7 @@
 // all is treated as `package_install` (ZERO secrets), never `other` — a false
 // install only withholds secrets, a false `other` would leak them.
 
-import type { Hooks, PluginInput } from "@opencode/plugin"
+import type { Hooks, PluginInput } from "@/plugin/compat"
 import { Classify } from "./classify"
 import { Policy } from "./policy"
 import { Stash } from "./stash"

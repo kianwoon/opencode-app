@@ -1,4 +1,6 @@
-import type { Model } from "@opencode/sdk"
+import type { Model } from "@/provider/provider"
+import { Model as ModelSchema } from "@opencode/core/model"
+import { Provider as ProviderSchema } from "@opencode/core/provider"
 import { Schema } from "effect"
 
 const reasoningOption = Schema.Struct({
@@ -62,8 +64,8 @@ export async function get(baseURL: string, apiKey: string, existing: Record<stri
     data.data.map((item) => {
       const template = existing[item.base_model_id ?? item.hugging_face_id ?? item.id]
       const model: Model = {
-        id: item.id,
-        providerID: "modal",
+        id: ModelSchema.ID.make(item.id),
+        providerID: ProviderSchema.ID.make("modal"),
         name: item.name ?? template?.name ?? item.id,
         family: template?.family,
         api: {

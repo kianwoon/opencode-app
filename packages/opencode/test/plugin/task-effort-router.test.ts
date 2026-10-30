@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Hooks } from "@opencode/plugin"
+import type { Hooks } from "@/plugin/compat"
 import {
   TaskEffortRouterPlugin,
   resetSystemFreeze,
