@@ -224,7 +224,7 @@ const layer = Layer.effect(
             time: { start: match.part.state.time.start, end: Date.now() },
           },
         })
-        if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
+        if (error instanceof Permission.RejectedError || error instanceof Question.RejectedError) {
           ctx.blocked = ctx.shouldBreak
         }
         yield* settleToolCall(toolCallID)

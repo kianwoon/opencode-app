@@ -2,22 +2,53 @@ import { LayerNode } from "@opencode/util/effect/layer-node"
 import { ConfigPermissionV1 } from "@opencode/core/v1/config/permission"
 import { InstanceState } from "@/effect/instance-state"
 import { Wildcard } from "@opencode/core/util/wildcard"
-import { Deferred, Effect, Layer, Context } from "effect"
+import { Deferred, Effect, Layer, Context, Schema } from "effect"
 import os from "os"
 import { PermissionV1 } from "@opencode/schema/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
 export const Event = PermissionV1.Event
 
+export class RejectedError extends Schema.TaggedError<RejectedError>()("PermissionRejectedError", {}) {
+  override get message() {
+    return "The user rejected permission to use this specific tool call."
+  }
+}
+
+export class CorrectedError extends Schema.TaggedError<CorrectedError>()("PermissionCorrectedError", {
+  feedback: Schema.String,
+}) {
+  override get message() {
+    return `The user rejected permission to use this specific tool call with the following feedback: ${this.feedback}`
+  }
+}
+
+export class DeniedError extends Schema.TaggedError<DeniedError>()("PermissionDeniedError", {
+  permission: Schema.String,
+  pattern: Schema.String,
+  matched: Schema.Unknown,
+  ruleset: Schema.Unknown,
+}) {
+  override get message() {
+    return `The user has specified a rule which prevents you from using this specific tool call. Permission "${this.permission}" with pattern "${this.pattern}" was denied by rule ${JSON.stringify(this.matched)} (the LAST matching rule wins). Rules that match this command (permission and pattern), in evaluation order: ${JSON.stringify(this.ruleset)}`
+  }
+}
+
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Permission.NotFoundError", {
+  requestID: PermissionV1.ID,
+}) {}
+
+export type Error = DeniedError | RejectedError | CorrectedError
+
 export interface Interface {
-  readonly ask: (input: PermissionV1.AskInput) => Effect.Effect<void, PermissionV1.Error>
-  readonly reply: (input: PermissionV1.ReplyInput) => Effect.Effect<void, PermissionV1.NotFoundError>
+  readonly ask: (input: PermissionV1.AskInput) => Effect.Effect<void, Error>
+  readonly reply: (input: PermissionV1.ReplyInput) => Effect.Effect<void, NotFoundError>
   readonly list: () => Effect.Effect<ReadonlyArray<PermissionV1.Request>>
 }
 
 interface PendingEntry {
   info: PermissionV1.Request
-  deferred: Deferred.Deferred<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>
+  deferred: Deferred.Deferred<void, RejectedError | CorrectedError>
 }
 
 interface State {
@@ -54,7 +85,7 @@ const layer = Layer.effect(
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
-              yield* Deferred.fail(item.deferred, new PermissionV1.RejectedError())
+              yield* Deferred.fail(item.deferred, new RejectedError())
             }
             state.pending.clear()
           }),
@@ -73,7 +104,7 @@ const layer = Layer.effect(
         const rule = evaluate(request.permission, pattern, ruleset, approved)
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny") {
-          return yield* new PermissionV1.DeniedError({
+          return yield* new DeniedError({
             permission: request.permission,
             pattern,
             matched: rule,
@@ -116,7 +147,7 @@ const layer = Layer.effect(
       }
       yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
 
-      const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
+      const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
       pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)
       return yield* Effect.ensuring(
@@ -130,7 +161,7 @@ const layer = Layer.effect(
     const reply = Effect.fn("Permission.reply")(function* (input: PermissionV1.ReplyInput) {
       const { approved, pending } = yield* InstanceState.get(state)
       const existing = pending.get(input.requestID)
-      if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
+      if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
 
       pending.delete(input.requestID)
       yield* events.publish(Event.Replied, {
@@ -143,8 +174,8 @@ const layer = Layer.effect(
         yield* Deferred.fail(
           existing.deferred,
           input.message
-            ? new PermissionV1.CorrectedError({ feedback: input.message })
-            : new PermissionV1.RejectedError(),
+            ? new CorrectedError({ feedback: input.message })
+            : new RejectedError(),
         )
 
         for (const [id, item] of pending.entries()) {
@@ -155,7 +186,7 @@ const layer = Layer.effect(
             requestID: item.info.id,
             reply: "reject",
           })
-          yield* Deferred.fail(item.deferred, new PermissionV1.RejectedError())
+          yield* Deferred.fail(item.deferred, new RejectedError())
         }
         return
       }
@@ -204,15 +235,28 @@ function expand(pattern: string): string {
   return pattern
 }
 
-export function fromConfig(permission: ConfigPermissionV1.Info) {
+// The canonical config decodes permission objects to ordered entries so key order survives.
+// Built-in defaults and `.md` frontmatter still hand us plain records, so accept both and
+// normalize to the same ordered entry form here.
+export type ConfigPermissionInput = Record<
+  string,
+  ConfigPermissionV1.Action | Record<string, ConfigPermissionV1.Action>
+>
+
+export function fromConfig(permission: ConfigPermissionV1.Info | ConfigPermissionInput) {
   const ruleset: PermissionV1.Rule[] = []
-  for (const [key, value] of Object.entries(permission)) {
+  const entries: Iterable<readonly [string, ConfigPermissionV1.Rule | Record<string, ConfigPermissionV1.Action>]> =
+    Array.isArray(permission) ? permission : Object.entries(permission)
+  for (const [key, value] of entries) {
     if (typeof value === "string") {
       ruleset.push({ permission: key, action: value, pattern: "*" })
       continue
     }
+    const patterns: readonly (readonly [string, ConfigPermissionV1.Action])[] = Array.isArray(value)
+      ? value
+      : Object.entries(value)
     ruleset.push(
-      ...Object.entries(value).map(([pattern, action]) => ({ permission: key, pattern: expand(pattern), action })),
+      ...patterns.map(([pattern, action]) => ({ permission: key, pattern: expand(pattern), action })),
     )
   }
   return ruleset

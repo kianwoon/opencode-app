@@ -1,6 +1,7 @@
 export * as ConfigBrain from "./brain"
 
 import type { ConfigV1 } from "@/compat/v1-config/config"
+import type { ConfigPermissionV1 } from "@opencode/core/v1/config/permission"
 
 // Default-deny: MCP tools are named `<server>_<tool>` and `disabled()`
 // (permission/index.ts:219) hides a tool only when its NAME matches a rule, so a
@@ -20,48 +21,51 @@ import type { ConfigV1 } from "@/compat/v1-config/config"
 // `zai-mcp-server_*`) cover whole read-only MCP servers. `context-mode_*` is NOT
 // prefix-allowed because that server is mixed — it also exposes
 // context-mode_execute/context-mode_batch_execute which must stay denied.
-const BRAIN_PERMISSION_STRICT = () => ({
-  "*": "deny",
-  read: "allow",
-  grep: "allow",
-  glob: "allow",
-  list: "allow",
-  todowrite: "allow",
-  session_rename: "allow",
-  jev_accept: "allow",
-  jev_ask: "allow",
-  jev_label: "allow",
-  jev_rank: "allow",
-  skill: "allow",
-  question: "allow",
-  invalid: "allow",
-  request_effort: "allow",
-  workflow: "allow",
-  tool_search: "allow",
-  find_tools: "allow",
-  webfetch: "allow",
-  websearch: "allow",
-  "context-mode_search": "allow",
-  "context-mode_get_chunk": "allow",
-  "context-mode_fetch_and_index": "allow",
-  "web-reader_*": "allow",
-  "web-search-prime_*": "allow",
-  "zai-mcp-server_*": "allow",
-  bash: {
-    "*": "deny",
-    "echo *": "allow",
-    // "*>*" catches all redirection variants; last matching rule wins (permission/index.ts findLast)
-    "*>*": "deny",
-  },
+type BrainPermission = [string, ConfigPermissionV1.Action | [string, ConfigPermissionV1.Action][]][]
+
+const BRAIN_PERMISSION_STRICT = (): BrainPermission => [
+  ["*", "deny"],
+  ["read", "allow"],
+  ["grep", "allow"],
+  ["glob", "allow"],
+  ["list", "allow"],
+  ["todowrite", "allow"],
+  ["session_rename", "allow"],
+  ["jev_accept", "allow"],
+  ["jev_ask", "allow"],
+  ["jev_label", "allow"],
+  ["jev_rank", "allow"],
+  ["skill", "allow"],
+  ["question", "allow"],
+  ["invalid", "allow"],
+  ["request_effort", "allow"],
+  ["workflow", "allow"],
+  ["tool_search", "allow"],
+  ["find_tools", "allow"],
+  ["webfetch", "allow"],
+  ["websearch", "allow"],
+  ["context-mode_search", "allow"],
+  ["context-mode_get_chunk", "allow"],
+  ["context-mode_fetch_and_index", "allow"],
+  ["web-reader_*", "allow"],
+  ["web-search-prime_*", "allow"],
+  ["zai-mcp-server_*", "allow"],
+  [
+    "bash",
+    [
+      ["*", "deny"],
+      ["echo *", "allow"],
+      // "*>*" catches all redirection variants; last matching rule wins (permission/index.ts findLast)
+      ["*>*", "deny"],
+    ],
+  ],
   // Registry-driven dispatch: brain may dispatch to any subagent. The runtime
   // discovers taskable subagents from the live agent registry (`describeTask` in
   // tool/registry.ts lists `agents.list()` filtered to mode !== "primary" and
   // non-denied `task`), so no fixed name list belongs here — a hardcoded
   // allowlist would hide every newly installed subagent from brain.
-  task: {
-    "*": "allow",
-  },
-}) as const
+  ["task", [["*", "allow"]]],
+]
 
 // Explicit brain models take precedence over agent entry models: a non-empty
 // brain model string overwrites `agent.<name>.model`; empty/absent leaves the
@@ -77,18 +81,20 @@ export function expand(config: ConfigV1.Info) {
     agent.brain = {
       mode: "primary",
       ...(brain.model ? { model: brain.model } : {}),
-      permission: strict ? BRAIN_PERMISSION_STRICT() : {},
+      permission: strict ? BRAIN_PERMISSION_STRICT() : [],
     }
   } else {
     // brain.model overrides agent/*.md entry models when set.
     if (brain.model) agent.brain.model = brain.model
-    if (strict && (!agent.brain.permission || Object.keys(agent.brain.permission).length === 0)) {
+    if (strict && (!agent.brain.permission || agent.brain.permission.length === 0)) {
       agent.brain.permission = BRAIN_PERMISSION_STRICT()
     }
   }
 
   // session_rename must always be directly callable: guarantee allow even when
   // enforcement is not strict or a custom permission omits it.
-  agent.brain.permission ??= {}
-  agent.brain.permission.session_rename ??= "allow"
+  agent.brain.permission ??= []
+  if (!agent.brain.permission.some(([key]) => key === "session_rename")) {
+    agent.brain.permission = [...agent.brain.permission, ["session_rename", "allow"]]
+  }
 }
