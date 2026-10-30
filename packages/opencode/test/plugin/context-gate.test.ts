@@ -1,6 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import type { Hooks } from "@/plugin/compat"
-import {
+import type { GateConfig, Section } from "../../../../.opencode/plugin-lib/context-gate"
+import fsSync from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
+// The plugin resolves context-gate.json from $OPENCODE_CONFIG_DIR at module
+// load. Point it at an empty temp directory so the host's scoping config
+// (scopingEnabled:false) cannot leak into these assertions.
+const configDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "context-gate-config-"))
+const previousConfigDir = process.env.OPENCODE_CONFIG_DIR
+process.env.OPENCODE_CONFIG_DIR = configDir
+
+const {
   ContextGatePlugin,
   applyGate,
   extractiveFallback,
@@ -17,9 +29,13 @@ import {
   scopeSnapshots,
   __resetFlightsForTest,
   __awaitConfigForTest,
-  type GateConfig,
-  type Section,
-} from "../../../../.opencode/plugin-lib/context-gate"
+} = await import("../../../../.opencode/plugin-lib/context-gate")
+
+afterAll(() => {
+  if (previousConfigDir !== undefined) process.env.OPENCODE_CONFIG_DIR = previousConfigDir
+  else delete process.env.OPENCODE_CONFIG_DIR
+  fsSync.rmSync(configDir, { recursive: true, force: true })
+})
 
 const hooks = (await (ContextGatePlugin as (input: unknown) => Promise<Hooks>)({
   project: { id: "test" },

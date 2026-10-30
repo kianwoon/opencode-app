@@ -4,6 +4,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { Effect, Layer } from "effect"
+import fsSync from "fs"
 import fs from "fs/promises"
 import path from "path"
 import os from "os"
@@ -14,6 +15,10 @@ import { testEffect } from "../lib/effect"
 
 const reloads = { count: 0 }
 
+// Global.acquire mkdirs the config dir, so the fixture must point at a
+// creatable path; a hardcoded absolute path fails on the read-only root.
+const globalConfigDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "config-watcher-global-"))
+
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([ConfigWatcher.nodeWithoutPolling, FSUtil.node]), [
     Config.node.replace(Layer.mock(Config.Service)({ invalidate: () => Effect.sync(() => reloads.count++) })),
@@ -23,7 +28,7 @@ const it = testEffect(
         disposeAll: () => Effect.sync(() => reloads.count++),
       }),
     ),
-    Global.node.replace(Global.layerWith({ config: "/nonexistent-config-watcher-test" })),
+    Global.node.replace(Global.layerWith({ config: globalConfigDir })),
   ]),
 )
 

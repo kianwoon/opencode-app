@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode/schema/v1/session"
 import { Database } from "@opencode/core/database/database"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -24,6 +24,28 @@ import { disposeAllInstances, testBootstrapReplacement, testLocationReplacement 
 import { testEffect } from "../lib/effect"
 import { Provider } from "@opencode/core/provider"
 import { Model } from "@opencode/core/model"
+import { Global } from "@opencode/util/global"
+import fsSync from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
+// `bun test` cannot override HOME, so the machine-global config
+// (`experimental.primary_tools`, agent/reviewer.md) would leak into the
+// derived permission assertions. Redirect the global config dir at an empty
+// temp directory for this file, and drop OPENCODE_CONFIG_DIR so ConfigPaths
+// does not add the real user config tree.
+const isolatedConfig = {
+  global: Global.Path.config,
+  configDir: process.env.OPENCODE_CONFIG_DIR,
+}
+;(Global.Path as { config: string }).config = fsSync.mkdtempSync(path.join(os.tmpdir(), "task-isolate-config-"))
+delete process.env.OPENCODE_CONFIG_DIR
+
+afterAll(() => {
+  ;(Global.Path as { config: string }).config = isolatedConfig.global
+  if (isolatedConfig.configDir !== undefined) process.env.OPENCODE_CONFIG_DIR = isolatedConfig.configDir
+  else delete process.env.OPENCODE_CONFIG_DIR
+})
 
 // These exercise the real Tool + real CrossSpawnSpawner — no mocks. The isolation
 // flag is read from process.env at call time, so each test toggles it directly and
