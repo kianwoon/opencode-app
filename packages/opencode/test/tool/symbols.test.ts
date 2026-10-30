@@ -15,7 +15,14 @@ import { ReadTool } from "../../src/tool/read"
 import { SymbolsTool, formatOutline, noSymbolParserMessage, parseSymbols } from "../../src/tool/symbols"
 import type * as Tool from "../../src/tool/tool"
 import { SessionID, MessageID } from "../../src/session/schema"
-import { disposeAllInstances, provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
+import {
+  disposeAllInstances,
+  provideInstance,
+  testBootstrapReplacement,
+  testInstanceStoreLayer,
+  testLocationReplacement,
+  tmpdirScoped,
+} from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 afterEach(async () => {
@@ -114,6 +121,7 @@ const toolLayer = LayerNode.compile(
     Ripgrep.node,
     Truncate.node,
   ]),
+  { replacements: [testBootstrapReplacement, testLocationReplacement] },
 )
 const it = testEffect(Layer.mergeAll(toolLayer, testInstanceStoreLayer))
 

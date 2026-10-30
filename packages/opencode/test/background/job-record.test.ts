@@ -16,6 +16,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Ripgrep } from "@opencode/core/ripgrep"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 
 const layer = () =>
   LayerNode.compile(
@@ -34,6 +35,7 @@ const layer = () =>
       Ripgrep.node,
       BackgroundJob.node,
     ]),
+    { replacements: [testBootstrapReplacement, testLocationReplacement] },
   )
 
 const it = testEffect(layer())

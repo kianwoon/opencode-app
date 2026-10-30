@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
@@ -8,7 +8,6 @@ import { MCP } from "@/mcp"
 import { Config } from "@/config/config"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceStore } from "@/project/instance-store"
-import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Agent } from "@/agent/agent"
@@ -18,6 +17,7 @@ import { CuaBatchTool, Parameters } from "@/tool/cua-batch"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
+import { testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 
 // The test env configures no MCP servers, so the real MCP.Service has no
 // cua-driver tools and the tool must degrade to the not-connected notice.
@@ -31,9 +31,8 @@ const it = testEffect(
         }),
       ),
       RuntimeFlags.node.replace(RuntimeFlags.layer({ experimentalWorkspaces: false })),
-      InstanceBootstrap.node.replace(
-        Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
-      ),
+      testBootstrapReplacement,
+      testLocationReplacement,
     ],
   ),
 )

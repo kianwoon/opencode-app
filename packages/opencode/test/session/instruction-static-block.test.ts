@@ -12,21 +12,19 @@ import { BLOCK_META, Instruction } from "../../src/session/instruction"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Global } from "@opencode/util/global"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
-import { provideTmpdirInstance } from "../fixture/fixture"
+import { provideTmpdirInstance, testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { LayerNodePlatform } from "@opencode/util/effect/app-node-platform"
 import { InstanceStore } from "@/project/instance-store"
-import { InstanceBootstrap } from "@/project/bootstrap"
 import { Config } from "@/config/config"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([CrossSpawnSpawner.node, LayerNodePlatform.filesystem, InstanceStore.node]), [
-    InstanceBootstrap.node.replace(
-      Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
-    ),
+    testBootstrapReplacement,
+    testLocationReplacement,
   ]),
 )
 

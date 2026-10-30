@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
@@ -7,14 +7,19 @@ import { SessionProjector } from "@opencode/core/session/projector"
 import { Session as SessionNs } from "@/session/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceStore } from "@/project/instance-store"
-import { InstanceBootstrap } from "@/project/bootstrap"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Agent } from "@/agent/agent"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { SessionRenameTool } from "@/tool/session-rename"
 import { MessageID, SessionID } from "@/session/schema"
-import { provideInstance, provideTmpdirInstance, TestInstance } from "../fixture/fixture"
+import {
+  provideInstance,
+  provideTmpdirInstance,
+  testBootstrapReplacement,
+  testLocationReplacement,
+  TestInstance,
+} from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(
@@ -30,9 +35,8 @@ const it = testEffect(
     ]),
     [
       RuntimeFlags.node.replace(RuntimeFlags.layer({ experimentalWorkspaces: false })),
-      InstanceBootstrap.node.replace(
-        Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
-      ),
+      testBootstrapReplacement,
+      testLocationReplacement,
     ],
   ),
 )
