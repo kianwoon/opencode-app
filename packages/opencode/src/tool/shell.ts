@@ -10,9 +10,9 @@ import { Language, type Node } from "web-tree-sitter"
 
 import { FSUtil } from "@opencode/util/fs-util"
 import { fileURLToPath } from "url"
-import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Shell } from "@opencode/core/shell"
+import { ShellSelect } from "@opencode/core/shell/select"
 import { ShellID } from "./shell/id"
 
 import * as Truncate from "./truncate"
@@ -66,6 +66,9 @@ const CMD_FILES = new Set([
 ])
 const FLAGS = new Set(["-destination", "-literalpath", "-path"])
 const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurse", "-verbose", "-whatif"])
+const POSIX = new Set(["bash", "dash", "ksh", "sh", "zsh"])
+
+const posix = (shell: string) => POSIX.has(ShellSelect.name(shell))
 
 type Part = {
   type: string
@@ -280,7 +283,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
-      if (process.platform === "win32") return FSUtil.normalizePathPattern(path.join(dir, "*"))
+      if (process.platform === "win32") return FSUtil.normalizePath(path.join(dir, "*"))
       return path.join(dir, "*")
     })
     yield* ctx.ask({
@@ -307,7 +310,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
 })
 
 function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
-  if (process.platform === "win32" && Shell.ps(shell)) {
+  if (process.platform === "win32" && ShellSelect.ps(shell)) {
     const encoded = Buffer.from(command, "utf-16le").toString("base64")
     return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
       cwd,
@@ -355,13 +358,13 @@ const parser = lazy(async () => {
 export const ShellTool = Tool.define(
   ShellID.ToolID,
   Effect.gen(function* () {
-    const config = yield* Config.Service
     const spawner = yield* ChildProcessSpawner
     const fs = yield* FSUtil.Service
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
     const instruction = yield* Instruction.Service
+    const shellSelect = yield* ShellSelect.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -375,7 +378,7 @@ export const ShellTool = Tool.define(
 
     const resolvePath = Effect.fn("ShellTool.resolvePath")(function* (text: string, root: string, shell: string) {
       if (process.platform === "win32") {
-        if (Shell.posix(shell) && text.startsWith("/") && FSUtil.windowsPath(text) === text) {
+        if (posix(shell) && text.startsWith("/") && FSUtil.windowsPath(text) === text) {
           const file = yield* cygpath(shell, text)
           if (file) return file
         }
@@ -405,7 +408,7 @@ export const ShellTool = Tool.define(
         patterns: new Set<string>(),
         always: new Set<string>(),
       }
-      const shellKind = ShellID.toKind(Shell.name(shell))
+      const shellKind = ShellID.toKind(ShellSelect.name(shell))
 
       for (const node of commands(root)) {
         const command = parts(node)
@@ -614,9 +617,8 @@ export const ShellTool = Tool.define(
 
     return () =>
       Effect.gen(function* () {
-        const cfg = yield* config.get()
-        const shell = Shell.acceptable(cfg.shell)
-        const name = Shell.name(shell)
+        const shell = yield* shellSelect.resolve({ priority: "compat" })
+        const name = ShellSelect.name(shell)
         const limits = yield* trunc.limits()
         const prompt = ShellPrompt.render(name, process.platform, limits, defaultTimeoutMs)
         yield* Effect.logInfo("shell tool using shell", { shell })
@@ -634,7 +636,7 @@ export const ShellTool = Tool.define(
                 throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
               }
               const timeout = params.timeout ?? defaultTimeoutMs
-              const ps = Shell.ps(shell)
+              const ps = ShellSelect.ps(shell)
               // Attach package-level AGENTS.md guidance for the directory the
               // command runs in, the same way the read tool does for files. This
               // ensures nested package guides (e.g. packages/desktop/AGENTS.md)

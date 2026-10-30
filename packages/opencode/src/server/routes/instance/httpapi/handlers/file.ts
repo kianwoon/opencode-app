@@ -5,21 +5,31 @@ import { Ripgrep } from "@opencode/core/ripgrep"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "@opencode/core/location"
 import { AbsolutePath, RelativePath } from "@opencode/core/schema"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Layer, Option, Stream } from "effect"
 import ignore from "ignore"
 import path from "path"
 import { HttpApiBuilder } from "effect/http-api"
 import { InstanceHttpApi } from "../api"
+import * as ApiError from "../errors"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
     const ripgrep = yield* Ripgrep.Service
     const locations = yield* LocationServiceMap.Service
 
-    const filesystem = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
+    const filesystem = Effect.fnUntraced(function* <A, R>(effect: Effect.Effect<A, FileSystem.NotFoundError, R>) {
       return yield* effect.pipe(
         Effect.provide(
           locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
+        ),
+        Effect.catchIf(
+          (error): error is FileSystem.DirectoryNotFoundError => error instanceof FileSystem.DirectoryNotFoundError,
+          (error) =>
+            Effect.fail(new ApiError.InvalidRequestError({ message: `Directory not found: ${error.directory}` })),
+        ),
+        Effect.catchIf(
+          (error): error is FileSystem.NotFoundError => error instanceof FileSystem.NotFoundError,
+          (error) => Effect.fail(new ApiError.InvalidRequestError({ message: `File not found: ${error.path}` })),
         ),
       )
     })
@@ -98,30 +108,19 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       const file = path.resolve(directory, ctx.query.path)
       if (!FSUtil.contains(directory, file)) return yield* Effect.die(new Error("Path escapes the location"))
       if (!(yield* FSUtil.Service.use((fs) => fs.existsSafe(file)))) return { type: "text" as const, content: "" }
-      return yield* filesystem(
-        FileSystem.Service.use((fs) => fs.read({ path: RelativePath.make(ctx.query.path) })),
-      ).pipe(
-        Effect.flatMap((item) =>
-          Effect.gen(function* () {
-            const text = item.content.includes(0)
-              ? Option.none<string>()
-              : yield* Effect.sync(() => new TextDecoder("utf-8", { fatal: true }).decode(item.content)).pipe(
-                  Effect.option,
-                )
-            return { item, text }
-          }),
-        ),
-        Effect.map(({ item, text }) =>
-          Option.isSome(text)
-            ? { type: "text" as const, content: text.value.trim() }
-            : {
-                type: "binary" as const,
-                content: Buffer.from(item.content).toString("base64"),
-                encoding: "base64" as const,
-                mimeType: item.mime,
-              },
-        ),
-      )
+      const item = yield* filesystem(FileSystem.Service.use((fs) => fs.read({ path: RelativePath.make(ctx.query.path) })))
+      const content = yield* Stream.mkUint8Array(item.stream()).pipe(Effect.orDie)
+      const text = content.includes(0)
+        ? Option.none<string>()
+        : yield* Effect.sync(() => new TextDecoder("utf-8", { fatal: true }).decode(content)).pipe(Effect.option)
+      return Option.isSome(text)
+        ? { type: "text" as const, content: text.value.trim() }
+        : {
+            type: "binary" as const,
+            content: Buffer.from(content).toString("base64"),
+            encoding: "base64" as const,
+            mimeType: item.mime,
+          }
     })
 
     const status = Effect.fn("FileHttpApi.status")(function* () {
