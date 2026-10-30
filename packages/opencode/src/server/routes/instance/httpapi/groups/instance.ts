@@ -29,7 +29,7 @@ export const VcsDiffQuery = Schema.Struct({
   context: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
 })
 
-export class ApiVcsApplyError extends Schema.ErrorClass<ApiVcsApplyError>("VcsApplyError")(
+export class ApiVcsApplyError extends Schema.TaggedError<ApiVcsApplyError>()("VcsApplyError",
   {
     name: Schema.Literal("VcsApplyError"),
     data: Schema.Struct({
@@ -40,7 +40,7 @@ export class ApiVcsApplyError extends Schema.ErrorClass<ApiVcsApplyError>("VcsAp
   { httpApiStatus: 400 },
 ) {}
 
-export class ApiSkillRemoveError extends Schema.ErrorClass<ApiSkillRemoveError>("SkillRemoveError")(
+export class ApiSkillRemoveError extends Schema.TaggedError<ApiSkillRemoveError>()("SkillRemoveError",
   {
     name: Schema.Literals(["Skill.NotFoundError", "Skill.NotRemovableError"]),
     data: Schema.Struct({
@@ -50,7 +50,7 @@ export class ApiSkillRemoveError extends Schema.ErrorClass<ApiSkillRemoveError>(
   { httpApiStatus: 400 },
 ) {}
 
-export class ApiPluginRemoveError extends Schema.ErrorClass<ApiPluginRemoveError>("PluginRemoveError")(
+export class ApiPluginRemoveError extends Schema.TaggedError<ApiPluginRemoveError>()("PluginRemoveError",
   {
     name: Schema.Literals(["ConfigPlugin.NotFoundError"]),
     data: Schema.Struct({

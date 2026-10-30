@@ -12,7 +12,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 export function classifyProtocolError(raw: string): ProtocolFamily | undefined {
-  const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw))
+  const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw))
   if (!isRecord(decoded)) return undefined
   const rootType = decoded["type"]
   const inner = decoded["error"]

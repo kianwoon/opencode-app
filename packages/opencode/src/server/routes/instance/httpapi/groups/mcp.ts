@@ -41,7 +41,7 @@ export const Inventory = Schema.Struct({
   ),
   mcp: Schema.Array(InventoryServer),
 })
-export class UnsupportedOAuthError extends Schema.ErrorClass<UnsupportedOAuthError>("McpUnsupportedOAuthError")(
+export class UnsupportedOAuthError extends Schema.TaggedError<UnsupportedOAuthError>()("McpUnsupportedOAuthError",
   { error: Schema.String },
   { httpApiStatus: 400 },
 ) {}

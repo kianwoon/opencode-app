@@ -144,7 +144,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       const raw = yield* fs.readFileStringSafe(file).pipe(Effect.orElseSucceed(() => undefined))
       if (!raw) return resolveEffortRouterConfig(undefined)
       return resolveEffortRouterConfig(
-        Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw)),
+        Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw)),
       )
     })
 
@@ -170,7 +170,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       // A seek into the middle of a line leaves a partial first entry: drop it.
       const whole = Number(info.size) > tailBytes ? lines.slice(1) : lines
       return whole.slice(-limit).flatMap((line) => {
-        const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(line))
+        const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(line))
         if (!parsed || typeof parsed !== "object") return []
         return [parsed as Record<string, unknown>]
       }).reverse()
@@ -184,7 +184,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const gateConfig = Effect.fn("GlobalHttpApi.gateConfig")(function* () {
       const raw = yield* fs.readFileStringSafe(gateConfigPath).pipe(Effect.orElseSucceed(() => undefined))
       if (!raw) return resolveGateConfig(undefined)
-      return resolveGateConfig(Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw)))
+      return resolveGateConfig(Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw)))
     })
 
     // Only `triageEnabled` is writable here; every other on-disk key is
@@ -196,7 +196,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       if (ctx.payload.triageEnabled === undefined) return yield* new HttpApiError.BadRequest({})
       const raw = yield* fs.readFileStringSafe(gateConfigPath).pipe(Effect.orElseSucceed(() => undefined))
       const parsed = raw
-        ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(raw))
+        ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(raw))
         : undefined
       const existing = record(parsed)
       const current = resolveGateConfig(existing)

@@ -6,7 +6,7 @@ import { described } from "./metadata"
 const root = "/experimental/control-plane"
 export const MoveSessionPayload = Schema.Struct({ ...MoveSession.Input.fields })
 
-export class ApiMoveSessionError extends Schema.ErrorClass<ApiMoveSessionError>("MoveSessionError")(
+export class ApiMoveSessionError extends Schema.TaggedError<ApiMoveSessionError>()("MoveSessionError",
   {
     name: Schema.Literal("MoveSessionError"),
     data: Schema.Struct({

@@ -17,7 +17,7 @@ const McpResult = Schema.Struct({
   }),
 })
 
-const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 const decodeResult = Schema.decodeUnknownOption(McpResult)
 
 const parsePayload = (payload: string) =>

@@ -84,7 +84,7 @@ export function verdictFromRun(
   const line = stdout.trim()
   if (status !== 0) return error("nonzero_exit", `exit ${status}`, line || stderr.trim())
   if (!line) return error("empty_stdout", "empty stdout", stderr.trim())
-  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(line)
+  const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(line)
   if (Option.isNone(parsed)) return error("non_json", "stdout is not JSON", line)
   const effect = (parsed.value as { effect?: unknown }).effect
   return {

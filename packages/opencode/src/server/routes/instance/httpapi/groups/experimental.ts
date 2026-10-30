@@ -70,7 +70,7 @@ const WorktreeErrorName = Schema.Union([
   Schema.Literal("WorktreeResetFailedError"),
   Schema.Literal("WorktreeListFailedError"),
 ])
-export class WorktreeApiError extends Schema.ErrorClass<WorktreeApiError>("WorktreeError")(
+export class WorktreeApiError extends Schema.TaggedError<WorktreeApiError>()("WorktreeError",
   {
     name: WorktreeErrorName,
     data: Schema.Struct({ message: Schema.String }),

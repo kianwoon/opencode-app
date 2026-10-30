@@ -120,12 +120,12 @@ function isolationBinary() {
 // `opencode run --format json` emits one JSON object per line; assistant text
 // parts carry the model's user-visible output. This mirrors runTask's contract:
 // the LAST text part's text is the result. Non-JSON lines (banners, warnings)
-// and non-text events are ignored. Schema.UnknownFromJsonString keeps the parse
+// and non-text events are ignored. Schema.fromJsonString(Schema.Unknown) keeps the parse
 // total — a malformed line decodes to None rather than throwing.
 function isolatedText(stdout: string) {
   let last = ""
   for (const line of stdout.split("\n")) {
-    const event = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(line))
+    const event = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(line))
     if (!event || typeof event !== "object") continue
     const record = event as Record<string, unknown>
     if (record.type !== "text") continue

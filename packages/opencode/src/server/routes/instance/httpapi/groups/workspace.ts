@@ -17,7 +17,7 @@ export const WarpPayload = Schema.Struct({
   copyChanges: Workspace.SessionWarpInput.fields.copyChanges,
 })
 
-export class ApiWorkspaceWarpError extends Schema.ErrorClass<ApiWorkspaceWarpError>("WorkspaceWarpError")(
+export class ApiWorkspaceWarpError extends Schema.TaggedError<ApiWorkspaceWarpError>()("WorkspaceWarpError",
   {
     name: Schema.Literal("WorkspaceWarpError"),
     data: Schema.Struct({
@@ -27,7 +27,7 @@ export class ApiWorkspaceWarpError extends Schema.ErrorClass<ApiWorkspaceWarpErr
   { httpApiStatus: 400 },
 ) {}
 
-export class ApiWorkspaceCreateError extends Schema.ErrorClass<ApiWorkspaceCreateError>("WorkspaceCreateError")(
+export class ApiWorkspaceCreateError extends Schema.TaggedError<ApiWorkspaceCreateError>()("WorkspaceCreateError",
   {
     name: Schema.Literal("WorkspaceCreateError"),
     data: Schema.Struct({
