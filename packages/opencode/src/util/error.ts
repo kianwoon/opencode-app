@@ -1,5 +1,29 @@
 import { Schema } from "effect"
 
+type NamedErrorSchema<Name extends string, DataSchema extends Schema.Top> = Schema.Struct<{
+  name: Schema.Literal<Name>
+  data: DataSchema
+}>
+
+export type NamedErrorClass<Name extends string, DataSchema extends Schema.Top> = {
+  new (
+    data: Schema.Schema.Type<DataSchema>,
+    options?: ErrorOptions,
+  ): NamedError & {
+    readonly name: Name
+    readonly data: Schema.Schema.Type<DataSchema>
+    schema(): NamedErrorSchema<Name, DataSchema>
+    toObject(): { name: Name; data: Schema.Schema.Type<DataSchema> }
+  }
+  readonly Schema: NamedErrorSchema<Name, DataSchema>
+  readonly EffectSchema: NamedErrorSchema<Name, DataSchema>
+  readonly tag: Name
+  isInstance(input: unknown): input is NamedError & {
+    readonly name: Name
+    readonly data: Schema.Schema.Type<DataSchema>
+  }
+}
+
 export abstract class NamedError extends Error {
   abstract schema(): Schema.Top
   abstract toObject(): { name: string; data: unknown }
@@ -20,7 +44,10 @@ export abstract class NamedError extends Error {
     return NamedError.createSchemaClass(name, Schema.isSchema(data) ? data : Schema.Struct(data))
   }
 
-  public static createSchemaClass<Name extends string, DataSchema extends Schema.Top>(name: Name, data: DataSchema) {
+  public static createSchemaClass<Name extends string, DataSchema extends Schema.Top>(
+    name: Name,
+    data: DataSchema,
+  ): NamedErrorClass<Name, DataSchema> {
     const schema = Schema.Struct({
       name: Schema.Literal(name),
       data,

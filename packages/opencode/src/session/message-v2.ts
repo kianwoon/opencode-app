@@ -1,14 +1,12 @@
 import { SessionID, MessageID } from "./schema"
 import { SessionV1 } from "@opencode/schema/v1/session"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { WithParts } from "@/compat/schema/session-v1"
 import { ProviderV2 } from "@/compat/core-namespaces"
 import {
-  APIError,
   AbortedError,
   Assistant,
-  AuthError,
   CompactionPart,
-  ContextOverflowError,
   Info,
   OutputLengthError,
   Part,
@@ -17,7 +15,6 @@ import {
   WorkflowPart,
 } from "@opencode/schema/v1/session"
 
-import { NamedError } from "@/util/error"
 import { MessageError } from "./message-error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import { Database } from "@opencode/core/database/database"
@@ -30,7 +27,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import { sql } from "drizzle-orm"
-import { MessageTable, SessionPartTable, SessionTable } from "@opencode/core/session/sql"
+import { SessionMessageTable, SessionPartTable, SessionTable } from "@opencode/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
@@ -74,7 +71,7 @@ export const Event = {
 }
 
 const Cursor = Schema.Struct({
-  id: MessageID,
+  id: SessionMessage.ID,
   time: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 })
 type Cursor = typeof Cursor.Type
@@ -90,25 +87,28 @@ export const cursor = {
   },
 }
 
-const info = (row: typeof MessageTable.$inferSelect) =>
+const info = (row: typeof SessionMessageTable.$inferSelect) =>
   ({
     ...row.data,
     id: row.id,
     sessionID: row.session_id,
-  }) as Info
+  }) as unknown as Info
 
 const part = (row: typeof SessionPartTable.$inferSelect) =>
   ({
     ...row.data,
-    id: row.id,
+    id: `prt_${row.message_id}_${row.ordinal}`,
     sessionID: row.session_id,
     messageID: row.message_id,
-  }) as Part
+  }) as unknown as Part
 
 const older = (row: Cursor) =>
-  or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
+  or(
+    lt(SessionMessageTable.time_created, row.time),
+    and(eq(SessionMessageTable.time_created, row.time), lt(SessionMessageTable.id, row.id)),
+  )
 
-function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {
+function hydrate(db: Database.Interface["db"], rows: (typeof SessionMessageTable.$inferSelect)[]) {
   const ids = rows.map((row) => row.id)
   const partByMessage = new Map<string, Part[]>()
   return Effect.gen(function* () {
@@ -117,7 +117,7 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
         .select()
         .from(SessionPartTable)
         .where(inArray(SessionPartTable.message_id, ids))
-        .orderBy(SessionPartTable.message_id, SessionPartTable.id)
+        .orderBy(SessionPartTable.message_id, SessionPartTable.ordinal)
         .all()
         .pipe(Effect.orDie)
       for (const row of partRows) {
@@ -271,7 +271,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       if (
         msg.info.error &&
         !(
-          AbortedError.isInstance(msg.info.error) &&
+          Schema.is(AbortedError.Schema)(msg.info.error) &&
           msg.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")
         )
       ) {
@@ -463,13 +463,13 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   const { db } = yield* Database.Service
   const before = input.before ? cursor.decode(input.before) : undefined
   const where = before
-    ? and(eq(MessageTable.session_id, input.sessionID), older(before))
-    : eq(MessageTable.session_id, input.sessionID)
+    ? and(eq(SessionMessageTable.session_id, input.sessionID), older(before))
+    : eq(SessionMessageTable.session_id, input.sessionID)
   const rows = yield* db
     .select()
-    .from(MessageTable)
+    .from(SessionMessageTable)
     .where(where)
-    .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+    .orderBy(desc(SessionMessageTable.time_created), desc(SessionMessageTable.id))
     .limit(input.limit + 1)
     .all()
     .pipe(Effect.orDie)
@@ -528,8 +528,8 @@ export function parts(messageID: MessageID) {
     const rows = yield* db
       .select()
       .from(SessionPartTable)
-      .where(eq(SessionPartTable.message_id, messageID))
-      .orderBy(SessionPartTable.id)
+      .where(eq(SessionPartTable.message_id, messageID as unknown as SessionMessage.ID))
+      .orderBy(SessionPartTable.ordinal)
       .all()
       .pipe(Effect.orDie)
     return rows.map(part)
@@ -540,8 +540,13 @@ export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: Ses
   const { db } = yield* Database.Service
   const row = yield* db
     .select()
-    .from(MessageTable)
-    .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
+    .from(SessionMessageTable)
+    .where(
+      and(
+        eq(SessionMessageTable.id, input.messageID as unknown as SessionMessage.ID),
+        eq(SessionMessageTable.session_id, input.sessionID),
+      ),
+    )
     .get()
     .pipe(Effect.orDie)
   if (!row) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
@@ -630,9 +635,9 @@ export const filterCompactedEffect = Effect.fn("MessageV2.filterCompacted")(func
   const { db } = yield* Database.Service
   const rows = yield* db
     .select()
-    .from(MessageTable)
-    .where(eq(MessageTable.session_id, sessionID))
-    .orderBy(MessageTable.time_created, MessageTable.id)
+    .from(SessionMessageTable)
+    .where(eq(SessionMessageTable.session_id, sessionID))
+    .orderBy(SessionMessageTable.time_created, SessionMessageTable.id)
     .all()
     .pipe(Effect.orDie)
   if (rows.length === 0) {
@@ -683,7 +688,7 @@ export const filterCompactedEffect = Effect.fn("MessageV2.filterCompacted")(func
   if (selected.length === 0) return []
   const rowById = new Map(rows.map((row) => [row.id, row]))
   const keptRows = selected.flatMap((entry) => {
-    const row = rowById.get(entry.info.id)
+    const row = rowById.get(entry.info.id as unknown as SessionMessage.ID)
     return row ? [row] : []
   })
   return yield* hydrate(db, keptRows)
@@ -733,92 +738,71 @@ export function isAbortError(e: unknown): boolean {
   return /^The operation was aborted$/i.test(e.message) || /^This operation was aborted$/i.test(e.message)
 }
 
+const namedError = <const Name extends string, Data>(name: Name, data: Data) => ({ name, data })
+
 export function fromError(
   e: unknown,
   ctx: { providerID: ProviderV2.ID; aborted?: boolean },
 ): NonNullable<Assistant["error"]> {
   switch (true) {
     case isAbortError(e):
-      return new AbortedError(
-        { message: errorMessage(e) },
-        {
-          cause: e,
-        },
-      ).toObject()
-    case OutputLengthError.isInstance(e):
+      return namedError("MessageAbortedError", { message: errorMessage(e) })
+    case Schema.is(OutputLengthError.Schema)(e):
       return e
     case MessageError.RepetitionLoopError.isInstance(e):
-      return new APIError(
-        {
-          message: e.data.message,
-          isRetryable: false,
-          metadata: { code: "repetition_loop", repeated: e.data.repeated },
-        },
-        { cause: e },
-      ).toObject()
+      return namedError("APIError", {
+        message: e.data.message,
+        isRetryable: false,
+        metadata: { code: "repetition_loop", repeated: e.data.repeated },
+      })
     case LoadAPIKeyError.isInstance(e):
-      return new AuthError(
-        {
-          providerID: ctx.providerID,
-          message: e.message,
-        },
-        { cause: e },
-      ).toObject()
+      return namedError("ProviderAuthError", {
+        providerID: ctx.providerID,
+        message: e.message,
+      })
     case (e as SystemError)?.code === "ECONNRESET":
-      return new APIError(
-        {
-          message: "Connection reset by server",
-          isRetryable: true,
-          metadata: {
-            code: (e as SystemError).code ?? "",
-            syscall: (e as SystemError).syscall ?? "",
-            message: (e as SystemError).message ?? "",
-          },
+      return namedError("APIError", {
+        message: "Connection reset by server",
+        isRetryable: true,
+        metadata: {
+          code: (e as SystemError).code ?? "",
+          syscall: (e as SystemError).syscall ?? "",
+          message: (e as SystemError).message ?? "",
         },
-        { cause: e },
-      ).toObject()
+      })
     case e instanceof Error && (e as FetchDecompressionError).code === "ZlibError":
       if (ctx.aborted) {
-        return new AbortedError({ message: e.message }, { cause: e }).toObject()
+        return namedError("MessageAbortedError", { message: e.message })
       }
-      return new APIError(
-        {
-          message: "Response decompression failed",
-          isRetryable: true,
-          metadata: {
-            code: (e as FetchDecompressionError).code,
-            message: e.message,
-          },
-        },
-        { cause: e },
-      ).toObject()
-    case e instanceof ProviderError.HeaderTimeoutError:
-      return new APIError(
-        {
+      return namedError("APIError", {
+        message: "Response decompression failed",
+        isRetryable: true,
+        metadata: {
+          code: (e as FetchDecompressionError).code,
           message: e.message,
-          isRetryable: true,
-          metadata: {
-            code: e.name,
-            timeoutMs: String(e.ms),
-          },
         },
-        { cause: e },
-      ).toObject()
+      })
+    case e instanceof ProviderError.HeaderTimeoutError:
+      return namedError("APIError", {
+        message: e.message,
+        isRetryable: true,
+        metadata: {
+          code: e.name,
+          timeoutMs: String(e.ms),
+        },
+      })
     case e instanceof ProviderError.StreamVolumeError:
       // A flooded response is a provider-side defect; retrying re-issues the
       // same request and floods again, so unlike ChunkStallError this is fatal
       // for the turn.
-      return new APIError(
-        {
-          message: e.message,
-          isRetryable: false,
-          metadata: {
-            code: e.name,
-            maxBytes: String(e.bytes),
-          },
+      return namedError("APIError", {
+        message: e.message,
+        isRetryable: false,
+        metadata: {
+          code: e.name,
+          maxBytes: String(e.bytes),
         },
-        { cause: e },
-      ).toObject()
+      })
     case e instanceof ProviderError.ResponseStreamError:
       // ChunkStallError (idle-guard abort) must be retried: a silent stall is
       // a transient provider-side condition. Bounded by RETRY_MAX_RETRIES in
@@ -826,17 +810,14 @@ export function fromError(
       // Also matches the core AISDK ChunkStallError sibling by name: core
       // cannot import the opencode provider error, but both share the
       // `ProviderChunkStallError` name + `ms` field.
-      return new APIError(
-        {
-          message: e.message,
-          isRetryable: true,
-          metadata: {
-            code: e.name,
-            ...(e instanceof ProviderError.ChunkStallError ? { stallIdleMs: String(e.ms) } : {}),
-          },
+      return namedError("APIError", {
+        message: e.message,
+        isRetryable: true,
+        metadata: {
+          code: e.name,
+          ...(e instanceof ProviderError.ChunkStallError ? { stallIdleMs: String(e.ms) } : {}),
         },
-        { cause: e },
-      ).toObject()
+      })
     case e instanceof Error && e.name === "ProviderChunkStallError":
       // Name-based match for the core AISDK sibling (core cannot import the
       // opencode ProviderError, so instanceof cannot see it). The AI SDK may
@@ -844,71 +825,54 @@ export function fromError(
       // because APICallError.isInstance is matched after, but the plain-error
       // shape is what wrapSSE rejects with. Same identity as ChunkStallError:
       // retryable, bounded by the retry schedule.
-      return new APIError(
-        {
-          message: e.message,
-          isRetryable: true,
-          metadata: {
-            code: e.name,
-            ...("ms" in e && typeof e.ms === "number" ? { stallIdleMs: String(e.ms) } : {}),
-          },
+      return namedError("APIError", {
+        message: e.message,
+        isRetryable: true,
+        metadata: {
+          code: e.name,
+          ...("ms" in e && typeof e.ms === "number" ? { stallIdleMs: String(e.ms) } : {}),
         },
-        { cause: e },
-      ).toObject()
+      })
     case APICallError.isInstance(e):
       const parsed = ProviderError.parseAPICallError({
         providerID: ctx.providerID,
         error: e,
       })
       if (parsed.type === "context_overflow") {
-        return new ContextOverflowError(
-          {
-            message: parsed.message,
-            responseBody: parsed.responseBody,
-          },
-          { cause: e },
-        ).toObject()
+        return namedError("ContextOverflowError", {
+          message: parsed.message,
+          responseBody: parsed.responseBody,
+        })
       }
 
-      return new APIError(
-        {
-          message: parsed.message,
-          statusCode: parsed.statusCode,
-          isRetryable: parsed.isRetryable,
-          responseHeaders: parsed.responseHeaders,
-          responseBody: parsed.responseBody,
-          metadata: parsed.metadata,
-        },
-        { cause: e },
-      ).toObject()
+      return namedError("APIError", {
+        message: parsed.message,
+        statusCode: parsed.statusCode,
+        isRetryable: parsed.isRetryable,
+        responseHeaders: parsed.responseHeaders,
+        responseBody: parsed.responseBody,
+        metadata: parsed.metadata,
+      })
     case e instanceof Error:
-      return new NamedError.Unknown({ message: errorMessage(e) }, { cause: e }).toObject()
+      return namedError("UnknownError", { message: errorMessage(e) })
     default:
       try {
         const parsed = ProviderError.parseStreamError(e)
         if (parsed) {
           if (parsed.type === "context_overflow") {
-            return new ContextOverflowError(
-              {
-                message: parsed.message,
-                responseBody: parsed.responseBody,
-              },
-              { cause: e },
-            ).toObject()
-          }
-          return new APIError(
-            {
+            return namedError("ContextOverflowError", {
               message: parsed.message,
-              isRetryable: parsed.isRetryable,
               responseBody: parsed.responseBody,
-            },
-            {
-              cause: e,
-            },
-          ).toObject()
+            })
+          }
+          return namedError("APIError", {
+            message: parsed.message,
+            isRetryable: parsed.isRetryable,
+            responseBody: parsed.responseBody,
+          })
         }
       } catch {}
-      return new NamedError.Unknown({ message: JSON.stringify(e) }, { cause: e }).toObject()
+      return namedError("UnknownError", { message: JSON.stringify(e) })
   }
 }
 
