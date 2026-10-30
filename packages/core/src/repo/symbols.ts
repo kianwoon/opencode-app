@@ -1,6 +1,6 @@
 export * as Symbols from "./symbols"
 
-import { FileSystemWatcher } from "@opencode-ai/schema/filesystem-watcher"
+import { FileSystemWatcher } from "@opencode/schema/filesystem-watcher"
 import { Context, Effect, Layer, Scope, Stream } from "effect"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -8,7 +8,7 @@ import type { Node, Parser, Tree } from "web-tree-sitter"
 import { EventV2 } from "../event"
 import { makeLocationNode } from "../effect/app-node"
 import { FileSystemSearch } from "../filesystem/search"
-import { FSUtil } from "../fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "../location"
 import { Ripgrep } from "../ripgrep"
 

@@ -1,6 +1,6 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { Timestamps } from "../database/schema.sql"
-import type { Task } from "@opencode-ai/schema/task"
+import type { Task } from "@opencode/schema/task"
 
 // session_id is deliberately not a foreign key: V2 sessions are event-sourced and
 // the projector may populate the session table after a task binds one, and a task

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { createDeltaCoalescer, DELTA_COALESCE_MAX_AGE_MS } from "@opencode-ai/core/session/delta-coalescer"
+import { createDeltaCoalescer, DELTA_COALESCE_MAX_AGE_MS } from "@opencode/core/session/delta-coalescer"
 
 const harness = (options?: { now?: () => number; maxAgeMs?: number; maxParts?: number }) => {
   const published: Array<{ key: string; fragment: string }> = []

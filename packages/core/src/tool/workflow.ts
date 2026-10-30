@@ -1,6 +1,6 @@
 import * as Tool from "./tool"
 import { ToolJsonSchema } from "./json-schema"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
 import { MessageID } from "../session/schema"
 import { Session } from "@/session/session"
 import { Agent } from "@/agent/agent"

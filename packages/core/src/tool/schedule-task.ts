@@ -1,8 +1,8 @@
 export * as ScheduleTaskTool from "./schedule-task"
 
-import { ToolFailure } from "@opencode-ai/llm"
-import { AbsolutePath } from "@opencode-ai/schema/schema"
-import { SessionID } from "@opencode-ai/schema/session-id"
+import { ToolFailure } from "@opencode/ai/effect"
+import { AbsolutePath } from "@opencode/schema/schema"
+import { SessionID } from "@opencode/schema/session-id"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { LocationMutation } from "../location-mutation"

@@ -1,8 +1,8 @@
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { PluginHost } from "@opencode-ai/core/plugin/host"
-import { define } from "@opencode-ai/plugin/v2/effect"
+import { PluginV2 } from "@opencode/core/plugin"
+import { PluginHost } from "@opencode/core/plugin/host"
+import { define } from "@opencode/plugin/effect"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
