@@ -2,14 +2,15 @@ import * as InstanceState from "@/effect/instance-state"
 import { registerDisposer } from "@/effect/instance-registry"
 import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
 import { Plugin } from "@/plugin"
+import { FileSystem } from "@opencode/core/filesystem"
 import { Pty } from "@opencode/core/pty"
 import { PtyProtocol } from "@opencode/core/pty/protocol"
 import { PtyID } from "@/compat/pty-schema"
 import { PtyTicket } from "@opencode/core/pty/ticket"
-import { LocationServiceMap, locationServiceMapLayer } from "@opencode/core/location-services"
+import { buildLocationServiceMap, LocationServiceMap } from "@opencode/core/location-services"
 import { Location } from "@opencode/core/location"
 import { AbsolutePath } from "@opencode/core/schema"
-import { Shell } from "@opencode/core/shell"
+import { ShellSelect } from "@opencode/core/shell/select"
 import { CorsConfig, isAllowedRequestOrigin, type CorsOptions } from "@opencode/server/cors"
 import {
   PTY_CONNECT_TICKET_QUERY,
@@ -24,10 +25,13 @@ import { InstanceHttpApi } from "../api"
 import * as ApiError from "../errors"
 import { CursorQuery, PtyConnectApi } from "../groups/pty"
 import { WebSocketTracker } from "../websocket-tracker"
+import { runPtySocket } from "@opencode/server/handlers/pty-socket"
 
 function validOrigin(request: HttpServerRequest.HttpServerRequest, opts: CorsOptions | undefined) {
   return isAllowedRequestOrigin(request.headers.origin, request.headers.host, opts)
 }
+
+const locationServiceMapLayer = buildLocationServiceMap()
 
 const ticketScope = Effect.gen(function* () {
   const instance = yield* InstanceRef
@@ -54,11 +58,16 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
         Effect.provide(
           locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
         ),
+        Effect.catchIf(
+          (error): error is FileSystem.DirectoryNotFoundError => error instanceof FileSystem.DirectoryNotFoundError,
+          (error) =>
+            Effect.fail(new ApiError.InvalidRequestError({ message: `Directory not found: ${error.directory}` })),
+        ),
       )
     })
 
     const shells = Effect.fn("PtyHttpApi.shells")(function* () {
-      return yield* Effect.promise(() => Shell.list())
+      return yield* pty(ShellSelect.Service.use((service) => service.list?.() ?? Effect.succeed([])))
     })
 
     const list = Effect.fn("PtyHttpApi.list")(function* () {
@@ -170,14 +179,6 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
     )
     yield* Effect.addFinalizer(() => Effect.sync(unregister))
 
-    const pty = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      return yield* effect.pipe(
-        Effect.provide(
-          locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
-        ),
-      )
-    })
-
     return handlers.handleRaw(
       "connect",
       Effect.fn("PtyHttpApi.connect")(function* (ctx: {
@@ -190,9 +191,15 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         if (ticket && !(yield* tickets.consume({ ticket, ptyID: ctx.params.ptyID, ...(yield* ticketScope) })))
           return HttpServerResponse.empty({ status: 403 })
 
-        const exists = yield* pty(Pty.Service.use((service) => service.get(ctx.params.ptyID))).pipe(
+        const directory = (yield* InstanceState.context).directory
+        const location = locations.get(Location.Ref.make({ directory: AbsolutePath.make(directory) }))
+        const exists = yield* Pty.Service.use((service) => service.get(ctx.params.ptyID)).pipe(
+          Effect.provide(location),
           Effect.map((info) => info.status === "running"),
-          Effect.catchTag("Pty.NotFoundError", () => Effect.succeed(false)),
+          Effect.catchTags({
+            "Pty.NotFoundError": () => Effect.succeed(false),
+            "FileSystem.DirectoryNotFoundError": () => Effect.succeed(false),
+          }),
         )
         if (!exists) return HttpServerResponse.empty({ status: 404 })
 
@@ -204,67 +211,55 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
             ? parsedCursor
             : undefined
         const socket = yield* Effect.orDie(ctx.request.upgrade)
-        const write = yield* socket.writer
-        const closeAccepted = (event: Socket.CloseEvent) =>
-          socket
-            .runRaw(() => Effect.void, { onOpen: write(event).pipe(Effect.catch(() => Effect.void)) })
-            .pipe(
-              Effect.timeout("1 second"),
-              Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),
-              Effect.catch(() => Effect.void),
-            )
-        const registered = yield* WebSocketTracker.register(write(WebSocketTracker.SERVER_CLOSING_EVENT()))
-        if (!registered) {
-          yield* closeAccepted(WebSocketTracker.SERVER_CLOSING_EVENT())
-          return HttpServerResponse.empty()
-        }
+        const writer = yield* socket.writer
+        const registered = yield* WebSocketTracker.register(
+          writer.write(WebSocketTracker.SERVER_CLOSING_EVENT()).pipe(Effect.ignore),
+        )
+        if (!registered) return HttpServerResponse.empty()
 
         // Outbound frames flow through one queue drained by a single writer so replay, live
         // output, and the close frame keep their order.
         const outbox = yield* Queue.unbounded<string | Uint8Array | Socket.CloseEvent>()
-        const attachment = yield* pty(
-          Pty.Service.use((service) =>
-            service.attach(ctx.params.ptyID, {
-              cursor,
-              onData: (chunk) => Queue.offerUnsafe(outbox, chunk),
-              onEnd: () => Queue.offerUnsafe(outbox, new Socket.CloseEvent(1000)),
-            }),
-          ),
+        const attachment = yield* Pty.Service.use((service) =>
+          service.attach(ctx.params.ptyID, {
+            cursor,
+            onData: (chunk) => Queue.offerUnsafe(outbox, chunk),
+            onEnd: () => Queue.offerUnsafe(outbox, new Socket.CloseEvent(1000)),
+          }),
         ).pipe(
+          Effect.provide(location),
           Effect.catchTags({
             "Pty.NotFoundError": () =>
-              closeAccepted(new Socket.CloseEvent(4404, "session not found")).pipe(Effect.as(undefined)),
+              Effect.sync(() => {
+                Queue.offerUnsafe(outbox, new Socket.CloseEvent(4404, "session not found"))
+              }),
             "Pty.ExitedError": () =>
-              closeAccepted(new Socket.CloseEvent(4404, "session not found")).pipe(Effect.as(undefined)),
+              Effect.sync(() => {
+                Queue.offerUnsafe(outbox, new Socket.CloseEvent(4404, "session not found"))
+              }),
+            "FileSystem.DirectoryNotFoundError": () =>
+              Effect.sync(() => {
+                Queue.offerUnsafe(outbox, new Socket.CloseEvent(4404, "session not found"))
+              }),
           }),
         )
-        if (!attachment) return HttpServerResponse.empty()
+        if (attachment) {
+          for (const chunk of PtyProtocol.chunks(attachment.replay)) Queue.offerUnsafe(outbox, chunk)
+          Queue.offerUnsafe(outbox, PtyProtocol.metaFrame(attachment.cursor))
+          attachment.activate()
+        }
 
-        for (const chunk of PtyProtocol.chunks(attachment.replay)) Queue.offerUnsafe(outbox, chunk)
-        Queue.offerUnsafe(outbox, PtyProtocol.metaFrame(attachment.cursor))
-        attachment.activate()
-
-        const drain = Effect.gen(function* () {
-          while (true) {
-            const item = yield* Queue.take(outbox)
-            yield* write(item)
-            if (item instanceof Socket.CloseEvent) return
-          }
+        yield* runPtySocket({
+          socket,
+          outbox,
+          onMessage: (message) =>
+            Effect.sync(() => {
+              if (!attachment) return
+              const decoded = PtyProtocol.decodeInput(message)
+              if (decoded !== undefined) attachment.write(decoded)
+            }),
+          detach: () => attachment?.detach(),
         })
-
-        // The reader runs concurrently with the writer; whichever finishes first ends the
-        // connection and the attachment is always released.
-        yield* Effect.race(
-          drain,
-          socket.runRaw((message) => {
-            const decoded = PtyProtocol.decodeInput(message)
-            if (decoded !== undefined) attachment.write(decoded)
-          }),
-        ).pipe(
-          Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),
-          Effect.ensuring(Effect.sync(() => attachment.detach())),
-          Effect.orDie,
-        )
         return HttpServerResponse.empty()
       }),
     )
