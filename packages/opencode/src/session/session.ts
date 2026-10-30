@@ -586,8 +586,8 @@ const layer: Layer.Layer<
         model: input.model as unknown as Schema.Schema.Type<typeof SessionEvent.Created>["data"]["model"],
         metadata: result.metadata,
         permissions: input.permission?.map((rule) => ({
-          action: rule.pattern,
-          resource: rule.permission,
+          action: rule.permission,
+          resource: rule.pattern,
           effect: rule.action,
         })),
         version: result.version,
