@@ -21,17 +21,17 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "workspace:*",
+    "@opencode/plugin": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@tsconfig/node22": "catalog:",
     "@types/node": "catalog:",
-    "@typescript/native-preview": "catalog:",
+    "@typescript/native": "catalog:",
     "typescript": "catalog:"
   }
 }

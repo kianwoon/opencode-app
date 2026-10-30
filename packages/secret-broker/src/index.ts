@@ -21,7 +21,7 @@
 import * as path from "node:path"
 import { readFile, stat } from "node:fs/promises"
 import { Cause, Effect } from "effect"
-import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import type { Hooks, PluginInput } from "@opencode/plugin"
 import { Allowlist } from "./allowlist.js"
 import { audit } from "./audit.js"
 import { bootstrap } from "./bootstrap.js"

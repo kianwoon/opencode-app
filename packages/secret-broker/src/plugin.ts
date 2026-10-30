@@ -4,7 +4,7 @@
 // redaction helpers used by callers that hold a live plugin handle. The real
 // host service is injected at runtime, so `Service.of` is a plain constructor.
 
-import type { Hooks } from "@opencode-ai/plugin"
+import type { Hooks } from "@opencode/plugin"
 import type { Effect } from "effect"
 
 /** Hook names that follow the `(input, output) => Promise<void>` trigger shape. */
