@@ -345,6 +345,19 @@ const schema: Omit<DatabaseMigration.Migration, "id"> = {
         );
       `)
       yield* tx.run(`CREATE INDEX \`task_run_task_started_idx\` ON \`task_run\` (\`task_id\`,\`started_at\`);`)
+      yield* tx.run(`
+        CREATE TABLE \`background_job\` (
+          \`id\` text PRIMARY KEY,
+          \`type\` text NOT NULL,
+          \`title\` text,
+          \`status\` text NOT NULL,
+          \`started_at\` integer NOT NULL,
+          \`completed_at\` integer,
+          \`output\` text,
+          \`error\` text,
+          \`metadata\` text
+        );
+      `)
       yield* tx.run(
         `CREATE UNIQUE INDEX \`permission_project_action_resource_idx\` ON \`permission\` (\`project_id\`,\`action\`,\`resource\`);`,
       )
