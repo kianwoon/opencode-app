@@ -1,24 +1,25 @@
 import { describe, expect } from "bun:test"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { Cause, Effect, Exit } from "effect"
 import { testEffect } from "../lib/effect"
 import { WorkflowTool } from "../../src/tool/workflow"
 import { Session } from "@/session/session"
 import { MessageID } from "@/session/schema"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Agent } from "@/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
-import { Database } from "@opencode-ai/core/database/database"
+import { Database } from "@opencode/core/database/database"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { Ripgrep } from "@opencode/core/ripgrep"
 
 const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
@@ -61,7 +62,7 @@ describe("workflow tool", () => {
         const promptOps = {
           prompt: (input: { parts: SessionV1.Part[] }) => {
             emitted = input
-            return Effect.succeed({} as SessionV1.WithParts)
+            return Effect.succeed({} as WithParts)
           },
         }
 
@@ -169,7 +170,7 @@ describe("workflow tool", () => {
               messageID: MessageID.ascending(),
               agent: "build",
               abort: new AbortController().signal,
-              extra: { promptOps: { prompt: () => Effect.succeed({} as SessionV1.WithParts) } },
+              extra: { promptOps: { prompt: () => Effect.succeed({} as WithParts) } },
               messages: [],
               metadata: () => Effect.void,
               ask: () => Effect.void,
@@ -220,7 +221,7 @@ describe("workflow tool", () => {
                 promptOps: {
                   prompt: () => {
                     admitted = true
-                    return Effect.succeed({} as SessionV1.WithParts)
+                    return Effect.succeed({} as WithParts)
                   },
                 },
               },

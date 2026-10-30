@@ -1,20 +1,21 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
-import { Slug } from "@opencode-ai/core/util/slug"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { PermissionV1 } from "@opencode/schema/v1/permission"
+import { Slug } from "@opencode/core/util/slug"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import path from "path"
 import { BackgroundJob } from "@/background/job"
 import { Decimal } from "decimal.js"
-import type { ProviderMetadata, Usage } from "@opencode-ai/llm"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { Database } from "@opencode-ai/core/database/database"
+import type { ProviderMetadata, Usage } from "@opencode/ai"
+import { InstallationVersion } from "@/installation/version"
+import { Database } from "@opencode/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { EventV2 } from "@opencode-ai/core/event"
-import { SessionV2 } from "@opencode-ai/core/session"
-import { createDeltaCoalescer } from "@opencode-ai/core/session/delta-coalescer"
-import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
-import { locationServiceMapLayer } from "@opencode-ai/core/location-services"
+import { EventV2 } from "@opencode/core/event"
+import { SessionV2 } from "@/compat/core-namespaces"
+import { createDeltaCoalescer } from "@opencode/core/session/delta-coalescer"
+import * as SessionExecutionLocal from "@/compat/session-execution-local"
+import { locationServiceMapLayer } from "@opencode/core/location-services"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -28,24 +29,24 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { SessionPartTable, SessionTable } from "@opencode/core/session/sql"
+import { ProjectTable } from "@opencode/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
 import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
-import { ProjectV2 } from "@opencode-ai/core/project"
-import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import { Project } from "@opencode/core/project"
+import { Workspace } from "@opencode/core/workspace"
 import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@opencode/util/global"
 import { Effect, Layer, Option, Context, Schema, Types } from "effect"
-import { NonNegativeInt, optional } from "@opencode-ai/core/schema"
+import { NonNegativeInt, optional } from "@opencode/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { ProviderV2 } from "@/compat/core-namespaces"
+import { ModelV2 } from "@/compat/core-namespaces"
+import { SessionMessage } from "@opencode/schema/session-message"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -226,8 +227,8 @@ export const Metadata = Schema.Record(Schema.String, Schema.Any)
 export const Info = Schema.Struct({
   id: SessionID,
   slug: Schema.String,
-  projectID: ProjectV2.ID,
-  workspaceID: optional(WorkspaceV2.ID),
+  projectID: Project.ID,
+  workspaceID: optional(Workspace.ID),
   directory: Schema.String,
   path: optional(Schema.String),
   parentID: optional(SessionID),
@@ -247,7 +248,7 @@ export const Info = Schema.Struct({
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
 export const ProjectInfo = Schema.Struct({
-  id: ProjectV2.ID,
+  id: Project.ID,
   name: optional(Schema.String),
   worktree: Schema.String,
 }).annotate({ identifier: "ProjectSummary" })
@@ -267,7 +268,7 @@ export const CreateInput = Schema.optional(
     model: Schema.optional(Model),
     metadata: Schema.optional(Metadata),
     permission: Schema.optional(PermissionV1.Ruleset),
-    workspaceID: Schema.optional(WorkspaceV2.ID),
+    workspaceID: Schema.optional(Workspace.ID),
   }),
 )
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
@@ -305,7 +306,7 @@ export type ListInput = {
   directory?: string
   scope?: "project"
   path?: string
-  workspaceID?: WorkspaceV2.ID
+  workspaceID?: Workspace.ID
   roots?: boolean
   start?: number
   search?: string
@@ -406,7 +407,7 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
   }
 }
 
-export class BusyError extends Schema.TaggedErrorClass<BusyError>()("SessionBusyError", {
+export class BusyError extends Schema.TaggedError<BusyError>()("SessionBusyError", {
   sessionID: SessionID,
 }) {}
 
@@ -422,7 +423,7 @@ export interface Interface {
     model?: Schema.Schema.Type<typeof Model>
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
-    workspaceID?: WorkspaceV2.ID
+    workspaceID?: Workspace.ID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
@@ -447,7 +448,7 @@ export interface Interface {
   readonly setShare: (input: { sessionID: SessionID; share: Info["share"] }) => Effect.Effect<void>
   readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] }) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
-  readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
+  readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<WithParts[], NotFound>
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
@@ -469,8 +470,8 @@ export interface Interface {
   /** Finds the first message matching the predicate, searching newest-first. */
   readonly findMessage: (
     sessionID: SessionID,
-    predicate: (msg: SessionV1.WithParts) => boolean,
-  ) => Effect.Effect<Option.Option<SessionV1.WithParts>, NotFound>
+    predicate: (msg: WithParts) => boolean,
+  ) => Effect.Effect<Option.Option<WithParts>, NotFound>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Session") {}
@@ -525,7 +526,7 @@ const layer: Layer.Layer<
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
       parentID?: SessionID
-      workspaceID?: WorkspaceV2.ID
+      workspaceID?: Workspace.ID
       directory: string
       path?: string
       metadata?: typeof Metadata.Type
@@ -668,12 +669,12 @@ const layer: Layer.Layer<
     const getPart: Interface["getPart"] = Effect.fn("Session.getPart")(function* (input) {
       const row = yield* db
         .select()
-        .from(PartTable)
+        .from(SessionPartTable)
         .where(
           and(
-            eq(PartTable.session_id, input.sessionID),
-            eq(PartTable.message_id, input.messageID),
-            eq(PartTable.id, input.partID),
+            eq(SessionPartTable.session_id, input.sessionID),
+            eq(SessionPartTable.message_id, input.messageID),
+            eq(SessionPartTable.id, input.partID),
           ),
         )
         .get()
@@ -694,7 +695,7 @@ const layer: Layer.Layer<
       model?: Schema.Schema.Type<typeof Model>
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
-      workspaceID?: WorkspaceV2.ID
+      workspaceID?: Workspace.ID
     }) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
@@ -861,7 +862,7 @@ const layer: Layer.Layer<
       }
 
       const size = 50
-      const result = [] as SessionV1.WithParts[]
+      const result = [] as WithParts[]
       let before: string | undefined
       while (true) {
         const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: size, before }).pipe(
@@ -931,7 +932,7 @@ const layer: Layer.Layer<
         if (!page.more || !page.cursor) break
         before = page.cursor
       }
-      return Option.none<SessionV1.WithParts>()
+      return Option.none<WithParts>()
     })
 
     return Service.of({
@@ -986,7 +987,7 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
 function listByProject(
   db: Database.Interface["db"],
   input: ListInput & {
-    projectID: ProjectV2.ID
+    projectID: Project.ID
     experimentalWorkspaces: boolean
   },
 ) {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { isComplete, propagateFailure, readySteps, validateDag } from "../../../src/session/workflow/dag"
-import type { WorkflowStep } from "@opencode-ai/core/v1/session"
+import type { WorkflowStep } from "@opencode/schema/v1/session"
 
 /**
  * Integration-style test for the workflow DAG scheduling, using the pure

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { SessionStatus } from "@/session/status"

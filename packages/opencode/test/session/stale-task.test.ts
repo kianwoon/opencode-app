@@ -1,10 +1,10 @@
 import { describe, expect } from "bun:test"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { ORPHAN_ERROR, SessionProjector } from "@opencode-ai/core/session/projector"
-import { SessionTable } from "@opencode-ai/core/session/sql"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { ORPHAN_ERROR, SessionProjector } from "@opencode/core/session/projector"
+import { SessionTable } from "@opencode/core/session/sql"
+import { SessionV1 } from "@opencode/schema/v1/session"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Logger } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -18,9 +18,9 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Config } from "@/config/config"
 import { BackgroundJob } from "@/background/job"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Database } from "@opencode-ai/core/database/database"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { Database } from "@opencode/core/database/database"
+import { Provider } from "@opencode/core/provider"
+import { Model } from "@opencode/core/model"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(
@@ -64,7 +64,7 @@ const seed = (input: {
   Effect.gen(function* () {
     const sessions = yield* Session.Service
     const { db } = yield* Database.Service
-    const parent = yield* sessions.create({ agent: "build", model: { id: ModelV2.ID.make("test-model"), providerID: ProviderV2.ID.make("test") } })
+    const parent = yield* sessions.create({ agent: "build", model: { id: Model.ID.make("test-model"), providerID: Provider.ID.make("test") } })
     const child = yield* sessions.create({ parentID: parent.id, agent: "build" })
     const message: SessionV1.User = {
       id: MessageID.ascending(),
@@ -72,7 +72,7 @@ const seed = (input: {
       role: "user",
       time: { created: input.now },
       agent: "build",
-      model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") },
+      model: { providerID: Provider.ID.make("test"), modelID: Model.ID.make("test-model") },
     }
     yield* sessions.updateMessage(message)
     const partID = PartID.ascending()
@@ -175,14 +175,14 @@ describe("stale subagent sweep", () => {
       const sessions = yield* Session.Service
       const sweep = yield* StaleSubagentTask.Service
       const now = Date.now()
-      const parent = yield* sessions.create({ agent: "build", model: { id: ModelV2.ID.make("test-model"), providerID: ProviderV2.ID.make("test") } })
+      const parent = yield* sessions.create({ agent: "build", model: { id: Model.ID.make("test-model"), providerID: Provider.ID.make("test") } })
       const message: SessionV1.User = {
         id: MessageID.ascending(),
         sessionID: parent.id,
         role: "user",
         time: { created: now },
         agent: "build",
-        model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") },
+        model: { providerID: Provider.ID.make("test"), modelID: Model.ID.make("test-model") },
       }
       yield* sessions.updateMessage(message)
       yield* sessions.updatePart({
@@ -226,7 +226,7 @@ describe("stale subagent sweep", () => {
         role: "user",
         time: { created: now },
         agent: "build",
-        model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") },
+        model: { providerID: Provider.ID.make("test"), modelID: Model.ID.make("test-model") },
       }
       yield* sessions.updateMessage(message)
       yield* sessions.updatePart({

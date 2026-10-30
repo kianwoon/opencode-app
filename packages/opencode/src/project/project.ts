@@ -1,28 +1,28 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { and, eq, sql } from "drizzle-orm"
-import { Database } from "@opencode-ai/core/database/database"
-import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
-import { ProjectDirectories } from "@opencode-ai/core/project/directories"
-import { SessionTable } from "@opencode-ai/core/session/sql"
-import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Database } from "@opencode/core/database/database"
+import { ProjectDirectoryTable, ProjectTable } from "@opencode/core/project/sql"
+import { ProjectDirectories } from "@/compat/project-directories"
+import { SessionTable } from "@opencode/core/session/sql"
+import { WorkspaceTable } from "@opencode/core/workspace/sql"
+import { Flag } from "@/flag/flag"
 import { GlobalBus } from "@/bus/global"
-import { which } from "@opencode-ai/core/util/which"
+import { which } from "@opencode/core/util/which"
 import { Command } from "@/command"
 import { InstanceState } from "@/effect/instance-state"
 import { Effect, Layer, Scope, Context, Stream, Types, Schema } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { AppProcess } from "@opencode-ai/core/process"
-import { resolveBinary } from "@opencode-ai/core/git"
-import { ProjectV2 } from "@opencode-ai/core/project"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { FSUtil } from "@opencode/util/fs-util"
+import { AppProcess } from "@opencode/util/process"
+import { gitExecutable } from "@opencode/core/util/git-executable"
+import { ProjectV2 } from "@/compat/core-namespaces"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { AbsolutePath } from "@opencode/core/schema"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { EventV2 } from "@opencode-ai/core/event"
-import { Project } from "@opencode-ai/schema/project"
+import { EventV2 } from "@opencode/core/event"
+import { Project } from "@opencode/schema/project"
 
 export const Info = Project.Info
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
@@ -73,7 +73,7 @@ export const UpdatePayload = Schema.Struct({
 }).annotate({ identifier: "ProjectUpdateInput" })
 export type UpdatePayload = Types.DeepMutable<Schema.Schema.Type<typeof UpdatePayload>>
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Project.NotFoundError", {
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Project.NotFoundError", {
   projectID: ProjectV2.ID,
 }) {}
 
@@ -109,8 +109,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const appProcess = yield* AppProcess.Service
-    const gitBinary = yield* resolveBinary(appProcess)
+    const gitBinary = gitExecutable()
     const projectV2 = yield* ProjectV2.Service
     const projectDirectories = yield* ProjectDirectories.Service
     const events = yield* EventV2Bridge.Service

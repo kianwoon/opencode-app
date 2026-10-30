@@ -1,6 +1,7 @@
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { PermissionV1 } from "@opencode/schema/v1/permission"
 import { Permission } from "@/permission"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 
 import { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
@@ -12,7 +13,7 @@ import { Todo } from "@/session/todo"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Snapshot } from "@/snapshot"
 import { Schema, Struct } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import {
@@ -23,8 +24,8 @@ import {
 import { ApiNotFoundError, PermissionNotFoundError, SessionBusyError } from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { Provider } from "@opencode/core/provider"
+import { Model } from "@opencode/core/model"
 
 const root = "/session"
 export const ListQuery = Schema.Struct({
@@ -58,13 +59,13 @@ export const UpdatePayload = Schema.Struct({
 })
 export const ForkPayload = Schema.Struct(Struct.omit(Session.ForkInput.fields, ["sessionID"]))
 export const InitPayload = Schema.Struct({
-  modelID: ModelV2.ID,
-  providerID: ProviderV2.ID,
+  modelID: Model.ID,
+  providerID: Provider.ID,
   messageID: MessageID,
 })
 export const SummarizePayload = Schema.Struct({
-  providerID: ProviderV2.ID,
-  modelID: ModelV2.ID,
+  providerID: Provider.ID,
+  modelID: Model.ID,
   auto: Schema.optional(Schema.Boolean),
 })
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
@@ -179,7 +180,7 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.get("messages", SessionPaths.messages, {
           params: { sessionID: SessionID },
           query: MessagesQuery,
-          success: described(Schema.Array(SessionV1.WithParts), "List of messages"),
+          success: described(Schema.Array(WithParts), "List of messages"),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
@@ -191,7 +192,7 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.get("message", SessionPaths.message, {
           params: { sessionID: SessionID, messageID: MessageID },
           query: WorkspaceRoutingQuery,
-          success: described(SessionV1.WithParts, "Message"),
+          success: described(WithParts, "Message"),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
@@ -317,7 +318,7 @@ export const SessionApi = HttpApi.make("session")
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           payload: PromptPayload,
-          success: described(SessionV1.WithParts, "Created message"),
+          success: described(WithParts, "Created message"),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
@@ -344,7 +345,7 @@ export const SessionApi = HttpApi.make("session")
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           payload: CommandPayload,
-          success: described(SessionV1.WithParts, "Created message"),
+          success: described(WithParts, "Created message"),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
@@ -357,7 +358,7 @@ export const SessionApi = HttpApi.make("session")
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           payload: ShellPayload,
-          success: described(SessionV1.WithParts, "Created message"),
+          success: described(WithParts, "Created message"),
           error: [HttpApiError.BadRequest, ApiNotFoundError, SessionBusyError],
         }).annotateMerge(
           OpenApi.annotations({

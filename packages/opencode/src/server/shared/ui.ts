@@ -1,6 +1,6 @@
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Effect, Stream } from "effect"
-import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createHash } from "node:crypto"
 import { ProxyUtil } from "../proxy-util"
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Hooks } from "@opencode-ai/plugin"
+import type { Hooks } from "@opencode/plugin"
 import {
   ContextGatePlugin,
   applyGate,

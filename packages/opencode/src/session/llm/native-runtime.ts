@@ -3,11 +3,11 @@ import type { Provider } from "@/provider/provider"
 import { ProviderError } from "@/provider/error"
 import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
-import { isRecord } from "@/util/record"
+import { isRecord } from "@opencode/util/record"
 import { asSchema, type ModelMessage, type Tool } from "ai"
 import { Cause, Effect, FiberSet, Queue } from "effect"
 import * as Stream from "effect/Stream"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import {
   LLMRequest,
   Tool as NativeTool,
@@ -16,8 +16,8 @@ import {
   toDefinitions,
   type JsonSchema,
   type LLMEvent,
-} from "@opencode-ai/llm"
-import type { LLMClientShape } from "@opencode-ai/llm/route"
+} from "@opencode/ai"
+import type { LLMClientShape } from "@opencode/ai/route"
 import { LLMNative } from "./native-request"
 
 export type RuntimeStatus =
@@ -125,7 +125,7 @@ export function stream(input: StreamInput): StreamResult {
   const current = statusWithFetch(input, fetch)
   if (current.type === "unsupported") return current
 
-  // Integration point with @opencode-ai/llm: native-request lowers session data
+  // Integration point with @opencode/llm: native-request lowers session data
   // into an LLMRequest, then LLMClient handles route selection and transport.
   //
   // ProviderTransform.providerOptions builds AI-SDK-shaped options for the
@@ -224,7 +224,7 @@ export function nativeTools(tools: Record<string, Tool>, input: Pick<StreamInput
     Object.entries(tools).map(([name, item]) => [
       name,
       // Tool execution remains opencode-owned. The native runtime only adapts
-      // the @opencode-ai/llm tool call back into the AI SDK Tool.execute shape.
+      // the @opencode/llm tool call back into the AI SDK Tool.execute shape.
       NativeTool.make({
         description: item.description ?? "",
         jsonSchema: nativeSchema(item.inputSchema),

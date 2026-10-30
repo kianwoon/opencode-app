@@ -1,6 +1,7 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Effect, Layer, Context, Schema } from "effect"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Snapshot } from "@/snapshot"
 import { Session } from "./session"
@@ -66,7 +67,7 @@ function unquoteGitPath(input: string) {
 export interface Interface {
   readonly summarize: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<void>
   readonly diff: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Snapshot.FileDiff[]>
-  readonly computeDiff: (input: { messages: SessionV1.WithParts[] }) => Effect.Effect<Snapshot.FileDiff[]>
+  readonly computeDiff: (input: { messages: WithParts[] }) => Effect.Effect<Snapshot.FileDiff[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionSummary") {}
@@ -79,7 +80,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const config = yield* Config.Service
 
-    const computeDiff = Effect.fn("SessionSummary.computeDiff")(function* (input: { messages: SessionV1.WithParts[] }) {
+    const computeDiff = Effect.fn("SessionSummary.computeDiff")(function* (input: { messages: WithParts[] }) {
       let from: string | undefined
       let to: string | undefined
       for (const item of input.messages) {

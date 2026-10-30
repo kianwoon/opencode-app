@@ -1,5 +1,5 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { openUrl } from "@opencode-ai/core/open"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { openUrl } from "@opencode/util/open"
 import { Context, Effect, Layer } from "effect"
 
 export interface Interface {

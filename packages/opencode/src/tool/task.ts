@@ -1,10 +1,11 @@
 import * as Tool from "./tool"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
-import { ORPHAN_ERROR } from "@opencode-ai/core/session/projector"
+import { ORPHAN_ERROR } from "@opencode/core/session/projector"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
@@ -14,16 +15,16 @@ import { Config } from "@/config/config"
 import { Effect, Exit, Option, Schema, Scope, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Database } from "@opencode-ai/core/database/database"
-import { PartTable } from "@opencode-ai/core/session/sql"
+import { Database } from "@opencode/core/database/database"
+import { SessionPartTable } from "@opencode/core/session/sql"
 import { and, eq, sql } from "drizzle-orm"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { InstanceState } from "@/effect/instance-state"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
-  prompt(input: SessionPrompt.PromptInput): Effect.Effect<SessionV1.WithParts>
+  prompt(input: SessionPrompt.PromptInput): Effect.Effect<WithParts>
 }
 
 export const id = "task"
@@ -293,21 +294,21 @@ export const TaskTool = Tool.define(
       // slips into the reuse path. The part rows are the durable record.
       const identicalTaskRows = yield* database.db
         .select({
-          callID: sql<string | null>`json_extract(${PartTable.data}, '$.callID')`,
-          status: sql<string | null>`json_extract(${PartTable.data}, '$.state.status')`,
-          subagentType: sql<string | null>`json_extract(${PartTable.data}, '$.state.input.subagent_type')`,
-          description: sql<string | null>`json_extract(${PartTable.data}, '$.state.input.description')`,
-          prompt: sql<string | null>`json_extract(${PartTable.data}, '$.state.input.prompt')`,
-          error: sql<string | null>`json_extract(${PartTable.data}, '$.state.error')`,
-          output: sql<string | null>`json_extract(${PartTable.data}, '$.state.output')`,
-          end: sql<number | null>`json_extract(${PartTable.data}, '$.state.time.end')`,
+          callID: sql<string | null>`json_extract(${SessionPartTable.data}, '$.callID')`,
+          status: sql<string | null>`json_extract(${SessionPartTable.data}, '$.state.status')`,
+          subagentType: sql<string | null>`json_extract(${SessionPartTable.data}, '$.state.input.subagent_type')`,
+          description: sql<string | null>`json_extract(${SessionPartTable.data}, '$.state.input.description')`,
+          prompt: sql<string | null>`json_extract(${SessionPartTable.data}, '$.state.input.prompt')`,
+          error: sql<string | null>`json_extract(${SessionPartTable.data}, '$.state.error')`,
+          output: sql<string | null>`json_extract(${SessionPartTable.data}, '$.state.output')`,
+          end: sql<number | null>`json_extract(${SessionPartTable.data}, '$.state.time.end')`,
         })
-        .from(PartTable)
+        .from(SessionPartTable)
         .where(
           and(
-            eq(PartTable.session_id, ctx.sessionID),
-            sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
-            sql`json_extract(${PartTable.data}, '$.tool') = ${id}`,
+            eq(SessionPartTable.session_id, ctx.sessionID),
+            sql`json_extract(${SessionPartTable.data}, '$.type') = 'tool'`,
+            sql`json_extract(${SessionPartTable.data}, '$.tool') = ${id}`,
           ),
         )
         .all()

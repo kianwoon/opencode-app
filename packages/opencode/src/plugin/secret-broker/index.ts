@@ -22,7 +22,7 @@
 import * as path from "node:path"
 import { readFile, stat } from "node:fs/promises"
 import { Cause, Effect } from "effect"
-import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import type { Hooks, PluginInput } from "@opencode/plugin"
 import type { Plugin } from "@/plugin"
 import { errorMessage } from "@/util/error"
 import { Allowlist } from "./allowlist"

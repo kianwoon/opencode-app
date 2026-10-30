@@ -1,8 +1,8 @@
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { ConfigV1 } from "@/compat/v1-config/config"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
@@ -16,11 +16,11 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
-import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
-import { NamedError } from "@opencode-ai/core/util/error"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { ConfigMCPV1 } from "@opencode/core/v1/config/mcp"
+import { NamedError } from "@/util/error"
+import { InstallationVersion } from "@/installation/version"
 import { withTimeout } from "@/util/timeout"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { McpOAuthPendingProvider, McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -29,12 +29,12 @@ import { TuiEvent } from "@/server/tui-event"
 import { Cause, Duration, Effect, Exit, Layer, Context, Schedule, Schema, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
-import { McpEvent } from "@opencode-ai/schema/mcp-event"
+import { McpEvent } from "@opencode/schema/mcp-event"
 import { McpBrowser } from "./browser"
-import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
+import { PtyEnvironment } from "@/compat/pty-environment"
 
 const DEFAULT_TIMEOUT = 30_000
 // Bounds how often a connected server with empty defs may be re-listed; without it
@@ -70,7 +70,7 @@ export const Failed = NamedError.create("MCPFailed", {
   name: Schema.String,
 })
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("MCP.NotFoundError", {
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("MCP.NotFoundError", {
   name: Schema.String,
 }) {}
 

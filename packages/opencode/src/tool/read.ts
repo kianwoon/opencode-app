@@ -1,8 +1,8 @@
 import { Effect, Option, Schema, Scope, Stream } from "effect"
-import { NonNegativeInt } from "@opencode-ai/core/schema"
+import { NonNegativeInt } from "@opencode/core/schema"
 import * as path from "path"
 import * as Tool from "./tool"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { LSP } from "@/lsp/lsp"
 import DESCRIPTION from "./read.txt"
 import { InstanceState } from "@/effect/instance-state"
@@ -19,7 +19,7 @@ const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
 const SUPPORTED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 
-class ReadStop extends Schema.TaggedErrorClass<ReadStop>()("ReadStop", {}) {}
+class ReadStop extends Schema.TaggedError<ReadStop>()("ReadStop", {}) {}
 
 // `offset` and `limit` were originally `z.coerce.number()` — the runtime
 // coercion was useful when the tool was called from a shell but serves no

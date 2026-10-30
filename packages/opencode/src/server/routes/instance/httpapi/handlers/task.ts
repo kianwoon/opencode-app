@@ -1,6 +1,6 @@
-import { Task } from "@opencode-ai/core/task"
+import { Task } from "@opencode/core/task"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { InstanceHttpApi } from "../api"
 import { TaskNotFoundError } from "../errors"
 import { TaskScheduler } from "@/task/scheduler"

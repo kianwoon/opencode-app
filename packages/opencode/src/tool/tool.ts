@@ -1,6 +1,7 @@
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { PermissionV1 } from "@opencode/schema/v1/permission"
 import { Effect, Schema } from "effect"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type { MessageV2 } from "../session/message-v2"
 import type { Permission } from "../permission"
@@ -21,7 +22,7 @@ export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
  * error class makes it matchable upstream, and its `message` getter produces
  * the model-facing prose that the AI SDK feeds back as the tool result.
  */
-export class InvalidArgumentsError extends Schema.TaggedErrorClass<InvalidArgumentsError>()(
+export class InvalidArgumentsError extends Schema.TaggedError<InvalidArgumentsError>()(
   "ToolInvalidArgumentsError",
   {
     tool: Schema.String,
@@ -40,7 +41,7 @@ export type Context<M extends Metadata = Metadata> = {
   abort: AbortSignal
   callID?: string
   extra?: { [key: string]: unknown }
-  messages: SessionV1.WithParts[]
+  messages: WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>
 }

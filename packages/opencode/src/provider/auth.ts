@@ -1,11 +1,11 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import type { AuthOAuthResult, Hooks } from "@opencode-ai/plugin"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import type { AuthOAuthResult, Hooks } from "@opencode/plugin"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { Auth } from "@/auth"
 import { InstanceState } from "@/effect/instance-state"
-import { optional } from "@opencode-ai/core/schema"
+import { optional } from "@opencode/core/schema"
 import { Plugin } from "../plugin"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Provider } from "@opencode/core/provider"
 import { Array as Arr, Effect, Layer, Record, Result, Context, Schema } from "effect"
 
 const When = Schema.Struct({
@@ -65,20 +65,20 @@ export const CallbackInput = Schema.Struct({
 })
 export type CallbackInput = Schema.Schema.Type<typeof CallbackInput>
 
-export class OauthMissing extends Schema.TaggedErrorClass<OauthMissing>()("ProviderAuthOauthMissing", {
-  providerID: ProviderV2.ID,
+export class OauthMissing extends Schema.TaggedError<OauthMissing>()("ProviderAuthOauthMissing", {
+  providerID: Provider.ID,
 }) {}
 
-export class OauthCodeMissing extends Schema.TaggedErrorClass<OauthCodeMissing>()("ProviderAuthOauthCodeMissing", {
-  providerID: ProviderV2.ID,
+export class OauthCodeMissing extends Schema.TaggedError<OauthCodeMissing>()("ProviderAuthOauthCodeMissing", {
+  providerID: Provider.ID,
 }) {}
 
-export class OauthCallbackFailed extends Schema.TaggedErrorClass<OauthCallbackFailed>()(
+export class OauthCallbackFailed extends Schema.TaggedError<OauthCallbackFailed>()(
   "ProviderAuthOauthCallbackFailed",
   {},
 ) {}
 
-export class ValidationFailed extends Schema.TaggedErrorClass<ValidationFailed>()("ProviderAuthValidationFailed", {
+export class ValidationFailed extends Schema.TaggedError<ValidationFailed>()("ProviderAuthValidationFailed", {
   field: Schema.String,
   message: Schema.String,
 }) {}
@@ -91,15 +91,15 @@ export interface Interface {
   readonly methods: () => Effect.Effect<Methods>
   readonly authorize: (
     input: {
-      providerID: ProviderV2.ID
+      providerID: Provider.ID
     } & AuthorizeInput,
   ) => Effect.Effect<Authorization | undefined, Error>
-  readonly callback: (input: { providerID: ProviderV2.ID } & CallbackInput) => Effect.Effect<void, Error>
+  readonly callback: (input: { providerID: Provider.ID } & CallbackInput) => Effect.Effect<void, Error>
 }
 
 interface State {
-  hooks: Record<ProviderV2.ID, Hook>
-  pending: Map<ProviderV2.ID, AuthOAuthResult>
+  hooks: Record<Provider.ID, Hook>
+  pending: Map<Provider.ID, AuthOAuthResult>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ProviderAuth") {}
@@ -118,11 +118,11 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
           hooks: Record.fromEntries(
             Arr.filterMap(plugins, (x) =>
               x.auth?.provider !== undefined
-                ? Result.succeed([ProviderV2.ID.make(x.auth.provider), x.auth] as const)
+                ? Result.succeed([Provider.ID.make(x.auth.provider), x.auth] as const)
                 : Result.failVoid,
             ),
           ),
-          pending: new Map<ProviderV2.ID, AuthOAuthResult>(),
+          pending: new Map<Provider.ID, AuthOAuthResult>(),
         }
       }),
     )
@@ -161,7 +161,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
     })
 
     const authorize = Effect.fn("ProviderAuth.authorize")(function* (
-      input: { providerID: ProviderV2.ID } & AuthorizeInput,
+      input: { providerID: Provider.ID } & AuthorizeInput,
     ) {
       const { hooks, pending } = yield* InstanceState.get(state)
       const method = hooks[input.providerID].methods[input.method]
@@ -186,7 +186,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
     })
 
     const callback = Effect.fn("ProviderAuth.callback")(function* (
-      input: { providerID: ProviderV2.ID } & CallbackInput,
+      input: { providerID: Provider.ID } & CallbackInput,
     ) {
       const pending = (yield* InstanceState.get(state)).pending
       const match = pending.get(input.providerID)

@@ -1,16 +1,16 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { llmClient } from "@opencode-ai/core/effect/app-node-platform"
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { llmClient } from "@opencode/core/effect/app-node-platform"
+import { PermissionV1 } from "@opencode/schema/v1/permission"
 import { Provider } from "@/provider/provider"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { APICallError, streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
 import { classifyProtocolError, protocolFromNpm } from "@/provider/protocol"
-import type { LLMEvent } from "@opencode-ai/llm"
-import { LLMClient } from "@opencode-ai/llm/route"
-import type { LLMClientService } from "@opencode-ai/llm/route"
+import type { LLMEvent } from "@opencode/ai"
+import { LLMClient } from "@opencode/ai/route"
+import type { LLMClientService } from "@opencode/ai/route"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
 import { Config } from "@/config/config"
@@ -19,14 +19,14 @@ import type { MessageV2 } from "./message-v2"
 import { Plugin } from "@/plugin"
 import { Permission } from "@/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { EventV2 } from "@opencode-ai/core/event"
+import { EventV2 } from "@opencode/core/event"
 import { Wildcard } from "@/util/wildcard"
 import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Option from "effect/Option"
-import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import * as OtelTracer from "@effect/opentelemetry/OtelTracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
@@ -223,7 +223,7 @@ const live: Layer.Layer<
           })
         : undefined
 
-      // Runtime seam: native is an opt-in adapter over @opencode-ai/llm. It
+      // Runtime seam: native is an opt-in adapter over @opencode/llm. It
       // either returns a ready LLMEvent stream or a concrete fallback reason.
       if (flags.experimentalNativeLlm) {
         const native = LLMNativeRuntime.stream({

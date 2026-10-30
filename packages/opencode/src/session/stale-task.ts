@@ -1,8 +1,8 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Database } from "@opencode-ai/core/database/database"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
-import { ORPHAN_ERROR } from "@opencode-ai/core/session/projector"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { Database } from "@opencode/core/database/database"
+import { SessionPartTable, SessionTable } from "@opencode/core/session/sql"
+import { ORPHAN_ERROR } from "@opencode/core/session/projector"
+import { SessionV1 } from "@opencode/schema/v1/session"
 import { Session } from "./session"
 import { SessionRunState } from "./run-state"
 import { Config } from "@/config/config"
@@ -203,21 +203,21 @@ const layer = Layer.effect(
         (cfg._tag === "Some" ? cfg.value.subagent_stale_timeout_ms : undefined) ??
         DEFAULT_STALE_TIMEOUT_MS
       const condition = input?.boot
-        ? sql`(json_extract(${PartTable.data}, '$.state.status') IN ('pending','running') OR (json_extract(${PartTable.data}, '$.state.status') = 'error' AND json_extract(${PartTable.data}, '$.state.error') = ${ORPHAN_ERROR} AND json_extract(${PartTable.data}, '$.state.metadata.staleEscalated') IS NULL))`
-        : sql`json_extract(${PartTable.data}, '$.state.status') IN ('pending','running')`
+        ? sql`(json_extract(${SessionPartTable.data}, '$.state.status') IN ('pending','running') OR (json_extract(${SessionPartTable.data}, '$.state.status') = 'error' AND json_extract(${SessionPartTable.data}, '$.state.error') = ${ORPHAN_ERROR} AND json_extract(${SessionPartTable.data}, '$.state.metadata.staleEscalated') IS NULL))`
+        : sql`json_extract(${SessionPartTable.data}, '$.state.status') IN ('pending','running')`
       const rows = yield* db
         .select({
-          id: PartTable.id,
-          message_id: PartTable.message_id,
-          session_id: PartTable.session_id,
-          data: PartTable.data,
-          time_created: PartTable.time_created,
+          id: SessionPartTable.id,
+          message_id: SessionPartTable.message_id,
+          session_id: SessionPartTable.session_id,
+          data: SessionPartTable.data,
+          time_created: SessionPartTable.time_created,
         })
-        .from(PartTable)
+        .from(SessionPartTable)
         .where(
           and(
-            sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
-            sql`json_extract(${PartTable.data}, '$.tool') = 'task'`,
+            sql`json_extract(${SessionPartTable.data}, '$.type') = 'tool'`,
+            sql`json_extract(${SessionPartTable.data}, '$.tool') = 'task'`,
             condition,
           ),
         )
@@ -288,15 +288,15 @@ const layer = Layer.effect(
           // Compare-and-set: if the owning turn settled the part between the
           // scan and now, leave its terminal state alone.
           const claimed = yield* db
-            .update(PartTable)
-            .set({ data: nextData as unknown as typeof PartTable.$inferInsert.data })
+            .update(SessionPartTable)
+            .set({ data: nextData as unknown as typeof SessionPartTable.$inferInsert.data })
             .where(
               and(
-                eq(PartTable.id, row.id),
-                sql`json_extract(${PartTable.data}, '$.state.status') IN ('pending','running')`,
+                eq(SessionPartTable.id, row.id),
+                sql`json_extract(${SessionPartTable.data}, '$.state.status') IN ('pending','running')`,
               ),
             )
-            .returning({ id: PartTable.id })
+            .returning({ id: SessionPartTable.id })
             .get()
             .pipe(Effect.orDie)
           if (!claimed) continue
@@ -333,17 +333,17 @@ const layer = Layer.effect(
             state: { ...state, metadata: { ...metadata, staleEscalated: true } },
           }
           const claimed = yield* db
-            .update(PartTable)
-            .set({ data: nextData as unknown as typeof PartTable.$inferInsert.data })
+            .update(SessionPartTable)
+            .set({ data: nextData as unknown as typeof SessionPartTable.$inferInsert.data })
             .where(
               and(
-                eq(PartTable.id, row.id),
-                sql`json_extract(${PartTable.data}, '$.state.status') = 'error'`,
-                sql`json_extract(${PartTable.data}, '$.state.error') = ${ORPHAN_ERROR}`,
-                sql`json_extract(${PartTable.data}, '$.state.metadata.staleEscalated') IS NULL`,
+                eq(SessionPartTable.id, row.id),
+                sql`json_extract(${SessionPartTable.data}, '$.state.status') = 'error'`,
+                sql`json_extract(${SessionPartTable.data}, '$.state.error') = ${ORPHAN_ERROR}`,
+                sql`json_extract(${SessionPartTable.data}, '$.state.metadata.staleEscalated') IS NULL`,
               ),
             )
-            .returning({ id: PartTable.id })
+            .returning({ id: SessionPartTable.id })
             .get()
             .pipe(Effect.orDie)
           if (!claimed) continue

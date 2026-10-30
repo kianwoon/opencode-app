@@ -88,4 +88,4 @@ export const layer = (overrides: Partial<Info> = {}) =>
 export const node = LayerNode.make({ service: Service, layer: Service.layer.pipe(Layer.orDie), deps: [] })
 
 export * as RuntimeFlags from "./runtime-flags"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"

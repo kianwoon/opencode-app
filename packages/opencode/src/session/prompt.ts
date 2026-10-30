@@ -1,7 +1,8 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { PermissionV1 } from "@opencode/schema/v1/permission"
 import path from "path"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import os from "os"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
@@ -22,28 +23,28 @@ import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import { redactErrorText } from "../plugin/secret-broker"
-import { MAX_STEPS_PROMPT } from "@opencode-ai/core/session/runner/max-steps"
+import { MAX_STEPS_PROMPT } from "@opencode/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
 import { MCP } from "../mcp"
 import { LSP } from "@/lsp/lsp"
 import { ulid } from "ulid"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import * as Stream from "effect/Stream"
 import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
 import { SessionSummary } from "./summary"
-import { NamedError } from "@opencode-ai/core/util/error"
+import { NamedError } from "@/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
-import { Shell } from "@opencode-ai/core/shell"
+import { Shell } from "@opencode/core/shell"
 import { ShellID } from "@/tool/shell/id"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
@@ -54,15 +55,15 @@ import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { Database } from "@opencode-ai/core/database/database"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Database } from "@opencode/core/database/database"
+import { Model } from "@opencode/core/model"
+import { ProviderV2 } from "@/compat/core-namespaces"
 import { and, asc, eq, isNull, lte, max } from "drizzle-orm"
-import { FollowupTable, SessionStableHeadTable, SessionTable, WorkflowAttemptTable } from "@opencode-ai/core/session/sql"
+import { FollowupTable, SessionStableHeadTable, SessionTable, WorkflowAttemptTable } from "@opencode/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { node as SessionTodoNode, Service as TodoService } from "./todo"
 import { SessionTools } from "./tools"
-import { LLMEvent } from "@opencode-ai/llm"
+import { LLMEvent } from "@opencode/ai"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -502,10 +503,10 @@ function governorTaskHash(text: string): string {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
-  readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
-  readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
-  readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly prompt: (input: PromptInput) => Effect.Effect<WithParts, Image.Error>
+  readonly loop: (input: LoopInput) => Effect.Effect<WithParts>
+  readonly shell: (input: ShellInput) => Effect.Effect<WithParts, Session.BusyError>
+  readonly command: (input: CommandInput) => Effect.Effect<WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
 
@@ -637,14 +638,14 @@ const layer = Layer.effect(
 
     const title = Effect.fn("SessionPrompt.ensureTitle")(function* (input: {
       session: Session.Info
-      history: SessionV1.WithParts[]
+      history: WithParts[]
       providerID: ProviderV2.ID
-      modelID: ModelV2.ID
+      modelID: Model.ID
     }) {
       if (input.session.parentID) return
       if (!Session.isDefaultTitle(input.session.title)) return
 
-      const real = (m: SessionV1.WithParts) =>
+      const real = (m: WithParts) =>
         m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
       const idx = input.history.findIndex(real)
       if (idx === -1) return
@@ -714,7 +715,7 @@ const layer = Layer.effect(
       lastUser: SessionV1.User
       sessionID: SessionID
       session: Session.Info
-      msgs: SessionV1.WithParts[]
+      msgs: WithParts[]
       /** Extra metadata stamped on the running task part (workflow step context). */
       partMetadata?: Record<string, unknown>
     }) {
@@ -941,7 +942,7 @@ const layer = Layer.effect(
       lastUser: SessionV1.User
       sessionID: SessionID
       session: Session.Info
-      msgs: SessionV1.WithParts[]
+      msgs: WithParts[]
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
       // The part is settled either way inside runSubagentTask; hard failures
@@ -1045,7 +1046,7 @@ const layer = Layer.effect(
       lastUser: SessionV1.User
       sessionID: SessionID
       session: Session.Info
-      msgs: SessionV1.WithParts[]
+      msgs: WithParts[]
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
 
@@ -1284,7 +1285,7 @@ const layer = Layer.effect(
       model: Provider.Model
       sessionID: SessionID
       session: Session.Info
-      msgs: SessionV1.WithParts[]
+      msgs: WithParts[]
       reason: string
     }) {
       const { lastUser, model, sessionID, session, msgs, reason } = input
@@ -1477,7 +1478,7 @@ const layer = Layer.effect(
 
     const getModel = Effect.fn("SessionPrompt.getModel")(function* (
       providerID: ProviderV2.ID,
-      modelID: ModelV2.ID,
+      modelID: Model.ID,
       sessionID: SessionID,
     ) {
       const exit = yield* provider.getModel(providerID, modelID).pipe(Effect.exit)
@@ -1505,7 +1506,7 @@ const layer = Layer.effect(
       if (current?.model) {
         return {
           providerID: ProviderV2.ID.make(current.model.providerID),
-          modelID: ModelV2.ID.make(current.model.id),
+          modelID: Model.ID.make(current.model.id),
           ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
         }
       }
@@ -1971,7 +1972,7 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+    const prompt: (input: PromptInput) => Effect.Effect<WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
@@ -2000,7 +2001,7 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID, source: "prompt" | "wake") => Effect.Effect<SessionV1.WithParts> = Effect.fn(
+    const runLoop: (sessionID: SessionID, source: "prompt" | "wake") => Effect.Effect<WithParts> = Effect.fn(
       "SessionPrompt.run",
     )(
       function* (sessionID, source) {
@@ -3089,7 +3090,7 @@ const layer = Layer.effect(
       },
     )
 
-    const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
+    const loop: (input: LoopInput) => Effect.Effect<WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
       return yield* state.ensureRunning(
@@ -3099,7 +3100,7 @@ const layer = Layer.effect(
       )
     })
 
-    const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
+    const shell: (input: ShellInput) => Effect.Effect<WithParts, Session.BusyError> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
       const ready = yield* Latch.make()
@@ -3246,7 +3247,7 @@ const layer = Layer.effect(
 
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
-  modelID: ModelV2.ID,
+  modelID: Model.ID,
 })
 
 export const PromptInput = Schema.Struct({

@@ -1,12 +1,12 @@
 import { Auth } from "@/auth"
 
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/http-api"
 import { described } from "./metadata"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Provider } from "@opencode/core/provider"
 
 const AuthParams = Schema.Struct({
-  providerID: ProviderV2.ID,
+  providerID: Provider.ID,
 })
 
 const LogQuery = Schema.Struct({

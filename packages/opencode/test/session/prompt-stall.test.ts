@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
 import { turnAdvancesWork, nextStall } from "@/session/prompt"
 
 const bash = (command: string): SessionV1.Part =>

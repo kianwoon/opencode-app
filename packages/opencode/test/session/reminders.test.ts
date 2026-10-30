@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { FSUtil } from "@opencode/util/fs-util"
+import { Provider } from "@opencode/core/provider"
+import { Model } from "@opencode/core/model"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Instruction } from "../../src/session/instruction"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
@@ -17,28 +18,28 @@ let sessionSeq = 0
 const freshSessionID = () => SessionID.make(`session-${++sessionSeq}`)
 
 // Fresh message per call: SessionReminders.apply mutates the parts array.
-const userMessage = (sessionID: SessionID): SessionV1.WithParts => ({
+const userMessage = (sessionID: SessionID): WithParts => ({
   info: {
     id: MessageID.make("msg_user"),
     sessionID,
     role: "user",
     time: { created: 0 },
     agent: "user",
-    model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+    model: { providerID: Provider.ID.make("test"), modelID: Model.ID.make("test") },
   } as unknown as SessionV1.User,
   parts: [],
 })
 
 // A prior compaction marker in the projected history: the drift signal that
 // re-anchors the rule reminder after a context reset.
-const compactionMessage = (sessionID: SessionID): SessionV1.WithParts => ({
+const compactionMessage = (sessionID: SessionID): WithParts => ({
   info: {
     id: MessageID.make(`msg_compact_${sessionID}`),
     sessionID,
     role: "user",
     time: { created: 0 },
     agent: "user",
-    model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+    model: { providerID: Provider.ID.make("test"), modelID: Model.ID.make("test") },
   } as unknown as SessionV1.User,
   parts: [
     {
@@ -84,7 +85,7 @@ const run = (
   rulePaths: string[],
   todos: Todo.Info[] = [],
   sessionID: SessionID = freshSessionID(),
-  prior: SessionV1.WithParts[] = [],
+  prior: WithParts[] = [],
 ) =>
   SessionReminders.apply({
     messages: [...prior, userMessage(sessionID)],
@@ -92,7 +93,7 @@ const run = (
     session: sessionInfo(sessionID),
   }).pipe(Effect.provide(layers(rulePaths, todos)))
 
-const reminderTexts = (msgs: SessionV1.WithParts[]) =>
+const reminderTexts = (msgs: WithParts[]) =>
   msgs
     .flatMap((msg) => msg.parts)
     .filter((part): part is SessionV1.TextPart => part.type === "text" && part.synthetic === true)

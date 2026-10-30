@@ -1,8 +1,8 @@
 import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
 import * as Http from "node:http"
 import { Deferred, Effect, Layer, Context, Stream } from "effect"
-import * as HttpServer from "effect/unstable/http/HttpServer"
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import * as HttpServer from "effect/http/HttpServer"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 
 export type Usage = { input: number; output: number }
 

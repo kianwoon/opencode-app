@@ -1,16 +1,17 @@
 import { afterEach, describe, expect } from "bun:test"
-import { Database } from "@opencode-ai/core/database/database"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { Task } from "@opencode-ai/core/task"
+import { Database } from "@opencode/core/database/database"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { AbsolutePath } from "@opencode/core/schema"
+import { Task } from "@opencode/core/task"
 import { Context, Effect, Layer } from "effect"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionPrompt } from "@/session/prompt"
 import { DecodeError } from "@/image/image"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { Model } from "@opencode/core/model"
+import { Provider } from "@opencode/core/provider"
 import { TaskScheduler } from "@/task/scheduler"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "../../src/project/bootstrap-service"
@@ -38,7 +39,7 @@ const resetPromptState = () => {
   promptState.busy.clear()
 }
 
-const reply = (input: SessionPrompt.PromptInput): SessionV1.WithParts => {
+const reply = (input: SessionPrompt.PromptInput): WithParts => {
   const id = MessageID.ascending()
   return {
     info: {
@@ -51,8 +52,8 @@ const reply = (input: SessionPrompt.PromptInput): SessionV1.WithParts => {
       cost: 0,
       path: { cwd: "/tmp", root: "/tmp" },
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      modelID: ModelV2.ID.make("test-model"),
-      providerID: ProviderV2.ID.make("test"),
+      modelID: Model.ID.make("test-model"),
+      providerID: Provider.ID.make("test"),
       time: { created: Date.now() },
       finish: "stop",
     },

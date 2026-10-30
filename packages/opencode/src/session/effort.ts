@@ -10,7 +10,7 @@
  * Same discipline as the verification gate: pure, synchronous, explainable —
  * keyword and structural signals only, no LLM call, no I/O.
  *
- * @module @opencode-ai/opencode/session/effort
+ * @module @opencode/opencode/session/effort
  */
 
 /** Budget tiers, ordered by ascending effort. */

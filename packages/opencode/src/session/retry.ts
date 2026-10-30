@@ -1,9 +1,9 @@
-import type { NamedError } from "@opencode-ai/core/util/error"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import type { NamedError } from "@/util/error"
+import { SessionV1 } from "@opencode/schema/v1/session"
 import { Cause, Clock, Duration, Effect, Schedule } from "effect"
 import { MessageV2 } from "./message-v2"
 import { iife } from "@/util/iife"
-import { isRecord } from "@/util/record"
+import { isRecord } from "@opencode/util/record"
 
 export type Err = ReturnType<NamedError["toObject"]>
 

@@ -1,5 +1,5 @@
-import type { JsonSchema, LLMRequest, ProviderMetadata } from "@opencode-ai/llm"
-import { LLM, Message, SystemPart, ToolCallPart, ToolDefinition, ToolResultPart } from "@opencode-ai/llm"
+import type { JsonSchema, LLMRequest, ProviderMetadata } from "@opencode/ai"
+import { LLM, Message, SystemPart, ToolCallPart, ToolDefinition, ToolResultPart } from "@opencode/ai"
 import {
   AmazonBedrock,
   Anthropic,
@@ -8,10 +8,10 @@ import {
   OpenAI,
   OpenAICompatible,
   OpenRouter,
-} from "@opencode-ai/llm/providers"
+} from "@opencode/ai/providers"
 import type { ModelMessage } from "ai"
 import type { Provider } from "@/provider/provider"
-import { isRecord } from "@/util/record"
+import { isRecord } from "@opencode/util/record"
 
 type ToolInput = {
   readonly description?: string
@@ -185,7 +185,7 @@ export const model = (input: Provider.Model | RequestInput, headers?: Record<str
 export const request = (input: RequestInput) => {
   const converted = messages(input.messages)
   // This is the only native adapter boundary that should construct canonical
-  // @opencode-ai/llm request objects from opencode's session/AI SDK-shaped data.
+  // @opencode/llm request objects from opencode's session/AI SDK-shaped data.
   return LLM.request({
     model: model(input, input.headers),
     system: [...(input.system ?? []).map(SystemPart.make), ...converted.system],

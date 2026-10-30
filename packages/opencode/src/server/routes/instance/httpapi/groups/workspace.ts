@@ -1,7 +1,7 @@
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterEntry } from "@/control-plane/types"
 import { Schema, Struct } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api"
 import { ApiVcsApplyError } from "./instance"
 import { ApiNotFoundError } from "../errors"
 import { Authorization } from "../middleware/authorization"

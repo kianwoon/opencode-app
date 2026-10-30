@@ -6,7 +6,7 @@
  * propagation. Keeping this pure makes it trivially unit-testable and lets the
  * loop dispatcher stay thin.
  *
- * @module @opencode-ai/opencode/session/workflow/dag
+ * @module @opencode/opencode/session/workflow/dag
  */
 
 /** One workflow step, as the scheduler sees it. */

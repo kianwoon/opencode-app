@@ -6,7 +6,7 @@ import path from "node:path"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
-import type * as ModelsDev from "@opencode-ai/core/models-dev"
+import type * as ModelsDev from "@opencode/core/models-dev"
 import { iife } from "@/util/iife"
 
 type Modality = NonNullable<ModelsDev.Model["modalities"]>["input"][number]
@@ -365,7 +365,7 @@ function normalizeMessages(
 
 function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
-  // Match the `@opencode-ai/llm` cache-policy "auto" shape: pin the trailing
+  // Match the `@opencode/llm` cache-policy "auto" shape: pin the trailing
   // breakpoint at the latest user message instead of a sliding last-N window,
   // so intra-turn tool-loop requests reuse one stable cached prefix.
   const lastUserIndex = msgs.findLastIndex((msg) => msg.role === "user")

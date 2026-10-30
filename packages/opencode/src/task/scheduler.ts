@@ -1,13 +1,13 @@
 export * as TaskScheduler from "./scheduler"
 
 import { Cause, Context, Effect, Layer, Schedule, Scope } from "effect"
-import { Task } from "@opencode-ai/core/task"
-import { RunID } from "@opencode-ai/core/task"
+import { Task } from "@opencode/core/task"
+import { RunID } from "@opencode/core/task"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionPrompt } from "@/session/prompt"
 import { InstanceStore } from "@/project/instance-store"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Cron } from "./cron"
 
 /** How often the scheduler wakes to claim due tasks. */

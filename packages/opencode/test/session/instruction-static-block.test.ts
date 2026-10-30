@@ -1,22 +1,23 @@
 import { describe, expect } from "bun:test"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import path from "path"
 import { Effect, FileSystem, Layer } from "effect"
 import { createHash } from "node:crypto"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { Provider } from "@opencode/core/provider"
+import { Model } from "@opencode/core/model"
 
 import { BLOCK_META, Instruction } from "../../src/session/instruction"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@opencode/util/global"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
+import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNodePlatform } from "@opencode/core/effect/app-node-platform"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { Config } from "@/config/config"
@@ -32,7 +33,7 @@ const it = testEffect(
 
 const messageID = MessageID.make("msg_static-block")
 
-function history(parts: SessionV1.Part[]): SessionV1.WithParts[] {
+function history(parts: SessionV1.Part[]): WithParts[] {
   return [
     {
       info: {
@@ -42,8 +43,8 @@ function history(parts: SessionV1.Part[]): SessionV1.WithParts[] {
         time: { created: 0 },
         agent: "build",
         model: {
-          providerID: ProviderV2.ID.make("anthropic"),
-          modelID: ModelV2.ID.make("claude-sonnet-4-20250514"),
+          providerID: Provider.ID.make("anthropic"),
+          modelID: Model.ID.make("claude-sonnet-4-20250514"),
         },
       },
       parts,
@@ -57,7 +58,7 @@ function persisted(text: string, hash: string, id = PartID.make("prt_static-bloc
   return { id, messageID, sessionID: SessionID.make("session-static-block"), type: "text", text, synthetic: true, metadata: { [BLOCK_META]: hash } }
 }
 
-function blockParts(messages: SessionV1.WithParts[]) {
+function blockParts(messages: WithParts[]) {
   return messages
     .flatMap((msg) => msg.parts)
     .filter((part): part is SessionV1.TextPart => part.type === "text" && part.metadata?.[BLOCK_META] !== undefined)

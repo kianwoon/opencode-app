@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Effect, Exit } from "effect"
 import * as Stream from "effect/Stream"
-import { LLMEvent } from "@opencode-ai/llm"
+import { LLMEvent } from "@opencode/ai"
 import { RepetitionGuard } from "@/session/llm/repetition-guard"
 import { MessageError } from "@/session/message-error"
 

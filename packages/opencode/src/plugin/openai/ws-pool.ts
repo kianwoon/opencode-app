@@ -1,6 +1,6 @@
 import WebSocket from "ws"
 import { ProviderError } from "@/provider/error"
-import { isRecord } from "@/util/record"
+import { isRecord } from "@opencode/util/record"
 import { OpenAIWebSocket } from "./ws"
 
 export const TITLE_HEADER = "x-opencode-title"

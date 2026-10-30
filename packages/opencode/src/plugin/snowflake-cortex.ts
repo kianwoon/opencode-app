@@ -1,9 +1,9 @@
-import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import type { Hooks, PluginInput } from "@opencode/plugin"
 import { OAUTH_DUMMY_KEY } from "../auth"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
+import { InstallationVersion } from "@/installation/version"
+import { OauthCallbackPage } from "@opencode/core/oauth/page"
 import { createServer } from "http"
-import { openUrl } from "@opencode-ai/core/open"
+import { openUrl } from "@opencode/util/open"
 
 const OAUTH_CLIENT_ID = "LOCAL_APPLICATION"
 const OAUTH_CALLBACK_HOST = "127.0.0.1"

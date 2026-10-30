@@ -10,7 +10,7 @@
  * Risky-file detection uses basename/path substring matching, mirroring the
  * effort router's keyword discipline: cheap, deterministic, explainable.
  *
- * @module @opencode-ai/opencode/session/verification
+ * @module @opencode/opencode/session/verification
  */
 
 export interface VerificationInput {

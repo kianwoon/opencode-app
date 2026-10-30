@@ -1,5 +1,6 @@
 import { Agent } from "@/agent/agent"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { MCP } from "@/mcp"
@@ -23,9 +24,9 @@ import { Session } from "./session"
 import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
 import { EffectBridge } from "@/effect/bridge"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { isRecord } from "@/util/record"
+import { ProviderV2 } from "@/compat/core-namespaces"
+import { Model } from "@opencode/core/model"
+import { isRecord } from "@opencode/util/record"
 import { errorMessage } from "@/util/error"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 
@@ -57,7 +58,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   session: Session.Info
   processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
   bypassAgentCheck: boolean
-  messages: SessionV1.WithParts[]
+  messages: WithParts[]
   promptOps: TaskPromptOps
   /** Raw `cfg.mcp` record, read by the caller for tool-search `alwaysLoad` lookups. */
   mcpConfig: Record<string, unknown>
@@ -111,7 +112,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   })
 
   for (const item of yield* registry.tools({
-    modelID: ModelV2.ID.make(input.model.api.id),
+    modelID: Model.ID.make(input.model.api.id),
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.session.permission,

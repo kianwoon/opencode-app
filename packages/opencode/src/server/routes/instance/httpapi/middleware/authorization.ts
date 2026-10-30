@@ -1,13 +1,13 @@
 import { ServerAuth } from "@/server/auth"
 import { Effect, Encoding, Layer, Redacted } from "effect"
-import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { HttpApiError, HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { HttpApiError, HttpApiMiddleware } from "effect/http-api"
 import { hasPtyConnectTicketURL } from "@/server/shared/pty-ticket"
 import { isPublicUIPath } from "@/server/shared/public-ui"
 export {
   Authorization as ServerAuthorization,
   authorizationLayer as serverAuthorizationLayer,
-} from "@opencode-ai/server/middleware/authorization"
+} from "@opencode/server/middleware/authorization"
 
 const AUTH_TOKEN_QUERY = "auth_token"
 const UNAUTHORIZED = 401

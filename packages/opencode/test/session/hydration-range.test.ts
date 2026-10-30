@@ -1,18 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { PartTable } from "@opencode-ai/core/session/sql"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { SessionProjector } from "@opencode/core/session/projector"
+import { SessionPartTable } from "@opencode/core/session/sql"
 import { Effect } from "effect"
 import { eq, inArray } from "drizzle-orm"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
-import { Database } from "@opencode-ai/core/database/database"
+import { Database } from "@opencode/core/database/database"
 import { NotFoundError } from "@/storage/storage"
 import { testEffect } from "../lib/effect"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { Provider } from "@opencode/core/provider"
+import { Model } from "@opencode/core/model"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([SessionNs.node, MessageV2.node, SessionProjector.node])))
 
@@ -67,8 +68,8 @@ const addAssistant = Effect.fn("Test.addAssistant")(function* (
     role: "assistant",
     time: { created: Date.now() },
     parentID,
-    modelID: ModelV2.ID.make("test"),
-    providerID: ProviderV2.ID.make("test"),
+    modelID: Model.ID.make("test"),
+    providerID: Provider.ID.make("test"),
     mode: "",
     agent: "default",
     path: { cwd: "/", root: "/" },
@@ -339,15 +340,15 @@ describe("MessageV2.filterCompactedEffect (range hydration)", () => {
         const { db } = yield* Database.Service
         const selectedIds = result.map((item) => item.info.id)
         const hydratedParts = yield* db
-          .select({ message_id: PartTable.message_id })
-          .from(PartTable)
-          .where(inArray(PartTable.message_id, selectedIds))
+          .select({ message_id: SessionPartTable.message_id })
+          .from(SessionPartTable)
+          .where(inArray(SessionPartTable.message_id, selectedIds))
           .all()
           .pipe(Effect.orDie)
         const allParts = yield* db
-          .select({ message_id: PartTable.message_id })
-          .from(PartTable)
-          .where(eq(PartTable.session_id, sessionID))
+          .select({ message_id: SessionPartTable.message_id })
+          .from(SessionPartTable)
+          .where(eq(SessionPartTable.session_id, sessionID))
           .all()
           .pipe(Effect.orDie)
         const hydratedMessages = new Set(hydratedParts.map((row) => row.message_id))
@@ -365,7 +366,7 @@ describe("MessageV2.filterCompactedEffect (range hydration)", () => {
 describe("filterCompactedSkeleton shared boundary logic", () => {
   test("accepts full WithParts and plain arrays", () => {
     const id = MessageID.ascending()
-    const items: SessionV1.WithParts[] = [
+    const items: WithParts[] = [
       {
         info: {
           id,

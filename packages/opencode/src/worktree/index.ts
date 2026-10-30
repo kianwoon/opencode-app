@@ -1,23 +1,23 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { path } from "@opencode-ai/core/effect/app-node-platform"
-import { Global } from "@opencode-ai/core/global"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { path } from "@opencode/core/effect/app-node-platform"
+import { Global } from "@opencode/util/global"
 import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"
-import { Database } from "@opencode-ai/core/database/database"
+import { Database } from "@opencode/core/database/database"
 import { eq } from "drizzle-orm"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
-import type { ProjectV2 } from "@opencode-ai/core/project"
-import { Slug } from "@opencode-ai/core/util/slug"
+import { ProjectTable } from "@opencode/core/project/sql"
+import type { ProjectV2 } from "@/compat/core-namespaces"
+import { Slug } from "@opencode/core/util/slug"
 import { errorMessage } from "../util/error"
 import { GlobalBus } from "@/bus/global"
 import { Git } from "@/git"
 import { Effect, Layer, Path, Schema, Scope, Context } from "effect"
-import { ChildProcess } from "effect/unstable/process"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { AppProcess } from "@opencode-ai/core/process"
-import { resolveBinary } from "@opencode-ai/core/git"
+import { ChildProcess } from "effect/process"
+import { FSUtil } from "@opencode/util/fs-util"
+import { AppProcess } from "@opencode/util/process"
+import { gitExecutable } from "@opencode/core/util/git-executable"
 import { InstanceState } from "@/effect/instance-state"
-import { WorktreeEvent } from "@opencode-ai/schema/worktree-event"
+import { WorktreeEvent } from "@opencode/schema/worktree-event"
 
 export const Event = WorktreeEvent
 
@@ -46,37 +46,37 @@ export const ResetInput = Schema.Struct({
 }).annotate({ identifier: "WorktreeResetInput" })
 export type ResetInput = Schema.Schema.Type<typeof ResetInput>
 
-export class NotGitError extends Schema.TaggedErrorClass<NotGitError>()("WorktreeNotGitError", {
+export class NotGitError extends Schema.TaggedError<NotGitError>()("WorktreeNotGitError", {
   message: Schema.String,
 }) {}
 
-export class NameGenerationFailedError extends Schema.TaggedErrorClass<NameGenerationFailedError>()(
+export class NameGenerationFailedError extends Schema.TaggedError<NameGenerationFailedError>()(
   "WorktreeNameGenerationFailedError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class CreateFailedError extends Schema.TaggedErrorClass<CreateFailedError>()("WorktreeCreateFailedError", {
+export class CreateFailedError extends Schema.TaggedError<CreateFailedError>()("WorktreeCreateFailedError", {
   message: Schema.String,
 }) {}
 
-export class StartCommandFailedError extends Schema.TaggedErrorClass<StartCommandFailedError>()(
+export class StartCommandFailedError extends Schema.TaggedError<StartCommandFailedError>()(
   "WorktreeStartCommandFailedError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class RemoveFailedError extends Schema.TaggedErrorClass<RemoveFailedError>()("WorktreeRemoveFailedError", {
+export class RemoveFailedError extends Schema.TaggedError<RemoveFailedError>()("WorktreeRemoveFailedError", {
   message: Schema.String,
 }) {}
 
-export class ResetFailedError extends Schema.TaggedErrorClass<ResetFailedError>()("WorktreeResetFailedError", {
+export class ResetFailedError extends Schema.TaggedError<ResetFailedError>()("WorktreeResetFailedError", {
   message: Schema.String,
 }) {}
 
-export class ListFailedError extends Schema.TaggedErrorClass<ListFailedError>()("WorktreeListFailedError", {
+export class ListFailedError extends Schema.TaggedError<ListFailedError>()("WorktreeListFailedError", {
   message: Schema.String,
 }) {}
 
@@ -147,7 +147,7 @@ const layer: Layer.Layer<
     const fs = yield* FSUtil.Service
     const pathSvc = yield* Path.Path
     const appProcess = yield* AppProcess.Service
-    const gitBinary = yield* resolveBinary(appProcess)
+    const gitBinary = gitExecutable()
     const { db } = yield* Database.Service
     const gitSvc = yield* Git.Service
     const project = yield* Project.Service

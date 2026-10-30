@@ -1,4 +1,4 @@
-import type { Model } from "@opencode-ai/sdk/v2"
+import type { Model } from "@opencode/sdk"
 import { Schema } from "effect"
 
 const reasoningOption = Schema.Struct({

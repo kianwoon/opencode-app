@@ -1,12 +1,12 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Effect, Layer, Context, Schema, Scope } from "effect"
 import { formatPatch, structuredPatch } from "diff"
 import { InstanceState } from "@/effect/instance-state"
-import { Watcher } from "@opencode-ai/core/filesystem/watcher"
+import { Watcher } from "@opencode/core/filesystem/watcher"
 import { Git } from "@/git"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { EventV2 } from "@opencode-ai/core/event"
-import { VcsEvent } from "@opencode-ai/schema/vcs-event"
+import { EventV2 } from "@opencode/core/event"
+import { VcsEvent } from "@opencode/schema/vcs-event"
 
 const PATCH_CONTEXT_LINES = 2_147_483_647
 const MAX_PATCH_BYTES = 10_000_000
@@ -273,7 +273,7 @@ export const ApplyResult = Schema.Struct({
 })
 export type ApplyResult = Schema.Schema.Type<typeof ApplyResult>
 
-export class PatchApplyError extends Schema.TaggedErrorClass<PatchApplyError>()("VcsPatchApplyError", {
+export class PatchApplyError extends Schema.TaggedError<PatchApplyError>()("VcsPatchApplyError", {
   message: Schema.String,
   reason: Schema.Literals(["non-git", "not-clean"]),
 }) {}

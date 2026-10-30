@@ -1,19 +1,19 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { httpClient } from "@opencode/core/effect/app-node-platform"
 import { Effect, Layer, Schema, Context, Stream } from "effect"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { serviceUse } from "@opencode/core/effect/service-use"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { errorMessage } from "@/util/error"
-import { ChildProcess } from "effect/unstable/process"
-import { AppProcess } from "@opencode-ai/core/process"
+import { ChildProcess } from "effect/process"
+import { AppProcess } from "@opencode/util/process"
 import path from "path"
-import { makeRuntime } from "@opencode-ai/core/effect/runtime"
+import { makeRuntime } from "@opencode/core/effect/runtime"
 import semver from "semver"
-import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
-import { NpmConfig } from "@opencode-ai/core/npm-config"
-import { InstallationEvent } from "@opencode-ai/schema/installation-event"
+import { InstallationChannel, InstallationVersion } from "@/installation/version"
+import { NpmConfig } from "@opencode/util/npm-config"
+import { InstallationEvent } from "@opencode/schema/installation-event"
 
 export type Method = "curl" | "npm" | "yarn" | "pnpm" | "bun" | "brew" | "scoop" | "choco" | "unknown"
 
@@ -52,7 +52,7 @@ export function isLocal() {
   return InstallationChannel === "local"
 }
 
-export class UpgradeFailedError extends Schema.TaggedErrorClass<UpgradeFailedError>()("UpgradeFailedError", {
+export class UpgradeFailedError extends Schema.TaggedError<UpgradeFailedError>()("UpgradeFailedError", {
   stderr: Schema.String,
 }) {
   override get message() {

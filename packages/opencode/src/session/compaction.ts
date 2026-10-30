@@ -1,6 +1,7 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { ConfigV1 } from "@/compat/v1-config/config"
 import { Session } from "./session"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Provider } from "@/provider/provider"
@@ -15,13 +16,13 @@ import { NotFoundError } from "@/storage/storage"
 import { Effect, Layer, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow, usable } from "./overflow"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { buildPrompt } from "@opencode-ai/core/session/compaction"
-import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { ProviderV2 } from "@/compat/core-namespaces"
+import { Model } from "@opencode/core/model"
+import { buildPrompt } from "@opencode/core/session/compaction"
+import { SessionCompactionEvent } from "@/compat/schema/session-compaction-event"
 
 export const Event = SessionCompactionEvent
 
@@ -51,7 +52,7 @@ type CompletedCompaction = {
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
 
-const serialize = (message: SessionV1.WithParts) => {
+const serialize = (message: WithParts) => {
   if (message.info.role === "user") {
     const text = message.parts
       .filter((part): part is SessionV1.TextPart => part.type === "text" && !part.ignored)
@@ -84,7 +85,7 @@ const serialize = (message: SessionV1.WithParts) => {
     .join("\n")
 }
 
-function summaryText(message: SessionV1.WithParts) {
+function summaryText(message: WithParts) {
   const text = message.parts
     .filter((part): part is SessionV1.TextPart => part.type === "text")
     .map((part) => part.text.trim())
@@ -94,7 +95,7 @@ function summaryText(message: SessionV1.WithParts) {
   return text || undefined
 }
 
-function completedCompactions(messages: SessionV1.WithParts[]) {
+function completedCompactions(messages: WithParts[]) {
   const users = new Map<MessageID, number>()
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
@@ -119,7 +120,7 @@ function preserveRecentBudget(input: { cfg: ConfigV1.Info; model: Provider.Model
   )
 }
 
-function turns(messages: SessionV1.WithParts[]) {
+function turns(messages: WithParts[]) {
   const result: Turn[] = []
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
@@ -138,11 +139,11 @@ function turns(messages: SessionV1.WithParts[]) {
 }
 
 function splitTurn(input: {
-  messages: SessionV1.WithParts[]
+  messages: WithParts[]
   turn: Turn
   model: Provider.Model
   budget: number
-  estimate: (input: { messages: SessionV1.WithParts[]; model: Provider.Model }) => Effect.Effect<number>
+  estimate: (input: { messages: WithParts[]; model: Provider.Model }) => Effect.Effect<number>
 }) {
   return Effect.gen(function* () {
     if (input.budget <= 0) return undefined
@@ -170,7 +171,7 @@ export interface Interface {
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
     parentID: MessageID
-    messages: SessionV1.WithParts[]
+    messages: WithParts[]
     sessionID: SessionID
     auto: boolean
     overflow?: boolean
@@ -178,7 +179,7 @@ export interface Interface {
   readonly create: (input: {
     sessionID: SessionID
     agent: string
-    model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+    model: { providerID: ProviderV2.ID; modelID: Model.ID }
     auto: boolean
     overflow?: boolean
   }) => Effect.Effect<void>
@@ -213,7 +214,7 @@ const layer = Layer.effect(
     })
 
     const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
-      messages: SessionV1.WithParts[]
+      messages: WithParts[]
       model: Provider.Model
     }) {
       const msgs = yield* MessageV2.toModelMessagesEffect(input.messages, input.model)
@@ -221,7 +222,7 @@ const layer = Layer.effect(
     })
 
     const select = Effect.fn("SessionCompaction.select")(function* (input: {
-      messages: SessionV1.WithParts[]
+      messages: WithParts[]
       cfg: ConfigV1.Info
       model: Provider.Model
     }) {
@@ -333,7 +334,7 @@ const layer = Layer.effect(
 
     const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: {
       parentID: MessageID
-      messages: SessionV1.WithParts[]
+      messages: WithParts[]
       sessionID: SessionID
       auto: boolean
       overflow?: boolean
@@ -574,7 +575,7 @@ const layer = Layer.effect(
     const create = Effect.fn("SessionCompaction.create")(function* (input: {
       sessionID: SessionID
       agent: string
-      model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+      model: { providerID: ProviderV2.ID; modelID: Model.ID }
       auto: boolean
       overflow?: boolean
     }) {

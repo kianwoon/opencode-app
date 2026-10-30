@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer, type Server } from "node:http"
 import { streamText } from "ai"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { Effect } from "effect"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@/compat/core-namespaces"
+import { Model } from "@opencode/core/model"
 import { disposeAllInstances, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { testProviderConfig } from "../lib/test-provider"
@@ -36,7 +36,7 @@ it.live("heartbeat-only stream still stalls at chunkTimeout", () =>
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), Model.ID.make("test-model"))
           const result = streamText({
             model: yield* provider.getLanguage(model),
             onError() {},
@@ -76,7 +76,7 @@ it.live("healthy data stream does not stall", () =>
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), Model.ID.make("test-model"))
           const result = streamText({
             model: yield* provider.getLanguage(model),
             messages: [{ role: "user", content: "hello" }],

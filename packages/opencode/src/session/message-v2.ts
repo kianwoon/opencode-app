@@ -1,6 +1,7 @@
 import { SessionID, MessageID } from "./schema"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { ProviderV2 } from "@/compat/core-namespaces"
 import {
   APIError,
   AbortedError,
@@ -13,15 +14,14 @@ import {
   Part,
   SubtaskPart,
   User,
-  WithParts,
   WorkflowPart,
-} from "@opencode-ai/core/v1/session"
+} from "@opencode/schema/v1/session"
 
-import { NamedError } from "@opencode-ai/core/util/error"
+import { NamedError } from "@/util/error"
 import { MessageError } from "./message-error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
-import { Database } from "@opencode-ai/core/database/database"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Database } from "@opencode/core/database/database"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { NotFoundError } from "@/storage/storage"
 import { and } from "drizzle-orm"
 import { desc } from "drizzle-orm"
@@ -30,7 +30,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import { sql } from "drizzle-orm"
-import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { MessageTable, SessionPartTable, SessionTable } from "@opencode/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
@@ -97,7 +97,7 @@ const info = (row: typeof MessageTable.$inferSelect) =>
     sessionID: row.session_id,
   }) as Info
 
-const part = (row: typeof PartTable.$inferSelect) =>
+const part = (row: typeof SessionPartTable.$inferSelect) =>
   ({
     ...row.data,
     id: row.id,
@@ -115,9 +115,9 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
     if (ids.length > 0) {
       const partRows = yield* db
         .select()
-        .from(PartTable)
-        .where(inArray(PartTable.message_id, ids))
-        .orderBy(PartTable.message_id, PartTable.id)
+        .from(SessionPartTable)
+        .where(inArray(SessionPartTable.message_id, ids))
+        .orderBy(SessionPartTable.message_id, SessionPartTable.id)
         .all()
         .pipe(Effect.orDie)
       for (const row of partRows) {
@@ -527,9 +527,9 @@ export function parts(messageID: MessageID) {
     const { db } = yield* Database.Service
     const rows = yield* db
       .select()
-      .from(PartTable)
-      .where(eq(PartTable.message_id, messageID))
-      .orderBy(PartTable.id)
+      .from(SessionPartTable)
+      .where(eq(SessionPartTable.message_id, messageID))
+      .orderBy(SessionPartTable.id)
       .all()
       .pipe(Effect.orDie)
     return rows.map(part)
@@ -651,12 +651,12 @@ export const filterCompactedEffect = Effect.fn("MessageV2.filterCompacted")(func
   // Compaction markers live in rare part rows; fetch them without hydrating payloads.
   const compactionRows = rows.length
     ? yield* db
-        .select({ message_id: PartTable.message_id, tail: sql<string | null>`json_extract(${PartTable.data}, '$.tail_start_id')` })
-        .from(PartTable)
+        .select({ message_id: SessionPartTable.message_id, tail: sql<string | null>`json_extract(${SessionPartTable.data}, '$.tail_start_id')` })
+        .from(SessionPartTable)
         .where(
           and(
-            inArray(PartTable.message_id, rows.map((row) => row.id)),
-            sql`json_extract(${PartTable.data}, '$.type') = 'compaction'`,
+            inArray(SessionPartTable.message_id, rows.map((row) => row.id)),
+            sql`json_extract(${SessionPartTable.data}, '$.type') = 'compaction'`,
           ),
         )
         .all()

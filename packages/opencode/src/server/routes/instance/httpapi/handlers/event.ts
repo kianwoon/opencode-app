@@ -1,12 +1,12 @@
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
-import { EventV2 } from "@opencode-ai/core/event"
+import { EventV2 } from "@opencode/core/event"
 import { Effect, Queue } from "effect"
 import * as Stream from "effect/Stream"
-import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
-import * as Sse from "effect/unstable/encoding/Sse"
+import { HttpServerResponse } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
+import * as Sse from "effect/encoding/Sse"
 import { EventApi } from "../groups/event"
 
 // Sliding = drop-oldest under overload. A client that falls far enough behind

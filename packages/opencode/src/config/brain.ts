@@ -1,6 +1,6 @@
 export * as ConfigBrain from "./brain"
 
-import type { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import type { ConfigV1 } from "@/compat/v1-config/config"
 
 // Default-deny: MCP tools are named `<server>_<tool>` and `disabled()`
 // (permission/index.ts:219) hides a tool only when its NAME matches a rule, so a

@@ -1,7 +1,7 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { PermissionV1 } from "@opencode/schema/v1/permission"
 import { Config } from "@/config/config"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { Provider } from "@/provider/provider"
 
 import { generateObject, streamObject, type ModelMessage } from "ai"
@@ -16,21 +16,21 @@ import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@opencode/util/global"
 import path from "path"
 import { Plugin } from "@/plugin"
 import { Skill } from "../skill"
 import { Effect, Context, Layer, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import * as Option from "effect/Option"
-import * as OtelTracer from "@effect/opentelemetry/Tracer"
-import { AbsolutePath, type DeepMutable } from "@opencode-ai/core/schema"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
-import { Reference } from "@opencode-ai/core/reference"
-import { Location } from "@opencode-ai/core/location"
-import { PluginV2 } from "@opencode-ai/core/plugin"
+import * as OtelTracer from "@effect/opentelemetry/OtelTracer"
+import { AbsolutePath, type DeepMutable } from "@opencode/core/schema"
+import { ProviderV2 } from "@/compat/core-namespaces"
+import { Model } from "@opencode/core/model"
+import { LocationServiceMap, locationServiceMapLayer } from "@opencode/core/location-services"
+import { Reference } from "@opencode/core/reference"
+import { Location } from "@opencode/core/location"
+import { PluginV2 } from "@opencode/core/plugin"
 import type { MdDerived } from "@/config/agent"
 
 export const Info = Schema.Struct({
@@ -50,7 +50,7 @@ export const Info = Schema.Struct({
   permission: PermissionV1.Ruleset,
   model: Schema.optional(
     Schema.Struct({
-      modelID: ModelV2.ID,
+      modelID: Model.ID,
       providerID: ProviderV2.ID,
     }),
   ),
@@ -77,7 +77,7 @@ export interface Interface {
   readonly defaultAgent: () => Effect.Effect<string>
   readonly generate: (input: {
     description: string
-    model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+    model?: { providerID: ProviderV2.ID; modelID: Model.ID }
   }) => Effect.Effect<
     {
       identifier: string
@@ -390,7 +390,7 @@ const layer = Layer.effect(
       }),
       generate: Effect.fn("Agent.generate")(function* (input: {
         description: string
-        model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+        model?: { providerID: ProviderV2.ID; modelID: Model.ID }
       }) {
         const cfg = yield* config.get()
         const model = input.model ?? (yield* provider.defaultModel())

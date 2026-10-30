@@ -1,34 +1,34 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import os from "os"
-import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { ConfigV1 } from "@/compat/v1-config/config"
 import fuzzysort from "fuzzysort"
 import { Config } from "@/config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
-import { Npm } from "@opencode-ai/core/npm"
-import { Hash } from "@opencode-ai/core/util/hash"
+import { Npm } from "@opencode/util/npm"
+import { Hash } from "@opencode/util/hash"
 import { Plugin } from "../plugin"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
-import { ModelsDev } from "@opencode-ai/core/models-dev"
+import { ModelsDev } from "@opencode/core/models-dev"
 import { Auth } from "../auth"
 import { Env } from "../env"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationVersion } from "@/installation/version"
 import { iife } from "@/util/iife"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@opencode/util/global"
 import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, Context, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { isRecord } from "@/util/record"
-import { optional } from "@opencode-ai/core/schema"
+import { FSUtil } from "@opencode/util/fs-util"
+import { isRecord } from "@opencode/util/record"
+import { optional } from "@opencode/core/schema"
 import { protocolFromNpm, suggestProtocolFromBaseURL } from "./protocol"
 import { ProviderTransform } from "./transform"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@/compat/core-namespaces"
+import { ModelV2 } from "@/compat/core-namespaces"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
@@ -340,7 +340,7 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   "@ai-sdk/alibaba": () => import("@ai-sdk/alibaba").then((m) => m.createAlibaba),
   "gitlab-ai-provider": () => import("gitlab-ai-provider").then((m) => m.createGitLab),
   "@ai-sdk/github-copilot": () =>
-    import("@opencode-ai/core/github-copilot/copilot-provider").then((m) => m.createOpenaiCompatible),
+    import("@opencode/core/github-copilot/copilot-provider").then((m) => m.createOpenaiCompatible),
   "venice-ai-sdk-provider": () => import("venice-ai-sdk-provider").then((m) => m.createVenice),
 }
 
@@ -1359,7 +1359,7 @@ export function defaultModelIDs<T extends { models: Record<string, { id: string 
   return mapValues(providers, (item) => sort(Object.values(item.models))[0].id)
 }
 
-export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundError>()("ProviderModelNotFoundError", {
+export class ModelNotFoundError extends Schema.TaggedError<ModelNotFoundError>()("ProviderModelNotFoundError", {
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
   suggestions: Schema.optional(Schema.Array(Schema.String)),
@@ -1375,7 +1375,7 @@ export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundErr
   }
 }
 
-export class InitError extends Schema.TaggedErrorClass<InitError>()("ProviderInitError", {
+export class InitError extends Schema.TaggedError<InitError>()("ProviderInitError", {
   providerID: ProviderV2.ID,
   cause: Schema.optional(Schema.Defect()),
 }) {
@@ -1388,7 +1388,7 @@ export class InitError extends Schema.TaggedErrorClass<InitError>()("ProviderIni
   }
 }
 
-export class NoProvidersError extends Schema.TaggedErrorClass<NoProvidersError>()("ProviderNoProvidersError", {}) {
+export class NoProvidersError extends Schema.TaggedError<NoProvidersError>()("ProviderNoProvidersError", {}) {
   override get message() {
     return "No providers are available"
   }
@@ -1398,7 +1398,7 @@ export class NoProvidersError extends Schema.TaggedErrorClass<NoProvidersError>(
   }
 }
 
-export class NoModelsError extends Schema.TaggedErrorClass<NoModelsError>()("ProviderNoModelsError", {
+export class NoModelsError extends Schema.TaggedError<NoModelsError>()("ProviderNoModelsError", {
   providerID: ProviderV2.ID,
 }) {
   override get message() {

@@ -1,9 +1,9 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import path from "path"
 import { Effect, Layer, Record, Result, Schema, Context } from "effect"
-import { NonNegativeInt } from "@opencode-ai/core/schema"
-import { Global } from "@opencode-ai/core/global"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { NonNegativeInt } from "@opencode/core/schema"
+import { Global } from "@opencode/util/global"
+import { FSUtil } from "@opencode/util/fs-util"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
@@ -35,7 +35,7 @@ export class WellKnown extends Schema.Class<WellKnown>("WellKnownAuth")({
 export const Info = Schema.Union([Oauth, Api, WellKnown]).annotate({ discriminator: "type", identifier: "Auth" })
 export type Info = Schema.Schema.Type<typeof Info>
 
-export class AuthError extends Schema.TaggedErrorClass<AuthError>()("AuthError", {
+export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}

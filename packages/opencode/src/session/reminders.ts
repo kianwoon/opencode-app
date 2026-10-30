@@ -1,8 +1,9 @@
 import path from "path"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { Effect } from "effect"
 import { Agent } from "@/agent/agent"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Instruction } from "./instruction"
@@ -32,14 +33,14 @@ const ruleAnchors = new Map<string, string>()
  * marker on its user message, so its presence (and id) is observable in the
  * transform input; a new marker means the visible context was reset.
  */
-const compactionSignal = (messages: SessionV1.WithParts[]): string =>
+const compactionSignal = (messages: WithParts[]): string =>
   messages
     .flatMap((message) => message.parts)
     .flatMap((part) => (part.type === "compaction" ? [part.id] : []))
     .join(",")
 
 export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
-  messages: SessionV1.WithParts[]
+  messages: WithParts[]
   agent: Agent.Info
   session: Session.Info
 }) {

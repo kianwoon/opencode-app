@@ -6,7 +6,7 @@ import { APICallError } from "ai"
 import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
 import { ProxyEnv } from "@/util/proxy-env"
-import { isRecord } from "@/util/record"
+import { isRecord } from "@opencode/util/record"
 
 export const PROTOCOL_HEADER = "responses_websockets=2026-02-06"
 export const MESSAGE_TOO_BIG_CLOSE_CODE = 1009

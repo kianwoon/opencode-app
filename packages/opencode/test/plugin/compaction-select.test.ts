@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { Npm } from "@opencode-ai/core/npm"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { Npm } from "@opencode/util/npm"
 import path from "path"
 import { pathToFileURL } from "url"
 import { Account } from "../../src/account/account"
@@ -14,8 +14,8 @@ import { testEffect } from "../lib/effect"
 import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Plugin.node, CrossSpawnSpawner.node]), [

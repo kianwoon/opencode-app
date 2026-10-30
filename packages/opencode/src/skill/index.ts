@@ -1,21 +1,21 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import path from "path"
 import { Effect, Layer, Context, Schema } from "effect"
-import { NamedError } from "@opencode-ai/core/util/error"
+import { NamedError } from "@/util/error"
 import type { Agent } from "@/agent/agent"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
-import { Global } from "@opencode-ai/core/global"
-import { SkillPlugin } from "@opencode-ai/core/plugin/skill"
+import { Global } from "@opencode/util/global"
+import { SkillPlugin } from "@opencode/core/plugin/skill"
 import { Permission } from "@/permission"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Config } from "@/config/config"
-import { FrontmatterError } from "@opencode-ai/core/v1/config/error"
+import { FrontmatterError } from "@/compat/v1-config/error"
 import { ConfigMarkdown } from "@/config/markdown"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Glob } from "@opencode-ai/core/util/glob"
+import { Glob } from "@opencode/util/glob"
 import { Discovery } from "./discovery"
-import { isRecord } from "@/util/record"
+import { isRecord } from "@opencode/util/record"
 import { escapeHtml } from "@/util/html"
 
 const CLAUDE_EXTERNAL_DIR = ".claude"
@@ -58,19 +58,19 @@ function isSkillFrontmatter(data: unknown): data is { name: string; description?
   )
 }
 
-export class InvalidError extends Schema.TaggedErrorClass<InvalidError>()("SkillInvalidError", {
+export class InvalidError extends Schema.TaggedError<InvalidError>()("SkillInvalidError", {
   path: Schema.String,
   message: Schema.optional(Schema.String),
   issues: Schema.optional(Schema.Array(Issue)),
 }) {}
 
-export class NameMismatchError extends Schema.TaggedErrorClass<NameMismatchError>()("SkillNameMismatchError", {
+export class NameMismatchError extends Schema.TaggedError<NameMismatchError>()("SkillNameMismatchError", {
   path: Schema.String,
   expected: Schema.String,
   actual: Schema.String,
 }) {}
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Skill.NotFoundError", {
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Skill.NotFoundError", {
   name: Schema.String,
   available: Schema.Array(Schema.String),
 }) {
@@ -79,7 +79,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ski
   }
 }
 
-export class NotRemovableError extends Schema.TaggedErrorClass<NotRemovableError>()("Skill.NotRemovableError", {
+export class NotRemovableError extends Schema.TaggedError<NotRemovableError>()("Skill.NotRemovableError", {
   name: Schema.String,
   location: Schema.String,
   reason: Schema.String,

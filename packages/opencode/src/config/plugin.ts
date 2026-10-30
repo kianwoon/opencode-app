@@ -1,6 +1,6 @@
-import { Glob } from "@opencode-ai/core/util/glob"
-import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Glob } from "@opencode/util/glob"
+import { ConfigPluginV1 } from "@opencode/core/v1/config/plugin"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Effect, Schema } from "effect"
 import { fileURLToPath, pathToFileURL } from "url"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
@@ -56,7 +56,7 @@ export function invalidate(dir?: string) {
   else discoveryCache.delete(dir)
 }
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("ConfigPlugin.NotFoundError", {
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("ConfigPlugin.NotFoundError", {
   spec: Schema.String,
 }) {
   override get message() {

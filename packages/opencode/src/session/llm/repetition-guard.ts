@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import * as Stream from "effect/Stream"
-import { LLMEvent } from "@opencode-ai/llm"
+import { LLMEvent } from "@opencode/ai"
 import { MessageError } from "@/session/message-error"
 
 type RepetitionLoopError = InstanceType<typeof MessageError.RepetitionLoopError>

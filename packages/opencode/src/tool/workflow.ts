@@ -1,6 +1,7 @@
 import * as Tool from "./tool"
 import { ToolJsonSchema } from "./json-schema"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { MessageID } from "../session/schema"
 import { Session } from "@/session/session"
 import { Agent } from "@/agent/agent"
@@ -19,7 +20,7 @@ import { validateWorkflow, workflowErrorMessage } from "@/session/workflow/dag"
  */
 
 export interface WorkflowPromptOps {
-  prompt(input: SessionPrompt.PromptInput): Effect.Effect<SessionV1.WithParts>
+  prompt(input: SessionPrompt.PromptInput): Effect.Effect<WithParts>
 }
 
 const StepParams = Schema.Struct({

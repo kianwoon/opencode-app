@@ -1,10 +1,10 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { SessionID } from "@/session/schema"
 import { QuestionID } from "./schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { QuestionV1 } from "@opencode-ai/schema/question-v1"
+import { QuestionV1 } from "@/compat/schema/question-v1"
 
 export const Option = QuestionV1.Option
 export type Option = typeof Option.Type
@@ -24,13 +24,13 @@ export const Replied = QuestionV1.Replied
 export const Rejected = QuestionV1.Rejected
 export const Event = QuestionV1.Event
 
-export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("QuestionRejectedError", {}) {
+export class RejectedError extends Schema.TaggedError<RejectedError>()("QuestionRejectedError", {}) {
   override get message() {
     return "The user dismissed this question"
   }
 }
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Question.NotFoundError", {
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Question.NotFoundError", {
   requestID: QuestionID,
 }) {}
 

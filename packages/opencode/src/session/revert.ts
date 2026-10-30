@@ -1,6 +1,6 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Effect, Layer, Context, Schema } from "effect"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Snapshot } from "../snapshot"
 import { Storage } from "@/storage/storage"

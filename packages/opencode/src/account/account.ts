@@ -1,14 +1,14 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { httpClient } from "@opencode/core/effect/app-node-platform"
 import { Cache, Clock, Duration, Effect, Layer, Option, Schema, SchemaGetter, Context } from "effect"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { serviceUse } from "@opencode/core/effect/service-use"
 import {
   FetchHttpClient,
   HttpClient,
   HttpClientError,
   HttpClientRequest,
   HttpClientResponse,
-} from "effect/unstable/http"
+} from "effect/http"
 
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { AccountRepo, type AccountRow } from "./repo"

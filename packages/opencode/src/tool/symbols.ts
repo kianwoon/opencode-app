@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import path from "path"
-import { collectSymbols, loadParsers, PARSER_BY_EXTENSION } from "@opencode-ai/core/repo/symbols"
+import { collectSymbols, loadParsers, PARSER_BY_EXTENSION } from "@opencode/core/repo/symbols"
 import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import DESCRIPTION from "./symbols.txt"

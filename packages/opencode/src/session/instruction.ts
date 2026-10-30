@@ -1,21 +1,22 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { httpClient } from "@opencode/core/effect/app-node-platform"
 import path from "path"
 import { createHash } from "node:crypto"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
 import { Effect, Layer, Context } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Flag } from "@opencode-ai/core/flag/flag"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Flag } from "@/flag/flag"
+import { FSUtil } from "@opencode/util/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@opencode/util/global"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID, PartID } from "./schema"
 
-function extract(messages: SessionV1.WithParts[]) {
+function extract(messages: WithParts[]) {
   const paths = new Set<string>()
   for (const msg of messages) {
     for (const part of msg.parts) {
@@ -42,13 +43,13 @@ export const BLOCK_META = "instructionBlock"
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
   readonly staticBlock: (input: {
-    messages: SessionV1.WithParts[]
+    messages: WithParts[]
   }) => Effect.Effect<{ text: string; hash: string; replace: PartID | undefined } | undefined, FSUtil.Error>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
   readonly system: () => Effect.Effect<string[], FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
   readonly resolve: (
-    messages: SessionV1.WithParts[],
+    messages: WithParts[],
     filepath: string,
     messageID: MessageID,
   ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
@@ -265,7 +266,7 @@ const layer: Layer.Layer<
     // part so an edit updates it in place — the invariant is at most one block
     // part in history, so no stale contradictory copy can accumulate.
     const staticBlock = Effect.fn("Instruction.staticBlock")(function* (input: {
-      messages: SessionV1.WithParts[]
+      messages: WithParts[]
     }) {
       const prior = input.messages
         .flatMap((msg) => msg.parts)
@@ -292,7 +293,7 @@ const layer: Layer.Layer<
     })
 
     const resolve = Effect.fn("Instruction.resolve")(function* (
-      messages: SessionV1.WithParts[],
+      messages: WithParts[],
       filepath: string,
       messageID: MessageID,
     ) {
@@ -342,7 +343,7 @@ const layer: Layer.Layer<
   }),
 )
 
-export function loaded(messages: SessionV1.WithParts[]) {
+export function loaded(messages: WithParts[]) {
   return extract(messages)
 }
 

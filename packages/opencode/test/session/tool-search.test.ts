@@ -6,7 +6,7 @@ import { McpCatalog } from "@/mcp/catalog"
 import { resolveTools } from "@/session/llm/request"
 import { TOOL_SEARCH_TOOL } from "@/tool/tool-search"
 import type { Agent } from "@/agent/agent"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@opencode/schema/v1/session"
 
 function mcpTool(name: string, description: string, schemaProperties: Record<string, object> = {}): MCP.McpTool {
   return {

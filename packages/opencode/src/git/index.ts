@@ -1,9 +1,9 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { AppProcess } from "@opencode-ai/core/process"
-import { resolveBinary } from "@opencode-ai/core/git"
-import { memo } from "@opencode-ai/core/memo"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { AppProcess } from "@opencode/util/process"
+import { gitExecutable } from "@opencode/core/util/git-executable"
+import { memo } from "@opencode/core/memo"
 import { Effect, Layer, Context, Stream } from "effect"
-import { ChildProcess } from "effect/unstable/process"
+import { ChildProcess } from "effect/process"
 
 const cfg = [
   "--no-optional-locks",
@@ -110,7 +110,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const appProcess = yield* AppProcess.Service
-    const gitBinary = yield* resolveBinary(appProcess)
+    const gitBinary = gitExecutable()
     const encoder = new TextEncoder()
     const stdin = (text: string) => Stream.make(encoder.encode(text))
 

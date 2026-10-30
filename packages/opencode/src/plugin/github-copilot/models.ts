@@ -1,4 +1,4 @@
-import type { Model } from "@opencode-ai/sdk/v2"
+import type { Model } from "@opencode/sdk"
 import { Option, Schema } from "effect"
 
 const item = Schema.Struct({

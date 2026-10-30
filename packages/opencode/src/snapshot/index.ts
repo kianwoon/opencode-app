@@ -1,18 +1,18 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode/core/effect/layer-node"
 import { Cause, Duration, Effect, Layer, Option, Schedule, Schema, Semaphore, Context } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
-import { AppProcess } from "@opencode-ai/core/process"
-import { resolveBinary } from "@opencode-ai/core/git"
-import { Watcher } from "@opencode-ai/core/filesystem/watcher"
-import { EventV2 } from "@opencode-ai/core/event"
+import { AppProcess } from "@opencode/util/process"
+import { gitExecutable } from "@opencode/core/util/git-executable"
+import { Watcher } from "@opencode/core/filesystem/watcher"
+import { EventV2 } from "@opencode/core/event"
 import { InstanceState } from "@/effect/instance-state"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Hash } from "@opencode-ai/core/util/hash"
+import { FSUtil } from "@opencode/util/fs-util"
+import { Hash } from "@opencode/util/hash"
 import { Config } from "@/config/config"
-import { Global } from "@opencode-ai/core/global"
-import { Info } from "@opencode-ai/schema/file-diff"
+import { Global } from "@opencode/util/global"
+import { Info } from "@opencode/schema/file-diff"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
 export const Patch = Schema.Struct({
@@ -68,7 +68,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const appProcess = yield* AppProcess.Service
-    const gitBinary = yield* resolveBinary(appProcess)
+    const gitBinary = gitExecutable()
     const config = yield* Config.Service
     const locks = new Map<string, Semaphore.Semaphore>()
 

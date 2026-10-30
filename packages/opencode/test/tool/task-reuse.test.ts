@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Database } from "@opencode-ai/core/database/database"
-import { SessionTable } from "@opencode-ai/core/session/sql"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionV1 } from "@opencode/schema/v1/session"
+import { WithParts } from "@/compat/schema/session-v1"
+import { Database } from "@opencode/core/database/database"
+import { SessionTable } from "@opencode/core/session/sql"
+import { LayerNode } from "@opencode/core/effect/layer-node"
+import { SessionProjector } from "@opencode/core/session/projector"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { Ripgrep } from "@opencode/core/ripgrep"
 import { Session } from "@/session/session"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -29,8 +30,8 @@ import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { Provider } from "@opencode/core/provider"
+import { Model } from "@opencode/core/model"
 
 // In-fiber task lifecycle (stub prompt ops), not the child-process isolation
 // path, which is default-ON. Opt out so foreground tasks stay in-fiber.
@@ -41,8 +42,8 @@ afterEach(async () => {
 })
 
 const ref = {
-  providerID: ProviderV2.ID.make("test"),
-  modelID: ModelV2.ID.make("test-model"),
+  providerID: Provider.ID.make("test"),
+  modelID: Model.ID.make("test-model"),
 }
 
 const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
@@ -131,7 +132,7 @@ function stubOps(opts?: { onPrompt?: (input: SessionPrompt.PromptInput) => void;
               text: opts?.text ?? "done",
             },
           ],
-        } satisfies SessionV1.WithParts
+        } satisfies WithParts
       }),
   }
 }
