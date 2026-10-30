@@ -1,8 +1,8 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Database } from "@opencode/core/database/database"
 import { SessionPartTable, SessionTable } from "@opencode/core/session/sql"
-import { ORPHAN_ERROR } from "@opencode/core/session/projector"
 import { SessionV1 } from "@opencode/schema/v1/session"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { Session } from "./session"
 import { SessionRunState } from "./run-state"
 import { Config } from "@/config/config"
@@ -10,6 +10,12 @@ import { MessageID, PartID, type SessionID } from "./schema"
 import type { MessageID as MessageIDType, PartID as PartIDType } from "./schema"
 import { and, eq, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Scope } from "effect"
+
+// Parts left in-flight by a process that died mid-turn are marked with this
+// error by the boot reconciliation so a later boot can deliver the failure
+// message once. Kept local because core no longer exports the constant.
+export const ORPHAN_ERROR =
+  "Orphaned by restart: owning execution fiber did not survive process restart; marked failed at boot. Re-send your prompt to retry."
 
 // A subagent that stops emitting durable activity (session row updates) is
 // indistinguishable from one whose owning turn died, because the only signal
@@ -42,9 +48,9 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/StaleSubagentTask") {}
 
 type Candidate = {
-  id: PartIDType
   message_id: MessageIDType
   session_id: SessionID
+  ordinal: number
   data: Record<string, unknown>
   time_created: number
 }
@@ -57,10 +63,13 @@ const stateOf = (data: Record<string, unknown> | null): StoredState =>
 const metadataOf = (state: StoredState): Record<string, unknown> =>
   typeof state.metadata === "object" && state.metadata !== null ? (state.metadata as Record<string, unknown>) : {}
 
-const asPart = (row: Candidate): SessionV1.ToolPart =>
+const idOf = (row: Candidate): PartIDType =>
+  typeof row.data.id === "string" ? (row.data.id as PartIDType) : PartID.ascending()
+
+const asPart = (row: Candidate, data: Record<string, unknown>): SessionV1.ToolPart =>
   ({
-    ...row.data,
-    id: row.id,
+    ...data,
+    id: idOf(row),
     sessionID: row.session_id,
     messageID: row.message_id,
   }) as SessionV1.ToolPart
@@ -207,9 +216,9 @@ const layer = Layer.effect(
         : sql`json_extract(${SessionPartTable.data}, '$.state.status') IN ('pending','running')`
       const rows = yield* db
         .select({
-          id: SessionPartTable.id,
           message_id: SessionPartTable.message_id,
           session_id: SessionPartTable.session_id,
+          ordinal: SessionPartTable.ordinal,
           data: SessionPartTable.data,
           time_created: SessionPartTable.time_created,
         })
@@ -230,7 +239,7 @@ const layer = Layer.effect(
       // minute, so an unlinked-but-live part must not spam the log forever.
       const warnedUnlinked = new Set<PartIDType>()
 
-      for (const row of rows as Candidate[]) {
+      for (const row of rows as unknown as Candidate[]) {
         const state = stateOf(row.data)
         const metadata = metadataOf(state)
         const status = state.status
@@ -259,10 +268,11 @@ const layer = Layer.effect(
           // parent_id, and belt-and-braces on the returned row: a mismatch is
           // unlinked, never silently treated as a live child.
           if (!child || child.parent_id !== row.session_id) {
-            if (!warnedUnlinked.has(row.id)) {
-              warnedUnlinked.add(row.id)
+            const partID = idOf(row)
+            if (!warnedUnlinked.has(partID)) {
+              warnedUnlinked.add(partID)
               yield* Effect.logWarning("stale subagent sweep skipped part without a linked child session", {
-                partID: row.id,
+                partID,
                 sessionID: row.session_id,
               })
             }
@@ -292,15 +302,16 @@ const layer = Layer.effect(
             .set({ data: nextData as unknown as typeof SessionPartTable.$inferInsert.data })
             .where(
               and(
-                eq(SessionPartTable.id, row.id),
+                eq(SessionPartTable.message_id, SessionMessage.ID.make(row.message_id)),
+                eq(SessionPartTable.ordinal, row.ordinal),
                 sql`json_extract(${SessionPartTable.data}, '$.state.status') IN ('pending','running')`,
               ),
             )
-            .returning({ id: SessionPartTable.id })
+            .returning({ ordinal: SessionPartTable.ordinal })
             .get()
             .pipe(Effect.orDie)
           if (!claimed) continue
-          yield* sessions.updatePart(asPart({ ...row, data: nextData })).pipe(Effect.ignore)
+          yield* sessions.updatePart(asPart(row, nextData)).pipe(Effect.ignore)
           finalized++
           // Finalizing the part must also stop the orphan: otherwise the child
           // keeps streaming (and burning tokens) with no owner. Reuse the
@@ -337,17 +348,18 @@ const layer = Layer.effect(
             .set({ data: nextData as unknown as typeof SessionPartTable.$inferInsert.data })
             .where(
               and(
-                eq(SessionPartTable.id, row.id),
+                eq(SessionPartTable.message_id, SessionMessage.ID.make(row.message_id)),
+                eq(SessionPartTable.ordinal, row.ordinal),
                 sql`json_extract(${SessionPartTable.data}, '$.state.status') = 'error'`,
                 sql`json_extract(${SessionPartTable.data}, '$.state.error') = ${ORPHAN_ERROR}`,
                 sql`json_extract(${SessionPartTable.data}, '$.state.metadata.staleEscalated') IS NULL`,
               ),
             )
-            .returning({ id: SessionPartTable.id })
+            .returning({ ordinal: SessionPartTable.ordinal })
             .get()
             .pipe(Effect.orDie)
           if (!claimed) continue
-          yield* sessions.updatePart(asPart({ ...row, data: nextData })).pipe(Effect.ignore)
+          yield* sessions.updatePart(asPart(row, nextData)).pipe(Effect.ignore)
           finalized++
           if (
             yield* injectFailure({

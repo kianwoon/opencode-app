@@ -5,7 +5,7 @@ import { SessionV1 } from "@opencode/schema/v1/session"
 import { WithParts } from "@/compat/schema/session-v1"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
-import { ORPHAN_ERROR } from "@opencode/core/session/projector"
+import { ORPHAN_ERROR } from "@/session/stale-task"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
@@ -17,7 +17,11 @@ import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode/core/database/database"
 import { SessionPartTable } from "@opencode/core/session/sql"
+import { Flag } from "@/flag/flag"
+import { InstallationChannel } from "@/installation/version"
+import { Global } from "@opencode/util/global"
 import { and, eq, sql } from "drizzle-orm"
+import { isAbsolute, join } from "node:path"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { InstanceState } from "@/effect/instance-state"
 
@@ -115,6 +119,22 @@ function isolationBinary() {
   const configured = process.env["OPENCODE_BIN_PATH"]?.trim()
   if (configured) return configured
   return process.execPath.includes("opencode") ? process.execPath : undefined
+}
+
+// Mirror the database layer's default location so an isolated child opens the
+// same file the parent is using, even across channels.
+function databasePath() {
+  if (Flag.OPENCODE_DB) {
+    if (Flag.OPENCODE_DB === ":memory:" || isAbsolute(Flag.OPENCODE_DB)) return Flag.OPENCODE_DB
+    return join(Global.Path.data, Flag.OPENCODE_DB)
+  }
+  if (
+    ["latest", "beta", "prod"].includes(InstallationChannel) ||
+    process.env["OPENCODE_DISABLE_CHANNEL_DB"] === "1" ||
+    process.env["OPENCODE_DISABLE_CHANNEL_DB"] === "true"
+  )
+    return join(Global.Path.data, "opencode.db")
+  return join(Global.Path.data, `opencode-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`)
 }
 
 // `opencode run --format json` emits one JSON object per line; assistant text
@@ -603,7 +623,7 @@ export const TaskTool = Tool.define(
           // A user-initiated cancel surfaces as MessageAbortedError (or the
           // stream-level AbortError text). Report it as cancelled, not as a
           // failure — the subagent did nothing wrong.
-          if (SessionV1.AbortedError.isInstance(result.info.error)) {
+          if (Schema.is(SessionV1.AbortedError.Schema)(result.info.error)) {
             return yield* Effect.fail(new Error(`Subagent cancelled (task_id: ${nextSession.id})`))
           }
           const message =
@@ -702,7 +722,7 @@ export const TaskTool = Tool.define(
             // Pin the child to the parent's database. A same-build CLI compiled
             // for another channel opens `opencode-<channel>.db` by default, so
             // without this the resumed session would not exist in the child.
-            env: { OPENCODE_DB: Database.path() },
+            env: { OPENCODE_DB: databasePath() },
             stdin: "ignore",
             forceKillAfter: "3 seconds",
           },
