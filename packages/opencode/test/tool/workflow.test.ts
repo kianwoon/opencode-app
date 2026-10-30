@@ -3,6 +3,7 @@ import { SessionV1 } from "@opencode/schema/v1/session"
 import { WithParts } from "@/compat/schema/session-v1"
 import { Cause, Effect, Exit } from "effect"
 import { testEffect } from "../lib/effect"
+import { testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 import { WorkflowTool } from "../../src/tool/workflow"
 import { Session } from "@/session/session"
 import { MessageID } from "@/session/schema"
@@ -39,7 +40,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       RuntimeFlags.node,
       Ripgrep.node,
     ]),
-    [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
+    { replacements: [RuntimeFlags.node.replace(RuntimeFlags.layer(flags)), testBootstrapReplacement, testLocationReplacement] },
   )
 
 const it = testEffect(layer())

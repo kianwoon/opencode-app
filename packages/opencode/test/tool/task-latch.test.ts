@@ -20,7 +20,7 @@ import { Parameters, TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { disposeAllInstances } from "../fixture/fixture"
+import { disposeAllInstances, testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Provider } from "@opencode/core/provider"
 import { Model } from "@opencode/core/model"
@@ -54,7 +54,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       RuntimeFlags.node,
       Ripgrep.node,
     ]),
-    [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
+    { replacements: [RuntimeFlags.node.replace(RuntimeFlags.layer(flags)), testBootstrapReplacement, testLocationReplacement] },
   )
 
 const it = testEffect(layer())

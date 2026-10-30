@@ -104,7 +104,7 @@ describe("session.llm.repetition-guard.guardStream", () => {
     const events: LLMEvent[] = [
       delta("Hello there. "),
       delta("How can I help you today?"),
-      LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+      LLMEvent.stepFinish({ index: 0, reason: { normalized: "stop" } }),
     ]
     const stream: Stream.Stream<LLMEvent, never> = Stream.fromIterable(events)
     const collected = await Effect.runPromise(RepetitionGuard.guardStream(stream).pipe(Stream.runCollect))

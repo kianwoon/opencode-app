@@ -16,33 +16,33 @@ import { Config } from "../../src/config/config"
 import { ConfigBrain } from "../../src/config/brain"
 import { ConfigParse } from "../../src/config/parse"
 import { Env } from "../../src/env"
-import { InstanceRuntime } from "../../src/project/instance-runtime"
 import { Permission } from "../../src/permission"
 import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
-import { TestInstance, tmpdirScoped } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
-const layer = LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
-  [Auth.node, AuthTest.empty],
-  [Account.node, AccountTest.empty],
-  [Npm.node, NpmTest.noop],
-  [
-    httpClient,
-    Layer.succeed(
-      HttpClient.HttpClient,
-      HttpClient.make((request) => Effect.die(`unexpected http request: ${request.method} ${request.url}`)),
+const layer = LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), {
+  replacements: [
+    Auth.node.replace(AuthTest.empty),
+    Account.node.replace(AccountTest.empty),
+    Npm.node.replace(NpmTest.noop),
+    httpClient.replace(
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => Effect.die(`unexpected http request: ${request.method} ${request.url}`)),
+      ),
     ),
   ],
-])
+})
 
 const it = testEffect(layer)
 
 const invalidate = Config.use.invalidate().pipe(
   Effect.scoped,
   Effect.provide(layer),
-  Effect.andThen(Effect.promise(() => InstanceRuntime.disposeAllInstances())),
+  Effect.andThen(Effect.promise(() => disposeAllInstances())),
 )
 
 // Isolate from machine-level config sources: redirect the global config dir and
@@ -130,35 +130,36 @@ describe("brain config expansion", () => {
     }).pipe(
       Effect.tap((config) =>
         Effect.sync(() => {
-          const permission = config.agent?.brain?.permission
+          const permission = config.agent?.brain?.permission ?? []
           expect(config.agent?.brain).toMatchObject({
             mode: "primary",
             model: "anthropic/brain",
           })
           // Default-deny must stay the FIRST key: Ruleset.findLast makes the last
           // matching rule win, so a non-first "*" would stop denying execution tools.
-          expect(Object.keys(permission ?? {})[0]).toBe("*")
-          expect(permission?.["*"]).toBe("deny")
-          expect(permission).toMatchObject({
+          expect(permission[0]?.[0]).toBe("*")
+          expect(permission[0]?.[1]).toBe("deny")
+          const entries = Object.fromEntries(permission)
+          expect(entries).toMatchObject({
             read: "allow",
             grep: "allow",
             glob: "allow",
           })
           // Dispatch is registry-driven: any subagent name resolves to allow,
           // with no name list anywhere in the codebase.
-          const task = permission?.task
-          expect(task).toEqual({ "*": "allow" })
-          const ruleset = Permission.fromConfig(permission ?? {})
+          const task = entries.task
+          expect(task).toEqual([["*", "allow"]])
+          const ruleset = Permission.fromConfig(permission)
           for (const name of ["alpha", "beta", "a-brand-new-hand"]) {
             expect(Permission.evaluate("task", name, ruleset).action).toBe("allow")
           }
           // bash echo-allow + redirect-deny shape; edit falls under the "*" deny.
-          expect(permission?.bash).toMatchObject({
-            "*": "deny",
-            "echo *": "allow",
-            "*>*": "deny",
-          })
-          expect(permission?.edit).toBeUndefined()
+          expect(entries.bash).toEqual([
+            ["*", "deny"],
+            ["echo *", "allow"],
+            ["*>*", "deny"],
+          ])
+          expect(entries.edit).toBeUndefined()
         }),
       ),
       Effect.asVoid,
@@ -209,7 +210,7 @@ describe("brain config expansion", () => {
           // No name or capability table exists any more: a declared model is
           // preserved verbatim, and brain no longer injects a task permission.
           expect(config.agent?.helper).toMatchObject({ mode: "subagent", model: "anthropic/helper" })
-          expect(config.agent?.helper?.permission?.task).toBeUndefined()
+          expect(Object.fromEntries(config.agent?.helper?.permission ?? []).task).toBeUndefined()
           expect(config.agent?.bare).toMatchObject({ mode: "subagent" })
           expect(config.agent?.bare?.model).toBeUndefined()
         }),

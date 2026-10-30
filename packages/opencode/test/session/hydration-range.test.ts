@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { SessionV1 } from "@opencode/schema/v1/session"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { WithParts } from "@/compat/schema/session-v1"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionPartTable } from "@opencode/core/session/sql"
 import { Effect } from "effect"
 import { eq, inArray } from "drizzle-orm"
 import { Session as SessionNs } from "@/session/session"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Database } from "@opencode/core/database/database"
@@ -15,7 +17,9 @@ import { testEffect } from "../lib/effect"
 import { Provider } from "@opencode/core/provider"
 import { Model } from "@opencode/core/model"
 
-const it = testEffect(LayerNode.compile(LayerNode.group([SessionNs.node, MessageV2.node, SessionProjector.node])))
+const it = testEffect(
+  LayerNode.compile(LayerNode.group([SessionNs.node, MessageV2.node, SessionProjector.node, EventV2Bridge.node])),
+)
 
 const withSession = <A, E, R>(
   fn: (input: { session: SessionNs.Interface; sessionID: SessionID }) => Effect.Effect<A, E, R>,
@@ -187,7 +191,7 @@ describe("MessageV2.filterCompactedEffect (range hydration)", () => {
         yield* addCompactionPart(sessionID, c1, u2)
         const s1 = yield* addAssistant(sessionID, c1, {
           summary: true,
-          error: new SessionV1.APIError({ message: "boom", isRetryable: false }).toObject() as SessionV1.Assistant["error"],
+          error: { name: "APIError", data: { message: "boom", isRetryable: false } } as SessionV1.Assistant["error"],
         })
         yield* addTextPart(sessionID, s1, "summary")
 
@@ -338,7 +342,7 @@ describe("MessageV2.filterCompactedEffect (range hydration)", () => {
         // Direct DB proof: every part row that was hydrated belongs to a selected
         // message. The 20 discarded messages' parts never left the database.
         const { db } = yield* Database.Service
-        const selectedIds = result.map((item) => item.info.id)
+        const selectedIds = result.map((item) => SessionMessage.ID.make(item.info.id))
         const hydratedParts = yield* db
           .select({ message_id: SessionPartTable.message_id })
           .from(SessionPartTable)

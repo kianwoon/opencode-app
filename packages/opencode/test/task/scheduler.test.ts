@@ -15,7 +15,7 @@ import { Provider } from "@opencode/core/provider"
 import { TaskScheduler } from "@/task/scheduler"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "../../src/project/bootstrap-service"
-import { disposeAllInstances } from "../fixture/fixture"
+import { disposeAllInstances, testLocationReplacement } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { MessageID, PartID } from "@/session/schema"
 
@@ -94,13 +94,15 @@ const promptStubLayer = Layer.succeed(
 const layerFor = () =>
   LayerNode.compile(
     LayerNode.group([Database.node, Task.node, Session.node, SessionStatus.node, InstanceStore.node, TaskScheduler.node]),
-    [
-      [SessionPrompt.node, promptStubLayer],
-      [
-        InstanceStore.bootstrapNode,
-        Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
+    {
+      replacements: [
+        SessionPrompt.node.replace(promptStubLayer),
+        InstanceStore.bootstrapNode.replace(
+          Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
+        ),
+        testLocationReplacement,
       ],
-    ],
+    },
   )
 
 const it = testEffect(layerFor())

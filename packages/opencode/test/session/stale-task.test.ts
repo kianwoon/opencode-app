@@ -2,15 +2,14 @@ import { describe, expect } from "bun:test"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
-import { ORPHAN_ERROR, SessionProjector } from "@opencode/core/session/projector"
+import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionTable } from "@opencode/core/session/sql"
 import { SessionV1 } from "@opencode/schema/v1/session"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Logger } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
-import { StaleSubagentTask } from "@/session/stale-task"
+import { ORPHAN_ERROR, StaleSubagentTask } from "@/session/stale-task"
 import { Session } from "@/session/session"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
@@ -22,6 +21,7 @@ import { Database } from "@opencode/core/database/database"
 import { Provider } from "@opencode/core/provider"
 import { Model } from "@opencode/core/model"
 import { testEffect } from "../lib/effect"
+import { testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 
 const it = testEffect(
   AppNodeBuilder.build(
@@ -41,9 +41,8 @@ const it = testEffect(
     ]),
     [
       RuntimeFlags.node.replace(RuntimeFlags.layer({ experimentalWorkspaces: false })),
-      InstanceBootstrap.node.replace(
-        Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
-      ),
+      testBootstrapReplacement,
+      testLocationReplacement,
     ],
   ),
 )

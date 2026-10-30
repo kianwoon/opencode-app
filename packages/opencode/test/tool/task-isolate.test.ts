@@ -20,7 +20,7 @@ import { TaskTool, isolatedEnabled, type TaskPromptOps } from "../../src/tool/ta
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { disposeAllInstances } from "../fixture/fixture"
+import { disposeAllInstances, testBootstrapReplacement, testLocationReplacement } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Provider } from "@opencode/core/provider"
 import { Model } from "@opencode/core/model"
@@ -67,6 +67,7 @@ const layer = () =>
       RuntimeFlags.node,
       Ripgrep.node,
     ]),
+    { replacements: [testBootstrapReplacement, testLocationReplacement] },
   )
 
 const it = testEffect(layer())
@@ -253,7 +254,7 @@ describe("tool.task isolation path", () => {
     {
       config: {
         agent: {
-          reviewer: { mode: "subagent", permission: { task: "allow" } },
+          reviewer: { mode: "subagent", permission: [["task", "allow"]] },
         },
         experimental: {
           primary_tools: ["bash", "read"],
