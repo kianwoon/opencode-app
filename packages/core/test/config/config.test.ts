@@ -1,5 +1,6 @@
 import path from "path"
 import fs from "fs/promises"
+import { parse } from "jsonc-parser"
 import { describe, expect, test } from "bun:test"
 import { Arbitrary, Effect, Fiber, Layer, Logger, Schema, Stream } from "effect"
 import { Config } from "@opencode/core/config"
@@ -1741,6 +1742,36 @@ describe("Config", () => {
           }).pipe(Effect.provide(testLayer(tmp.path)))
         }),
       ),
+    ),
+  )
+
+  it.live("writes every provided patch key into the global config document", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const file = path.join(global, "opencode.jsonc")
+        return Effect.promise(async () => {
+          await fs.mkdir(global, { recursive: true })
+          await fs.writeFile(file, '{\n  // user comment\n  "username": "ada"\n}\n')
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              yield* config.update!({
+                agent: { reviewer: { mode: "subagent", owned_tools: ["read"], permission: { bash: "allow" } } },
+                compaction: { auto: false },
+              })
+              const contents = yield* Effect.promise(() => fs.readFile(file, "utf8"))
+              const parsed = parse(contents)
+              expect(contents).toContain("// user comment")
+              expect(parsed.username).toBe("ada")
+              expect(parsed.agent.reviewer.owned_tools).toEqual(["read"])
+              expect(parsed.agent.reviewer.permission).toEqual({ bash: "allow" })
+              expect(parsed.compaction.auto).toBe(false)
+            }).pipe(Effect.provide(testLayer(tmp.path, global))),
+          ),
+        )
+      }),
     ),
   )
 

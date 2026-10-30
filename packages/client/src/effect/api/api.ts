@@ -2772,10 +2772,78 @@ export interface ConfigApi<E = never> {
   readonly update: ExperimentalConfigUpdateOperation<E>
 }
 
-export type ExperimentalConfigUpdateInput = { readonly shell: string | null }
+export type ExperimentalConfigUpdateInput = {
+  readonly shell?: string | null | undefined
+  readonly agent?:
+    | {
+        readonly [x: string]: {
+          readonly description?: string | undefined
+          readonly mode?: "subagent" | "primary" | "all" | undefined
+          readonly model?: string | undefined
+          readonly owned_tools?: ReadonlyArray<string> | undefined
+          readonly skills?: ReadonlyArray<string> | undefined
+          readonly capabilities?: ReadonlyArray<string> | undefined
+          readonly permission?:
+            | { readonly [x: string]: Permission.Effect | { readonly [x: string]: Permission.Effect } }
+            | undefined
+          readonly steps?: number | undefined
+          readonly temperature?: number | undefined
+          readonly top_p?: number | undefined
+          readonly hidden?: boolean | undefined
+          readonly prompt?: string | undefined
+          readonly disable?: boolean | undefined
+        } & { readonly [x: string]: unknown }
+      }
+    | undefined
+  readonly permission?: Permission.Ruleset | undefined
+  readonly skill?: ReadonlyArray<string> | undefined
+  readonly plugin?:
+    | ReadonlyArray<
+        string | { readonly package: string; readonly options?: { readonly [x: string]: unknown } | undefined }
+      >
+    | undefined
+  readonly mcp?:
+    | {
+        readonly timeout?: Mcp.TimeoutConfig | undefined
+        readonly servers?: { readonly [x: string]: Mcp.LocalConfig | Mcp.RemoteConfig } | undefined
+      }
+    | undefined
+  readonly brain?:
+    | { readonly model?: string | undefined; readonly enforcement?: "strict" | "advisory" | undefined }
+    | undefined
+  readonly jev?:
+    | {
+        readonly enabled?: boolean | undefined
+        readonly model?: string | undefined
+        readonly threshold?: number | undefined
+      }
+    | undefined
+  readonly governor?:
+    | {
+        readonly enabled?: boolean | undefined
+        readonly model?: string | undefined
+        readonly threshold?: number | undefined
+      }
+    | undefined
+  readonly brainBooster?:
+    | {
+        readonly enabled?: boolean | undefined
+        readonly model?: string | undefined
+        readonly threshold?: number | undefined
+      }
+    | undefined
+  readonly jevDefault?: { readonly model?: string | undefined } | undefined
+  readonly compaction?:
+    | {
+        readonly auto?: boolean | undefined
+        readonly preserve_recent_tokens?: number | undefined
+        readonly trigger_tokens?: number | undefined
+      }
+    | undefined
+}
 export type ExperimentalConfigUpdateOutput = void
 export type ExperimentalConfigUpdateOperation<E = never> = (
-  input: ExperimentalConfigUpdateInput,
+  input?: ExperimentalConfigUpdateInput,
 ) => Effect.Effect<ExperimentalConfigUpdateOutput, E>
 
 export interface ExperimentalConfigApi<E = never> {

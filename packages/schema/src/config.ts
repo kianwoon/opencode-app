@@ -116,8 +116,67 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   experimental: ConfigExperimental.Info.pipe(optional),
 }) {}
 
+// Invariant: every key a settings panel writes must exist in this patch, be
+// applied by the config writer (packages/core/src/config.ts), and never be
+// JSON-parsed from a 204 response. The panels speak the on-disk (legacy) config
+// key names, so this contract mirrors those names and block shapes. Every field
+// is optional because a patch is always partial.
+const PatchPermissionEntry = Schema.Union([
+  Permission.Effect,
+  Schema.Record(Schema.String, Permission.Effect),
+]).annotate({ identifier: "Config.Patch.PermissionEntry" })
+
+const PatchPermission = Schema.Record(Schema.String, PatchPermissionEntry).annotate({
+  identifier: "Config.Patch.Permission",
+})
+
+const PatchAgent = Schema.StructWithRest(
+  Schema.Struct({
+    description: Schema.String.pipe(optional),
+    mode: Schema.Literals(["subagent", "primary", "all"]).pipe(optional),
+    model: Schema.String.pipe(optional),
+    owned_tools: Schema.String.pipe(Schema.Array, optional),
+    skills: Schema.String.pipe(Schema.Array, optional),
+    capabilities: Schema.String.pipe(Schema.Array, optional),
+    permission: PatchPermission.pipe(optional),
+    steps: Schema.Finite.pipe(optional),
+    temperature: Schema.Finite.pipe(optional),
+    top_p: Schema.Finite.pipe(optional),
+    hidden: Schema.Boolean.pipe(optional),
+    prompt: Schema.String.pipe(optional),
+    disable: Schema.Boolean.pipe(optional),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+).annotate({ identifier: "Config.Patch.Agent" })
+
+const PatchFeature = Schema.Struct({
+  enabled: Schema.Boolean.pipe(optional),
+  model: Schema.String.pipe(optional),
+  threshold: Schema.Finite.pipe(optional),
+}).annotate({ identifier: "Config.Patch.Feature" })
+
+const PatchCompaction = Schema.Struct({
+  auto: Schema.Boolean.pipe(optional),
+  preserve_recent_tokens: Schema.Finite.pipe(optional),
+  trigger_tokens: Schema.Finite.pipe(optional),
+}).annotate({ identifier: "Config.Patch.Compaction" })
+
 export const Patch = Schema.Struct({
-  shell: Schema.NullOr(Schema.String),
+  shell: Schema.NullOr(Schema.String).pipe(optional),
+  agent: Schema.Record(Schema.String, PatchAgent).pipe(optional),
+  permission: Permission.Ruleset.pipe(optional),
+  skill: Schema.String.pipe(Schema.Array, optional),
+  plugin: ConfigPlugin.Plugins.pipe(optional),
+  mcp: ConfigMCP.Info.pipe(optional),
+  brain: Schema.Struct({
+    model: Schema.String.pipe(optional),
+    enforcement: Schema.Literals(["strict", "advisory"]).pipe(optional),
+  }).pipe(optional),
+  jev: PatchFeature.pipe(optional),
+  governor: PatchFeature.pipe(optional),
+  brainBooster: PatchFeature.pipe(optional),
+  jevDefault: Schema.Struct({ model: Schema.String.pipe(optional) }).pipe(optional),
+  compaction: PatchCompaction.pipe(optional),
 }).annotate({ identifier: "Config.Patch" })
 export interface Patch extends Schema.Schema.Type<typeof Patch> {}
 

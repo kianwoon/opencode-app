@@ -470,13 +470,20 @@ export const layer = (options?: Options) =>
             (yield* Effect.filter(candidates, fs.isFile)).at(-1) ?? path.join(directory, "opencode.jsonc")
           const text = (yield* fs.readFileStringSafe(filepath)) ?? "{}\n"
           const updated = yield* Effect.try({
+            // Every provided patch key replaces its value in the SAME document,
+            // so unrelated JSONC content is preserved. `shell: null` still
+            // clears the key, mirroring the previous single-key behavior.
             try: () =>
-              applyEdits(
-                text,
-                modify(text, ["shell"], patch.shell ?? undefined, {
-                  formattingOptions: { tabSize: 2, insertSpaces: true },
-                }),
-              ),
+              Object.entries(patch).reduce((current, [key, value]) => {
+                const next = key === "shell" ? (value ?? undefined) : value
+                if (next === undefined) return current
+                return applyEdits(
+                  current,
+                  modify(current, [key], next, {
+                    formattingOptions: { tabSize: 2, insertSpaces: true },
+                  }),
+                )
+              }, text),
             catch: (cause) => new FSUtil.FileSystemError({ method: "config.update", cause }),
           })
           yield* fs.writeWithDirs(filepath, updated.endsWith("\n") ? updated : `${updated}\n`)

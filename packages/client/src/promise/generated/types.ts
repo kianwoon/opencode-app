@@ -2624,6 +2624,8 @@ export type AgentInfo = {
   color?: AgentColor
   steps?: number
   permissions: PermissionRuleset
+  tools?: { [x: string]: boolean }
+  budget?: number
 }
 
 export type SessionsResponse = {
@@ -4790,7 +4792,84 @@ export type ConfigGetOutput = Array<ConfigEntry>
 
 export type ConfigShellsOutput = Array<ConfigShellOption>
 
-export type ExperimentalConfigUpdateInput = { readonly shell: string | null }
+export type ExperimentalConfigUpdateInput = {
+  readonly shell?: string | null | undefined
+  readonly agent?:
+    | {
+        readonly [x: string]: {
+          readonly description?: string
+          readonly mode?: "subagent" | "primary" | "all"
+          readonly model?: string
+          readonly owned_tools?: ReadonlyArray<string>
+          readonly skills?: ReadonlyArray<string>
+          readonly capabilities?: ReadonlyArray<string>
+          readonly permission?: {
+            readonly [x: string]: ("allow" | "deny" | "ask") | { readonly [x: string]: "allow" | "deny" | "ask" }
+          }
+          readonly steps?: number
+          readonly temperature?: number
+          readonly top_p?: number
+          readonly hidden?: boolean
+          readonly prompt?: string
+          readonly disable?: boolean
+        } & { readonly [x: string]: JsonValue }
+      }
+    | undefined
+  readonly permission?:
+    | ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }>
+    | undefined
+  readonly skill?: ReadonlyArray<string> | undefined
+  readonly plugin?:
+    | ReadonlyArray<string | { readonly package: string; readonly options?: { readonly [x: string]: JsonValue } }>
+    | undefined
+  readonly mcp?:
+    | {
+        readonly timeout?: { readonly startup?: number; readonly catalog?: number; readonly execution?: number }
+        readonly servers?: {
+          readonly [x: string]:
+            | {
+                readonly type: "local"
+                readonly command: ReadonlyArray<string>
+                readonly cwd?: string
+                readonly environment?: { readonly [x: string]: string }
+                readonly disabled?: boolean
+                readonly codemode?: boolean
+                readonly timeout?: { readonly startup?: number; readonly catalog?: number; readonly execution?: number }
+                readonly protocol?: "legacy" | "auto" | "2026-07-28"
+              }
+            | {
+                readonly type: "remote"
+                readonly url: string
+                readonly headers?: { readonly [x: string]: string }
+                readonly oauth?:
+                  | {
+                      readonly client_id?: string
+                      readonly client_secret?: string
+                      readonly scope?: string
+                      readonly callback_port?: number
+                      readonly redirect_uri?: string
+                      readonly auth_server_metadata_url?: string
+                    }
+                  | false
+                readonly disabled?: boolean
+                readonly codemode?: boolean
+                readonly timeout?: { readonly startup?: number; readonly catalog?: number; readonly execution?: number }
+                readonly protocol?: "legacy" | "auto" | "2026-07-28"
+              }
+        }
+      }
+    | undefined
+  readonly brain?: { readonly model?: string; readonly enforcement?: "strict" | "advisory" } | undefined
+  readonly jev?: { readonly enabled?: boolean; readonly model?: string; readonly threshold?: number } | undefined
+  readonly governor?: { readonly enabled?: boolean; readonly model?: string; readonly threshold?: number } | undefined
+  readonly brainBooster?:
+    | { readonly enabled?: boolean; readonly model?: string; readonly threshold?: number }
+    | undefined
+  readonly jevDefault?: { readonly model?: string } | undefined
+  readonly compaction?:
+    | { readonly auto?: boolean; readonly preserve_recent_tokens?: number; readonly trigger_tokens?: number }
+    | undefined
+}
 
 export type ExperimentalConfigUpdateOutput = void
 

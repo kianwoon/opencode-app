@@ -1934,9 +1934,24 @@ const adaptGroupConfig = (raw: RawClient["server.config"]) => ({
   shells: EndpointConfigShells(raw),
 })
 
-const EndpointExperimentalConfigUpdate = (raw: RawClient["server.config"]) => (input: ExperimentalConfigUpdateInput) =>
+const EndpointExperimentalConfigUpdate = (raw: RawClient["server.config"]) => (input?: ExperimentalConfigUpdateInput) =>
   preserveEffect<ExperimentalConfigUpdateOutput>()(
-    raw["config.update"]({ payload: { shell: input["shell"] } }).pipe(Effect.mapError(mapClientError)),
+    raw["config.update"]({
+      payload: {
+        shell: input?.["shell"],
+        agent: input?.["agent"],
+        permission: input?.["permission"],
+        skill: input?.["skill"],
+        plugin: input?.["plugin"],
+        mcp: input?.["mcp"],
+        brain: input?.["brain"],
+        jev: input?.["jev"],
+        governor: input?.["governor"],
+        brainBooster: input?.["brainBooster"],
+        jevDefault: input?.["jevDefault"],
+        compaction: input?.["compaction"],
+      },
+    }).pipe(Effect.mapError(mapClientError)),
   )
 
 const adaptGroupExperimentalConfig = (raw: RawClient["server.config"]) => ({
