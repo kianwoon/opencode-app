@@ -180,3 +180,5 @@ export const Info = Schema.Struct({
     }),
   ),
 }).annotate({ identifier: "Config" })
+
+export type Info = Schema.Schema.Type<typeof Info>
