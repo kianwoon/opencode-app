@@ -16,7 +16,7 @@ import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { LayerNodePlatform } from "@opencode/core/effect/app-node-platform"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
@@ -24,10 +24,9 @@ import { Config } from "@/config/config"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([CrossSpawnSpawner.node, LayerNodePlatform.filesystem, InstanceStore.node]), [
-    [
-      InstanceBootstrap.node,
+    InstanceBootstrap.node.replace(
       Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
-    ],
+    ),
   ]),
 )
 
@@ -66,9 +65,9 @@ function blockParts(messages: WithParts[]) {
 
 const layer = (dir: string) =>
   AppNodeBuilder.build(Instruction.node, [
-    [Config.node, Layer.succeed(Config.Service, TestConfig.make())],
-    [Global.node, Global.layerWith({ home: dir, config: dir })],
-    [RuntimeFlags.node, RuntimeFlags.layer({})],
+    Config.node.replace(Layer.succeed(Config.Service, TestConfig.make())),
+    Global.node.replace(Global.layerWith({ home: dir, config: dir })),
+    RuntimeFlags.node.replace(RuntimeFlags.layer({})),
   ])
 
 const withAgents =

@@ -1,6 +1,6 @@
 // Opencode publish boundary for core events. Attach routed instance location
 // so direct EventV2 consumers can isolate directory/workspace streams.
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
 import { GlobalBus } from "@/bus/global"
 import { EventV2 } from "@opencode/core/event"

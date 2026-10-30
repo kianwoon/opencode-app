@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { ORPHAN_ERROR, SessionProjector } from "@opencode/core/session/projector"
 import { SessionTable } from "@opencode/core/session/sql"
@@ -40,11 +40,10 @@ const it = testEffect(
       Database.node,
     ]),
     [
-      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces: false })],
-      [
-        InstanceBootstrap.node,
+      RuntimeFlags.node.replace(RuntimeFlags.layer({ experimentalWorkspaces: false })),
+      InstanceBootstrap.node.replace(
         Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
-      ],
+      ),
     ],
   ),
 )

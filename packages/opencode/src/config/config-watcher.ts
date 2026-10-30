@@ -1,7 +1,7 @@
 export * as ConfigWatcher from "./config-watcher"
 
-import { LayerNode } from "@opencode/core/effect/layer-node"
-import { makeGlobalNode } from "@opencode/core/effect/app-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Flag } from "@/flag/flag"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"

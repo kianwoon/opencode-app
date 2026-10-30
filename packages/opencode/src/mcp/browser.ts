@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { openUrl } from "@opencode/util/open"
 import { Context, Effect, Layer } from "effect"
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer, Schema } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import path from "path"
 import { MCP } from "@/mcp"
@@ -25,14 +25,15 @@ const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([MCP.node, Truncate.node, Agent.node, InstanceStore.node]),
     [
-      [
-        Config.node,
+      Config.node.replace(
         TestConfig.layer({
           directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
         }),
-      ],
-      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces: false })],
-      [InstanceBootstrap.node, Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))],
+      ),
+      RuntimeFlags.node.replace(RuntimeFlags.layer({ experimentalWorkspaces: false })),
+      InstanceBootstrap.node.replace(
+        Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
+      ),
     ],
   ),
 )

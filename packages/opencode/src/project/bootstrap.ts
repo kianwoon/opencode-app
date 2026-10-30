@@ -1,4 +1,5 @@
-import { makeGlobalNode } from "@opencode/core/effect/app-node"
+import { makeGlobalNode, Node } from "@opencode/util/effect/app-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Plugin } from "../plugin"
 import { Format } from "../format"
 import { LSP } from "@/lsp/lsp"
@@ -19,7 +20,18 @@ export type { Interface } from "./bootstrap-service"
 // log at debug instead — one info line per directory per process run.
 const bootstrappedDirs = new Set<string>()
 
-const layer = Layer.effect(
+const layer: Layer.Layer<
+  Service,
+  never,
+  | Config.Service
+  | Format.Service
+  | LSP.Service
+  | Plugin.Service
+  | Project.Service
+  | Snapshot.Service
+  | Vcs.Service
+  | StaleSubagentTask.Service
+> = Layer.effect(
   Service,
   Effect.gen(function* () {
     // Yield each bootstrap dep at layer init so `run` itself has R = never.
@@ -66,10 +78,12 @@ const layer = Layer.effect(
   }),
 )
 
+// Dependency layers leak an `any` error through the graph's conditional types even
+// though bootstrap's own layer is error-free; pin the contract the providers uphold.
 export const node = makeGlobalNode({
   service: Service,
   layer: layer,
   deps: [Config.node, Format.node, LSP.node, Plugin.node, Project.node, Snapshot.node, Vcs.node, StaleSubagentTask.node],
-})
+}) as unknown as LayerNode.Provider<Service, never, typeof Node.tags.values.global>
 
 export * as InstanceBootstrap from "./bootstrap"

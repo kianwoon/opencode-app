@@ -15,14 +15,14 @@ import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Plugin.node, CrossSpawnSpawner.node]), [
-    [Auth.node, AuthTest.empty],
-    [Account.node, AccountTest.empty],
-    [Npm.node, NpmTest.noop],
-    [RuntimeFlags.node, RuntimeFlags.layer({ disableDefaultPlugins: true })],
+    Auth.node.replace(AuthTest.empty),
+    Account.node.replace(AccountTest.empty),
+    Npm.node.replace(NpmTest.noop),
+    RuntimeFlags.node.replace(RuntimeFlags.layer({ disableDefaultPlugins: true })),
   ]),
 )
 const selectHook = "experimental.compaction.select"

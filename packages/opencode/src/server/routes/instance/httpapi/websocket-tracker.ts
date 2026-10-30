@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option } from "effect"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import * as Socket from "effect/socket/Socket"
 
 export const SERVER_CLOSING_EVENT = () => new Socket.CloseEvent(1001, "server closing")

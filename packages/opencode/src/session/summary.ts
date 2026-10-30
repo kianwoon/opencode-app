@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Effect, Layer, Context, Schema } from "effect"
 import { SessionV1 } from "@opencode/schema/v1/session"
 import { WithParts } from "@/compat/schema/session-v1"

@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import path from "path"
 import { serviceUse } from "@opencode/core/effect/service-use"
 import { Global } from "@opencode/util/global"

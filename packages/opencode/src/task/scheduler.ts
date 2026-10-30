@@ -7,7 +7,7 @@ import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionPrompt } from "@/session/prompt"
 import { InstanceStore } from "@/project/instance-store"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Cron } from "./cron"
 
 /** How often the scheduler wakes to claim due tasks. */

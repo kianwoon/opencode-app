@@ -1,7 +1,7 @@
 import { expect, describe, test } from "bun:test"
 import { ConfigBrainV1 } from "@opencode/core/v1/config/brain"
 import { ConfigV1 } from "@/compat/v1-config/config"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { httpClient } from "@opencode/core/effect/app-node-platform"
 import { FSUtil } from "@opencode/util/fs-util"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"

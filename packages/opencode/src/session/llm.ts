@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { PermissionV1 } from "@opencode/schema/v1/permission"
 import { Provider } from "@/provider/provider"

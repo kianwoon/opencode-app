@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { AppProcess } from "@opencode/util/process"
 import { gitExecutable } from "@opencode/core/util/git-executable"
 import { memo } from "@opencode/core/memo"

@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Database } from "@opencode/core/database/database"
 import { SessionPartTable, SessionTable } from "@opencode/core/session/sql"
 import { ORPHAN_ERROR } from "@opencode/core/session/projector"

@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
@@ -16,15 +16,14 @@ const reloads = { count: 0 }
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([ConfigWatcher.nodeWithoutPolling, FSUtil.node]), [
-    [Config.node, Layer.mock(Config.Service)({ invalidate: () => Effect.sync(() => reloads.count++) })],
-    [
-      InstanceStore.node,
+    Config.node.replace(Layer.mock(Config.Service)({ invalidate: () => Effect.sync(() => reloads.count++) })),
+    InstanceStore.node.replace(
       Layer.mock(InstanceStore.Service)({
         directories: () => [],
         disposeAll: () => Effect.sync(() => reloads.count++),
       }),
-    ],
-    [Global.node, Global.layerWith({ config: "/nonexistent-config-watcher-test" })],
+    ),
+    Global.node.replace(Global.layerWith({ config: "/nonexistent-config-watcher-test" })),
   ]),
 )
 

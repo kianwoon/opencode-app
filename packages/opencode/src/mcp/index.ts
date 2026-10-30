@@ -1,6 +1,6 @@
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { ConfigV1 } from "@/compat/v1-config/config"
 import { serviceUse } from "@opencode/core/effect/service-use"
 import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js"

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode/schema/v1/session"
 import { Database } from "@opencode/core/database/database"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"

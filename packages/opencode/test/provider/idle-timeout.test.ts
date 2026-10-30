@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer, type Server } from "node:http"
 import { streamText } from "ai"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { Effect } from "effect"
 import { ProviderV2 } from "@/compat/core-namespaces"

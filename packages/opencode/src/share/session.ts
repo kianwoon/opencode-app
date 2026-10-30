@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
 import { Effect, Layer, Context } from "effect"

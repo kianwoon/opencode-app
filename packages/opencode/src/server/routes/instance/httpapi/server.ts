@@ -54,7 +54,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@/compat/move-session"
 import { Database } from "@opencode/core/database/database"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { httpClient } from "@opencode/core/effect/app-node-platform"
 import { EventV2 } from "@opencode/core/event"
 import { ModelsDev } from "@opencode/core/models-dev"
@@ -295,7 +295,7 @@ export function createRoutes(
       corsVaryFix,
       fenceLayer,
       cors(corsOptions),
-      AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2]]),
+      AppNodeBuilderV1.build(MoveSession.node, [LocationServiceMap.node.replace(locationServiceMapV2)]),
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
@@ -304,8 +304,8 @@ export function createRoutes(
     Layer.provide(PtyEnvironment.layer),
     Layer.provide(
       AppNodeBuilderV1.build(SessionV2.node, [
-        [LocationServiceMap.node, locationServiceMapV2],
-        [SessionExecution.node, SessionExecutionLocal.node],
+        LocationServiceMap.node.replace(locationServiceMapV2),
+        SessionExecution.node.replace(SessionExecutionLocal.node),
       ]),
     ),
     Layer.provide(locationServiceMapV2),

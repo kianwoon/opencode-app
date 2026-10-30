@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import os from "os"
 import { ConfigV1 } from "@/compat/v1-config/config"
 import fuzzysort from "fuzzysort"

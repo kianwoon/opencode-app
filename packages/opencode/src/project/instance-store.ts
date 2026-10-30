@@ -1,5 +1,5 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
-import { makeGlobalNode, Node } from "@opencode/core/effect/app-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
+import { makeGlobalNode, Node } from "@opencode/util/effect/app-node"
 import { GlobalBus } from "@/bus/global"
 import { serviceUse } from "@opencode/core/effect/service-use"
 import { WorkspaceContext } from "@/control-plane/workspace-context"

@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { PermissionV1 } from "@opencode/schema/v1/permission"
 import path from "path"
 import { SessionV1 } from "@opencode/schema/v1/session"

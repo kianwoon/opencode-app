@@ -1,7 +1,7 @@
 import { afterEach, expect } from "bun:test"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Watcher } from "@opencode/core/filesystem/watcher"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { FSUtil } from "@opencode/util/fs-util"
 import path from "path"
 import { Effect, Layer } from "effect"

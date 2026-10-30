@@ -1,6 +1,6 @@
 import { afterEach, describe, expect } from "bun:test"
 import { Database } from "@opencode/core/database/database"
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Task } from "@opencode/core/task"
 import { Context, Effect, Layer } from "effect"

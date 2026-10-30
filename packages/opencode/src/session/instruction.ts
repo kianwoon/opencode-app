@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { httpClient } from "@opencode/core/effect/app-node-platform"
 import path from "path"
 import { createHash } from "node:crypto"

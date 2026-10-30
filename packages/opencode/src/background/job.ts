@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { BackgroundJob as CoreBackgroundJob } from "@/compat/background-job"
 import { JobRecord } from "@opencode/core/job-record"
 import { Database } from "@opencode/core/database/database"

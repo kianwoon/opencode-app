@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode/core/effect/layer-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { httpClient } from "@opencode/core/effect/app-node-platform"
 import { Effect, Layer, Schema, Context, Stream } from "effect"
