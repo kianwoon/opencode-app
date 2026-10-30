@@ -1,5 +1,3 @@
-export * as ProjectCopy from "./copy.js"
-
 import { Context, Effect, Layer, Schema } from "effect"
 import path from "path"
 import { AbsolutePath } from "@opencode/core/schema"
@@ -11,18 +9,27 @@ import { ProjectDirectories } from "@/compat/directories"
 import { makeGitWorktreeStrategy } from "@/compat/project-copy-strategies"
 import { Slug } from "@opencode/core/util/slug"
 import { Bus } from "@opencode/core/bus"
-import { Database } from "../database/database.js"
-import { Location } from "../location.js"
-import { Event } from "@opencode-ai/schema/project-directories"
-import { ProjectCopy } from "@opencode-ai/schema/project-copy"
+import { Database } from "@opencode/core/database/database"
+import { Location } from "@opencode/core/location"
+import { ephemeral, inventory } from "@opencode/schema/event"
 
-export const StrategyID = ProjectCopy.StrategyID
+export const StrategyID = Schema.Trim.pipe(Schema.check(Schema.isNonEmpty()), Schema.brand("ProjectCopy.StrategyID"))
 export type StrategyID = typeof StrategyID.Type
 
-export const CreateInput = ProjectCopy.CreateInput
+export const CreateInput = Schema.Struct({
+  projectID: Project.ID,
+  strategy: StrategyID,
+  sourceDirectory: AbsolutePath,
+  directory: AbsolutePath,
+  name: Schema.optional(Schema.String),
+}).annotate({ identifier: "ProjectCopy.CreateInput" })
 export type CreateInput = typeof CreateInput.Type
 
-export const RemoveInput = ProjectCopy.RemoveInput
+export const RemoveInput = Schema.Struct({
+  projectID: Project.ID,
+  directory: AbsolutePath,
+  force: Schema.Boolean,
+}).annotate({ identifier: "ProjectCopy.RemoveInput" })
 export type RemoveInput = typeof RemoveInput.Type
 
 export const RefreshInput = Schema.Struct({
@@ -36,7 +43,9 @@ export const RefreshResult = Schema.Struct({
 }).annotate({ identifier: "ProjectCopy.RefreshResult" })
 export type RefreshResult = typeof RefreshResult.Type
 
-export const Copy = ProjectCopy.Copy
+export const Copy = Schema.Struct({
+  directory: AbsolutePath,
+}).annotate({ identifier: "ProjectCopy.Copy" })
 export type Copy = typeof Copy.Type
 
 export const ListEntry = Schema.Struct({
@@ -91,7 +100,11 @@ export interface Strategy {
   readonly list: (directory: AbsolutePath) => Effect.Effect<ListEntry[], Git.WorktreeError | DirectoryUnavailableError>
 }
 
-export { Event }
+const Updated = ephemeral({
+  type: "project.directories.updated",
+  schema: { projectID: Project.ID },
+})
+export const Event = { Updated, Definitions: inventory(Updated) }
 
 export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Copy, Error>
