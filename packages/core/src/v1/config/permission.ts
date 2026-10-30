@@ -26,10 +26,23 @@ export type Rule = Schema.Schema.Type<typeof Rule>
 
 const actionOnly = new Set(["question", "websearch", "doom_loop"])
 
-export const Info = Schema.Union([Action, Schema.ObjectKeyword])
+// Config written by the canonical permission migration uses the entries-array
+// form (`[["task", "allow"]]`), while legacy config uses a string or object.
+// Accept all three and normalize to the entries representation internally.
+export const Info = Schema.Union([
+  Action,
+  Schema.Array(Schema.Tuple([Schema.String, Rule])),
+  Schema.ObjectKeyword,
+])
   .pipe(
     Schema.decodeTo(Entries(Rule), {
-      decode: SchemaGetter.transform((input) => (typeof input === "string" ? { "*": input } : input)),
+      decode: SchemaGetter.transform((input) =>
+        typeof input === "string"
+          ? { "*": input }
+          : globalThis.Array.isArray(input)
+            ? globalThis.Object.fromEntries(input)
+            : input,
+      ),
       encode: SchemaGetter.passthrough({ strict: false }),
     }),
   )
