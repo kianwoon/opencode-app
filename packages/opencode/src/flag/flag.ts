@@ -41,6 +41,7 @@ export const Flag = {
   OPENCODE_DISABLE_FFF: fff === undefined ? process.platform === "win32" : truthy("OPENCODE_DISABLE_FFF"),
   // V2: ServerOptions.fs.filewatcher
   OPENCODE_DISABLE_FILEWATCHER: truthy("OPENCODE_DISABLE_FILEWATCHER"),
+  OPENCODE_DISABLE_CONFIG_WATCHER: truthy("OPENCODE_DISABLE_CONFIG_WATCHER"),
   // V2: TUI config terminal.copy_on_select
   OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT:
     copy === undefined ? process.platform === "win32" : truthy("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"),

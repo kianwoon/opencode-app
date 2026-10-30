@@ -2,9 +2,10 @@ export * as ConfigV1 from "./config"
 
 import { Schema } from "effect"
 import { ConfigReference } from "@opencode/schema/config/reference"
-import { NonNegativeInt, PositiveInt } from "@opencode/core/schema"
+import { type DeepMutable, NonNegativeInt, PositiveInt } from "@opencode/core/schema"
 import { ConfigAgentV1 } from "@opencode/core/v1/config/agent"
 import { ConfigAttachmentV1 } from "./attachment"
+import { ConfigBrainV1 } from "@opencode/core/v1/config/brain"
 import { ConfigCommandV1 } from "@opencode/core/v1/config/command"
 import { ConfigFormatterV1 } from "./formatter"
 import { ConfigLayoutV1 } from "./layout"
@@ -19,6 +20,11 @@ import { ConfigSkillsV1 } from "./skills"
 const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate({
   identifier: "LogLevel",
   description: "Log level",
+})
+
+export const WellKnown = Schema.Struct({
+  config: Schema.optional(Schema.Json),
+  remote_config: Schema.optional(Schema.Json),
 })
 
 export const Info = Schema.Struct({
@@ -68,6 +74,10 @@ export const Info = Schema.Struct({
   }),
   small_model: Schema.optional(Schema.String).annotate({
     description: "Small model to use for tasks like title generation in the format of provider/model",
+  }),
+  brain: Schema.optional(ConfigBrainV1.Info).annotate({
+    description:
+      "Brain configuration for hands and review agents. Strict enforcement permissions take precedence over global `permission` for the generated agents.",
   }),
   default_agent: Schema.optional(Schema.String).annotate({
     description:
@@ -119,6 +129,86 @@ export const Info = Schema.Struct({
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),
   tools: Schema.optional(ConfigPermissionV1.Entries(Schema.Boolean)),
+  jevDefault: Schema.optional(
+    Schema.Struct({
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Default Jev decision model as "provider/model-id" used by tool routing, governor and booster when their own model is unset.',
+      }),
+    }),
+  ).annotate({
+    description:
+      "Shared default Jev decision model applied to tool routing, governor and booster when their per-feature model is unset.",
+  }),
+  jev: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable Jev tool-routing: narrows the tool list per turn via the Jev decision model. OFF = full tool list.",
+      }),
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Jev decision model as "provider/model-id" (default "typesafe/jev-latest"). "typesafe" routes to the SystemOne endpoint; "openrouter" routes to the OpenRouter decisions endpoint.',
+      }),
+      threshold: Schema.optional(Schema.Finite).annotate({
+        description: "Confidence threshold for Jev keep/drop decisions (default 0.7).",
+      }),
+      confidenceFloor: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))).annotate({
+        description:
+          "Minimum score strength a Jev row must carry to be trusted (default 0.3). Below this a measured row fails open (keep).",
+      }),
+      timeoutMs: Schema.optional(PositiveInt).annotate({
+        description:
+          "Timeout in milliseconds for the Jev decision request (default 3000). Fail-open keeps the full tool list.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Global Jev tool-routing switch (all agents/sessions). ON = Jev choice narrows tools per turn; OFF = current behavior.",
+  }),
+  governor: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable the context governor: drop-only relevance gate over conversation context at the shared v1 choke-point (brain, hands, agents). OFF = current behavior.",
+      }),
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Governor decision model as "provider/model-id" (default "typesafe/jev-latest"). "typesafe" routes to the SystemOne endpoint; "openrouter" routes to the OpenRouter decisions endpoint.',
+      }),
+      threshold: Schema.optional(Schema.Finite).annotate({
+        description: "Choice-probability threshold for governor keep/drop decisions (default 0.7).",
+      }),
+      timeoutMs: Schema.optional(PositiveInt).annotate({
+        description:
+          "Timeout in milliseconds for the governor decision request (default 3000). Fail-open keeps all sections.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Global context governor switch (all agents/sessions). ON = drop-only relevance gating of conversation context; OFF = current behavior.",
+  }),
+  brainBooster: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable the brain booster: advisory-only Jev reasoning judgement injected as an ephemeral system block per provider turn. OFF = current behavior.",
+      }),
+      model: Schema.optional(Schema.String).annotate({
+        description:
+          'Booster decision model as "provider/model-id" (default "typesafe/jev-latest"). "typesafe" routes to the SystemOne endpoint; "openrouter" routes to the OpenRouter decisions endpoint.',
+      }),
+      threshold: Schema.optional(Schema.Finite).annotate({
+        description: "Choice-probability threshold for brain booster switch/verify decisions (default 0.7).",
+      }),
+      timeoutMs: Schema.optional(PositiveInt).annotate({
+        description:
+          "Timeout in milliseconds for the brain booster decision request (default 3000). Fail-open emits no advisory block.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Global brain booster switch (Jev reasoning advisory). ON = advisory-only reasoning judgement injected per provider turn; OFF = current behavior.",
+  }),
   attachment: Schema.optional(ConfigAttachmentV1.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
   }),
@@ -153,6 +243,10 @@ export const Info = Schema.Struct({
       preserve_recent_tokens: Schema.optional(NonNegativeInt).annotate({
         description: "Maximum number of tokens from recent turns to preserve verbatim after compaction",
       }),
+      trigger_tokens: Schema.optional(NonNegativeInt).annotate({
+        description:
+          "Total-token threshold that triggers compaction, overriding the model-derived fire point (the model's usable window). Unset keeps the model-derived behaviour.",
+      }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
       }),
@@ -177,8 +271,11 @@ export const Info = Schema.Struct({
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
+      workflow_concurrency: Schema.optional(PositiveInt).annotate({
+        description: "Maximum number of workflow steps running concurrently (default 4)",
+      }),
     }),
   ),
 }).annotate({ identifier: "Config" })
 
-export type Info = Schema.Schema.Type<typeof Info>
+export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>

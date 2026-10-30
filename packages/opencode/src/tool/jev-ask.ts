@@ -79,10 +79,10 @@ const choiceLabels = (descriptions: string[]) => {
 }
 
 const failChoiceCriteria = (input: unknown) =>
-  Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CHOICE_CRITERIA_MESSAGE }))
+  Effect.fail(new SchemaIssue.InvalidValue({ message: CHOICE_CRITERIA_MESSAGE }, input))
 
 const failScoreCriteria = (input: unknown) =>
-  Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: SCORE_CRITERIA_MESSAGE }))
+  Effect.fail(new SchemaIssue.InvalidValue({ message: SCORE_CRITERIA_MESSAGE }, input))
 
 // Vendor level bounds (2–10); never truncated — dropping a level would corrupt the scale.
 const SCORE_LEVELS_MIN = 2
@@ -103,7 +103,7 @@ const serializedLength = (criteria: unknown) => JSON.stringify(criteria).length
  */
 const ChoiceCriteria = Schema.Unknown.pipe(
   Schema.decodeTo(Schema.Record(Schema.String, Schema.String), {
-    decode: SchemaGetter.transformOrFail((input) => {
+    decode: SchemaGetter.transformEffect((input) => {
       if (typeof input !== "object" || input === null) return failChoiceCriteria(input)
       if (Array.isArray(input)) {
         const descriptions = input.filter((description): description is string => typeof description === "string")
@@ -114,7 +114,7 @@ const ChoiceCriteria = Schema.Unknown.pipe(
           choiceLabels(descriptions).map((label, index) => [label, descriptions[index]] as const),
         )
         return serializedLength(coerced) > CRITERIA_MAX
-          ? Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CRITERIA_LENGTH_MESSAGE }))
+          ? Effect.fail(new SchemaIssue.InvalidValue({ message: CRITERIA_LENGTH_MESSAGE }, input))
           : Effect.succeed(coerced)
       }
       const entries = Object.entries(input)
@@ -126,7 +126,7 @@ const ChoiceCriteria = Schema.Unknown.pipe(
         return failChoiceCriteria(input)
       const record = Object.fromEntries(entries.map(([label, description]) => [label, String(description)] as const))
       return serializedLength(record) > CRITERIA_MAX
-        ? Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CRITERIA_LENGTH_MESSAGE }))
+        ? Effect.fail(new SchemaIssue.InvalidValue({ message: CRITERIA_LENGTH_MESSAGE }, input))
         : Effect.succeed(record)
     }),
     encode: SchemaGetter.passthrough(),
@@ -176,13 +176,13 @@ const QuestionArms = Schema.Union([
     // oversized payload fails with guidance instead of a raw mismatch.
     criteria: Schema.Unknown.pipe(
       Schema.decodeTo(Schema.Array(Schema.String), {
-        decode: SchemaGetter.transformOrFail((input) => {
+        decode: SchemaGetter.transformEffect((input) => {
           if (!Array.isArray(input)) return failScoreCriteria(input)
           const levels = input.filter((level): level is string => typeof level === "string")
           if (levels.length !== input.length) return failScoreCriteria(input)
           if (levels.length < SCORE_LEVELS_MIN || levels.length > SCORE_LEVELS_MAX) return failScoreCriteria(input)
           return serializedLength(levels) > CRITERIA_MAX
-            ? Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: CRITERIA_LENGTH_MESSAGE }))
+            ? Effect.fail(new SchemaIssue.InvalidValue({ message: CRITERIA_LENGTH_MESSAGE }, input))
             : Effect.succeed(levels)
         }),
         encode: SchemaGetter.passthrough(),
@@ -253,9 +253,9 @@ const inferQuestionType = (input: unknown): unknown => {
  */
 export const Question = Schema.Unknown.pipe(
   Schema.decodeTo(QuestionArms, {
-    decode: SchemaGetter.transformOrFail((input) => {
+    decode: SchemaGetter.transformEffect((input) => {
       const required = missingCriteriaMessage(input)
-      if (required !== undefined) return Effect.fail(new SchemaIssue.InvalidValue(Option.some(input), { message: required }))
+      if (required !== undefined) return Effect.fail(new SchemaIssue.InvalidValue({ message: required }, input))
       return Effect.succeed(inferQuestionType(input) as Schema.Codec.Encoded<typeof QuestionArms>)
     }),
     encode: SchemaGetter.passthrough(),
@@ -311,11 +311,11 @@ export const Parameters = RawParameters.pipe(
       ),
     }),
     {
-      decode: SchemaGetter.transformOrFail((raw) => {
+      decode: SchemaGetter.transformEffect((raw) => {
         const questions = raw.questions.filter(isQuestionObject)
         const malformedDrops = malformedDropsOf(raw.questions)
         if (questions.length === 0 && malformedDrops.length > 0)
-          return Effect.fail(new SchemaIssue.InvalidValue(Option.some(raw.questions), { message: ALL_MALFORMED_MESSAGE }))
+          return Effect.fail(new SchemaIssue.InvalidValue({ message: ALL_MALFORMED_MESSAGE }, raw.questions))
         return Effect.succeed({ goal: raw.goal, questions, malformedDrops })
       }),
       encode: SchemaGetter.passthrough(),

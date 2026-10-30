@@ -31,7 +31,7 @@ const POLL = Duration.seconds(2)
 
 type Fingerprint = { mtime: number; size: bigint }
 
-const fingerprintOf = (stat: { mtime: Option.Option<Date>; size: FileSystem.Size }): Fingerprint => ({
+const fingerprintOf = (stat: { mtime: Option.Option<Date>; size: bigint }): Fingerprint => ({
   mtime: Option.getOrElse(stat.mtime, () => new Date(0)).getTime(),
   size: stat.size,
 })

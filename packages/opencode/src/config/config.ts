@@ -466,18 +466,12 @@ const layer = Layer.effect(
 
           yield* ensureGitignore(dir).pipe(Effect.orDie)
 
+          // Preview builds produce `0.0.0-prod-<ts>` versions that are never
+          // published to npm; pinning them here makes every subsequent boot
+          // fail npm install. Fall back to the latest published release.
+          const pluginVersion = InstallationLocal || InstallationVersion.startsWith("0.0.0-") ? undefined : InstallationVersion
           const dep = yield* npmSvc
-            .install(dir, {
-              add: [
-                {
-                  name: "@opencode/plugin",
-                  // Preview builds produce `0.0.0-prod-<ts>` versions that are never
-                  // published to npm; pinning them here makes every subsequent boot
-                  // fail npm install. Fall back to the latest published release.
-                  version: InstallationLocal || InstallationVersion.startsWith("0.0.0-") ? undefined : InstallationVersion,
-                },
-              ],
-            })
+            .add(`@opencode/plugin${pluginVersion ? `@${pluginVersion}` : ""}`)
             .pipe(
               Effect.exit,
               Effect.tap((exit) =>

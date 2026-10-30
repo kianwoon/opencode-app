@@ -66,7 +66,7 @@ export abstract class NamedError extends Error {
     ref: Schema.optional(Schema.String),
   })
 }
-import { isRecord } from "@opencode/tui/util/record"
+import { isRecord } from "@opencode/util/record"
 
 type ConfigIssue = { message: string; path: string[] }
 
