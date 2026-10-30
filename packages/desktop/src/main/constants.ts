@@ -1,10 +1,26 @@
-type Channel = "dev" | "beta" | "prod"
-const raw = import.meta.env.OPENCODE_CHANNEL
-export const CHANNEL: Channel = raw === "dev" || raw === "beta" || raw === "prod" ? raw : "dev"
+import { app } from "electron"
 
-// We compile opencode locally with customizations (V2 plugin, vacuum, cache
-// fixes, compaction fix). The auto-updater targets the UPSTREAM release, which
-// would download and replace our local build, silently losing all of that work.
-// Keep it disabled so the update button never appears and the app can never be
-// clobbered by an upstream update.
-export const UPDATER_ENABLED = false
+type Channel = "local" | "dev" | "beta" | "prod"
+
+const raw = import.meta.env.OPENCODE_CHANNEL
+
+export const CHANNEL: Channel = raw === "local" || raw === "dev" || raw === "beta" || raw === "prod" ? raw : "dev"
+
+export const VERSION = app.isPackaged ? app.getVersion() : (process.env.OPENCODE_VERSION ?? app.getVersion())
+
+const appNames: Record<string, string> = {
+  dev: "OpenCode Dev",
+  beta: "OpenCode Beta",
+  prod: "OpenCode",
+}
+
+const appIDs: Record<string, string> = {
+  dev: "ai.opencode.desktop.dev",
+  beta: "ai.opencode.desktop.beta",
+  prod: "ai.opencode.desktop",
+}
+
+// Local renderer/server mode keeps the dev application identity.
+export const APP_NAME = app.isPackaged ? appNames[CHANNEL] : "OpenCode Dev"
+
+export const APP_ID = app.isPackaged ? appIDs[CHANNEL] : "ai.opencode.desktop.dev"

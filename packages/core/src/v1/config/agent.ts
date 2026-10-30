@@ -1,8 +1,8 @@
-export * as ConfigAgentV1 from "./agent"
+export * as ConfigAgentV1 from "./agent.js"
 
 import { Schema, SchemaGetter } from "effect"
-import { PositiveInt } from "../../schema"
-import { ConfigPermissionV1 } from "./permission"
+import { PositiveInt } from "../../schema.js"
+import { ConfigPermissionV1 } from "./permission.js"
 
 const Color = Schema.Union([
   Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/)),
@@ -18,17 +18,8 @@ const AgentSchema = Schema.StructWithRest(
     temperature: Schema.optional(Schema.Finite),
     top_p: Schema.optional(Schema.Finite),
     prompt: Schema.optional(Schema.String),
-    tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
+    tools: Schema.optional(ConfigPermissionV1.Entries(Schema.Boolean)).annotate({
       description: "@deprecated Use 'permission' field instead",
-    }),
-    owned_tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
-      description: "Allowlist of tool names this agent owns. Undefined means every tool.",
-    }),
-    skills: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
-      description: "Allowlist of skill names this agent owns. Undefined means every skill.",
-    }),
-    capabilities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
-      description: "Declarative capability tags for this agent.",
     }),
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
@@ -49,27 +40,7 @@ const AgentSchema = Schema.StructWithRest(
   [Schema.Record(Schema.String, Schema.Any)],
 )
 
-const KNOWN_KEYS = new Set([
-  "name",
-  "model",
-  "variant",
-  "prompt",
-  "description",
-  "temperature",
-  "top_p",
-  "mode",
-  "hidden",
-  "color",
-  "steps",
-  "maxSteps",
-  "options",
-  "permission",
-  "disable",
-  "tools",
-  "owned_tools",
-  "skills",
-  "capabilities",
-])
+const KNOWN_KEYS = new Set(["name", ...Object.keys(AgentSchema.schema.fields)])
 
 const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema.Type<typeof AgentSchema> => {
   const options: Record<string, unknown> = { ...agent.options }
@@ -77,23 +48,20 @@ const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema
     if (!KNOWN_KEYS.has(key)) options[key] = value
   }
 
-  const permission: ConfigPermissionV1.Info = {}
-  for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
+  // A Map keeps each key's first position when a later entry overrides it, like Object.assign.
+  const permission = new Map<string, ConfigPermissionV1.Rule>()
+  for (const [tool, enabled] of agent.tools ?? []) {
     const action = enabled ? "allow" : "deny"
-    if (tool === "write" || tool === "edit" || tool === "patch") {
-      permission.edit = action
-      continue
-    }
-    permission[tool] = action
+    permission.set(tool === "write" || tool === "patch" ? "edit" : tool, action)
   }
-  globalThis.Object.assign(permission, agent.permission)
+  for (const [key, rule] of agent.permission ?? []) permission.set(key, rule)
 
   const steps = agent.steps ?? agent.maxSteps
-  return { ...agent, options, permission, ...(steps !== undefined ? { steps } : {}) }
+  return { ...agent, options, permission: [...permission], ...(steps !== undefined ? { steps } : {}) }
 }
 
 export const Info = AgentSchema.pipe(
-  Schema.decodeTo(AgentSchema, {
+  Schema.decodeTo(Schema.toType(AgentSchema), {
     decode: SchemaGetter.transform(normalize),
     encode: SchemaGetter.passthrough({ strict: false }),
   }),

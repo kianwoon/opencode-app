@@ -1,16 +1,13 @@
-export * as SkillV2 from "./skill"
+export * as Skill from "./skill.js"
 
-import { makeLocationNode } from "./effect/app-node"
+import { makeLocationNode } from "@opencode/util/effect/app-node"
+import { FSUtil } from "@opencode/util/fs-util"
 import path from "path"
-import { Context, Effect, Layer, Schema, Types } from "effect"
-import { Skill } from "@opencode-ai/schema/skill"
-import { AgentV2 } from "./agent"
-import { ConfigMarkdown } from "./config/markdown"
-import { FSUtil } from "./fs-util"
-import { PermissionV2 } from "./permission"
-import { AbsolutePath } from "./schema"
-import { SkillDiscovery } from "./skill/discovery"
-import { State } from "./state"
+import { Context, Effect, Layer, Types } from "effect"
+import { Skill } from "@opencode/schema/skill"
+import { Bus } from "./bus.js"
+import { Permission } from "./permission.js"
+import { State } from "./state.js"
 
 export const DirectorySource = Skill.DirectorySource
 export type DirectorySource = Skill.DirectorySource
@@ -22,184 +19,125 @@ export const EmbeddedSource = Skill.EmbeddedSource
 export type EmbeddedSource = Skill.EmbeddedSource
 
 export const Source = Skill.Source
-export type Source = typeof Source.Type
+export type Source = Skill.Source
 
 export const Info = Skill.Info
 export type Info = Skill.Info
+export const ID = Skill.ID
+export type ID = Skill.ID
+export const Name = Skill.Name
+export type Name = Skill.Name
 
-export const available = (skills: ReadonlyArray<Info>, agent: AgentV2.Info) =>
-  skills.filter((skill) => PermissionV2.evaluate("skill", skill.name, agent.permissions).effect !== "deny")
+export { Event } from "@opencode/schema/skill"
 
-const Frontmatter = Schema.Struct({
-  name: Schema.String.pipe(Schema.optional),
-  description: Schema.String.pipe(Schema.optional),
-  slash: Schema.Boolean.pipe(Schema.optional),
+export const available = (skills: ReadonlyArray<Info>, permissions: Permission.Ruleset) =>
+  skills.filter((skill) => Permission.evaluate("skill", skill.id, permissions).effect !== "deny")
+
+export const toModelOutput = (skill: Info, files: ReadonlyArray<string>) => {
+  const directory = path.dirname(skill.path)
+  return [
+    `<skill_content name="${skill.name}">`,
+    `# Skill: ${skill.name}`,
+    "",
+    skill.content.trim(),
+    "",
+    `Base directory for this skill: ${directory}`,
+    "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.",
+    "Note: file list is sampled.",
+    "",
+    "<skill_files>",
+    ...files.map((file) => `<file>${file}</file>`),
+    "</skill_files>",
+    "</skill_content>",
+  ].join("\n")
+}
+
+export const prepare = Effect.fn("Skill.prepare")(function* (fs: FSUtil.Interface, skill: Info) {
+  const directory = path.dirname(skill.path)
+  const files =
+    path.basename(skill.path) === "SKILL.md"
+      ? (yield* fs.scan("**/*", {
+          cwd: directory,
+          absolute: true,
+          include: "file",
+          dot: true,
+          ignore: FSUtil.ignoreGlobs,
+        }))
+          .filter((file) => path.basename(file) !== "SKILL.md")
+          .toSorted()
+          .slice(0, 10)
+      : []
+  return {
+    directory,
+    output: toModelOutput(skill, files),
+  }
 })
-const decodeFrontmatter = Schema.decodeUnknownOption(Frontmatter)
 
 export type Data = {
-  sources: Types.DeepMutable<Source>[]
-  disabled: Set<string>
+  skills: Map<ID, Types.DeepMutable<Info>>
 }
 
-export type Draft = {
-  source: (source: Source) => void
-  disable: (name: string) => void
-  list: () => readonly Source[]
+export type Editor = {
+  list: () => readonly Types.DeepMutable<Info>[]
+  get: (id: string) => Types.DeepMutable<Info> | undefined
+  add: (skill: Info) => void
+  update: (id: string, update: (skill: Types.DeepMutable<Info>) => void) => void
+  remove: (id: string) => void
 }
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("SkillV2.NotFoundError", {
-  name: Schema.String,
-}) {
-  override get message() {
-    return `Skill "${this.name}" not found`
-  }
-}
-
-export class NotRemovableError extends Schema.TaggedErrorClass<NotRemovableError>()("SkillV2.NotRemovableError", {
-  name: Schema.String,
-  location: Schema.String,
-  reason: Schema.String,
-}) {
-  override get message() {
-    return `Skill "${this.name}" at ${this.location} cannot be removed: ${this.reason}`
-  }
-}
-
-export interface Interface extends State.Transformable<Draft> {
-  readonly sources: () => Effect.Effect<Source[]>
-  readonly disabled: () => Effect.Effect<ReadonlySet<string>>
+export interface Interface extends State.Transformable<Editor> {
+  readonly get: (id: ID) => Effect.Effect<Info | undefined>
   readonly list: () => Effect.Effect<Info[]>
-  readonly remove: (name: string) => Effect.Effect<Info, NotFoundError | NotRemovableError>
 }
 
-// Active = listed AND not user-disabled. User disables are name-based config
-// toggles; permission denies remain a separate per-agent filter (available).
-export const active = (skills: ReadonlyArray<Info>, disabled: ReadonlySet<string>) =>
-  skills.filter((skill) => !disabled.has(skill.name))
-
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Skill") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/Skill") {}
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const discovery = yield* SkillDiscovery.Service
-    const fs = yield* FSUtil.Service
+    const bus = yield* Bus.Service
 
-    const state = State.create<Data, Draft>({
-      initial: () => ({ sources: [], disabled: new Set() }),
-      draft: (draft) => ({
-        source: (source) => {
-          if (draft.sources.some((item) => Source.equals(item, source))) return
-          draft.sources.push(source as Types.DeepMutable<Source>)
+    const state = State.create<Data, Editor>({
+      name: "skill",
+      initial: () => ({ skills: new Map() }),
+      editor: (editor) => ({
+        list: () => Array.from(editor.skills.values()),
+        get: (id) => editor.skills.get(ID.make(id)),
+        add: (skill) => {
+          editor.skills.set(skill.id, { ...skill })
         },
-        disable: (name) => {
-          draft.disabled.add(name)
+        update: (id, update) => {
+          const key = ID.make(id)
+          const current = editor.skills.get(key)
+          if (!current) return
+          update(current)
+          current.id = key
         },
-        list: () => draft.sources as Source[],
+        remove: (id) => {
+          editor.skills.delete(ID.make(id))
+        },
       }),
-    })
-
-    const load = Effect.fn("SkillV2.load")(function* (source: Source) {
-      const skills: Info[] = []
-      if (source.type === "embedded") return [source.skill]
-      const directories = source.type === "directory" ? [source.path] : yield* discovery.pull(source.url)
-      for (const directory of directories) {
-        const files = yield* fs
-          .glob("{*.md,**/SKILL.md}", { cwd: directory, absolute: true, include: "file", symlink: true, dot: true })
-          .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-        for (const filepath of files.toSorted()) {
-          const content = yield* fs.readFileStringSafe(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
-          if (!content) continue
-          const markdown = ConfigMarkdown.parseOption(content)
-          if (!markdown) continue
-          const frontmatter = decodeFrontmatter(markdown.data).valueOrUndefined
-          if (!frontmatter) continue
-          const name =
-            frontmatter.name !== undefined
-              ? frontmatter.name
-              : path.dirname(filepath) === directory
-                ? path.basename(filepath, ".md")
-                : undefined
-          if (!name) continue
-          skills.push({
-            name,
-            description: frontmatter.description,
-            slash: frontmatter.slash,
-            location: AbsolutePath.make(filepath),
-            content: markdown.content,
-          })
-        }
-      }
-      return skills
-    })
-
-    // QUESTION(Dax): Should local skill sources invalidate on filesystem watch
-    // events, following the reload policy chosen for other context sources?
-    const cache = new Map<string, Info[]>()
-    const list = Effect.fn("SkillV2.list")(function* () {
-      const skills = new Map<string, Info>()
-      for (const source of state.get().sources) {
-        const key = Source.key(source)
-        const loaded = cache.get(key) ?? (yield* load(source))
-        cache.set(key, loaded)
-        for (const skill of loaded) skills.set(skill.name, skill)
-      }
-      return Array.from(skills.values())
-    })
-
-    // Removes a file-backed skill by deleting its SKILL.md directory. Only the
-    // standard `<skill-dir>/SKILL.md` layout is deletable; sources also glob
-    // loose `*.md` files and nested trees where dirname(location) could remove
-    // unrelated sibling content. The whole per-source cache is dropped because
-    // list() does not attribute skills to sources.
-    const remove = Effect.fn("SkillV2.remove")(function* (name: string) {
-      const skills = yield* list()
-      const info = skills.find((skill) => skill.name === name)
-      if (!info) return yield* new NotFoundError({ name })
-      if (info.location.startsWith("/builtin/")) {
-        return yield* new NotRemovableError({
-          name,
-          location: info.location,
-          reason: "built-in skills cannot be removed",
-        })
-      }
-      if (path.basename(info.location) !== "SKILL.md") {
-        return yield* new NotRemovableError({
-          name,
-          location: info.location,
-          reason: "only skills backed by a SKILL.md directory can be removed",
-        })
-      }
-      const dir = path.dirname(info.location)
-      yield* fs.remove(dir, { recursive: true, force: true }).pipe(
-        Effect.mapError(
-          (error) =>
-            new NotRemovableError({
-              name,
-              location: info.location,
-              reason: error instanceof Error ? error.message : String(error),
-            }),
-        ),
-      )
-      cache.clear()
-      yield* Effect.logInfo("skill removed", { name, dir })
-      return info
+      notify: State.changes(
+        (data) => Array.from(data.skills.values()),
+        () => bus.publish(Skill.Event.Updated, {}).pipe(Effect.asVoid),
+      ),
     })
 
     return Service.of({
       transform: state.transform,
       reload: state.reload,
-      sources: Effect.fn("SkillV2.sources")(function* () {
-        return state.get().sources
+      get: Effect.fn("Skill.get")(function* (id) {
+        return state.get().skills.get(id)
       }),
-      disabled: Effect.fn("SkillV2.disabled")(function* () {
-        return state.get().disabled as ReadonlySet<string>
+      list: Effect.fn("Skill.list")(function* () {
+        return Array.from(state.get().skills.values())
       }),
-      list,
-      remove,
     })
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [SkillDiscovery.node, FSUtil.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer,
+  deps: [Bus.node],
+})

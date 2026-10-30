@@ -7,260 +7,80 @@
     </picture>
   </a>
 </p>
-
-<p align="center"><b>The AI coding agent, upgraded into an AI harness.</b></p>
-<p align="center">A fork of <a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a> with a built-in harness layer: scheduled tasks, runaway-loop and stall guards, task-aware effort routing, cache-safe context control, workflow orchestration, verification gates, and durable runtime state.</p>
-
+<p align="center">The open source AI coding agent.</p>
 <p align="center">
-  <a href="https://github.com/kianwoon/opencode-app/releases"><img alt="Latest fork release" src="https://img.shields.io/github/v/release/kianwoon/opencode-app?style=flat-square&label=fork%20release" /></a>
-  <a href="https://github.com/anomalyco/opencode"><img alt="Upstream" src="https://img.shields.io/badge/upstream-opencode-blue?style=flat-square" /></a>
+  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
+  <a href="https://www.npmjs.com/package/@opencode/cli"><img alt="npm" src="https://img.shields.io/npm/v/@opencode/cli?style=flat-square" /></a>
+  <a href="https://github.com/anomalyco/opencode/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/release.yml?style=flat-square&branch=dev" /></a>
 </p>
 
----
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README.zh.md">简体中文</a> |
+  <a href="README.zht.md">繁體中文</a> |
+  <a href="README.ko.md">한국어</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.it.md">Italiano</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.bs.md">Bosanski</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.no.md">Norsk</a> |
+  <a href="README.br.md">Português (Brasil)</a> |
+  <a href="README.th.md">ไทย</a> |
+  <a href="README.tr.md">Türkçe</a> |
+  <a href="README.uk.md">Українська</a> |
+  <a href="README.bn.md">বাংলা</a> |
+  <a href="README.gr.md">Ελληνικά</a> |
+  <a href="README.vi.md">Tiếng Việt</a>
+</p>
 
-## Why This Fork
-
-Upstream opencode is a capable agent loop surrounded by providers, tools, and
-permissions. This fork turns that agent loop into a **harness** — a control
-plane that manages context, intelligence allocation, orchestration, and
-verification around every turn. All enhancements are implemented in-process
-(no external meta-harness), staying upstream-mergeable.
-
-## Enterprise Harness
-
-The fork ships a complete harness layer, organized in phases 0–3 (see
-`harness-enhancement-plan.md`):
-
-- **Effort governance** — `task-effort-router.ts` routes each task to an
-  appropriate model effort level, so routine work doesn't burn premium
-  reasoning tokens. Direct cost control with per-agent overrides.
-- **Context policy engine** — `context-gate.ts` enforces cache-safe context
-  control and auditability before content reaches a turn. Measured savings:
-  **676k+ tokens** avoided.
-- **Phases 0–3 shipped** — scheduled tasks, loop/stall guards, effort
-  routing, orchestration, and verification gates are all live, not planned.
-- **Knowledge-graph navigation** — `graphify-out/` provides a persistent
-  graph of the codebase with query/path/explain tools for architecture
-  questions.
-- **Skills & agents** — packaged expertise (`effect`, `rtl-aware-development`)
-  and specialist subagents (`triage`, `duplicate-pr`) extend the harness
-  without touching core.
-- **Plugin-first, zero-fork architecture** — everything lives in
-  `.opencode/plugin-lib/`, staying upstream-mergeable.
-
-## Unique Features
-
-### ⏰ Scheduled Tasks (default ON)
-
-Cron-scheduled sessions that run without you. Tasks are declared with a 5-field
-cron expression (or `daily`/`hourly`/… presets) plus a prompt; the scheduler
-fires them on time, claims due rows durably, and skips (or queues behind) a
-session that is already busy. The model can create tasks itself with the
-`schedule_task` tool, and the sidebar's Tasks section manages them.
-
-```text
-User: "review open PRs every weekday at 9am"
-  → schedule_task  cron: "0 9 * * 1-5", prompt: "review open PRs, summarize risks"
-  → scheduler fires on time → fresh session runs the prompt → run history kept
-```
-
-### 🛑 Runaway Loop Guards (default ON)
-
-Two layers stop degenerate sessions without killing healthy long work:
-
-- **Step bound** — every agent is capped at 1000 provider turns (per-agent
-  `steps` config wins). Near the cap the tools are physically removed and a
-  wrap-up prompt injected, so the session salvages itself with a final answer
-  instead of erroring mid-work.
-- **Turn-fingerprint interceptor** — identical consecutive turns are detected
-  by content hash: 3 identical turns inject a visible warning, 6 strip tools
-  and force a wrap-up, 10 hard-stop the loop with a persisted error.
-
-### 🛡️ Idle Stall Guard (default ON, 180s)
-
-Provider streams that go silent mid-turn are aborted after 180s of
-no bytes — but strictly idle-based: **no total-time limit ever applies**, so
-long healthy reasoning turns cannot be interrupted. Stalls raise a distinct
-`ChunkStallError`, are retried with backoff by the normal bounded schedule,
-and log a WARN with the stall duration. Per-phase escape hatches:
-`timeout: false`, `chunkTimeout: false`, `headerTimeout: false`.
-
-### ⚡ Workflow DAG Engine (default ON)
-
-Multi-step pipelines as parallel subagent graphs. The model declares steps and
-dependencies with the `workflow` tool; the engine runs independent steps
-concurrently (event-driven, concurrency-capped), skips dependents of failed
-steps, reports per-step outcomes, and detects deadlocks. Admission validation
-(cycles, duplicate/missing deps, step cap, unknown agents) fails fast at both
-the tool and the dispatch boundary.
-
-```text
-User: "run lint and tests in parallel, then commit if both pass"
-  → PLAN    model lays out steps + dependencies
-  → ORCHESTRATE  one workflow call; lint ∥ tests run concurrently
-  → REACT   per-step summary; model fixes failures or commits
-```
-
-### 🧠 Task Assessor + Effort Governor
-
-Every task boundary is profiled by cheap heuristics (complexity, risk domains —
-zero LLM cost). Complex tasks **start** at medium reasoning effort,
-complex+risky at high — no wasted turns discovering difficulty. The model can
-still escalate via a `request_effort` tool (monotonic, capped). Never lowers a
-user-pinned effort. Risky tasks get a "verify blast radius" system notice.
-
-### 🗜️ Context Optimizer (KV-cache-aware pruning)
-
-Compresses the conversation before each request **without wrecking the
-provider cache**: under budget it is a strict no-op (byte-identical prefix =
-max cache hits); over budget it prunes the minimum needed, nearest the
-protected tail. Reasoning is always stripped; token estimation is CJK-aware;
-live telemetry tracks hit rate and tokens saved (~90% hit rate in daily use).
-
-### 🪟 Context Governor
-
-Token-efficient turns for the runner: per-agent context budgets for
-compaction, per-agent tool-catalog visibility (trim schema overhead), and a
-repo-index system context source that surfaces repository structure through
-the same delta-updated, epoch-persisted pipeline as other context.
-
-### ✅ Verification Gate (opt-in)
-
-After a task finishes, a pure risk detector (sensitive paths, destructive
-prompts, broad refactors) can trigger **one reviewer subagent pass** whose
-findings are injected back before the session goes idle. Enable with
-`OPENCODE_EXPERIMENTAL_VERIFICATION=true`.
-
-### ⏰ Followup Delivery (V2 sessions)
-
-Durably admitted prompts with a delivery time: `delivery: "followup"` +
-`deliverAt` keeps the input pending until its time passes, then promotes it at
-the idle boundary. The execution scheduler wakes the session when it is due;
-the database stays the source of truth.
-
-### 💾 Durable Background Job Records
-
-Background job lifecycle transitions persist best-effort to a `background_job`
-table (never breaks live work). Restarts sweep stale "running" rows to
-cancelled ("interrupted by restart"); `list`/`get` merge live entries over
-recorded history.
-
-### 🔎 Honest Failure Semantics
-
-Aborts are classified as aborts (not mystery `UnknownError`s), user-initiated
-subagent cancels report "Subagent cancelled", and early stream teardowns emit
-diagnosable telemetry instead of failing silently.
-
-### 🚀 Performance Pass
-
-Context- and IO-efficiency work that keeps turns fast as sessions grow:
-
-- **Read-only tool result cache** — repeated read-only calls in a session skip
-  canonical execution entirely.
-- **Watcher dirty-set staging** — file snapshots stage from watcher dirty sets
-  instead of full rescans.
-- **Post-compaction hydration boundary** — only retained messages hydrate
-  after compaction, not the whole history.
-- **find_tools demotion** — promoted tool definitions demote again under
-  context pressure, keeping the catalog lean.
+[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 ---
-
-## Harness Architecture
-
-The harness wraps every turn in four concentric stages — assessment, context
-control, orchestration, and verification — over durable runtime state, and a
-reliability shell around the provider stream itself.
-
-```mermaid
-flowchart TB
-    task(["user task"]) --> assessor["Task Assessor"]
-    assessor --> profile["effort / risk profile"]
-    profile --> governor["Effort Governor (pre-escalate)"]
-    model["model"] -.->|"request_effort (model escalates)"| governor
-    governor --> ctx["Context Engine<br/>• Context Optimizer (prune)<br/>• Context Governor (budgets)<br/>• System Context (deltas + epochs)"]
-    ctx --> orch["Orchestrator<br/>• single loop (simple tasks)<br/>• workflow DAG (parallel subagents)<br/>• Loop Guards (step bound + turn fingerprints)"]
-    orch --> verify["Verification Gate<br/>reviewer pass (opt-in)"]
-    verify --> state[("Durable State<br/>• inputs / jobs / events<br/>• Task Scheduler (cron → sessions)")]
-
-    orch ==>|"single provider turn (LLM.stream)"| shell
-
-    subgraph shell["RELIABILITY SHELL (per stream)"]
-        direction LR
-        idle["idle stall guard<br/>180s idle, no total-time limit"]
-        chunk["ChunkStallError<br/>bounded retry + backoff"]
-        rep["repetition-loop guard"]
-    end
-
-    shell --> providers["providers / tools / MCP"]
-```
-
-Every element is in-process: plugins handle assessment/effort/pruning, core
-handles orchestration/delivery/durability/scheduling. No external
-meta-harness.
-
----
-
-## Feature Flags
-
-| Flag                                 | Default | Controls                      |
-| ------------------------------------ | ------- | ----------------------------- |
-| `OPENCODE_EXPERIMENTAL_WORKFLOWS`    | on      | Workflow DAG engine           |
-| `OPENCODE_EXPERIMENTAL_VERIFICATION` | off     | Automatic reviewer gate       |
-| `experimental.workflow_concurrency`  | 4       | Parallel workflow steps       |
-| per-agent `steps` config             | 1000    | Max provider turns per agent  |
-| `timeout` / `chunkTimeout` / `headerTimeout` | 180000 | Provider idle stall guard (ms; `false` disables a phase) |
-
-## Releases (macOS Apple Silicon)
-
-Fork releases are published on the
-[releases page](https://github.com/kianwoon/opencode-app/releases) with a
-prod-channel desktop app whose embedded server channel is machine-verified
-before publishing:
-
-| Release                                                                                  | Highlights                                                              |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| [v1.18.25-fork.5](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.5) | Scheduled tasks, runaway loop guards, performance pass                  |
-| [v1.18.25-fork.4](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.4) | Idle stall guard (default ON), plugin loading fixes                     |
-| [v1.18.25-fork.3](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.3) | Context governor, abort handling                                        |
-| [v1.18.25-fork.2](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.2) | Review hardening, honest cancel reporting                               |
-| [v1.18.25-fork.1](https://github.com/kianwoon/opencode-app/releases/tag/v1.18.25-fork.1) | Workflow engine, effort governor, context optimizer, Phase 3 durability |
-
-The full plan and rationale live in
-[harness-enhancement-plan.md](./harness-enhancement-plan.md).
-
----
-
-## Everything From Upstream
-
-This fork tracks anomalyco/opencode (`merge-v1.18.24-25` base). Upstream
-features all work unchanged:
 
 ### Installation
 
 ```bash
 # YOLO
-curl -fsSL https://opencode.ai/install | bash
+curl -fsSL https://opencode.ai/v2/install | bash
 
 # Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
+npm i -g @opencode/cli@latest      # or bun/pnpm/yarn
+brew install anomalyco/tap/opencode-v2 # macOS and Linux (recommended, always up to date)
 brew install opencode              # macOS and Linux (official brew formula, updated less)
 sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
+paru -S opencode-beta              # Arch Linux (Latest from AUR)
 mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
+nix run github:anomalyco/opencode  # Nix
 ```
+
+> [!TIP]
+> Remove versions older than 0.1.x before installing.
 
 ### Desktop App (BETA)
 
-Also available as a desktop application from the
-[upstream releases page](https://github.com/anomalyco/opencode/releases) or
-[opencode.ai/download](https://opencode.ai/download). This fork publishes its
-own macOS-arm64 desktop builds on
-[our releases page](https://github.com/kianwoon/opencode-app/releases).
+OpenCode is also available as a desktop application. Download it from [opencode.ai/download](https://opencode.ai/download).
+
+| Platform              | Download                           |
+| --------------------- | ---------------------------------- |
+| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
+| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
+| Windows               | `opencode-desktop-win-x64.exe`     |
+| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
+
+```bash
+# macOS (Homebrew)
+brew install --cask opencode-desktop
+```
+
+#### Installation Directory
+
+The install script installs OpenCode to `$HOME/.opencode/bin`.
 
 ### Agents
 
@@ -275,19 +95,20 @@ OpenCode includes two built-in agents you can switch between with the `Tab` key.
 Also included is a **general** subagent for complex searches and multistep tasks.
 This is used internally and can be invoked using `@general` in messages.
 
+Learn more about [agents](https://opencode.ai/v2/docs/agents).
+
 ### Documentation
 
-For upstream configuration and usage,
-[**head over to the docs**](https://opencode.ai/docs).
+For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/v2/docs).
 
 ### Contributing
 
-See upstream [contributing docs](./CONTRIBUTING.md). Fork-specific changes are
-documented in [harness-enhancement-plan.md](./harness-enhancement-plan.md).
+If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
+
+### Building on OpenCode
+
+If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
 
 ---
 
-**Upstream community:** [Discord](https://discord.gg/opencode) |
-[X.com](https://x.com/opencode)
-
-_This fork is not built by the OpenCode team and is not affiliated with them._
+**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)

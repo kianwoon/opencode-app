@@ -1,25 +1,9 @@
-export * as ConfigProviderV1 from "./provider"
+export * as ConfigProviderV1 from "./provider.js"
 
 import { Schema } from "effect"
-import { PositiveInt } from "../../schema"
+import { PositiveInt } from "../../schema.js"
 
 export const ModelStatus = Schema.Literals(["alpha", "beta", "deprecated", "active"])
-
-const InterleavedField = Schema.Union([
-  Schema.Literals(["reasoning", "reasoning_content", "reasoning_text"]),
-  Schema.String,
-])
-
-// models.dev's `reasoning_options`: OpenCode builds the model's reasoning variants from them.
-const ReasoningOption = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("effort"), values: Schema.Array(Schema.NullOr(Schema.String)) }),
-  Schema.Struct({ type: Schema.Literal("toggle") }),
-  Schema.Struct({
-    type: Schema.Literal("budget_tokens"),
-    min: Schema.optional(Schema.Finite),
-    max: Schema.optional(Schema.Finite),
-  }),
-])
 
 export const Model = Schema.Struct({
   id: Schema.optional(Schema.String),
@@ -28,19 +12,14 @@ export const Model = Schema.Struct({
   release_date: Schema.optional(Schema.String),
   attachment: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(Schema.Boolean),
-  reasoning_options: Schema.optional(
-    Schema.Array(ReasoningOption).annotate({
-      description: "Reasoning controls the model accepts, used to build its variants",
-    }),
-  ),
   temperature: Schema.optional(Schema.Boolean),
   tool_call: Schema.optional(Schema.Boolean),
   interleaved: Schema.optional(
     Schema.Union([
       Schema.Boolean,
-      InterleavedField,
+      Schema.String,
       Schema.Struct({
-        field: InterleavedField,
+        field: Schema.String,
       }),
     ]),
   ),
@@ -114,32 +93,16 @@ export const Info = Schema.Struct({
         setCacheKey: Schema.optional(Schema.Boolean).annotate({
           description: "Enable promptCacheKey for this provider (default false)",
         }),
-        timeout: Schema.optional(
-          Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
-            description:
-              "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 180000 when unset; set to false to disable the idle guards entirely.",
-          }),
-        ).annotate({
-          description:
-            "Idle timeout in milliseconds for this provider. Guards the headers phase and gaps between streamed chunks; it never limits total request duration, so long streaming responses are unaffected. Defaults to 180000 when unset; set to false to disable the idle guards entirely.",
+        timeout: Schema.optional(Schema.Union([PositiveInt, Schema.Literal(false)])).annotate({
+          description: "Timeout in milliseconds for full requests to this provider. Set to false to disable timeout.",
         }),
-        headerTimeout: Schema.optional(
-          Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
-            description:
-              "Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.",
-          }),
-        ).annotate({
+        headerTimeout: Schema.optional(Schema.Union([PositiveInt, Schema.Literal(false)])).annotate({
           description:
             "Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.",
         }),
-        chunkTimeout: Schema.optional(
-          Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
-            description:
-              "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (180000 when unset); set to false to disable the chunk-gap guard.",
-          }),
-        ).annotate({
+        chunkTimeout: Schema.optional(PositiveInt).annotate({
           description:
-            "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted and retried. Defaults to the provider timeout (180000 when unset); set to false to disable the chunk-gap guard.",
+            "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
         }),
       }),
       [Schema.Record(Schema.String, Schema.Any)],

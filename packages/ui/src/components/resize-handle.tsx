@@ -1,4 +1,4 @@
-import { createSignal, splitProps, type JSX } from "solid-js"
+import { splitProps, type JSX } from "solid-js"
 
 export interface ResizeHandleProps extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "onResize"> {
   direction: "horizontal" | "vertical"
@@ -27,20 +27,19 @@ export function ResizeHandle(props: ResizeHandleProps) {
     "class",
     "classList",
   ])
-  // `:active` is unreliable here because mousedown is preventDefault-ed, so
-  // dragging state is reflected via data-active for the highlight style.
-  const [dragging, setDragging] = createSignal(false)
 
   const handleMouseDown = (e: MouseEvent) => {
     if (e.detail > 1) return
     e.preventDefault()
-    setDragging(true)
+    const handle = e.currentTarget instanceof HTMLElement ? e.currentTarget : undefined
     const edge = local.edge ?? (local.direction === "vertical" ? "start" : "end")
     const start = local.direction === "horizontal" ? e.clientX : e.clientY
+
     const rtl =
       local.direction === "horizontal" &&
       e.currentTarget instanceof Element &&
       getComputedStyle(e.currentTarget).direction === "rtl"
+
     const startSize = local.size
     const min = local.min
     const max = local.max
@@ -53,9 +52,12 @@ export function ResizeHandle(props: ResizeHandleProps) {
 
     document.body.style.userSelect = "none"
     document.body.style.overflow = "hidden"
+    document.body.style.cursor = local.direction === "horizontal" ? "col-resize" : "row-resize"
+    handle?.setAttribute("data-dragging", "")
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       const pos = local.direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY
+
       const delta =
         local.direction === "vertical"
           ? edge === "end"
@@ -64,26 +66,32 @@ export function ResizeHandle(props: ResizeHandleProps) {
           : (edge === "start") !== rtl
             ? start - pos
             : pos - start
+
       current = startSize + delta
       const nextCollapsed = threshold > 0 && current < threshold
+
       if (nextCollapsed !== collapsed) {
         collapsed = nextCollapsed
         onCollapseChange?.(collapsed)
       }
+
       onResize(Math.min(max, Math.max(min, current)))
     }
 
     const onMouseUp = () => {
       document.body.style.userSelect = ""
       document.body.style.overflow = ""
+      document.body.style.cursor = ""
+      handle?.removeAttribute("data-dragging")
       document.removeEventListener("mousemove", onMouseMove)
       document.removeEventListener("mouseup", onMouseUp)
-      setDragging(false)
 
       if (collapsed) {
         onCollapse?.()
+
         return
       }
+
       onCollapseChange?.(false)
     }
 
@@ -97,7 +105,6 @@ export function ResizeHandle(props: ResizeHandleProps) {
       data-component="resize-handle"
       data-direction={local.direction}
       data-edge={local.edge ?? (local.direction === "vertical" ? "start" : "end")}
-      data-active={dragging()}
       classList={{
         ...local.classList,
         [local.class ?? ""]: !!local.class,

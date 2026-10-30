@@ -8,9 +8,11 @@ export default $config({
       protect: ["production"].includes(input?.stage),
       home: "cloudflare",
       providers:
-        input.stage === "v1"
+        input.stage === "beta"
           ? {}
           : {
+              // Production state was written by 6.15.0; the default 6.13 provider can't read it back.
+              cloudflare: "6.15.0",
               aws: {
                 version: "7.30.0",
                 region: "us-east-1",
@@ -24,37 +26,23 @@ export default $config({
                 version: "0.0.28",
                 apiKey: process.env.STRIPE_SECRET_KEY!,
               },
-              random: "4.19.2",
               planetscale: "0.4.1",
-              honeycomb: "0.49.0",
             },
     }
   },
   async run() {
-    // The v1 branch only serves the V1 web app; everything else deploys from dev and production.
-    if ($app.stage === "v1") {
-      const app = new sst.cloudflare.StaticSite("WebApp", {
-        domain: "app.opencode.ai",
-        path: "packages/app",
-        build: {
-          command: "bun turbo build",
-          output: "./dist",
-        },
-      })
-      return { WebAppUrl: app.url }
+    if ($app.stage === "beta") {
+      const { createWebApp } = await import("./infra/webapp.js")
+      return { WebAppUrl: createWebApp("beta.opencode.ai").url }
     }
 
     const stage = await import("./infra/stage.js")
     await import("./infra/app.js")
     const stats = stage.deployAws ? await import("./infra/stats.js") : undefined
-    const { stat } = await import("./infra/console.js")
-    await import("./infra/enterprise.js")
-    if ($app.stage === "production" || $app.stage === "vimtor") {
-      await import("./infra/monitoring.js")
-    }
+    await import("./infra/console.js")
+    await import("./infra/share.js")
 
     return {
-      StatWorkerUrl: stat.url,
       ...(stats ? { StatsUrl: stats.app.url } : {}),
       AwsStage: stage.awsStage,
     }

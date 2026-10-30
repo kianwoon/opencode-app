@@ -23,6 +23,7 @@
   5. Use the user's configured `sans` font-feature-settings by default.
   6. Use the user's configured `sans` font-variation-settings by default.
   7. Disable tap highlights on iOS.
+  8. Avoid one-word last lines in all wrapped text. Chromium keeps the line count, so heights do not change.
 */
 
 html,
@@ -36,6 +37,7 @@ html,
   font-variation-settings: var(--font-family-sans--font-variation-settings, normal); /* 6 */
   color: var(--font-family-sans--color, inherit); /* 4 */
   -webkit-tap-highlight-color: transparent; /* 7 */
+  text-wrap-style: pretty; /* 8 */
 }
 
 /*
@@ -113,6 +115,7 @@ strong {
   2. Use the user's configured `mono` font-feature-settings by default.
   3. Use the user's configured `mono` font-variation-settings by default.
   4. Correct the odd `em` font sizing in all browsers.
+  5. Keep code wrapping greedy so wrapped lines break where an editor would.
 */
 
 code,
@@ -125,6 +128,17 @@ pre {
   font-variation-settings: var(--font-family-mono--font-variation-settings, normal); /* 3 */
   color: var(--font-family-mono--color, inherit); /* 4 */
   font-size: 1em; /* 4 */
+  text-wrap-style: auto; /* 5 */
+}
+
+/*
+  Keep earlier lines still while the user types.
+*/
+
+input,
+textarea,
+[contenteditable] {
+  text-wrap-style: stable;
 }
 
 /*
@@ -404,5 +418,10 @@ input:where([type="button"], [type="reset"], [type="submit"]),
   textarea,
   [contenteditable="true"] {
     font-size: 16px !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    font-size: 13px;
   }
 }

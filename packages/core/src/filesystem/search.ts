@@ -1,332 +1,241 @@
-export * as FileSystemSearch from "./search"
+export * as FileSystemSearch from "./search.js"
 
-import { makeLocationNode } from "../effect/app-node"
+import { makeLocationNode } from "@opencode/util/effect/app-node"
 import path from "path"
-import { Context, Effect, Layer, Scope } from "effect"
+import { Clock, Context, Deferred, Duration, Effect, Layer, Scope } from "effect"
 import { Fff } from "#fff"
 import fuzzysort from "fuzzysort"
-import { Entry, Match } from "@opencode-ai/schema/filesystem"
-import type { FileSystem } from "../filesystem"
-import { EventV2 } from "../event"
-import { FSUtil } from "../fs-util"
-import { Location } from "../location"
-import { Ripgrep } from "../ripgrep"
-import { RelativePath } from "../schema"
-import { Flag } from "../flag/flag"
+import { FileSystem } from "@opencode/schema/filesystem"
+import { Location } from "../location.js"
+import { Ripgrep } from "../ripgrep.js"
+import { RelativePath } from "../schema.js"
+import { Protected } from "./protected.js"
 
 export interface Interface {
   readonly find: (input: FileSystem.FindInput) => Effect.Effect<FileSystem.Entry[]>
-  readonly glob: (input: FileSystem.GlobInput) => Effect.Effect<readonly FileSystem.Entry[]>
-  readonly grep: (input: FileSystem.GrepInput) => Effect.Effect<readonly FileSystem.Match[]>
-  readonly list: (input: { filter?: string; limit: number }) => Effect.Effect<{ paths: string[]; total: number }>
-  readonly refresh: () => Effect.Effect<void>
 }
 
-const REPO_LIST_TTL_MS = 30_000
-export const REPO_LIST_MAX = 10_000
-
-export const filterPaths = (paths: string[], filter: string | undefined, limit: number) => {
-  const needle = filter?.toLowerCase()
-  const matched = needle ? paths.filter((entry) => entry.toLowerCase().includes(needle)) : paths
-  return [...matched].sort().slice(0, Math.min(limit, REPO_LIST_MAX))
+export interface Options {
+  readonly fff?: boolean
 }
 
-// Dirty-mark only, pull-based: the event costs one flag reset and the next list()
-// pays one rebuild. publish() backfills payload.location from the ambient
-// Location.Service, so this matches only this Location's watcher. Non-vcs
-// locations keep TTL-only staleness because the watcher only watches vcs ones.
-const dirtyOnWatcherEvents = <S extends { builtAt: number; invalidations: number }>(state: S) =>
-  Effect.gen(function* () {
-    const events = yield* EventV2.Service
-    const location = yield* Location.Service
-    const unsubscribe = yield* events.listen((event) =>
-      Effect.sync(() => {
-        if (event.type !== "file.watcher.updated") return
-        if (event.location?.directory !== location.directory) return
-        state.builtAt = 0
-        state.invalidations++
-      }),
-    )
-    yield* Effect.addFinalizer(() => unsubscribe)
+export class Service extends Context.Service<Service, Interface>()("@opencode/FileSystem/Search") {}
+
+const REFRESH_INTERVAL = Duration.toMillis("10 seconds")
+type Prepared = ReturnType<typeof fuzzysort.prepare>
+
+function emptyIndex() {
+  return { files: new Map<string, Prepared>(), directories: new Map<string, Prepared>() }
+}
+
+function search(index: ReturnType<typeof emptyIndex>, input: FileSystem.FindInput) {
+  const items =
+    input.type === "file"
+      ? Array.from(index.files.values())
+      : input.type === "directory"
+        ? Array.from(index.directories.values())
+        : [...index.files.values(), ...index.directories.values()]
+  const result = fuzzysort.go(input.query, items, { limit: input.limit ?? 50 })
+  // Targets are owned by the current location index. The only global fuzzysort
+  // state left is its query cache, which must not retain every query forever.
+  fuzzysort.cleanup()
+  return result.map((item) => {
+    const relative = item.target
+    const type = relative.endsWith(path.sep) ? ("directory" as const) : ("file" as const)
+    return FileSystem.Entry.make({
+      path: RelativePath.make(relative),
+      type,
+    })
   })
+}
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/FileSystem/Search") {}
-
-export const ripgrepLayer = Layer.effect(
+const ripgrepLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const fs = yield* FSUtil.Service
     const location = yield* Location.Service
     const ripgrep = yield* Ripgrep.Service
     const scope = yield* Scope.Scope
-    const state = {
-      files: [] as string[],
-      directories: [] as string[],
-      builtAt: 0,
-      invalidations: 0,
-    }
-    // Dirty-mark only, pull-based: the event costs one flag reset here and the next
-    // list() pays one rebuild. Non-vcs locations keep TTL-only staleness because the
-    // watcher only watches vcs ones.
-    yield* dirtyOnWatcherEvents(state)
-    // Populate into fresh arrays and swap at the end, so a concurrent reader never
-    // observes a half-filled index.
-    const populate = Effect.gen(function* () {
-      // An event arriving mid-build must NOT be marked fresh by this build, or the
-      // snapshot stays stale for a full TTL: compare the generation, not just the flag.
-      const gen = state.invalidations
-      const files: string[] = []
-      const directories = new Set<string>()
-      yield* ripgrep
-        .find({
-          cwd: location.directory,
-          pattern: "*",
-          limit: location.vcs ? Number.MAX_SAFE_INTEGER : 100_000,
-          onEntry: (entry) =>
-            Effect.sync(() => {
-              files.push(entry.path)
-              const parts = entry.path.split("/")
-              parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
-            }),
-        })
-        .pipe(Effect.orDie, Effect.asVoid)
-      state.files = files
-      state.directories = Array.from(directories)
-      state.builtAt = state.invalidations === gen ? Date.now() : 0
-    })
-    yield* populate.pipe(Effect.forkIn(scope))
-    return Service.of({
-      glob: (input) =>
-        Effect.gen(function* () {
-          const target = path.resolve(location.directory, input.path ?? ".")
-          const info = yield* fs.stat(target).pipe(Effect.orDie)
-          const cwd = info.type === "File" ? path.dirname(target) : target
-          return yield* ripgrep
-            .glob({
-              cwd,
-              pattern: input.pattern,
-              limit: input.limit ?? Number.MAX_SAFE_INTEGER,
+    const clock = yield* Clock.Clock
+    const home = Protected.isHome(location.directory)
+    let index = emptyIndex()
+    let initialized = false
+    let settledAt = Number.NEGATIVE_INFINITY
+    let refreshing: Deferred.Deferred<void> | undefined
+    const scan = Effect.gen(function* () {
+      const next = emptyIndex()
+      const previous = index
+      if (!initialized) index = next
+      yield* ripgrep.find({
+        cwd: location.directory,
+        pattern: "*",
+        limit: location.vcs && !home ? Number.MAX_SAFE_INTEGER : 100_000,
+        exclude: home ? [...Protected.names()].map((name) => `${name}/**`) : undefined,
+        onEntry: (entry) =>
+          Effect.sync(() => {
+            next.files.set(entry.path, previous.files.get(entry.path) ?? fuzzysort.prepare(entry.path))
+            const parts = entry.path.split("/")
+            parts.slice(0, -1).forEach((_, offset) => {
+              const directory = parts.slice(0, offset + 1).join("/") + path.sep
+              if (!next.directories.has(directory))
+                next.directories.set(directory, previous.directories.get(directory) ?? fuzzysort.prepare(directory))
             })
-            .pipe(
-              Effect.map((result) =>
-                result.map((entry) =>
-                  Entry.make({
-                    ...entry,
-                    path: RelativePath.make(path.relative(location.directory, path.resolve(cwd, entry.path))),
-                  }),
-                ),
-              ),
-              Effect.orDie,
-            )
-        }),
-      grep: (input) =>
-        Effect.gen(function* () {
-          const target = path.resolve(location.directory, input.path ?? ".")
-          const info = yield* fs.stat(target).pipe(Effect.orDie)
-          const cwd = info.type === "File" ? path.dirname(target) : target
-          return yield* ripgrep
-            .grep({
-              cwd,
-              pattern: input.pattern,
-              file: info.type === "File" ? path.basename(target) : undefined,
-              include: input.include,
-              limit: input.limit ?? Number.MAX_SAFE_INTEGER,
-            })
-            .pipe(
-              Effect.map((result) =>
-                result.map((match) =>
-                  Match.make({
-                    ...match,
-                    entry: Entry.make({
-                      ...match.entry,
-                      path: RelativePath.make(path.relative(location.directory, path.resolve(cwd, match.entry.path))),
-                    }),
-                  }),
-                ),
-              ),
-              Effect.orDie,
-            )
-        }),
-      find: (input) =>
-        Effect.gen(function* () {
-          const items =
-            input.type === "file"
-              ? state.files
-              : input.type === "directory"
-                ? state.directories
-                : [...state.files, ...state.directories]
-          return fuzzysort.go(input.query, items, { limit: input.limit ?? 50 }).map((item) => {
-            const relative = item.target
-            const type = relative.endsWith(path.sep) ? ("directory" as const) : ("file" as const)
-            return Entry.make({
-              path: RelativePath.make(relative),
-              type,
-            })
-          })
-        }),
-      list: (input) =>
-        Effect.gen(function* () {
-          if (state.builtAt === 0 || Date.now() - state.builtAt > REPO_LIST_TTL_MS) yield* populate
-          return { paths: filterPaths(state.files, input.filter, input.limit), total: state.files.length }
-        }),
-      // Phase-2 watcher hook: the file watcher calls this so the next list() rebuilds
-      // instead of serving the index captured before the change.
-      refresh: () =>
-        Effect.sync(() => {
-          state.builtAt = 0
-        }),
-    })
-  }),
-)
-
-export const fffLayer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const location = yield* Location.Service
-    const result = yield* Effect.try({
-      try: () =>
-        Fff.create({
-          basePath: location.directory,
-          aiMode: true,
-          disableMmapCache: true,
-          disableContentIndexing: true,
-        }),
-      catch: (cause) => cause,
-    }).pipe(
-      Effect.catch((error) => Effect.logWarning("failed to initialize fff", { error }).pipe(Effect.as(undefined))),
-    )
-    if (!result?.ok) {
-      if (result) yield* Effect.logWarning("failed to initialize fff", { error: result.error })
-      return Service.of({
-        find: () => Effect.succeed([]),
-        glob: () => Effect.succeed([]),
-        grep: () => Effect.succeed([]),
-        list: () => Effect.succeed({ paths: [], total: 0 }),
-        refresh: () => Effect.succeed(undefined),
+          }),
       })
-    }
-    yield* Effect.addFinalizer(() => Effect.sync(() => result.value.destroy()).pipe(Effect.ignore))
-    const state = {
-      files: [] as string[],
-      builtAt: 0,
-      invalidations: 0,
-    }
-    yield* dirtyOnWatcherEvents(state)
-    // fff has no "walk everything" primitive, so an empty file query is its listing
-    // equivalent. REPO_LIST_MAX bounds the page because filterPaths caps there anyway.
-    const populate = Effect.sync(() => {
-      // Same invariant as ripgrepLayer: an event mid-build must not be stamped fresh.
-      const gen = state.invalidations
-      const found = result.value.fileSearch("", { pageIndex: 0, pageSize: REPO_LIST_MAX })
-      if (!found.ok) throw found.error
-      state.files = found.value.items.map((item) => item.relativePath.replaceAll("\\", "/"))
-      state.builtAt = state.invalidations === gen ? Date.now() : 0
+      index = next
+      initialized = true
+    }).pipe(Effect.orDie)
+    const refresh = Effect.suspend(() => {
+      if (refreshing) return initialized ? Effect.void : Deferred.await(refreshing)
+      if (initialized && clock.currentTimeMillisUnsafe() < settledAt + REFRESH_INTERVAL) return Effect.void
+
+      const attempt = Deferred.makeUnsafe<void>()
+      refreshing = attempt
+      return scan.pipe(
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            settledAt = clock.currentTimeMillisUnsafe()
+            if (refreshing === attempt) refreshing = undefined
+            Deferred.doneUnsafe(attempt, exit)
+          }),
+        ),
+        Effect.forkIn(scope),
+        Effect.flatMap(() => (initialized ? Effect.void : Deferred.await(attempt))),
+      )
     })
     return Service.of({
-      glob: (input) =>
-        Effect.sync(() => {
-          const prefix = input.path?.replaceAll("\\", "/").replace(/\/$/, "")
-          const found = result.value.glob(prefix ? `${prefix}/${input.pattern}` : input.pattern, {
-            pageIndex: 0,
-            pageSize: input.limit,
-          })
-          if (!found.ok) throw found.error
-          return found.value.items.map((item) =>
-            Entry.make({
-              path: RelativePath.make(item.relativePath.replaceAll("\\", "/")),
-              type: "file",
-            }),
-          )
-        }),
-      grep: (input) =>
-        Effect.sync(() => {
-          const prefix = input.path?.replaceAll("\\", "/").replace(/\/$/, "")
-          const found = result.value.grep(
-            [prefix ? `${prefix}/**` : undefined, input.include, input.pattern]
-              .filter((value) => value !== undefined)
-              .join(" "),
-            { mode: "regex", pageSize: input.limit, timeBudgetMs: 1_500 },
-          )
-          if (!found.ok) throw found.error
-          return found.value.items.map((match) => {
-            const bytes = Buffer.from(match.lineContent)
-            return Match.make({
-              entry: Entry.make({
-                path: RelativePath.make(match.relativePath.replaceAll("\\", "/")),
-                type: "file",
-              }),
-              line: match.lineNumber,
-              offset: match.byteOffset,
-              text: match.lineContent.length > 2_000 ? match.lineContent.slice(0, 2_000) + "..." : match.lineContent,
-              submatches: match.matchRanges.map(([start, end]) => ({
-                text: bytes.subarray(start, end).toString("utf8"),
-                start,
-                end,
-              })),
-            })
-          })
-        }),
       find: (input) =>
-        Effect.sync(() => {
-          const options = { pageIndex: 0, pageSize: input.limit ?? 50 }
-          const items = (() => {
-            if (input.type === "file") {
-              const found = result.value.fileSearch(input.query.trim(), options)
-              if (!found.ok) throw found.error
-              return found.value.items.map((item, index) => ({
-                path: item.relativePath,
-                type: "file" as const,
-                score: found.value.scores[index]?.total ?? 0,
-              }))
-            }
-            if (input.type === "directory") {
-              const found = result.value.directorySearch(input.query.trim(), options)
-              if (!found.ok) throw found.error
-              return found.value.items.map((item, index) => ({
-                path: item.relativePath,
-                type: "directory" as const,
-                score: found.value.scores[index]?.total ?? 0,
-              }))
-            }
-            const found = result.value.mixedSearch(input.query.trim(), options)
-            if (!found.ok) throw found.error
-            return found.value.items.map((item, index) => ({
-              path: item.item.relativePath,
-              type: item.type,
-              score: found.value.scores[index]?.total ?? 0,
-            }))
-          })()
-          return items
-            .sort((a, b) => b.score - a.score || a.path.length - b.path.length)
-            .map((item) => {
-              const relative = item.path.replaceAll("\\", "/").replace(/\/$/, "")
-              return Entry.make({
-                path: RelativePath.make(relative + (item.type === "directory" ? path.sep : "")),
-                type: item.type,
-              })
-            })
-        }),
-      list: (input) =>
         Effect.gen(function* () {
-          if (state.builtAt === 0 || Date.now() - state.builtAt > REPO_LIST_TTL_MS) yield* populate
-          return { paths: filterPaths(state.files, input.filter, input.limit), total: state.files.length }
-        }),
-      // Phase-2 watcher hook: the file watcher calls this so the next list() rebuilds
-      // instead of serving the index captured before the change.
-      refresh: () =>
-        Effect.sync(() => {
-          state.builtAt = 0
+          yield* refresh
+          return search(index, input)
         }),
     })
   }),
 )
 
-const layer = Layer.unwrap(Effect.sync(() => (Flag.OPENCODE_DISABLE_FFF || !Fff.available() ? ripgrepLayer : fffLayer)))
+const FFF_SCAN_WAIT = Duration.seconds(3)
 
-export const locationLayer = layer
+type CreatePicker = (options: Fff.Init) => Fff.Result<Fff.Picker>
 
-export const node = makeLocationNode({
-  service: Service,
-  layer,
-  deps: [FSUtil.node, Location.node, Ripgrep.node, EventV2.node],
-})
+function createPicker(
+  create: CreatePicker,
+  directory: string,
+): { ok: true; value: Fff.Picker } | { ok: false; error: unknown } {
+  try {
+    return create({
+      basePath: directory,
+      aiMode: true,
+      disableMmapCache: true,
+      disableContentIndexing: true,
+    })
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
+// Each fff picker owns its own scanner, watcher and git threads, so it starts on the first search
+// instead of when the Location boots.
+export const makeFffLayer = (create: CreatePicker) =>
+  Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const location = yield* Location.Service
+      let state: { readonly result: ReturnType<typeof createPicker>; scanned: boolean } | "closed" | undefined
+      // The layer owns the picker before it exists: creating and publishing it is one synchronous,
+      // uninterruptible step, so an interrupted search can't leave a native picker without this finalizer.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (typeof state === "object" && state.result.ok) state.result.value.destroy()
+          state = "closed"
+        }),
+      )
+      const acquire = Effect.uninterruptible(
+        Effect.sync(() => {
+          if (state !== undefined) return { current: state, created: false }
+          state = { result: createPicker(create, location.directory), scanned: false }
+          return { current: state, created: true }
+        }),
+      )
+      const picker = Effect.gen(function* () {
+        const { current, created } = yield* acquire
+        if (current === "closed") return undefined
+        if (!current.result.ok) {
+          if (created) yield* Effect.logWarning("failed to initialize fff", { error: current.result.error })
+          return undefined
+        }
+        if (!current.scanned) {
+          const value = current.result.value
+          yield* Effect.gen(function* () {
+            while (value.isScanning()) yield* Effect.sleep("20 millis")
+          }).pipe(Effect.timeoutOption(FFF_SCAN_WAIT))
+          current.scanned = true
+        }
+        return current.result.value
+      })
+      return Service.of({
+        find: (input) =>
+          Effect.gen(function* () {
+            const finder = yield* picker
+            if (!finder) return []
+            const options = { pageIndex: 0, pageSize: input.limit ?? 50 }
+            const items = (() => {
+              if (input.type === "file") {
+                const found = finder.fileSearch(input.query.trim(), options)
+                if (!found.ok) throw found.error
+                return found.value.items.map((item, index) => ({
+                  path: item.relativePath,
+                  type: "file" as const,
+                  score: found.value.scores[index]?.total ?? 0,
+                }))
+              }
+              if (input.type === "directory") {
+                const found = finder.directorySearch(input.query.trim(), options)
+                if (!found.ok) throw found.error
+                return found.value.items.map((item, index) => ({
+                  path: item.relativePath,
+                  type: "directory" as const,
+                  score: found.value.scores[index]?.total ?? 0,
+                }))
+              }
+              const found = finder.mixedSearch(input.query.trim(), options)
+              if (!found.ok) throw found.error
+              return found.value.items.map((item, index) => ({
+                path: item.item.relativePath,
+                type: item.type,
+                score: found.value.scores[index]?.total ?? 0,
+              }))
+            })()
+            return items
+              .sort((a, b) => b.score - a.score || a.path.length - b.path.length)
+              .map((item) => {
+                const relative = item.path.replaceAll("\\", "/").replace(/\/$/, "")
+                return FileSystem.Entry.make({
+                  path: RelativePath.make(relative + (item.type === "directory" ? path.sep : "")),
+                  type: item.type,
+                })
+              })
+          }),
+      })
+    }),
+  )
+
+export const fffLayer = makeFffLayer(Fff.create)
+
+const layer = (options?: Options) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const location = yield* Location.Service
+      // Workspace-backed Locations resolve in a remote sandbox; fff would index the local server directory
+      // in-process and serve wrong results. Ripgrep routes through the Location environment spawner.
+      if (location.workspaceID) return ripgrepLayer
+      if (options?.fff === false || (options?.fff === undefined && process.platform === "win32") || !Fff.available())
+        return ripgrepLayer
+      // Non-VCS locations can contain many repositories, so avoid eagerly content-indexing the entire aggregate tree.
+      return location.vcs && !Protected.isHome(location.directory) ? fffLayer : ripgrepLayer
+    }),
+  )
+
+export function configured(options?: Options) {
+  return makeLocationNode({ service: Service, layer: layer(options), deps: [Location.node, Ripgrep.node] })
+}
+
+export const node = configured()

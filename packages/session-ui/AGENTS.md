@@ -1,36 +1,17 @@
-# session-ui
-
-Session-rendering UI package (`@opencode-ai/session-ui`): message parts, session diffs, markdown streaming, prompt input, and shared session context. Consumed by `app` and desktop; built on top of `ui`.
-
-## Scope ownership
-
-- `session-ui` owns session-specific rendering: message parts, session diff, markdown stream/cache, prompt input (incl. `v2/`), session context providers, and the vendored `pierre/` code.
-- `packages/ui` owns generic components, theming, icons, and i18n infrastructure. Do not copy or re-implement `ui` primitives here; import from `@opencode-ai/ui` instead.
-- `packages/app` owns pages/routing/app shell, not session rendering internals.
-
-## Import direction
-
-- `session-ui` may import `ui`; never the reverse. `app` may import both. Keep `session-ui` free of app-specific state/routing.
-
-## Commands
-
-- `bun typecheck` from this package dir (never `tsc` directly, never from repo root).
-- `bun test src --only-failures` from this package dir.
-
 ## Localization
 
-Follow `packages/ui/AGENTS.md` (## Localization) — full i18n rules live there and apply here unchanged; do not duplicate them. In short: never hardcode user-visible English strings, use i18n keys, preserve English copy byte-for-byte, verify translations against the corpora listed in `ui`'s guide.
+- NEVER hardcode user-visible English strings in production code. ALWAYS use an i18n key for visible copy, placeholders, accessible labels, tooltips, menus, dialogs, empty states, and displayed errors.
+- Feature work adds English source strings only. Leave non-English keys absent so the runtime English fallback applies; translations land separately after language review.
+- Render count-sensitive copy through `i18n.plural(baseKey, count, params)`. Never select or pass `.zero`, `.one`, `.two`, `.few`, `.many`, or `.other` variants to `i18n.t(...)`; `pluralForm(...)` is reserved for components that animate individual grammatical forms.
+- When migrating existing copy to i18n, preserve the English text byte-for-byte unless the task explicitly requests a copy change.
+- NEVER change existing English text or English keys to facilitate translation. English is intentional, designer-written source copy; adapt locale-specific translations and i18n mechanics around it.
+- Do not translate from model knowledge alone. Verify terminology and grammar with Unicode CLDR locale/plural data, Microsoft Localization Style Guides and terminology, Apple localization/style guidance and localized platform UI, Mozilla localization style guides, Mozilla Pontoon, and the Firefox localization corpus at `github.com/mozilla-l10n/firefox-l10n`.
+- Also use the relevant language authority or official dictionary for the locale (for example RAE/Fundéu, FranceTerme, Duden, TDK, Kotus/Kielitoimiston sanakirja, Språkrådet/Bokmålsordboka, Rada Języka Polskiego/PWN, the Russian and Arabic language academies, the Ukrainian Orthography, Taiwan MOE dictionaries, or the Royal Society of Thailand). Treat the English dictionary as the semantic source of truth and preserve placeholders, code identifiers, product names, and keyboard labels.
 
-## SelectV2 / Kobalte gotcha
+## Typography
 
-The Kobalte Select VIRTUAL-focus / `onFocusOutside` dismissal gotcha is documented in `packages/ui/AGENTS.md` (## SelectV2 / Kobalte focus gotcha). Read it before touching any Select usage here; do not remove the `preventDefault` guard.
-
-## Bun test seam for message-part
-
-Importing `message-part.tsx` from a Bun unit test transitively loads the Vite-only `markdown.worker.ts?worker&url` module and fails before assertions. Keep pure task-session resolution and left-click logic in `message-part-task.ts`, and test that module directly; do not mock the worker.
-
-Acceptance gate:
-
-`cd packages/session-ui && bun test src/components/message-part-task.test.ts --only-failures && bun typecheck`
-
-The focused test must report 1 passed/0 failed, typecheck must exit 0, and no worker-module load error may occur.
+- Use `--line-height-compact` (`16px`) for `13px` transcript, tool, notice, and truncation text. Use `--line-height-base` (`20px`) for body text.
+- Never copy Figma's generated `leading-none` onto text. Inter descenders clip when a solid `13px` line box meets `overflow: hidden`, `overflow: clip`, or truncation.
+- Keep fixed row dimensions explicit; correct inner line metrics do not require transforms, negative margins, or paint-space compensation.
+- `TextShimmer` inherits font metrics, so put typography overrides on its parent.
+- Fonts follow the Fonts section of `packages/app/AGENTS.md`. Commands, code and paths shown as code use the code font with the timeline shell metrics; never write a literal family or add font files here.
