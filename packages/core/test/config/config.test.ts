@@ -1775,6 +1775,41 @@ describe("Config", () => {
     ),
   )
 
+  it.live("merges a record patch into the live document instead of replacing sibling entries", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const file = path.join(global, "opencode.jsonc")
+        return Effect.promise(async () => {
+          await fs.mkdir(global, { recursive: true })
+          await fs.writeFile(
+            file,
+            JSON.stringify({
+              agent: {
+                a: { description: "Agent A", mode: "subagent", owned_tools: ["read"] },
+                b: { description: "Agent B", mode: "subagent", owned_tools: ["write"] },
+              },
+            }),
+          )
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              yield* config.update!({ agent: { a: { description: "Agent A edited", owned_tools: ["read"] } } })
+              const parsed = parse(yield* Effect.promise(() => fs.readFile(file, "utf8")))
+              expect(parsed.agent.a).toEqual({ description: "Agent A edited", owned_tools: ["read"] })
+              expect(parsed.agent.b).toEqual({
+                description: "Agent B",
+                mode: "subagent",
+                owned_tools: ["write"],
+              })
+            }).pipe(Effect.provide(testLayer(tmp.path, global))),
+          ),
+        )
+      }),
+    ),
+  )
+
   it.live("loads supported scalar and resource configuration", () =>
     Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
       Effect.flatMap((tmp) =>

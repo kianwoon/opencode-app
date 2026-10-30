@@ -30,6 +30,19 @@ export function latest<K extends keyof Info>(entries: readonly Entry[], key: K):
     ?.info[key]
 }
 
+const mergeKeys = new Set(["agent", "permission", "skill", "plugin", "mcp"])
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+// A settings write is a read-modify-write of the live document, never a replacement from a
+// possibly-empty panel cache. Record-of-blocks keys merge one level into what is already on
+// disk so editing one agent keeps its siblings; scalars and arrays carry their whole value.
+function mergeRecordValue(key: string, current: unknown, next: unknown) {
+  if (!mergeKeys.has(key) || !isRecord(current) || !isRecord(next)) return next
+  return { ...current, ...next }
+}
+
 export interface Interface {
   /** Returns location config documents and discovery sources from lowest to highest priority. */
   readonly entries: () => Effect.Effect<Entry[]>
@@ -470,12 +483,16 @@ export const layer = (options?: Options) =>
             (yield* Effect.filter(candidates, fs.isFile)).at(-1) ?? path.join(directory, "opencode.jsonc")
           const text = (yield* fs.readFileStringSafe(filepath)) ?? "{}\n"
           const updated = yield* Effect.try({
-            // Every provided patch key replaces its value in the SAME document,
-            // so unrelated JSONC content is preserved. `shell: null` still
-            // clears the key, mirroring the previous single-key behavior.
-            try: () =>
-              Object.entries(patch).reduce((current, [key, value]) => {
-                const next = key === "shell" ? (value ?? undefined) : value
+            // Every provided patch key updates its value in the SAME document,
+            // so unrelated JSONC content is preserved. Object-valued record keys
+            // merge into the existing document value; `shell: null` still clears
+            // the key, mirroring the previous single-key behavior.
+            try: () => {
+              const parsed: unknown = parse(text, [], { allowTrailingComma: true })
+              const existing = isRecord(parsed) ? parsed : {}
+              return Object.entries(patch).reduce((current, [key, value]) => {
+                const next =
+                  key === "shell" ? (value ?? undefined) : mergeRecordValue(key, existing[key], value)
                 if (next === undefined) return current
                 return applyEdits(
                   current,
@@ -483,7 +500,8 @@ export const layer = (options?: Options) =>
                     formattingOptions: { tabSize: 2, insertSpaces: true },
                   }),
                 )
-              }, text),
+              }, text)
+            },
             catch: (cause) => new FSUtil.FileSystemError({ method: "config.update", cause }),
           })
           yield* fs.writeWithDirs(filepath, updated.endsWith("\n") ? updated : `${updated}\n`)
