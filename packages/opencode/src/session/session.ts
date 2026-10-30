@@ -28,7 +28,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { SessionPartTable, SessionTable } from "@opencode/core/session/sql"
+import { SessionMessageTable, SessionPartTable, SessionTable } from "@opencode/core/session/sql"
 import { ProjectTable } from "@opencode/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -685,9 +685,122 @@ const layer: Layer.Layer<
       }
     })
 
+    // The fork writes V1-shaped message/part rows. These are the live equivalents
+    // of the legacy `message`/`part` storage rows, projected into the canonical
+    // `session_message`/`session_part` tables that MessageV2 reads. Without this
+    // write the live path only published events and MessageV2 saw empty history.
+    const messageSeq = new Map<string, number>()
+    const partRows = new Map<string, Map<string, SessionV1.Part>>()
+
+    const nextMessageSeq = Effect.fnUntraced(function* (sessionID: SessionID) {
+      const current = messageSeq.get(sessionID)
+      if (current !== undefined) {
+        messageSeq.set(sessionID, current + 1)
+        return current + 1
+      }
+      const row = yield* db
+        .select({ seq: SessionMessageTable.seq })
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.session_id, sessionID))
+        .orderBy(desc(SessionMessageTable.seq))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      const next = (row?.seq ?? -1) + 1
+      messageSeq.set(sessionID, next)
+      return next
+    })
+
+    const writeMessage = Effect.fnUntraced(function* <T extends SessionV1.Info>(msg: T) {
+      const existing = yield* db
+        .select({ seq: SessionMessageTable.seq })
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.id, SessionMessage.ID.make(msg.id)))
+        .get()
+        .pipe(Effect.orDie)
+      const seq = existing?.seq ?? (yield* nextMessageSeq(msg.sessionID))
+      const data = msg as unknown as typeof SessionMessageTable.$inferInsert.data
+      const updated = "completed" in msg.time && msg.time.completed !== undefined ? msg.time.completed : msg.time.created
+      const row = {
+        id: SessionMessage.ID.make(msg.id),
+        session_id: msg.sessionID,
+        type: msg.role as typeof SessionMessageTable.$inferInsert.type,
+        seq,
+        time_created: msg.time.created,
+        time_updated: updated,
+        data,
+      } satisfies typeof SessionMessageTable.$inferInsert
+      yield* db
+        .insert(SessionMessageTable)
+        .values(row)
+        .onConflictDoUpdate({
+          target: SessionMessageTable.id,
+          set: {
+            type: row.type,
+            time_created: row.time_created,
+            time_updated: row.time_updated,
+            data: row.data,
+          },
+        })
+        .run()
+        .pipe(Effect.orDie)
+    })
+
+    const loadParts = Effect.fnUntraced(function* (messageID: MessageID) {
+      const key = messageID as string
+      const cached = partRows.get(key)
+      if (cached) return cached
+      const rows = yield* db
+        .select()
+        .from(SessionPartTable)
+        .where(eq(SessionPartTable.message_id, SessionMessage.ID.make(messageID)))
+        .orderBy(SessionPartTable.ordinal)
+        .all()
+        .pipe(Effect.orDie)
+      const map = new Map<string, SessionV1.Part>()
+      for (const row of rows) {
+        const value = row.data as unknown as SessionV1.Part
+        map.set(value.id ?? `prt_${messageID}_${row.ordinal}`, value)
+      }
+      partRows.set(key, map)
+      return map
+    })
+
+    const writeParts = Effect.fnUntraced(function* (messageID: MessageID) {
+      const map = yield* loadParts(messageID)
+      const ordered = [...map.values()].sort((a, b) => a.id.localeCompare(b.id))
+      const now = Date.now()
+      yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx
+              .delete(SessionPartTable)
+              .where(eq(SessionPartTable.message_id, SessionMessage.ID.make(messageID)))
+              .run()
+            for (const [ordinal, part] of ordered.entries()) {
+              yield* tx
+                .insert(SessionPartTable)
+                .values({
+                  message_id: SessionMessage.ID.make(messageID),
+                  session_id: part.sessionID,
+                  ordinal,
+                  type: part.type as unknown as typeof SessionPartTable.$inferInsert.type,
+                  call_id: part.type === "tool" ? part.callID : null,
+                  time_created: now,
+                  time_updated: now,
+                  data: part as unknown as typeof SessionPartTable.$inferInsert.data,
+                })
+                .run()
+            }
+          }),
+        )
+        .pipe(Effect.orDie)
+    })
+
     const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
         yield* publishGuarded(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
+        yield* writeMessage(msg)
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
@@ -698,6 +811,8 @@ const layer: Layer.Layer<
           part: structuredClone(part),
           time: Date.now(),
         })
+        ;(yield* loadParts(part.messageID)).set(part.id, part)
+        yield* writeParts(part.messageID)
         return part
       }).pipe(Effect.withSpan("Session.updatePart"))
 
@@ -927,6 +1042,17 @@ const layer: Layer.Layer<
         sessionID: input.sessionID,
         messageID: input.messageID,
       })
+      partRows.delete(input.messageID as string)
+      yield* db
+        .delete(SessionMessageTable)
+        .where(
+          and(
+            eq(SessionMessageTable.session_id, input.sessionID),
+            eq(SessionMessageTable.id, SessionMessage.ID.make(input.messageID)),
+          ),
+        )
+        .run()
+        .pipe(Effect.orDie)
       return input.messageID
     })
 
@@ -940,6 +1066,8 @@ const layer: Layer.Layer<
         messageID: input.messageID,
         partID: input.partID,
       })
+      const parts = yield* loadParts(input.messageID)
+      if (parts.delete(input.partID)) yield* writeParts(input.messageID)
       return input.partID
     })
 

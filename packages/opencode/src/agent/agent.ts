@@ -279,9 +279,12 @@ const layer = Layer.effect(
           },
         }
 
+        // Built-in agents are a registry, not config-owned entries: an override may
+        // customise one, but must not remove it. Only config-defined agents disable.
+        const builtin = new Set(Object.keys(agents))
         for (const [key, value] of Object.entries(cfg.agent ?? {})) {
           if (value.disable) {
-            delete agents[key]
+            if (!builtin.has(key)) delete agents[key]
             continue
           }
           let item = agents[key]
