@@ -10,6 +10,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { useModels } from "@/providers/models/models"
 import type { ModelKey } from "@/providers/models/selection"
 import { useServerSDK } from "@/runtime/server/client"
+import type { ExperimentalConfigUpdateInput } from "@opencode/client/promise"
 import { useServer } from "@/runtime/server/current"
 import { authTokenFromCredentials } from "@/runtime/server/api"
 import { ModelSelectorDrawer } from "@/providers/models/select-dialog"
@@ -119,7 +120,7 @@ export const SettingsOrchestrationV2: Component = () => {
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const server = useServer()
-  const updateConfig = (patch: Record<string, unknown>) => serverSdk.api.experimental.config.update(patch as never)
+  const updateConfig = (patch: ExperimentalConfigUpdateInput) => serverSdk.api.experimental.config.update(patch)
 
   // Fork-only config blocks are not in the shared Config schema yet.
   const config = createMemo(
@@ -145,7 +146,13 @@ export const SettingsOrchestrationV2: Component = () => {
       headers: { ...headers, ...(init?.body === undefined ? {} : { "content-type": "application/json" }) },
     })
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-    return response.json()
+    // 204 and empty bodies are successful no-content replies; only parse when
+    // there is actually a body, so a server that answers 204 cannot crash the
+    // panel with "Unexpected end of JSON input".
+    if (response.status === 204) return undefined
+    const body = await response.text()
+    if (body.trim() === "") return undefined
+    return JSON.parse(body) as unknown
   }
 
   const brain = createMemo<BrainConfig>(() => config().brain ?? {})
@@ -227,7 +234,16 @@ export const SettingsOrchestrationV2: Component = () => {
   }
 
   const commitSection = (name: FeatureSection | "jevDefault", model: string) => {
-    void updateConfig({ [name]: { ...section(name), model } })
+    const value = { ...section(name), model }
+    const patch: ExperimentalConfigUpdateInput =
+      name === "jev"
+        ? { jev: value }
+        : name === "governor"
+          ? { governor: value }
+          : name === "brainBooster"
+            ? { brainBooster: value }
+            : { jevDefault: value }
+    void updateConfig(patch)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })

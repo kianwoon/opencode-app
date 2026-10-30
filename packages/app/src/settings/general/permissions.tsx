@@ -7,6 +7,7 @@ import { TextInput } from "@opencode/ui/text-input"
 import { Wildcard } from "./wildcard"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
+import type { ExperimentalConfigUpdateInput } from "@opencode/client/promise"
 import { useServer } from "@/runtime/server/current"
 import { normalizeAgentList } from "@/runtime/server/global-sync/utils"
 import { showToast } from "@/shell/notifications/toast"
@@ -86,12 +87,10 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const server = useServer()
-  const updateConfig = (patch: Record<string, unknown>) => serverSdk.api.experimental.config.update(patch as never)
+  const updateConfig = (patch: ExperimentalConfigUpdateInput) => serverSdk.api.experimental.config.update(patch)
 
   const config = createMemo(() => server.ctx.sync.data.config ?? {})
-  const agents = createMemo<Record<string, AgentBlock | undefined>>(() =>
-    (config().agent ?? {}) as Record<string, AgentBlock | undefined>,
-  )
+  const agents = createMemo<Record<string, AgentBlock>>(() => (config().agent ?? {}) as Record<string, AgentBlock>)
   // Provider-free on purpose: this tab renders OUTSIDE the directory Sync
   // provider, so the directory-scoped sync hook throws at render. Same
   // dual-protocol resource shape as the skills fetch below.
@@ -166,11 +165,8 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   // THE single write path: every control funnels through here, so there is
   // exactly one updateConfig call shape for the tab.
   const commit = (name: string, patch: AgentBlock) => {
-    const next = { ...config() }
-    const agent = { ...agents() }
-    agent[name] = { ...block(name), ...patch }
-    next.agent = agent
-    void updateConfig(next)
+    const agent = { ...agents(), [name]: { ...block(name), ...patch } }
+    void updateConfig({ agent })
       .then(() => refetchSkills())
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -477,11 +473,13 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
           <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.tools.description")}</p>
           <Show when={sectionExpanded("tools")}>
           <Show
-            when={!inventory.loading && !inventory.error}
+            when={!inventory.loading && !inventory.error && inventory.latest !== undefined}
             fallback={
               <p class="settings-v2-plugins-hint">
                 {language.t(
-                  inventory.error ? "settings.permissions.section.tools.error" : "settings.permissions.section.tools.loading",
+                  inventory.error || (!inventory.loading && inventory.latest === undefined)
+                    ? "settings.permissions.section.tools.error"
+                    : "settings.permissions.section.tools.loading",
                 )}
               </p>
             }

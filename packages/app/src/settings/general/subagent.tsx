@@ -14,6 +14,7 @@ import { useModels } from "@/providers/models/models"
 import { usePlatform } from "@/runtime/platform/platform"
 import type { ModelKey } from "@/providers/models/selection"
 import { useServerSDK } from "@/runtime/server/client"
+import type { ExperimentalConfigUpdateInput } from "@opencode/client/promise"
 import { useServer } from "@/runtime/server/current"
 import { normalizeAgentList } from "@/runtime/server/global-sync/utils"
 import { ModelSelectorDrawer } from "@/providers/models/select-dialog"
@@ -85,13 +86,11 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const server = useServer()
-  const updateConfig = (patch: Record<string, unknown>) => serverSdk.api.experimental.config.update(patch as never)
+  const updateConfig = (patch: ExperimentalConfigUpdateInput) => serverSdk.api.experimental.config.update(patch)
   const models = useModels()
 
   const config = createMemo(() => server.ctx.sync.data.config ?? {})
-  const agents = createMemo<Record<string, AgentBlock | undefined>>(
-    () => (config().agent ?? {}) as Record<string, AgentBlock | undefined>,
-  )
+  const agents = createMemo<Record<string, AgentBlock>>(() => (config().agent ?? {}) as Record<string, AgentBlock>)
   const [agentList, { refetch: refetchAgents }] = createResource(
     () => props.directory(),
     async (directory) =>
@@ -162,11 +161,8 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     // An empty list makes active() the {name:""} fallback; writing it would
     // create a malformed config key.
     if (name === "") return
-    const next = { ...config() }
-    const agent = { ...agents() }
-    agent[name] = { ...block(name), ...patch }
-    next.agent = agent
-    void updateConfig(next)
+    const agent = { ...agents(), [name]: { ...block(name), ...patch } }
+    void updateConfig({ agent })
       .then(() => refetchSkills())
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -1026,11 +1022,13 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
           <p class="settings-v2-plugins-hint">{language.t("settings.permissions.section.tools.description")}</p>
           <Show when={sectionExpanded("tools")}>
           <Show
-            when={!inventory.loading && !inventory.error}
+            when={!inventory.loading && !inventory.error && inventory.latest !== undefined}
             fallback={
               <p class="settings-v2-plugins-hint">
                 {language.t(
-                  inventory.error ? "settings.permissions.section.tools.error" : "settings.permissions.section.tools.loading",
+                  inventory.error || (!inventory.loading && inventory.latest === undefined)
+                    ? "settings.permissions.section.tools.error"
+                    : "settings.permissions.section.tools.loading",
                 )}
               </p>
             }
