@@ -1,5 +1,3 @@
-export * as ProjectDirectories from "./directories.js"
-
 import { and, asc, desc, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "@opencode/core/database/database"
@@ -8,9 +6,8 @@ import { AbsolutePath } from "@opencode/core/schema"
 import { ProjectSchema } from "@opencode/core/project/schema"
 import { ProjectDirectoryTable } from "@opencode/core/project/sql"
 import type { EffectDrizzleSqlite } from "@opencode/core/database/drizzle"
-import type { Project } from "@opencode/core/project"
 
-export type Directory = Project.Directory
+export type Directory = { readonly directory: AbsolutePath; readonly strategy?: string }
 
 export const CreateInput = Schema.Struct({
   projectID: ProjectSchema.ID,
@@ -28,12 +25,6 @@ export type RemoveInput = typeof RemoveInput.Type
 
 type DatabaseClient = EffectDrizzleSqlite.EffectSQLiteDatabase
 export type Transaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
-
-export const ListInput = ProjectSchema.DirectoriesInput
-export type ListInput = typeof ListInput.Type
-
-export const ListOutput = ProjectSchema.Directories
-export type ListOutput = typeof ListOutput.Type
 
 export interface Interface {
   readonly list: (projectID: ProjectSchema.ID) => Effect.Effect<ReadonlyArray<Directory>>

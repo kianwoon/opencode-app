@@ -18,6 +18,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProjectV2 } from "@/compat/core-namespaces"
 import { Slug } from "@opencode/core/util/slug"
 import { WorkspaceTable } from "@opencode/core/workspace/sql"
+import { WorkspaceDriver } from "@opencode/core/workspace/driver"
 import { getAdapter, registeredAdapters } from "./adapters"
 import { type Target, type WorkspaceInfo, WorkspaceInfo as WorkspaceInfoSchema } from "./types"
 import { WorkspaceV2 } from "@/compat/core-namespaces"
@@ -46,16 +47,32 @@ export type ConnectionStatus = WorkspaceEvent.ConnectionStatus
 
 export const Event = WorkspaceEvent
 
+type WorkspaceFields = Pick<Info, "type" | "branch" | "name" | "directory" | "extra" | "projectID" | "timeUsed">
+
+// Core's workspace table only persists provider + opaque binding JSON. The fork's
+// control-plane metadata lives inside that binding instead of forking the schema.
+function toBinding(info: WorkspaceFields): WorkspaceDriver.Binding {
+  return {
+    branch: info.branch,
+    name: info.name,
+    directory: info.directory,
+    extra: info.extra,
+    project_id: info.projectID,
+    time_used: info.timeUsed,
+  } as WorkspaceDriver.Binding
+}
+
 function fromRow(row: typeof WorkspaceTable.$inferSelect): Info {
+  const binding = (row.binding ?? {}) as Record<string, unknown>
   return {
     id: row.id,
-    type: row.type,
-    branch: row.branch,
-    name: row.name,
-    directory: row.directory,
-    extra: row.extra,
-    projectID: row.project_id,
-    timeUsed: row.time_used,
+    type: row.provider,
+    branch: typeof binding.branch === "string" ? binding.branch : null,
+    name: typeof binding.name === "string" ? binding.name : "",
+    directory: typeof binding.directory === "string" ? binding.directory : null,
+    extra: binding.extra ?? null,
+    projectID: (typeof binding.project_id === "string" ? binding.project_id : "") as ProjectV2.ID,
+    timeUsed: typeof binding.time_used === "number" ? binding.time_used : row.last_used_at,
   }
 }
 
@@ -515,13 +532,10 @@ const layer = Layer.effect(
         .insert(WorkspaceTable)
         .values({
           id: info.id,
-          type: info.type,
-          branch: info.branch,
-          name: info.name,
-          directory: info.directory,
-          extra: info.extra,
-          project_id: info.projectID,
-          time_used: info.timeUsed,
+          provider: info.type,
+          binding: toBinding(info),
+          created_at: Date.now(),
+          last_used_at: info.timeUsed,
         })
         .run()
         .pipe(Effect.orDie)
@@ -718,10 +732,10 @@ const layer = Layer.effect(
       return (yield* db
         .select()
         .from(WorkspaceTable)
-        .where(eq(WorkspaceTable.project_id, project.id))
         .all()
         .pipe(Effect.orDie))
         .map(fromRow)
+        .filter((workspace) => workspace.projectID === project.id)
         .sort((a, b) => a.id.localeCompare(b.id))
     })
 
@@ -760,13 +774,10 @@ const layer = Layer.effect(
               .insert(WorkspaceTable)
               .values({
                 id: info.id,
-                type: info.type,
-                branch: info.branch,
-                name: info.name,
-                directory: info.directory,
-                extra: info.extra,
-                project_id: info.projectID,
-                time_used: info.timeUsed,
+                provider: info.type,
+                binding: toBinding(info),
+                created_at: Date.now(),
+                last_used_at: info.timeUsed,
               })
               .run()
               .pipe(Effect.orDie)
@@ -808,7 +819,7 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           yield* WorkspaceAdapterRuntime.remove(info)
         }),
-        () => Effect.logError("adapter not available when removing workspace", { type: row.type }),
+        () => Effect.logError("adapter not available when removing workspace", { type: row.provider }),
       )
 
       yield* db.delete(WorkspaceTable).where(eq(WorkspaceTable.id, id)).run().pipe(Effect.orDie)
@@ -856,11 +867,10 @@ const layer = Layer.effect(
       const rows = yield* db
         .selectDistinct({ workspace: WorkspaceTable })
         .from(WorkspaceTable)
-        .where(eq(WorkspaceTable.project_id, projectID))
         .all()
         .pipe(Effect.orDie)
 
-      for (const { workspace } of rows) {
+      for (const { workspace } of rows.filter((row) => fromRow(row.workspace).projectID === projectID)) {
         yield* startSync(fromRow(workspace)).pipe(
           Effect.catch((error) =>
             Effect.sync(() => {

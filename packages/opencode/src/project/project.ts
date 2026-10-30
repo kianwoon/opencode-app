@@ -1,8 +1,9 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
+import path from "path"
 import { and, eq, sql } from "drizzle-orm"
 import { Database } from "@opencode/core/database/database"
 import { ProjectDirectoryTable, ProjectTable } from "@opencode/core/project/sql"
-import { ProjectDirectories } from "@/compat/project-directories"
+import { ProjectDirectories } from "@/compat/directories"
 import { SessionTable } from "@opencode/core/session/sql"
 import { WorkspaceTable } from "@opencode/core/workspace/sql"
 import { Flag } from "@/flag/flag"
@@ -44,14 +45,15 @@ export function fromRow(row: Row): Info {
       : undefined
   return {
     id: row.id,
-    worktree: row.worktree,
+    canonical: row.worktree,
     vcs: row.vcs ? Schema.decodeUnknownSync(Project.Vcs)(row.vcs) : undefined,
     name: row.name ?? undefined,
     icon,
     time: {
       created: row.time_created,
       updated: row.time_updated,
-      initialized: row.time_initialized ?? undefined,
+      active: row.time_active,
+      archived: row.time_archived ?? undefined,
     },
     sandboxes: row.sandboxes,
     commands: row.commands ?? undefined,
@@ -181,15 +183,15 @@ const layer = Layer.effect(
                 .set({ project_id: newID, time_updated: sql`${SessionTable.time_updated}` })
                 .where(eq(SessionTable.project_id, oldID))
                 .run()
-              yield* d
-                .update(WorkspaceTable)
-                .set({ project_id: newID })
-                .where(eq(WorkspaceTable.project_id, oldID))
-                .run()
-
               if (oldProject) yield* d.delete(ProjectTable).where(eq(ProjectTable.id, oldID)).run()
             }),
           { behavior: "immediate" },
+        )
+        .pipe(Effect.orDie)
+
+      yield* db
+        .run(
+          sql`UPDATE ${WorkspaceTable} SET binding = json_set(coalesce(binding, '{}'), '$.project_id', ${newID}) WHERE json_extract(binding, '$.project_id') = ${oldID}`,
         )
         .pipe(Effect.orDie)
     })
@@ -223,26 +225,26 @@ const layer = Layer.effect(
       yield* migrateProjectId(data.previous ? ProjectV2.ID.make(data.previous) : undefined, projectID)
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get().pipe(Effect.orDie)
       const existing = row
-        ? fromRow(row)
-        : {
+          ? fromRow(row)
+          : {
             id: projectID,
-            worktree,
+            canonical: AbsolutePath.make(worktree),
             vcs: data.vcs?.type ?? fakeVcs,
             sandboxes: [] as string[],
-            time: { created: Date.now(), updated: Date.now() },
+            time: { created: Date.now(), updated: Date.now(), active: Date.now() },
           }
 
       if (flags.experimentalIconDiscovery) yield* discover(existing).pipe(Effect.ignore, Effect.forkIn(scope))
 
       const result: Info = {
         ...existing,
-        worktree: projectID === ProjectV2.ID.global ? worktree : existing.worktree,
+        canonical: projectID === ProjectV2.ID.global ? AbsolutePath.make(worktree) : existing.canonical,
         vcs: data.vcs?.type ?? fakeVcs,
         time: { ...existing.time, updated: Date.now() },
       }
       if (
         projectID !== ProjectV2.ID.global &&
-        data.directory !== result.worktree &&
+        data.directory !== result.canonical &&
         !result.sandboxes.includes(data.directory)
       )
         result.sandboxes.push(data.directory)
@@ -260,7 +262,7 @@ const layer = Layer.effect(
         .insert(ProjectTable)
         .values({
           id: result.id,
-          worktree: AbsolutePath.make(result.worktree),
+          worktree: AbsolutePath.make(result.canonical),
           vcs: result.vcs ?? null,
           name: result.name,
           icon_url: result.icon?.url,
@@ -268,21 +270,23 @@ const layer = Layer.effect(
           icon_color: result.icon?.color,
           time_created: result.time.created,
           time_updated: result.time.updated,
-          time_initialized: result.time.initialized,
+          time_active: result.time.active,
+          time_archived: result.time.archived,
           sandboxes: result.sandboxes.map((sandbox) => AbsolutePath.make(sandbox)),
           commands: result.commands,
         })
         .onConflictDoUpdate({
           target: ProjectTable.id,
           set: {
-            worktree: AbsolutePath.make(result.worktree),
+            worktree: AbsolutePath.make(result.canonical),
             vcs: result.vcs ?? null,
             name: result.name,
             icon_url: result.icon?.url,
             icon_url_override: result.icon?.override,
             icon_color: result.icon?.color,
             time_updated: result.time.updated,
-            time_initialized: result.time.initialized,
+            time_active: result.time.active,
+            time_archived: result.time.archived,
             sandboxes: result.sandboxes.map((sandbox) => AbsolutePath.make(sandbox)),
             commands: result.commands,
           },
@@ -306,10 +310,10 @@ const layer = Layer.effect(
 
       yield* emitUpdated(result)
       if (projectID !== ProjectV2.ID.global && data.vcs?.type === "git") {
-        yield* projectV2.commit({ store: data.vcs.store, id: data.id })
+        yield* fs.writeFileString(path.join(data.vcs.store, "opencode"), data.id).pipe(Effect.ignore)
       }
-      return { project: result, sandbox: data.vcs ? data.directory : worktree }
-    })
+      return { project: result, sandbox: String(data.vcs ? data.directory : worktree) }
+    }) as Interface["fromDirectory"]
 
     const discover = Effect.fn("Project.discover")(function* (input: Info) {
       if (input.vcs !== "git") return
@@ -317,8 +321,8 @@ const layer = Layer.effect(
       if (input.icon?.url) return
 
       const matches = yield* fs
-        .glob("**/favicon.{ico,png,svg,jpg,jpeg,webp}", {
-          cwd: input.worktree,
+        .scan("**/favicon.{ico,png,svg,jpg,jpeg,webp}", {
+          cwd: input.canonical,
           absolute: true,
           include: "file",
         })
@@ -483,3 +487,4 @@ export const node = LayerNode.make({
 })
 
 export * as Project from "./project"
+
