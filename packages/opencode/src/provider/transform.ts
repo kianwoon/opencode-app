@@ -6,10 +6,9 @@ import path from "node:path"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
-import type * as ModelsDev from "@opencode/core/models-dev"
 import { iife } from "@/util/iife"
 
-type Modality = NonNullable<ModelsDev.Model["modalities"]>["input"][number]
+type Modality = "text" | "audio" | "image" | "video" | "pdf"
 
 function mimeToModality(mime: string): Modality | undefined {
   if (mime.startsWith("image/")) return "image"
@@ -1973,8 +1972,13 @@ export function schema(model: Provider.Model, schema: JSONSchema7): JSONSchema7 
   return schema
 }
 
+type ReasoningOption =
+  | { readonly type: "effort"; readonly values?: readonly unknown[] }
+  | { readonly type: "toggle" }
+  | { readonly type: "budget_tokens"; readonly min?: number; readonly max?: number }
+
 export function reasoningVariants(
-  model: Pick<ModelsDev.Model, "reasoning_options">,
+  model: { readonly reasoning_options?: readonly ReasoningOption[] },
   target: Provider.Model,
 ): Provider.Model["variants"] {
   const options = model.reasoning_options
@@ -1984,7 +1988,7 @@ export function reasoningVariants(
   const effort = options.find((option) => option.type === "effort")
   const toggle = options.some((option) => option.type === "toggle")
   if (effort) {
-    const efforts = effortVariants(target, effort.values)
+    const efforts = effortVariants(target, effort.values ?? [])
     // When a model exposes both a toggle and an effort scale (e.g. deepseek-v4),
     // keep the toggle's off state alongside the effort tiers so developers can
     // fully disable thinking rather than only scaling it.

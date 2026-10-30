@@ -1440,36 +1440,30 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pr
 
 export const use = serviceUse(Service)
 
-function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
+function cost(cost: ModelV2.Info["cost"]): Model["cost"] {
+  const base = cost[0] ?? { input: 0, output: 0, cache: { read: 0, write: 0 } }
   const result: Model["cost"] = {
-    input: c?.input ?? 0,
-    output: c?.output ?? 0,
+    input: base.input,
+    output: base.output,
     cache: {
-      read: c?.cache_read ?? 0,
-      write: c?.cache_write ?? 0,
+      read: base.cache.read,
+      write: base.cache.write,
     },
   }
-  if (c?.tiers) {
-    result.tiers = c.tiers.map((item) => ({
-      input: item.input,
-      output: item.output,
-      cache: {
-        read: item.cache_read ?? 0,
-        write: item.cache_write ?? 0,
-      },
-      tier: item.tier,
-    }))
-  }
-  if (c?.context_over_200k) {
-    result.experimentalOver200K = {
-      cache: {
-        read: c.context_over_200k.cache_read ?? 0,
-        write: c.context_over_200k.cache_write ?? 0,
-      },
-      input: c.context_over_200k.input,
-      output: c.context_over_200k.output,
-    }
-  }
+  // Core keeps context-size overrides as tiers after the base entry.
+  const tiers = cost.flatMap((item) =>
+    item.tier
+      ? [
+          {
+            input: item.input,
+            output: item.output,
+            cache: { read: item.cache.read, write: item.cache.write },
+            tier: item.tier,
+          },
+        ]
+      : [],
+  )
+  if (tiers.length > 0) result.tiers = tiers
   return result
 }
 
@@ -1485,25 +1479,62 @@ function cloudflareGatewayNpm(providerID: string, modelID: string) {
   return undefined
 }
 
-function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
+// The catalog reaches us already normalized to core's provider/model shapes. The fork's runtime
+// still loads providers through @ai-sdk packages, so map core's canonical package identifier back
+// to the npm package the bundled loader knows. Native catalog entrypoints (@opencode/ai/...) are
+// keyed by provider; anything unmapped falls back to the compatible OpenAI package as before.
+const CATALOG_NPM: Readonly<Record<string, string>> = {
+  anthropic: "@ai-sdk/anthropic",
+  openai: "@ai-sdk/openai",
+  google: "@ai-sdk/google",
+  "google-vertex": "@ai-sdk/google-vertex",
+  "amazon-bedrock": "@ai-sdk/amazon-bedrock",
+  azure: "@ai-sdk/azure",
+  xai: "@ai-sdk/xai",
+  mistral: "@ai-sdk/mistral",
+  groq: "@ai-sdk/groq",
+  deepseek: "@ai-sdk/deepseek",
+  cerebras: "@ai-sdk/cerebras",
+  cohere: "@ai-sdk/cohere",
+  deepinfra: "@ai-sdk/deepinfra",
+  togetherai: "@ai-sdk/togetherai",
+  perplexity: "@ai-sdk/perplexity",
+  vercel: "@ai-sdk/vercel",
+  alibaba: "@ai-sdk/alibaba",
+  openrouter: "@openrouter/ai-sdk-provider",
+  "github-copilot": "@ai-sdk/github-copilot",
+  gitlab: "gitlab-ai-provider",
+  venice: "venice-ai-sdk-provider",
+  gateway: "@ai-sdk/gateway",
+}
+
+function catalogNpm(providerID: string, model: ModelV2.Info) {
+  const declared = model.package ?? undefined
+  if (declared && ProviderV2.isAISDK(declared)) return ProviderV2.packageName(declared)
+  if (providerID === "google-vertex" && declared?.includes("anthropic")) return "@ai-sdk/google-vertex/anthropic"
+  return CATALOG_NPM[providerID] ?? "@ai-sdk/openai-compatible"
+}
+
+function fromModelsDevModel(provider: ProviderV2.Info, model: ModelV2.Info): Model {
+  const apiID = model.modelID ?? model.id
+  const modalities = (values: readonly string[], kind: string) => values.includes(kind)
+  const input = model.capabilities.input
+  const output = model.capabilities.output
   const base: Model = {
-    id: ModelV2.ID.make(model.id),
+    id: ModelV2.ID.make(apiID),
     providerID: ProviderV2.ID.make(provider.id),
     name: model.name,
     family: model.family,
     api: {
-      id: model.id,
-      url: model.provider?.api ?? provider.api ?? "",
+      id: apiID,
+      url: model.settings?.baseURL ?? provider.settings?.baseURL ?? "",
       npm:
         provider.id === "deepseek"
           ? "@ai-sdk/deepseek"
-          : (cloudflareGatewayNpm(provider.id, model.id) ??
-            model.provider?.npm ??
-            provider.npm ??
-            "@ai-sdk/openai-compatible"),
+          : (cloudflareGatewayNpm(provider.id, apiID) ?? catalogNpm(provider.id, model)),
     },
-    status: model.status ?? "active",
-    headers: {},
+    status: model.status,
+    headers: model.headers ? { ...model.headers } : {},
     options: {},
     cost: cost(model.cost),
     limit: {
@@ -1512,36 +1543,42 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       output: model.limit.output,
     },
     capabilities: {
-      temperature: model.temperature ?? false,
-      reasoning: model.reasoning ?? false,
-      attachment: model.attachment ?? false,
-      toolcall: model.tool_call ?? true,
+      temperature: model.capabilities.temperature ?? false,
+      // Core only resolves variants for models that declare reasoning support.
+      reasoning: model.variants.length > 0 || model.compatibility?.reasoningField !== undefined,
+      attachment: input.some((kind) => kind !== "text"),
+      toolcall: model.capabilities.tools,
       input: {
-        text: model.modalities?.input?.includes("text") ?? false,
-        audio: model.modalities?.input?.includes("audio") ?? false,
-        image: model.modalities?.input?.includes("image") ?? false,
-        video: model.modalities?.input?.includes("video") ?? false,
-        pdf: model.modalities?.input?.includes("pdf") ?? false,
+        text: modalities(input, "text"),
+        audio: modalities(input, "audio"),
+        image: modalities(input, "image"),
+        video: modalities(input, "video"),
+        pdf: modalities(input, "pdf"),
       },
       output: {
-        text: model.modalities?.output?.includes("text") ?? false,
-        audio: model.modalities?.output?.includes("audio") ?? false,
-        image: model.modalities?.output?.includes("image") ?? false,
-        video: model.modalities?.output?.includes("video") ?? false,
-        pdf: model.modalities?.output?.includes("pdf") ?? false,
+        text: modalities(output, "text"),
+        audio: modalities(output, "audio"),
+        image: modalities(output, "image"),
+        video: modalities(output, "video"),
+        pdf: modalities(output, "pdf"),
       },
       interleaved:
         provider.id === "deepseek"
           ? false
-          : typeof model.interleaved === "string"
-            ? { field: model.interleaved }
-            : (model.interleaved ?? false),
+          : model.compatibility?.reasoningField
+            ? { field: model.compatibility.reasoningField }
+            : false,
     },
-    release_date: model.release_date ?? "",
+    release_date: model.time.released ? new Date(model.time.released).toISOString() : "",
     variants: {},
   }
 
-  const variants = ProviderTransform.reasoningVariants(model, base) ?? ProviderTransform.variants(base)
+  const variants =
+    model.variants.length > 0
+      ? Object.fromEntries(
+          model.variants.map((variant) => [variant.id, { ...variant.settings, ...variant.body }]),
+        )
+      : ProviderTransform.variants(base)
 
   return {
     ...base,
@@ -1549,42 +1586,19 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
   }
 }
 
-export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
+export function fromModelsDevProvider(snapshot: ModelsDev.Snapshot): Info {
   const models: Record<string, Model> = {}
-  for (const [key, model] of Object.entries(provider.models)) {
-    models[key] = fromModelsDevModel(provider, model)
-    for (const [mode, opts] of Object.entries(model.experimental?.modes ?? {})) {
-      const id = `${model.id}-${mode}`
-      const base = fromModelsDevModel(provider, model)
-      models[id] = {
-        ...base,
-        id: ModelV2.ID.make(id),
-        name: `${model.name} ${mode[0].toUpperCase()}${mode.slice(1)}`,
-        cost: opts.cost ? mergeDeep(base.cost, cost(opts.cost)) : base.cost,
-        options: modeOptions(base, opts.provider?.body),
-        headers: opts.provider?.headers ?? base.headers,
-      }
-    }
+  for (const model of snapshot.models) {
+    models[model.modelID ?? model.id] = fromModelsDevModel(snapshot.info, model)
   }
   return {
-    id: ProviderV2.ID.make(provider.id),
+    id: ProviderV2.ID.make(snapshot.info.id),
     source: "custom",
-    name: provider.name,
-    env: [...(provider.env ?? [])],
+    name: snapshot.info.name,
+    env: [...snapshot.environment],
     options: {},
     models,
   }
-}
-
-function modeOptions(model: Model, body: Record<string, unknown> | undefined) {
-  if (!body) return model.options
-  const options = Object.fromEntries(
-    Object.entries(body).map(([key, value]) => [key.replace(/_([a-z])/g, (_, char) => char.toUpperCase()), value]),
-  )
-  const reasoning = body.reasoning
-  if (model.api.npm !== "@ai-sdk/openai" || !isRecord(reasoning) || typeof reasoning.mode !== "string") return options
-  const { reasoning: _, ...rest } = options
-  return { ...rest, reasoningMode: reasoning.mode }
 }
 
 function modelSuggestions(provider: Info | undefined, modelID: ModelV2.ID, enableExperimentalModels: boolean) {
@@ -1631,8 +1645,15 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelsDev = yield* modelsDevSvc.get()
+        const snapshots = yield* modelsDevSvc.get()
+        const modelsDev = Object.fromEntries(snapshots.map((snapshot) => [snapshot.info.id, snapshot]))
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
+        const catalogDefaults = mapValues(modelsDev, (snapshot) => ({
+          npm: ProviderV2.isAISDK(snapshot.info.package)
+            ? ProviderV2.packageName(snapshot.info.package)
+            : (CATALOG_NPM[snapshot.info.id] ?? "@ai-sdk/openai-compatible"),
+          api: snapshot.info.settings?.baseURL ?? "",
+        }))
         const database = mapValues(catalog, toPublicInfo)
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
@@ -1730,15 +1751,15 @@ const layer = Layer.effect(
               // Config-defined gateway models bypass fromModelsDevModel, so resolve the
               // native passthrough npm here before falling back to the catalog default.
               cloudflareGatewayNpm(providerID, apiID) ??
-              modelsDev[providerID]?.npm ??
+              catalogDefaults[providerID]?.npm ??
               (providerID === "deepseek" ? "@ai-sdk/deepseek" : "@ai-sdk/openai-compatible")
             const apiUrl =
-              model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api ?? ""
+              model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? catalogDefaults[providerID]?.api ?? ""
             const defaultedCompat =
               apiNpm === "@ai-sdk/openai-compatible" &&
               (model.provider?.npm ?? provider.npm ?? existingModel?.api.npm) === undefined &&
               cloudflareGatewayNpm(providerID, apiID) === undefined &&
-              modelsDev[providerID]?.npm === undefined &&
+              catalogDefaults[providerID]?.npm === undefined &&
               providerID !== "deepseek"
             if (defaultedCompat && suggestProtocolFromBaseURL(apiUrl) === "anthropic") {
               Effect.runFork(
@@ -1751,8 +1772,8 @@ const layer = Layer.effect(
               )
             }
             const declaredNpm = model.provider?.npm ?? provider.npm
-            const catalogNpm = modelsDev[providerID]?.npm
-            const baseUnsetOrOfficial = apiUrl === "" || apiUrl === (modelsDev[providerID]?.api ?? "")
+            const catalogNpm = catalogDefaults[providerID]?.npm
+            const baseUnsetOrOfficial = apiUrl === "" || apiUrl === (catalogDefaults[providerID]?.api ?? "")
             if (
               declaredNpm !== undefined &&
               catalogNpm !== undefined &&
@@ -1780,7 +1801,7 @@ const layer = Layer.effect(
               api: {
                 id: apiID,
                 npm: apiNpm,
-                url: model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api ?? "",
+                url: model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? catalogDefaults[providerID]?.api ?? "",
               },
               status: model.status ?? existingModel?.status ?? "active",
               name,
@@ -1835,13 +1856,10 @@ const layer = Layer.effect(
               release_date: model.release_date ?? existingModel?.release_date ?? "",
               variants: {},
             }
-            // Configured reasoning options replace the catalog variants; configured variants still apply on top.
             const variants =
-              model.reasoning_options !== undefined
-                ? (ProviderTransform.reasoningVariants(model, parsedModel) ?? ProviderTransform.variants(parsedModel))
-                : existingModel?.api.npm === parsedModel.api.npm
-                  ? (existingModel.variants ?? ProviderTransform.variants(parsedModel))
-                  : ProviderTransform.variants(parsedModel)
+              existingModel?.api.npm === parsedModel.api.npm
+                ? (existingModel.variants ?? ProviderTransform.variants(parsedModel))
+                : ProviderTransform.variants(parsedModel)
             const merged = mergeDeep(variants, model.variants ?? {})
             parsedModel.variants = mapValues(
               pickBy(merged, (v) => !v.disabled),
