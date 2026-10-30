@@ -42,7 +42,7 @@ import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
-import { Shell } from "@opencode/core/shell"
+import { ShellSelect } from "@opencode/core/shell/select"
 import { ShellID } from "@/tool/shell/id"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Truncate } from "@/tool/truncate"
@@ -59,7 +59,8 @@ import { Database } from "@opencode/core/database/database"
 import { Model } from "@opencode/core/model"
 import { ProviderV2 } from "@/compat/core-namespaces"
 import { and, asc, eq, isNull, lte, max } from "drizzle-orm"
-import { FollowupTable, SessionStableHeadTable, SessionTable, WorkflowAttemptTable } from "@opencode/core/session/sql"
+import { SessionTable } from "@opencode/core/session/sql"
+import { FollowupTable, SessionStableHeadTable, WorkflowAttemptTable } from "./sql-compat"
 import { SessionReminders } from "./reminders"
 import { node as SessionTodoNode, Service as TodoService } from "./todo"
 import { SessionTools } from "./tools"
@@ -1405,8 +1406,8 @@ const layer = Layer.effect(
           }).pipe(Effect.ensuring(markReady))
 
           const cfg = yield* config.get()
-          const sh = Shell.preferred(cfg.shell)
-          const args = Shell.args(sh, input.command, cwd)
+          const sh = ShellSelect.resolve({ priority: "config" }, cfg.shell)
+          const args = ShellSelect.args(sh, input.command)
           let output = ""
           let aborted = false
 
@@ -1917,7 +1918,7 @@ const layer = Layer.effect(
           : Effect.succeed(part),
       )
 
-      const parsed = decodeMessageInfo(info, { errors: "all", propertyOrder: "original" })
+      const parsed = decodeMessageInfo(info, { errors: "all" })
       if (Exit.isFailure(parsed)) {
         yield* Effect.logError("invalid user message before save", {
           sessionID: input.sessionID,
@@ -1928,7 +1929,7 @@ const layer = Layer.effect(
         })
       }
       for (const [index, part] of parts.entries()) {
-        const p = decodeMessagePart(part, { errors: "all", propertyOrder: "original" })
+        const p = decodeMessagePart(part, { errors: "all" })
         if (Exit.isSuccess(p)) continue
         yield* Effect.logError("invalid user part before save", {
           sessionID: input.sessionID,
@@ -2960,18 +2961,19 @@ const layer = Layer.effect(
               // output at all — previously the session went idle silently — or
               // partial text that was cut off by the provider's filter.
               if (handle.message.finish === "content-filter") {
-                handle.message.error = new SessionV1.ContentFilterError({
-                  message: "The response was blocked by the provider's content filter",
-                }).toObject()
+                handle.message.error = {
+                  name: "ContentFilterError",
+                  data: { message: "The response was blocked by the provider's content filter" },
+                }
                 yield* sessions.updateMessage(handle.message)
                 yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
                 return "break" as const
               }
               if (format.type === "json_schema") {
-                handle.message.error = new SessionV1.StructuredOutputError({
-                  message: "Model did not produce structured output",
-                  retries: 0,
-                }).toObject()
+                handle.message.error = {
+                  name: "StructuredOutputError",
+                  data: { message: "Model did not produce structured output", retries: 0 },
+                }
                 yield* sessions.updateMessage(handle.message)
                 return "break" as const
               }
@@ -2999,10 +3001,13 @@ const layer = Layer.effect(
             repeatCount = stall.repeatCount
             stallFingerprint = stall.fingerprint
             if (repeatCount >= REPETITION_BREAK) {
-              handle.message.error = new SessionV1.MaxStepsError({
-                message: `Agent "${agent.name}" repeated the same tool calls ${repeatCount} times without making progress. The run was stopped automatically. Re-run with a more specific prompt, or increase the agent's "steps" config if the repetition is expected.`,
-                steps: step,
-              }).toObject()
+              handle.message.error = {
+                name: "MessageMaxStepsError",
+                data: {
+                  message: `Agent "${agent.name}" repeated the same tool calls ${repeatCount} times without making progress. The run was stopped automatically. Re-run with a more specific prompt, or increase the agent's "steps" config if the repetition is expected.`,
+                  steps: step,
+                },
+              }
               yield* sessions.updateMessage(handle.message)
               yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
               yield* Effect.logWarning("loop force-break after repeated identical turns", {
@@ -3060,12 +3065,15 @@ const layer = Layer.effect(
             // a manual cancel). This is the last resort after salvage failed;
             // a normal finish still exits via the regular path above.
             if (isPastGrace && !finished) {
-              handle.message.error = new SessionV1.MaxStepsError({
-                message: `Agent "${agent.name}" reached the maximum of ${maxSteps} steps${
-                  MAX_STEPS_GRACE > 0 ? ` (+${MAX_STEPS_GRACE} grace steps)` : ""
-                } without producing a final response. The run was stopped automatically. Increase the agent's "steps" config to allow longer runs.`,
-                steps: maxSteps,
-              }).toObject()
+              handle.message.error = {
+                name: "MessageMaxStepsError",
+                data: {
+                  message: `Agent "${agent.name}" reached the maximum of ${maxSteps} steps${
+                    MAX_STEPS_GRACE > 0 ? ` (+${MAX_STEPS_GRACE} grace steps)` : ""
+                  } without producing a final response. The run was stopped automatically. Increase the agent's "steps" config to allow longer runs.`,
+                  steps: maxSteps,
+                },
+              }
               yield* sessions.updateMessage(handle.message)
               yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
               yield* Effect.logWarning("loop force-break at max steps", {
@@ -3151,7 +3159,7 @@ const layer = Layer.effect(
       const shellMatches = ConfigMarkdown.shell(template)
       if (shellMatches.length > 0) {
         const cfg = yield* config.get()
-        const sh = Shell.preferred(cfg.shell)
+        const sh = ShellSelect.resolve({ priority: "config" }, cfg.shell)
         const results = yield* Effect.promise(() =>
           Promise.all(
             shellMatches.map(async ([, cmd]) => (await Process.text([cmd], { shell: sh, nothrow: true })).text),

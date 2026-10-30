@@ -4,7 +4,7 @@ import { Effect, Layer, Context } from "effect"
 import { Database } from "@opencode/core/database/database"
 import { eq } from "drizzle-orm"
 import { asc } from "drizzle-orm"
-import { TodoTable } from "@opencode/core/session/sql"
+import { TodoTable } from "./sql-compat"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionTodo } from "@/compat/schema/session-todo"
 

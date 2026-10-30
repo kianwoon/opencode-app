@@ -9,7 +9,7 @@ export type NamedErrorClass<Name extends string, DataSchema extends Schema.Top> 
   new (
     data: Schema.Schema.Type<DataSchema>,
     options?: ErrorOptions,
-  ): NamedError & {
+  ): Omit<NamedError, "toObject"> & {
     readonly name: Name
     readonly data: Schema.Schema.Type<DataSchema>
     schema(): NamedErrorSchema<Name, DataSchema>
