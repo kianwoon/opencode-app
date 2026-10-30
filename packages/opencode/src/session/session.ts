@@ -15,7 +15,6 @@ import { EventV2 } from "@opencode/core/event"
 import { SessionV2 } from "@/compat/core-namespaces"
 import { createDeltaCoalescer } from "@opencode/core/session/delta-coalescer"
 import * as SessionExecutionLocal from "@/compat/session-execution-local"
-import { locationServiceMapLayer } from "@opencode/core/location-services"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -66,7 +65,13 @@ export function fromRow(row: SessionRow): Info {
           additions: row.summary_additions ?? 0,
           deletions: row.summary_deletions ?? 0,
           files: row.summary_files ?? 0,
-          diffs: row.summary_diffs ?? undefined,
+          diffs: row.summary_diffs?.map((diff) => ({
+            file: diff.file ?? "",
+            patch: diff.patch ?? "",
+            additions: diff.additions,
+            deletions: diff.deletions,
+            status: diff.status ?? "modified",
+          })),
         }
       : undefined
   const share = row.share_url ? { url: row.share_url } : undefined
@@ -75,7 +80,7 @@ export function fromRow(row: SessionRow): Info {
         messageID: MessageID.make(row.revert.messageID),
         partID: row.revert.partID ? PartID.make(row.revert.partID) : undefined,
         snapshot: row.revert.snapshot,
-        diff: row.revert.diff,
+        diff: "diff" in row.revert ? row.revert.diff : undefined,
       }
     : undefined
   return {
@@ -86,7 +91,7 @@ export function fromRow(row: SessionRow): Info {
     directory: row.directory,
     path: row.path ?? undefined,
     parentID: row.parent_id ?? undefined,
-    title: row.title,
+    title: row.title ?? "",
     agent: row.agent ?? undefined,
     model: row.model
       ? {
@@ -110,7 +115,11 @@ export function fromRow(row: SessionRow): Info {
     share,
     metadata: row.metadata ?? undefined,
     revert,
-    permission: row.permission ? [...row.permission] : undefined,
+    permission: row.permission?.map((rule) => ({
+      permission: rule.action,
+      pattern: rule.resource,
+      action: rule.effect,
+    })),
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -534,7 +543,7 @@ const layer: Layer.Layer<
     }) {
       const ctx = yield* InstanceState.context
       const result: Info = {
-        id: SessionID.descending(input.id),
+        id: input.id ? SessionID.make(input.id) : SessionID.create(),
         slug: Slug.create(),
         version: InstallationVersion,
         projectID: ctx.project.id,
@@ -667,25 +676,30 @@ const layer: Layer.Layer<
       }).pipe(Effect.withSpan("Session.updatePart"))
 
     const getPart: Interface["getPart"] = Effect.fn("Session.getPart")(function* (input) {
-      const row = yield* db
+      const rows = yield* db
         .select()
         .from(SessionPartTable)
         .where(
           and(
             eq(SessionPartTable.session_id, input.sessionID),
-            eq(SessionPartTable.message_id, input.messageID),
-            eq(SessionPartTable.id, input.partID),
+            eq(SessionPartTable.message_id, SessionMessage.ID.make(input.messageID)),
           ),
         )
-        .get()
+        .orderBy(SessionPartTable.ordinal)
+        .all()
         .pipe(Effect.orDie)
+      const row = rows.find(
+        (part) =>
+          part.call_id === input.partID ||
+          ("id" in part.data && typeof part.data.id === "string" && part.data.id === input.partID),
+      )
       if (!row) return
       return {
         ...row.data,
-        id: row.id,
+        id: input.partID,
         sessionID: row.session_id,
         messageID: row.message_id,
-      } as SessionV1.Part
+      } as unknown as SessionV1.Part
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {
