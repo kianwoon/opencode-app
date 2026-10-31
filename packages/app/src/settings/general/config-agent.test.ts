@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { agentPatch, parseModel, readAgents } from "./config-agent"
+import { agentPatch, parseModel, readAgents, resolveDisplayModel } from "./config-agent"
 
 // The exact shapes GET /api/config serves for the user's live config: model is a
 // decoded ConfigModel.Selection, permissions an ordered Permission.Ruleset, and
@@ -120,5 +120,42 @@ describe("agentPatch", () => {
     // dropped by the v1 normalizer, which would erase the model entirely.
     expect(block.model).not.toContain("#")
     expect(parseModel(block.model)!.modelID).toBe("deepseek/deepseek-v4.1-flash")
+  })
+
+  // The Model row displays what `/api/agent` resolved; `normalizeAgentList` maps
+  // the server's `{providerID, id}` onto this `{providerID, modelID}` shape.
+  test("the display model comes from the runtime entry, not the config snapshot", () => {
+    const runtime = {
+      name: "implementer",
+      mode: "subagent" as const,
+      model: { providerID: "command-code", modelID: "deepseek/deepseek-v4.1-flash" },
+    }
+
+    expect(resolveDisplayModel(runtime.model, undefined)).toEqual({
+      providerID: "command-code",
+      modelID: "deepseek/deepseek-v4.1-flash",
+    })
+  })
+
+  // An agent whose model lives only in `.md` frontmatter has no config block and
+  // no snapshot model; the resolved runtime model still has to display.
+  test("an md-frontmatter model displays even though the config snapshot lacks it", () => {
+    const config = { agents: { implementer: { mode: "subagent" } } }
+    expect(readAgents(config).implementer.model).toBeUndefined()
+    expect(
+      resolveDisplayModel(
+        { providerID: "command-code", modelID: "deepseek/deepseek-v4.1-flash" },
+        readAgents(config).implementer.model,
+      ),
+    ).toEqual({ providerID: "command-code", modelID: "deepseek/deepseek-v4.1-flash" })
+  })
+
+  test("falls back to the config model when the runtime entry has no model", () => {
+    expect(resolveDisplayModel(undefined, "anthropic/claude-sonnet-4-5")).toEqual({
+      providerID: "anthropic",
+      modelID: "claude-sonnet-4-5",
+    })
+    // No runtime model and no config model is the "Default" state.
+    expect(resolveDisplayModel(undefined, undefined)).toBeUndefined()
   })
 })

@@ -116,6 +116,24 @@ export function parseModel(value: string | undefined) {
 }
 
 /**
+ * The Model row displays the model the RUNTIME resolved for the agent, never a
+ * client-side reconstruction: the server's `/api/agent` entry already carries the
+ * effective model (an `.md` frontmatter model, an inherited default), so a stale
+ * or empty config snapshot can no longer contradict what the agent actually runs.
+ * The config string is the fallback for a config-only entry the runtime did not
+ * resolve a model for. Returns a ModelKey so the catalog lookup stays one call.
+ */
+export function resolveDisplayModel(
+  runtime: { providerID: string; modelID: string } | undefined,
+  config: string | undefined,
+): { providerID: string; modelID: string } | undefined {
+  if (runtime?.providerID && runtime.modelID) {
+    return { providerID: runtime.providerID, modelID: runtime.modelID }
+  }
+  return parseModel(config)
+}
+
+/**
  * The one write shape for both panels: the legacy `agent` key, ONE agent, and
  * only the keys the edited control changed. Never the block read back from the
  * normalized config — that reconstruction cannot carry `prompt`, the legacy

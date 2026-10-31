@@ -25,7 +25,7 @@ import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
 import { fetchToolInventory } from "./tool-inventory"
 // The panels read the normalized config the server serves (`agents`, model as a
 // selection), never the legacy on-disk key; the write path below stays legacy.
-import { agentPatch, parseModel, readAgents, type Action, type AgentBlock } from "./config-agent"
+import { agentPatch, readAgents, resolveDisplayModel, type Action, type AgentBlock } from "./config-agent"
 import { createConfigUnavailable } from "./config-availability"
 import { readConfigDocuments } from "@/runtime/server/global-sync/bootstrap"
 import "@/settings/settings.css"
@@ -167,8 +167,15 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       })
   }
 
+  // DISPLAY ONLY: the row shows the model the runtime resolved for this agent
+  // (`/api/agent`), so the panel agrees with the model the agent actually runs
+  // even when the config snapshot is stale or carries no model for it. The
+  // config-derived value is only the fallback for a config-only entry.
   const currentModel = createMemo(() => {
-    const selection = parseModel(block(active().name).model)
+    const selection = resolveDisplayModel(
+      agentList.latest?.find((item) => item.name === active().name)?.model,
+      block(active().name).model,
+    )
     if (!selection) return
     return models.find(selection)
   })
