@@ -18,6 +18,7 @@
     "build": "bun run script/build.ts",
     "pack": "bun run script/pack.ts",
     "preview": "electron-vite preview",
+    "verify:prod": "bun run script/verify-prod.ts",
     "bench:startup": "bun run script/bench-startup.ts"
   },
   "main": "./out/main/index.js",

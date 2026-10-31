@@ -1,18 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Verifies the packaged desktop app actually embeds the requested channel in
- * its opencode server bundle — failing LOUDLY if it doesn't.
+ * Verifies the packaged desktop app ships the requested channel's server sidecar
+ * and a real renderer payload — failing LOUDLY when it doesn't.
  *
- * Prevents the silent-wrong-DB bug: build-node.ts falls back to the git branch
- * when OPENCODE_CHANNEL is unset, which would make the app open a per-branch DB
- * (e.g. opencode-main.db) instead of the channel DB (e.g. opencode.db for
- * prod). This script inspects the packed app.asar server chunk and aborts the
- * build when the embedded channel doesn't match the requested channel.
+ * The server ships as the bundled sidecar CLI: Contents/Resources/opencode-cli
+ * with its version in opencode-cli.version. A preview CLI (0.0.0-*) in a prod
+ * bundle is the incident this script guards against: the app would run preview
+ * behaviour and open the wrong database while calling itself a release.
  */
-import { $ } from "bun"
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 
 const channel = process.env.OPENCODE_CHANNEL
 if (!channel || !["dev", "beta", "prod"].includes(channel)) {
@@ -22,40 +19,65 @@ if (!channel || !["dev", "beta", "prod"].includes(channel)) {
 const appDir = process.env.APP_DIR
 if (!appDir) throw new Error("APP_DIR is required")
 
-// Locate the server chunk inside the packed app.asar.
-const asar = join(appDir, "Contents", "Resources", "app.asar")
-if (!existsSync(asar)) throw new Error(`app.asar not found at ${asar}`)
+const resourcesDir = join(appDir, "Contents", "Resources")
 
-const tmp = mkdtempSync(join(tmpdir(), "opencode-verify-"))
-try {
-  await $`bunx asar extract ${asar} ${tmp}`
-  const chunksDir = join(tmp, "out", "main", "chunks")
-  const serverChunk = readdirSync(chunksDir).find((f) => f.startsWith("node-") && f.endsWith(".js"))
-  if (!serverChunk) throw new Error(`No server chunk (node-*.js) found in ${chunksDir}`)
+// 1. The bundled server sidecar CLI and its release version.
+const versionPath = join(resourcesDir, "opencode-cli.version")
+if (!existsSync(versionPath))
+  throw new Error(`MISSING CLI: ${versionPath} not found. The app does not ship the bundled server CLI.`)
 
-  const content = readFileSync(join(chunksDir, serverChunk), "utf8")
-  const match = content.match(/InstallationChannel\s*=\s*"([a-z]+)"/)
-  const embedded = match?.[1]
-  if (!embedded) throw new Error(`Could not find InstallationChannel literal in ${serverChunk}`)
+const version = readFileSync(versionPath, "utf8").trim()
+if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(version))
+  throw new Error(`INVALID CLI VERSION: ${versionPath} contains "${version}", which is not a version.`)
 
-  // prod uses the canonical opencode.db; other channels use opencode-<channel>.db.
-  const expectedDb = channel === "prod" ? "opencode.db" : `opencode-${channel}.db`
-  const usesChannelDb = content.includes(expectedDb)
-
-  if (embedded !== channel) {
+if (version.startsWith("0.0.0-")) {
+  if (channel === "prod") {
     throw new Error(
-      `CHANNEL MISMATCH: packaged server embeds "${embedded}" but requested "${channel}". ` +
-        `The app would open the wrong database. Rebuild with OPENCODE_CHANNEL=${channel} propagated ` +
-        `through prebuild (scripts/prebuild.ts).`,
+      `CHANNEL MISMATCH: packaged server CLI is preview version "${version}" in a prod build. ` +
+        `Rebuild the CLI with OPENCODE_CHANNEL=latest and OPENCODE_VERSION set to the release version.`,
     )
   }
-  if (!usesChannelDb) {
-    throw new Error(
-      `DB MISMATCH: server chunk does not reference "${expectedDb}". The app would not use the ${channel} database.`,
-    )
-  }
+  console.warn(`⚠️  ${channel} build bundles preview CLI "${version}" (allowed outside prod)`)
+}
 
-  console.log(`✅ Verified ${channel} build: ${serverChunk} embeds channel "${embedded}" and uses ${expectedDb}`)
-} finally {
-  rmSync(tmp, { recursive: true, force: true })
+const cliPath = ["opencode-cli", "opencode-cli.exe"].map((file) => join(resourcesDir, file)).find(existsSync)
+if (!cliPath) throw new Error(`MISSING CLI: no opencode-cli next to ${versionPath}.`)
+
+// 2. The asar is a real renderer payload: index.html points at the built entry.
+const asarPath = join(resourcesDir, "app.asar")
+if (!existsSync(asarPath)) throw new Error(`app.asar not found at ${asarPath}`)
+
+const archive = readFileSync(asarPath)
+if (archive.length < 16) throw new Error(`NOT AN ASAR: ${asarPath} is too small to hold an asar header.`)
+
+const headerSize = archive.readUInt32LE(4)
+const jsonSize = archive.readUInt32LE(12)
+const header = JSON.parse(archive.subarray(16, 16 + jsonSize).toString("utf8")) as AsarEntry
+const dataStart = 8 + headerSize
+
+const indexHtml = readAsarFile(header, dataStart, archive, ["out", "renderer", "index.html"])
+if (indexHtml === undefined) throw new Error(`MISSING RENDERER: out/renderer/index.html not found in ${asarPath}.`)
+if (!indexHtml.includes('id="root"'))
+  throw new Error(`BROKEN RENDERER: out/renderer/index.html in ${asarPath} has no #root mount point.`)
+
+const entryScript = [...indexHtml.matchAll(/<script\b[^>]*>/g)]
+  .map((match) => match[0])
+  .find((tag) => tag.includes('type="module"') && tag.includes("assets/"))
+const entry = entryScript?.match(/src="\.\/assets\/([^"]+\.js)"/)?.[1]
+if (!entry)
+  throw new Error(`BROKEN RENDERER: out/renderer/index.html in ${asarPath} references no ./assets/*.js module entry.`)
+
+const entryPath = ["out", "renderer", "assets", entry]
+if (readAsarFile(header, dataStart, archive, entryPath) === undefined)
+  throw new Error(`BROKEN RENDERER: referenced entry ${entryPath.join("/")} is missing from ${asarPath}.`)
+
+console.log(`✅ Verified ${channel} build: CLI ${version} + renderer entry ${entry}`)
+
+type AsarEntry = { files?: Record<string, AsarEntry>; offset?: string; size?: number }
+
+function readAsarFile(header: AsarEntry, dataStart: number, archive: Buffer, segments: string[]) {
+  const entry = segments.reduce<AsarEntry | undefined>((node, segment) => node?.files?.[segment], header)
+  if (entry?.offset === undefined || entry.size === undefined) return
+  const start = dataStart + Number(entry.offset)
+  return archive.subarray(start, start + entry.size).toString("utf8")
 }
