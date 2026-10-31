@@ -846,6 +846,8 @@ export const dict = {
   "sidebar.housekeep.error": "Failed to house-keep sessions",
   "settings.orchestration.title": "Orchestration",
   "settings.orchestration.description": "Control model routing, Jev advisory reasoning, guardrails, and compaction.",
+  "settings.orchestration.unavailable": "Not available on this server",
+  "settings.orchestration.verdicts.empty": "No recent verdicts",
   "settings.permissions.title": "Agents",
   "settings.permissions.description": "Control what tools the server can use by default.",
   "settings.subagent.title": "Subagents",

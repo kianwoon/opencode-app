@@ -121,6 +121,7 @@ export const SettingsOrchestrationV2: Component = () => {
   const serverSdk = useServerSDK()
   const server = useServer()
   const updateConfig = (patch: ExperimentalConfigUpdateInput) => serverSdk.api.experimental.config.update(patch)
+  const unavailable = () => language.t("settings.orchestration.unavailable")
 
   // Fork-only config blocks are not in the shared Config schema yet.
   const config = createMemo(
@@ -155,6 +156,17 @@ export const SettingsOrchestrationV2: Component = () => {
     return JSON.parse(body) as unknown
   }
 
+  // Reads must never reject: a server that does not serve a route (404) or an
+  // empty reply is a legitimate "not available", rendered as such instead of
+  // crashing the tab. Writes stay on `request` so they can report failure.
+  const requestRead = async (path: string) => {
+    try {
+      return await request(path)
+    } catch {
+      return undefined
+    }
+  }
+
   const brain = createMemo<BrainConfig>(() => config().brain ?? {})
   const jev = createMemo(() => config().jev ?? {})
   const governor = createMemo(() => config().governor ?? {})
@@ -163,22 +175,21 @@ export const SettingsOrchestrationV2: Component = () => {
   const compaction = createMemo(() => config().compaction ?? {})
   const models = useModels()
 
-  // Panel-mount reads of the server-owned effort-router state. Both fail
-  // SILENT: `createResource` parks a failure in `.error`, so a missing/older
-  // server or a malformed record renders "unknown" and never breaks the tab,
-  // which stays usable for config writes.
+  // Panel-mount reads of the server-owned effort-router state. Both resolve
+  // `undefined` when the route is absent or the reply is empty, which renders
+  // as "not available"; they never reject into the render path.
   const [effortRouter] = createResource(async () => {
-    return (await request("/global/effort-router")) as EffortRouterState | undefined
+    return (await requestRead("/global/effort-router")) as EffortRouterState | undefined
   })
 
   const [verdicts] = createResource(async () => {
-    return ((await request("/global/jev-verdicts?limit=5")) ?? []) as JevVerdict[]
+    return (await requestRead("/global/jev-verdicts?limit=5")) as JevVerdict[] | undefined
   })
 
   // Context-gate config: server-owned file state, read at mount and after each
   // write. Read-only fields are displayed; only triage is writable here.
   const [gateConfig, gateConfigActions] = createResource(async () => {
-    return (await request("/global/gate-config")) as GateConfigState | undefined
+    return (await requestRead("/global/gate-config")) as GateConfigState | undefined
   })
 
   const commitGateTriage = (value: boolean) => {
@@ -465,7 +476,7 @@ export const SettingsOrchestrationV2: Component = () => {
             >
               <Badge variant="neutral" data-action="settings-orchestration-gate-scoping-status">
                 {gateConfig() === undefined
-                  ? "unknown"
+                  ? unavailable()
                   : gateConfig()?.scopingEnabled
                     ? "scoping on"
                     : "scoping off"}
@@ -528,7 +539,7 @@ export const SettingsOrchestrationV2: Component = () => {
             >
               <Badge variant="neutral" data-action="settings-orchestration-gate-summarize-status">
                 {gateConfig() === undefined
-                  ? "unknown"
+                  ? unavailable()
                   : gateConfig()?.summarizeEnabled
                     ? "summarize on"
                     : "summarize off"}
@@ -558,7 +569,11 @@ export const SettingsOrchestrationV2: Component = () => {
               description="Resolved from effort-router.json at panel mount. Read-only; edit the file to change the router itself."
             >
               <Badge variant="neutral" data-action="settings-orchestration-effort-router-status">
-                {effortRouter() === undefined ? "unknown" : effortRouter()?.jev.enabled ? "jev enabled" : "jev disabled"}
+                {effortRouter() === undefined
+                  ? unavailable()
+                  : effortRouter()?.jev.enabled
+                    ? "jev enabled"
+                    : "jev disabled"}
               </Badge>
             </SettingsRow>
 
@@ -568,7 +583,7 @@ export const SettingsOrchestrationV2: Component = () => {
             >
               <Badge variant="neutral" data-action="settings-orchestration-guardrail-status">
                 {effortRouter() === undefined
-                  ? "unknown"
+                  ? unavailable()
                   : effortRouter()?.guardrail.enabled
                     ? "guardrail enabled"
                     : "guardrail disabled"}
@@ -584,7 +599,11 @@ export const SettingsOrchestrationV2: Component = () => {
                   when={(verdicts()?.length ?? 0) > 0}
                   fallback={
                     <span class="truncate leading-4 opacity-60">
-                      {verdicts.error ? "unknown" : verdicts.loading ? "" : "No recent verdicts"}
+                      {verdicts.loading
+                        ? ""
+                        : verdicts() === undefined
+                          ? unavailable()
+                          : language.t("settings.orchestration.verdicts.empty")}
                     </span>
                   }
                 >
