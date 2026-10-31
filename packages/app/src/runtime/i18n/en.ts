@@ -848,6 +848,14 @@ export const dict = {
   "settings.orchestration.description": "Control model routing, Jev advisory reasoning, guardrails, and compaction.",
   "settings.orchestration.unavailable": "Not available on this server",
   "settings.orchestration.verdicts.empty": "No recent verdicts",
+  "settings.orchestration.row.model.title": "Brain model",
+  "settings.orchestration.row.model.description":
+    "Model that runs the brain orchestration step. Unset uses the default model.",
+  "settings.orchestration.enforcement.title": "Enforcement",
+  "settings.orchestration.enforcement.description":
+    "Strict blocks a step the brain rejects; advisory only annotates the step and continues.",
+  "settings.orchestration.enforcement.option.strict": "Strict",
+  "settings.orchestration.enforcement.option.advisory": "Advisory",
   "settings.permissions.title": "Agents",
   "settings.permissions.description": "Control what tools the server can use by default.",
   "settings.subagent.title": "Subagents",

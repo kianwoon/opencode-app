@@ -406,6 +406,7 @@ export const SettingsOrchestrationV2: Component = () => {
             >
               <Select
                 data-action="settings-orchestration-enforcement"
+                aria-label={language.t("settings.orchestration.enforcement.title")}
                 options={enforcementOptions}
                 current={brain().enforcement ?? "advisory"}
                 placement="bottom-end"
