@@ -10,8 +10,9 @@ export type ToolInventory = {
 
 // A production server may not serve /mcp/inventory at all (404 with an empty
 // body). That is a state, not an exception: return undefined so the panels can
-// render "not available on this server", and never call response.json() on a
-// body that is not there.
+// render "not available on this server". A proxy that does not forward the path
+// answers the SPA shell with a 200 instead, so any non-JSON body is "unavailable"
+// too and never reaches JSON.parse ("Unexpected token '<'").
 export async function fetchToolInventory(server: {
   url: string
   username?: string
@@ -24,11 +25,21 @@ export async function fetchToolInventory(server: {
     : undefined
   const response = await fetch(`${server.url}/mcp/inventory`, { headers })
   if (!response.ok) return undefined
+  const contentType = response.headers.get("content-type")
+  if (contentType !== null && !contentType.includes("application/json")) return undefined
   const body = await response.text()
   if (body.trim() === "") return undefined
-  const value: unknown = JSON.parse(body)
+  const value = parseJSON(body)
   if (!isToolInventory(value)) return undefined
   return value
+}
+
+function parseJSON(body: string): unknown {
+  try {
+    return JSON.parse(body)
+  } catch {
+    return undefined
+  }
 }
 
 function isToolInventory(value: unknown): value is ToolInventory {
