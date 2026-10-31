@@ -1,6 +1,18 @@
 import { Tabs } from "@opencode/ui/tabs"
 import { useDialog } from "@opencode/ui/context/dialog"
-import { createEffect, createMemo, For, on, onCleanup, onMount, Show, Switch, Match, type Accessor } from "solid-js"
+import {
+  createEffect,
+  createMemo,
+  For,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+  Match,
+  type Accessor,
+  type JSX,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useTabs } from "@/shell/tabs/tabs"
@@ -230,6 +242,16 @@ function insideScroller(target: Element, root: Element) {
   return false
 }
 
+// Panels that read the active Location (their model selectors call useWorkspaceLocation) mount inside the provider when
+// a directory is known, and otherwise keep their existing "no location" state rather than forcing a placeholder one.
+function LocationPanels(props: { directory: string | undefined; children: JSX.Element }) {
+  return (
+    <Show when={props.directory} fallback={props.children}>
+      {(directory) => <LocationProvider directory={directory()}>{props.children}</LocationProvider>}
+    </Show>
+  )
+}
+
 function RootSettings() {
   const language = useLanguage()
   const dialog = useDialog()
@@ -383,15 +405,17 @@ function RootSettings() {
                 onSubtab={(value) => surface.subtab(value)}
               />
             </Tabs.Content>
-            <Tabs.Content value="permissions" class="settings-panel">
-              <SettingsPermissionsV2 directory={activeDirectory} />
-            </Tabs.Content>
-            <Tabs.Content value="subagent" class="settings-panel">
-              <SettingsSubagentV2 directory={activeDirectory} />
-            </Tabs.Content>
-            <Tabs.Content value="orchestration" class="settings-panel">
-              <SettingsOrchestrationV2 />
-            </Tabs.Content>
+            <LocationPanels directory={activeDirectory()}>
+              <Tabs.Content value="permissions" class="settings-panel">
+                <SettingsPermissionsV2 directory={activeDirectory} />
+              </Tabs.Content>
+              <Tabs.Content value="subagent" class="settings-panel">
+                <SettingsSubagentV2 directory={activeDirectory} />
+              </Tabs.Content>
+              <Tabs.Content value="orchestration" class="settings-panel">
+                <SettingsOrchestrationV2 />
+              </Tabs.Content>
+            </LocationPanels>
             <Tabs.Content value="projects" class="settings-panel">
               <SettingsProjects
                 server={server}
