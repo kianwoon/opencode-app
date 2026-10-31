@@ -48,6 +48,14 @@ export function mapV2Foreground(
     c: isDark ? 1.04 : 1.02,
   })
 
+  // A theme-provided `text-weak` replaces the muted step, so faint must dim from it too.
+  const muted = overrides["text-weak"] ?? shift(body, { l: isDark ? -0.11 : 0.11, c: 0.9 })
+
+  const faint =
+    typeof muted === "string" && muted.startsWith("#")
+      ? shift(muted as HexColor, { l: isDark ? -0.12 : 0.12, c: isDark ? 0.78 : 0.72 })
+      : muted
+
   const semantics = mapV2Semantics(isDark)
   const bgBase = resolveGreyRef(semantics["v2-background-bg-base"], primitives)
   const bgContrast = resolveGreyRef(semantics["v2-background-bg-contrast"], primitives)
@@ -56,8 +64,8 @@ export function mapV2Foreground(
 
   return {
     "v2-text-text-base": isDark ? blend("#ffffff", body, 0.9) : shift(body, { l: -0.07, c: 1.04 }),
-    "v2-text-text-muted": overrides["text-weak"] ?? shift(body, { l: isDark ? -0.11 : 0.11, c: 0.9 }),
-    "v2-text-text-faint": shift(body, { l: isDark ? -0.2 : 0.21, c: isDark ? 0.78 : 0.72 }),
+    "v2-text-text-muted": muted,
+    "v2-text-text-faint": faint,
     "v2-icon-icon-base": greyRef(pickGrey(primitives, bgBase, 7, isDark ? 400 : 800)),
     "v2-icon-icon-muted": greyRef(pickGrey(primitives, bgBase, 3, 600)),
     "v2-icon-icon-faint": greyRef(pickGrey(primitives, bgBase, 1.5, 500)),
