@@ -400,6 +400,15 @@ function normalizeCompaction(
       : undefined
   const tokens = prefer(legacyTokens, nativeTokens, ["compaction", "keep", "tokens"], diagnostics)
   if (tokens !== undefined) result.keep = { tokens }
+  const triggerTokens = own(input.compaction, "trigger_tokens")
+    ? decodeEncoded(
+        ConfigCompaction.Info.fields.trigger_tokens,
+        input.compaction.trigger_tokens,
+        ["compaction", "trigger_tokens"],
+        diagnostics,
+      )
+    : undefined
+  if (triggerTokens !== undefined) result.trigger_tokens = triggerTokens
   const legacyBuffer = own(input.compaction, "reserved")
     ? decodeEncoded(
         ConfigCompaction.Info.fields.buffer,

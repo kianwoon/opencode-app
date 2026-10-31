@@ -11,4 +11,8 @@ export class Info extends Schema.Class<Info>("Config.Compaction")({
   auto: Schema.Boolean.pipe(optional),
   keep: Keep.pipe(optional),
   buffer: NonNegativeInt.pipe(optional),
+  // `trigger_tokens` is the on-disk leaf the settings panel writes and has no
+  // canonical equivalent, so it is carried through `config.get` unchanged.
+  // (`preserve_recent_tokens` normalizes into `keep.tokens`.)
+  trigger_tokens: NonNegativeInt.pipe(optional),
 }) {}

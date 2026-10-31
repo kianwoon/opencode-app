@@ -509,11 +509,17 @@ describe("ConfigNormalize", () => {
         keep: { tokens: 2000 },
         reserved: 3000,
         buffer: 4000,
+        trigger_tokens: 5000,
         tail_turns: 2,
         prune: true,
       },
     })
-    expect(result.encoded.compaction).toEqual({ auto: false, keep: { tokens: 2000 }, buffer: 4000 })
+    expect(result.encoded.compaction).toEqual({
+      auto: false,
+      keep: { tokens: 2000 },
+      buffer: 4000,
+      trigger_tokens: 5000,
+    })
     expect(result.diagnostics.map((item) => [item.kind, item.path])).toEqual([
       ["unsupported", ["compaction", "tail_turns"]],
       ["unsupported", ["compaction", "prune"]],

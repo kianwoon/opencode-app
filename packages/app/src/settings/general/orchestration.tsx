@@ -44,7 +44,9 @@ type OrchestrationConfig = {
   governor?: { enabled?: boolean; model?: string }
   brainBooster?: { enabled?: boolean; model?: string }
   jevDefault?: { model?: string }
-  compaction?: { auto?: boolean; preserve_recent_tokens?: number; trigger_tokens?: number }
+  // `config.get` returns the canonical compaction shape: `preserve_recent_tokens`
+  // normalizes into `keep.tokens`. Writes still speak the on-disk leaf names.
+  compaction?: { auto?: boolean; keep?: { tokens?: number }; trigger_tokens?: number }
 }
 
 // Empty string means "unset": the brain agent expansion treats falsy models as
@@ -340,7 +342,7 @@ export const SettingsOrchestrationV2: Component = () => {
   // A token budget, not a probability: commit on `change` (blur/Enter), never per
   // keystroke, so a partially typed "8" never persists as an 8-token budget.
   const commitCompaction = (patch: { auto?: boolean; preserve_recent_tokens?: number; trigger_tokens?: number }) => {
-    void updateConfig({ compaction: { ...compaction(), ...patch } })
+    void updateConfig({ compaction: patch })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })
@@ -529,7 +531,7 @@ export const SettingsOrchestrationV2: Component = () => {
                   numeric
                   min={0}
                   step={1000}
-                  value={String(compaction().preserve_recent_tokens ?? "")}
+                  value={String(compaction().keep?.tokens ?? "")}
                   onChange={(event) => commitPreserveRecentTokens(event.currentTarget.value)}
                   aria-label="Preserve recent tokens"
                 />
