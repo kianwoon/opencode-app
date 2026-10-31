@@ -23,28 +23,10 @@ import { SettingsList } from "@/settings/list"
 import { SettingsRow } from "@/settings/row"
 import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
 import { fetchToolInventory } from "./tool-inventory"
+// The panels read the normalized config the server serves (`agents`, model as a
+// selection), never the legacy on-disk key; the write path below stays legacy.
+import { agentPatch, parseModel, readAgents, type Action, type AgentBlock } from "./config-agent"
 import "@/settings/settings.css"
-
-type Action = "allow" | "ask" | "deny"
-type PermissionRule = Action | { [pattern: string]: Action }
-type AgentBlock = {
-  description?: string
-  mode?: "subagent" | "primary" | "all"
-  model?: string
-  owned_tools?: string[]
-  skills?: string[]
-  capabilities?: string[]
-  permission?: { [tool: string]: PermissionRule }
-  steps?: number
-  temperature?: number
-  top_p?: number
-  hidden?: boolean
-  // A rename copies the RESOLVED prompt/description/mode onto the new key, so
-  // the moved block must carry them; `disable` is the tombstone left behind on
-  // the old key (updateConfig deep-merges and cannot delete).
-  prompt?: string
-  disable?: boolean
-}
 
 // Defined locally rather than imported: the tool inventory must be able to
 // diverge from the Permissions tab without coupling two settings panels.
@@ -90,7 +72,10 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const models = useModels()
 
   const config = createMemo(() => server.ctx.sync.data.config ?? {})
-  const agents = createMemo<Record<string, AgentBlock>>(() => (config().agent ?? {}) as Record<string, AgentBlock>)
+  // The server serves the NORMALIZED Info (`agents`, selection-shaped model,
+  // Permission.Ruleset array); config-agent.ts maps it back onto the legacy
+  // block shape these rows and commit() speak.
+  const agents = createMemo<Record<string, AgentBlock>>(() => readAgents(config()))
   const [agentList, { refetch: refetchAgents }] = createResource(
     () => props.directory(),
     async (directory) =>
@@ -156,13 +141,15 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   const isExposed = (tool: string) => inventory.latest === undefined || exposedIds().has(tool)
 
   // THE single write path: every control funnels through here, so there is
-  // exactly one updateConfig call shape for the tab.
+  // exactly one updateConfig call shape for the tab. The patch stays on the
+  // legacy `agent` key and carries ONLY the keys the control changed: the served
+  // block cannot reconstruct prompt/variant/color, so restating it would erase
+  // them, and the server merges the named keys into the on-disk block.
   const commit = (name: string, patch: AgentBlock) => {
     // An empty list makes active() the {name:""} fallback; writing it would
     // create a malformed config key.
     if (name === "") return
-    const agent = { ...agents(), [name]: { ...block(name), ...patch } }
-    void updateConfig({ agent })
+    void updateConfig(agentPatch(name, patch))
       .then(() => refetchSkills())
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -171,11 +158,9 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   }
 
   const currentModel = createMemo(() => {
-    const value = block(active().name).model ?? ""
-    const [providerID, ...rest] = value.split("/")
-    const modelID = rest.join("/")
-    if (!providerID || !modelID) return
-    return models.find({ providerID, modelID })
+    const selection = parseModel(block(active().name).model)
+    if (!selection) return
+    return models.find(selection)
   })
   const modelState = createMemo(() => ({
     ready: models.ready,

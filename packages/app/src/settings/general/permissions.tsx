@@ -14,16 +14,10 @@ import { showToast } from "@/shell/notifications/toast"
 import { SettingsList } from "@/settings/list"
 import { SettingsRow } from "@/settings/row"
 import { fetchToolInventory } from "./tool-inventory"
+// The panels read the normalized config the server serves (`agents`, permissions
+// as an ordered ruleset), never the legacy on-disk key; the write path stays legacy.
+import { agentPatch, readAgents, type Action, type AgentBlock } from "./config-agent"
 import "@/settings/settings.css"
-
-type Action = "allow" | "ask" | "deny"
-type PermissionRule = Action | { [pattern: string]: Action }
-type AgentBlock = {
-  mode?: "subagent" | "primary" | "all"
-  owned_tools?: string[]
-  skills?: string[]
-  permission?: { [tool: string]: PermissionRule }
-}
 
 /**
  * A group either lists its members or CLAIMS them by predicate. The JEV family is
@@ -90,7 +84,10 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const updateConfig = (patch: ExperimentalConfigUpdateInput) => serverSdk.api.experimental.config.update(patch)
 
   const config = createMemo(() => server.ctx.sync.data.config ?? {})
-  const agents = createMemo<Record<string, AgentBlock>>(() => (config().agent ?? {}) as Record<string, AgentBlock>)
+  // The served Info is normalized (`agents`, permissions as a Permission.Ruleset
+  // array); config-agent.ts maps it back onto the legacy block shape the rows and
+  // commit() speak, so an on-disk rule is visible instead of a silent "ask".
+  const agents = createMemo<Record<string, AgentBlock>>(() => readAgents(config()))
   // Provider-free on purpose: this tab renders OUTSIDE the directory Sync
   // provider, so the directory-scoped sync hook throws at render. Same
   // dual-protocol resource shape as the skills fetch below.
@@ -163,10 +160,12 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   const isExposed = (tool: string) => inventory.latest === undefined || exposedIds().has(tool)
 
   // THE single write path: every control funnels through here, so there is
-  // exactly one updateConfig call shape for the tab.
+  // exactly one updateConfig call shape for the tab. The patch stays on the
+  // legacy `agent` key and carries ONLY the keys the control changed: the served
+  // block cannot reconstruct prompt/variant/color, so restating it would erase
+  // them, and the server merges the named keys into the on-disk block.
   const commit = (name: string, patch: AgentBlock) => {
-    const agent = { ...agents(), [name]: { ...block(name), ...patch } }
-    void updateConfig({ agent })
+    void updateConfig(agentPatch(name, patch))
       .then(() => refetchSkills())
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
