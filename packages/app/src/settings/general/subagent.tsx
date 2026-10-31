@@ -699,7 +699,7 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                       >
                         {(prompt) => (
                           <pre
-                            class="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-12-regular"
+                            class="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-12-regular text-v2-text-text-base"
                             data-action="settings-subagent-prompt"
                           >
                             {prompt()}
