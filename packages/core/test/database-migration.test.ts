@@ -23,6 +23,8 @@ import sessionViewedStateMigration from "@opencode/core/database/migration/20260
 import azureCliCredentialMigration from "@opencode/core/database/migration/20261007190000_azure_cli_external_credential"
 import dropSessionPendingMigration from "@opencode/core/database/migration/20261025154125_drop_session_pending"
 import { Global } from "@opencode/util/global"
+import scheduledTaskMigration from "@opencode/core/database/migration/20260831025251_scheduled_task"
+import taskMigration from "@opencode/core/database/migration/20261031000000_task"
 
 const run = <A, E>(
   effect: Effect.Effect<A, E, SqlClient.SqlClient | Global.Service>,
@@ -65,6 +67,40 @@ const parkedClient = (arrived: Deferred.Deferred<void>, gate: Deferred.Deferred<
   ).pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })), Layer.provide(Reactivity.layer))
 
 describe("DatabaseMigration", () => {
+  test.each([false, true])("task migration preserves scheduled tasks (legacy schema: %s)", async (legacy) => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        if (legacy) yield* DatabaseMigration.applyOnly(db, [scheduledTaskMigration])
+        if (!legacy) yield* DatabaseMigration.applyOnly(db, [taskMigration])
+        yield* db.run(sql`
+          INSERT INTO task (id, title, prompt, cron, directory, time_created, time_updated)
+          VALUES ('task_saved', 'Saved task', 'Keep this prompt', '* * * * *', '/repo', 1, 2)
+        `)
+        yield* db.run(sql`
+          INSERT INTO task_run (id, task_id, session_id, status, started_at)
+          VALUES ('run_saved', 'task_saved', 'session_saved', 'completed', 3)
+        `)
+
+        yield* DatabaseMigration.applyOnly(db, [taskMigration])
+        yield* DatabaseMigration.applyOnly(db, [taskMigration])
+
+        expect(yield* db.get(sql`SELECT title, prompt, time_created FROM task WHERE id = 'task_saved'`)).toEqual({
+          title: "Saved task",
+          prompt: "Keep this prompt",
+          time_created: 1,
+        })
+        expect(yield* db.get(sql`SELECT session_id, status FROM task_run WHERE id = 'run_saved'`)).toEqual({
+          session_id: "session_saved",
+          status: "completed",
+        })
+        expect(yield* db.get(sql`SELECT count(*) AS count FROM migration WHERE id = ${taskMigration.id}`)).toEqual({
+          count: 1,
+        })
+      }),
+    )
+  })
+
   test("defaults missing workspace names while preserving legacy workspace data", async () => {
     await run(
       Effect.gen(function* () {

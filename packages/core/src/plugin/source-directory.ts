@@ -20,6 +20,8 @@ export const discover = Effect.fn("PluginSourceDirectory.discover")(function* (
     .sort((a, b) => (a.target < b.target ? -1 : a.target > b.target ? 1 : 0))
   const targets = yield* Effect.forEach(children, (entry) =>
     Effect.gen(function* () {
+      // Discovery must not execute colocated tests or import declaration files.
+      if (/\.(test|spec|d)\.[jt]s$/.test(entry.name)) return Option.none<string>()
       const source = entry.target.endsWith(".ts") || entry.target.endsWith(".js")
       if (entry.type === "file" && source) return Option.some(entry.target)
       if (entry.type === "directory") return Option.some(entry.target)

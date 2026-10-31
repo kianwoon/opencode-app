@@ -4,13 +4,14 @@ import type { DatabaseMigration } from "../migration.js"
 // baseline-guard:allow new forward migration file following the existing migration convention
 // Forward migration for the fork's scheduled-task tables. The task schema is
 // read and written by Task/TaskScheduler; the core migration chain must
-// enumerate every table the runtime code touches.
+// enumerate every table the runtime code touches. Older fork installs already
+// created these tables under 20260831025251_scheduled_task; preserve their rows.
 const migration: DatabaseMigration.Migration = {
   id: "20261031000000_task",
   up(tx) {
     return Effect.gen(function* () {
       yield* tx.run(`
-        CREATE TABLE \`task\` (
+        CREATE TABLE IF NOT EXISTS \`task\` (
           \`id\` text PRIMARY KEY,
           \`title\` text NOT NULL,
           \`prompt\` text NOT NULL,
@@ -26,10 +27,10 @@ const migration: DatabaseMigration.Migration = {
           \`time_updated\` integer NOT NULL
         );
       `)
-      yield* tx.run(`CREATE INDEX \`task_next_run_idx\` ON \`task\` (\`next_run_at\`);`)
-      yield* tx.run(`CREATE INDEX \`task_directory_idx\` ON \`task\` (\`directory\`);`)
+      yield* tx.run(`CREATE INDEX IF NOT EXISTS \`task_next_run_idx\` ON \`task\` (\`next_run_at\`);`)
+      yield* tx.run(`CREATE INDEX IF NOT EXISTS \`task_directory_idx\` ON \`task\` (\`directory\`);`)
       yield* tx.run(`
-        CREATE TABLE \`task_run\` (
+        CREATE TABLE IF NOT EXISTS \`task_run\` (
           \`id\` text PRIMARY KEY,
           \`task_id\` text NOT NULL,
           \`session_id\` text NOT NULL,
@@ -40,7 +41,7 @@ const migration: DatabaseMigration.Migration = {
           CONSTRAINT \`fk_task_run_task_id_task_id_fk\` FOREIGN KEY (\`task_id\`) REFERENCES \`task\`(\`id\`) ON DELETE CASCADE
         );
       `)
-      yield* tx.run(`CREATE INDEX \`task_run_task_started_idx\` ON \`task_run\` (\`task_id\`,\`started_at\`);`)
+      yield* tx.run(`CREATE INDEX IF NOT EXISTS \`task_run_task_started_idx\` ON \`task_run\` (\`task_id\`,\`started_at\`);`)
     })
   },
 }
