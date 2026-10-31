@@ -5,7 +5,7 @@
 // `packages/script` treats only OPENCODE_CHANNEL=latest as production, and the desktop app maps
 // `latest` to the prod app id. Passing anything else (or nothing) silently ships a preview build.
 import { $ } from "bun"
-import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -40,16 +40,35 @@ const env = {
 }
 
 const built: Array<string> = []
+let cliFreshMs: number | undefined
+let outFreshMs: number | undefined
+
+// Every source tree that lands in the packaged renderer/main bundles, and every tree the CLI binary is
+// built from. A packaged artifact older than any of its inputs means the wrapper packed stale code.
+const uiSourceDirs = ["packages/app/src", "packages/ui/src", "packages/session-ui/src", "packages/desktop/src"]
+const cliSourceDirs = [
+  "packages/cli/src",
+  "packages/core/src",
+  "packages/server/src",
+  "packages/protocol/src",
+  "packages/schema/src",
+]
 
 if (!skipCli) {
   console.log(`rebuild-prod: cli build (channel=latest version=${version})`)
   await $`${bun} run --cwd packages/cli build`.cwd(root).env(env)
+  cliFreshMs = requireFresh("cli", cliSourceDirs, cliArtifact).mtimeMs
   installCli()
   await verifyCli()
   built.push(`cli=${installPath}`)
 }
 
 if (!skipDesktop) {
+  // `pack` only packages the prebuilt out/ directory, so electron-vite must run first or the app ships
+  // whatever renderer happened to be there.
+  console.log(`rebuild-prod: desktop build (channel=latest version=${version})`)
+  await $`${bun} run --cwd packages/desktop build`.cwd(root).env(env)
+  outFreshMs = requireFresh("desktop", uiSourceDirs, path.join(desktopDir, "out")).mtimeMs
   console.log(`rebuild-prod: desktop pack (channel=latest version=${version})`)
   await $`${bun} ./script/copy-icons.ts prod`.cwd(desktopDir).env(env)
   await $`${bun} run --cwd packages/desktop pack`.cwd(root).env(env)
@@ -57,11 +76,48 @@ if (!skipDesktop) {
   built.push(`app=${app}`)
 }
 
+const fresh = [
+  outFreshMs === undefined ? undefined : `out=${new Date(outFreshMs).toISOString()}`,
+  cliFreshMs === undefined ? undefined : `cli=${new Date(cliFreshMs).toISOString()}`,
+].filter((entry) => entry !== undefined)
+if (fresh.length) console.log(`rebuild-prod: freshness ok (${fresh.join(" ")})`)
+
 console.log([`channel=latest`, `version=${version}`, ...built].join(" "))
 
 function fail(message: string): never {
   console.error(`rebuild-prod: ${message}`)
   process.exit(1)
+}
+
+// Fail closed on a build that is older than the sources it must contain.
+function requireFresh(label: string, sourceDirs: Array<string>, artifact: string) {
+  const newestSource = sourceDirs.reduce<{ path: string; mtimeMs: number } | undefined>((newest, dir) => {
+    const candidate = newestFile(path.join(root, dir))
+    if (!candidate) return newest
+    if (newest && newest.mtimeMs >= candidate.mtimeMs) return newest
+    return candidate
+  }, undefined)
+  if (!newestSource) fail(`${label}: no source files found under ${sourceDirs.join(", ")}`)
+  const artifactFile = newestFile(artifact)
+  if (!artifactFile) fail(`${label}: no build artifact at ${artifact}`)
+  if (newestSource.mtimeMs > artifactFile.mtimeMs)
+    fail(
+      `${label}: stale build, ${path.relative(root, newestSource.path)} (${new Date(newestSource.mtimeMs).toISOString()}) is newer than ${path.relative(root, artifactFile.path)} (${new Date(artifactFile.mtimeMs).toISOString()})`,
+    )
+  return artifactFile
+}
+
+function newestFile(target: string): { path: string; mtimeMs: number } | undefined {
+  if (!existsSync(target)) return undefined
+  const stats = statSync(target)
+  if (!stats.isDirectory()) return { path: target, mtimeMs: stats.mtimeMs }
+  let newest: { path: string; mtimeMs: number } | undefined
+  for (const entry of readdirSync(target, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue
+    const candidate = newestFile(path.join(target, entry.name))
+    if (candidate && (!newest || candidate.mtimeMs > newest.mtimeMs)) newest = candidate
+  }
+  return newest
 }
 
 // Copy next to the target, then rename over it so a failed copy never leaves a partial binary.
