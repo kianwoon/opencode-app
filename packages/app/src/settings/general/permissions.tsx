@@ -17,6 +17,8 @@ import { fetchToolInventory } from "./tool-inventory"
 // The panels read the normalized config the server serves (`agents`, permissions
 // as an ordered ruleset), never the legacy on-disk key; the write path stays legacy.
 import { agentPatch, readAgents, type Action, type AgentBlock } from "./config-agent"
+import { createConfigUnavailable } from "./config-availability"
+import { readConfigDocuments } from "@/runtime/server/global-sync/bootstrap"
 import "@/settings/settings.css"
 
 /**
@@ -88,6 +90,14 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
   // array); config-agent.ts maps it back onto the legacy block shape the rows and
   // commit() speak, so an on-disk rule is visible instead of a silent "ask".
   const agents = createMemo<Record<string, AgentBlock>>(() => readAgents(config()))
+  // An empty store must never be rendered as "allow everything" defaults: ask the server once whether it
+  // disagrees and say the config is unavailable instead.
+  const configUnavailable = createConfigUnavailable({
+    agents: () => Object.keys(agents()).length,
+    settled: () => server.ctx.sync.config.settled(),
+    serverAgents: async () => Object.keys(readAgents(readConfigDocuments(await serverSdk.api.config.get()))).length,
+    refetch: () => server.ctx.sync.config.refresh(),
+  })
   // Provider-free on purpose: this tab renders OUTSIDE the directory Sync
   // provider, so the directory-scoped sync hook throws at render. Same
   // dual-protocol resource shape as the skills fetch below.
@@ -312,6 +322,11 @@ export const SettingsPermissionsV2: Component<{ directory: Accessor<string | und
       </div>
 
       <div class="settings-v2-tab-body" data-action="settings-permissions">
+        <Show when={configUnavailable()}>
+          <p class="settings-v2-plugins-hint" data-action="settings-permissions-config-unavailable">
+            {language.t("settings.config.unavailable")}
+          </p>
+        </Show>
         <div class="settings-v2-section">
           <SettingsList>
             <SettingsRow

@@ -8,10 +8,12 @@ import { type ServerSDK } from "./client"
 import {
   bootstrapDirectory,
   bootstrapGlobal,
+  createConfigRetryBudget,
   loadGlobalConfigQuery,
   loadPathQuery,
   loadProjects,
   loadProjectsQuery,
+  type ConfigRetryBudget,
 } from "./global-sync/bootstrap"
 import { createChildStoreManager } from "./global-sync/child-store"
 import type { ProjectMeta } from "./global-sync/types"
@@ -25,6 +27,7 @@ import { persisted } from "@/runtime/persistence/storage"
 import type { ServerApi } from "@/runtime/server/api"
 import { toggleMcp } from "./global-sync/mcp"
 import { createConnectionSync, reconnectOrder } from "./server-sync/connection"
+import { recoverConfigOnConnect } from "./server-sync/config-recovery"
 import { usePlatform } from "@/runtime/platform/platform"
 import type { Data } from "@opencode/client/solid"
 import { createWorktreeInventory, withWorktreeInventory, worktreeInventoryViewKey } from "@/workspaces/inventory"
@@ -44,9 +47,9 @@ const loadLspQuery = (scope: ServerScope, directory: string) =>
     queryFn: async () => [],
   })
 
-function makeQueryOptionsApi(scope: ServerScope, serverAPI: () => ServerApi) {
+function makeQueryOptionsApi(scope: ServerScope, serverAPI: () => ServerApi, configBudget: ConfigRetryBudget) {
   return {
-    globalConfig: () => loadGlobalConfigQuery(scope, serverAPI().config),
+    globalConfig: () => loadGlobalConfigQuery(scope, serverAPI().config, configBudget),
     path: () => loadPathQuery(scope, null, serverAPI().location),
     lsp: (directory: PathKey) => loadLspQuery(scope, directory),
   }
@@ -62,7 +65,8 @@ function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
   if (!owner) throw new Error("ServerSync must be created within owner")
 
   const booting = new Map<string, Promise<void>>()
-  const queryOptionsApi = makeQueryOptionsApi(serverSDK.scope, () => serverSDK.api)
+  const configBudget = createConfigRetryBudget()
+  const queryOptionsApi = makeQueryOptionsApi(serverSDK.scope, () => serverSDK.api, configBudget)
   const connected = () => serverSDK.connection.status() === "connected"
 
   const [configQuery, pathQuery] = useQueries(() => ({
@@ -71,6 +75,17 @@ function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
       { ...queryOptionsApi.path(), enabled: connected() },
     ],
   }))
+
+  // The query retries its own transient failures (bootstrap.ts) from the same budget, and a failure cached
+  // after those attempts would never be retried: `enabled` is already true on every later handshake. Recover
+  // it here so the store cannot stay empty while the provider catalog recovers.
+  recoverConfigOnConnect({
+    status: serverSDK.connection.status,
+    resolved: () => configQuery.status === "success",
+    errored: () => configQuery.isError,
+    budget: configBudget,
+    refetch: () => configQuery.refetch(),
+  })
 
   const [globalStore, setGlobalStore] = createStore<GlobalStore>({
     project: [],
@@ -330,6 +345,12 @@ function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
     data: globalStore,
     set: setGlobalStore,
     child: children.child,
+    // A panel that read an empty config can ask the store to retry instead of rendering defaults.
+    config: {
+      refresh: () => configQuery.refetch(),
+      // Settled = the query has finished at least once: an empty read before that is "loading", not "empty".
+      settled: () => !configQuery.isPending && !configQuery.isFetching,
+    },
     disableMcp: children.disableMcp,
     // bootstrap,
     updateConfig: updateConfigMutation.mutateAsync,

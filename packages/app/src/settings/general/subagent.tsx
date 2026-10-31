@@ -26,6 +26,8 @@ import { fetchToolInventory } from "./tool-inventory"
 // The panels read the normalized config the server serves (`agents`, model as a
 // selection), never the legacy on-disk key; the write path below stays legacy.
 import { agentPatch, parseModel, readAgents, type Action, type AgentBlock } from "./config-agent"
+import { createConfigUnavailable } from "./config-availability"
+import { readConfigDocuments } from "@/runtime/server/global-sync/bootstrap"
 import "@/settings/settings.css"
 
 // Defined locally rather than imported: the tool inventory must be able to
@@ -76,6 +78,14 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
   // Permission.Ruleset array); config-agent.ts maps it back onto the legacy
   // block shape these rows and commit() speak.
   const agents = createMemo<Record<string, AgentBlock>>(() => readAgents(config()))
+  // An empty store must never be rendered as "Default" everywhere: ask the server once whether it disagrees
+  // and say the config is unavailable instead.
+  const configUnavailable = createConfigUnavailable({
+    agents: () => Object.keys(agents()).length,
+    settled: () => server.ctx.sync.config.settled(),
+    serverAgents: async () => Object.keys(readAgents(readConfigDocuments(await serverSdk.api.config.get()))).length,
+    refetch: () => server.ctx.sync.config.refresh(),
+  })
   const [agentList, { refetch: refetchAgents }] = createResource(
     () => props.directory(),
     async (directory) =>
@@ -492,6 +502,11 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       </div>
 
       <div class="settings-v2-tab-body" data-action="settings-subagent">
+        <Show when={configUnavailable()}>
+          <p class="settings-v2-plugins-hint" data-action="settings-subagent-config-unavailable">
+            {language.t("settings.config.unavailable")}
+          </p>
+        </Show>
         <div class="settings-v2-section">
           <SettingsList>
             <SettingsRow

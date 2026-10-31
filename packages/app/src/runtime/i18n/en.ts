@@ -860,6 +860,8 @@ export const dict = {
   "settings.permissions.description": "Control what tools the server can use by default.",
   "settings.subagent.title": "Subagents",
   "settings.subagent.description": "Configure per-subagent model, tools, skills, and permissions.",
+  "settings.config.unavailable":
+    "The server configuration could not be loaded, so these fields may not match the server. Reopen this tab to retry.",
   "settings.plugins.reload": "Reload",
   "settings.plugins.status.loading": "Loading",
   "settings.plugins.status.failed": "Failed",

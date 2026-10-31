@@ -1,5 +1,11 @@
 import type { Config, Path, Project, ProviderAuthResponse } from "@/runtime/server/types"
-import type { ConfigGetOutput, LocationGetInput, LocationGetOutput, ProjectListOutput } from "@opencode/client/promise"
+import {
+  isServiceUnavailableError,
+  type ConfigGetOutput,
+  type LocationGetInput,
+  type LocationGetOutput,
+  type ProjectListOutput,
+} from "@opencode/client/promise"
 import { showToast } from "@/shell/notifications/toast"
 import { getFilename } from "@opencode/util/path"
 import { retry } from "@opencode/util/retry"
@@ -49,16 +55,55 @@ function runAll(list: Array<() => Promise<unknown>>) {
   return Promise.allSettled(list.map((item) => item()))
 }
 
-export const loadGlobalConfigQuery = (scope: ServerScope, config: { readonly get: () => Promise<ConfigGetOutput> }) =>
+// The merged global document, highest priority last. Shared with the settings panels' availability probe so
+// "the server has agents" is read exactly the way the store reads them.
+export const readConfigDocuments = (entries: ConfigGetOutput): Config =>
+  Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : []))) as Config
+
+export type ConfigRetryBudget = {
+  /** Consumes one retry, returning false once the budget is spent. */
+  readonly spend: () => boolean
+  readonly reset: () => void
+}
+
+/**
+ * One budget for the query's own retries and the store's connection recovery. A recovery `refetch()` restarts
+ * TanStack's failureCount, so independent budgets multiplied (12 retries per refetch, per mechanism); sharing
+ * one cap keeps a broken server at a single bounded set of requests per connection.
+ */
+export const createConfigRetryBudget = (max = 12): ConfigRetryBudget => {
+  let used = 0
+
+  return {
+    spend() {
+      if (used >= max) return false
+      used += 1
+      return true
+    },
+    reset() {
+      used = 0
+    },
+  }
+}
+
+// A cold server refuses config while its instances activate, the same window the provider catalog retries
+// (providers.ts syncWhileBooting). Retrying here keeps a transient refusal out of the cache: an error stored
+// once would outlive every later handshake, because nothing re-runs a query that already failed.
+export const retryConfigQuery = (budget: ConfigRetryBudget) => (failureCount: number, error: Error) =>
+  (isServiceUnavailableError(error) || failureCount < 3) && budget.spend()
+
+export const loadGlobalConfigQuery = (
+  scope: ServerScope,
+  config: { readonly get: () => Promise<ConfigGetOutput> },
+  budget: ConfigRetryBudget = createConfigRetryBudget(),
+) =>
   queryOptions({
     queryKey: [scope, "config"],
     // Settings writes are read-modify-write. Panels edit from the live documents, highest priority
     // last, so an edit starts from real state instead of a possibly-empty cache.
-    queryFn: async (): Promise<Config> =>
-      Object.assign(
-        {},
-        ...(await config.get()).flatMap((entry) => (entry.type === "document" ? [entry.info] : [])),
-      ) as Config,
+    queryFn: async (): Promise<Config> => readConfigDocuments(await config.get()),
+    retry: retryConfigQuery(budget),
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
   })
 
 type ProjectApi = {
