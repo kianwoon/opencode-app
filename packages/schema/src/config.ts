@@ -3,7 +3,7 @@ export * as Config from "./config.js"
 import { Schema } from "effect"
 import { ephemeral, inventory } from "./event.js"
 import { Permission } from "./permission.js"
-import { AbsolutePath, optional } from "./schema.js"
+import { AbsolutePath, NonNegativeInt, optional } from "./schema.js"
 import { ConfigAgent } from "./config/agent.js"
 import { ConfigMedia } from "./config/media.js"
 import { ConfigCompaction } from "./config/compaction.js"
@@ -187,6 +187,8 @@ const PatchCompaction = Schema.Struct({
   auto: Schema.Boolean.pipe(optional),
   preserve_recent_tokens: Schema.Finite.pipe(optional),
   trigger_tokens: Schema.Finite.pipe(optional),
+  // Native v2 leaf read by the runtime as tokens kept free below the window.
+  buffer: NonNegativeInt.pipe(optional),
 }).annotate({ identifier: "Config.Patch.Compaction" })
 
 export const Patch = Schema.Struct({

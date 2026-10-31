@@ -1775,6 +1775,28 @@ describe("Config", () => {
     ),
   )
 
+  it.live("persists a compaction buffer patch without dropping keep or auto", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const file = path.join(global, "opencode.jsonc")
+        return Effect.promise(async () => {
+          await fs.mkdir(global, { recursive: true })
+          await fs.writeFile(file, JSON.stringify({ compaction: { auto: true, keep: { tokens: 80000 } } }))
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              yield* config.update!({ compaction: { buffer: 32000 } })
+              const parsed = parse(yield* Effect.promise(() => fs.readFile(file, "utf8")))
+              expect(parsed.compaction).toEqual({ auto: true, keep: { tokens: 80000 }, buffer: 32000 })
+            }).pipe(Effect.provide(testLayer(tmp.path, global))),
+          ),
+        )
+      }),
+    ),
+  )
+
   it.live("merges a record patch into the live document instead of replacing sibling entries", () =>
     Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
       Effect.flatMap((tmp) => {

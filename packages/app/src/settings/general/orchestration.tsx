@@ -45,8 +45,9 @@ type OrchestrationConfig = {
   brainBooster?: { enabled?: boolean; model?: string }
   jevDefault?: { model?: string }
   // `config.get` returns the canonical compaction shape: `preserve_recent_tokens`
-  // normalizes into `keep.tokens`. Writes still speak the on-disk leaf names.
-  compaction?: { auto?: boolean; keep?: { tokens?: number }; trigger_tokens?: number }
+  // normalizes into `keep.tokens` and `reserved` into `buffer`. Writes speak those
+  // canonical leaves too: a legacy-only leaf is not consumed by the v2 runtime.
+  compaction?: { auto?: boolean; keep?: { tokens?: number }; buffer?: number; trigger_tokens?: number }
 }
 
 // Empty string means "unset": the brain agent expansion treats falsy models as
@@ -341,7 +342,7 @@ export const SettingsOrchestrationV2: Component = () => {
 
   // A token budget, not a probability: commit on `change` (blur/Enter), never per
   // keystroke, so a partially typed "8" never persists as an 8-token budget.
-  const commitCompaction = (patch: { auto?: boolean; preserve_recent_tokens?: number; trigger_tokens?: number }) => {
+  const commitCompaction = (patch: { auto?: boolean; preserve_recent_tokens?: number; buffer?: number }) => {
     void updateConfig({ compaction: patch })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -355,10 +356,13 @@ export const SettingsOrchestrationV2: Component = () => {
     commitCompaction({ preserve_recent_tokens: value })
   }
 
+  // The trigger row edits `compaction.buffer`: tokens kept free below the model's
+  // usable window, so compaction fires at `window - buffer`. A positive count;
+  // the runtime ignores a buffer that leaves no room at all.
   const commitTriggerTokens = (raw: string) => {
     const value = Number(raw)
-    if (!Number.isFinite(value) || value < 0) return
-    commitCompaction({ trigger_tokens: value })
+    if (!Number.isFinite(value) || value < 1) return
+    commitCompaction({ buffer: value })
   }
 
   const commitGovernor = (patch: { enabled?: boolean }) => {
@@ -540,16 +544,16 @@ export const SettingsOrchestrationV2: Component = () => {
 
             <SettingsRow
               title="Context trigger tokens"
-              description="Total tokens (including cache reads) that trigger compaction. Unset uses the model's own usable window. Fires at the next safe boundary; each event re-bills the prompt prefix once."
+              description="Tokens kept free below the model's usable window: compaction fires at the window minus this value. Unset uses the model default (15% of the window, at least 16k). Fires at the next safe boundary; each event re-bills the prompt prefix once."
             >
               <div class="w-full sm:w-[220px]">
                 <TextInput
                   data-action="settings-orchestration-compaction-trigger-tokens"
                   type="number"
                   numeric
-                  min={0}
+                  min={1}
                   step={10000}
-                  value={String(compaction().trigger_tokens ?? "")}
+                  value={String(compaction().buffer ?? "")}
                   onChange={(event) => commitTriggerTokens(event.currentTarget.value)}
                   aria-label="Context trigger tokens"
                 />

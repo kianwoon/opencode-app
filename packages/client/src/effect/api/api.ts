@@ -2888,6 +2888,7 @@ export type ExperimentalConfigUpdateInput = {
         readonly auto?: boolean | undefined
         readonly preserve_recent_tokens?: number | undefined
         readonly trigger_tokens?: number | undefined
+        readonly buffer?: number | undefined
       }
     | undefined
 }

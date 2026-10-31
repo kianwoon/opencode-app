@@ -374,6 +374,12 @@ export type UsageLimitsMeter = { percent: number; limited: boolean; resetsAt: nu
 
 export type McpProtocol = "legacy" | "auto" | "2026-07-28"
 
+export type ConfigBrain = { model?: string; enforcement?: "strict" | "advisory" }
+
+export type ConfigFeature = { enabled?: boolean; model?: string; threshold?: number }
+
+export type ConfigJevDefault = { model?: string }
+
 export type ConfigWorktree = { directory: string }
 
 export type ConfigModelReasoning =
@@ -2432,7 +2438,12 @@ export type ConfigEntry =
                 }
           }
         }
-        compaction?: { auto?: boolean; keep?: { tokens?: number }; buffer?: number }
+        compaction?: { auto?: boolean; keep?: { tokens?: number }; buffer?: number; trigger_tokens?: number }
+        brain?: ConfigBrain
+        jev?: ConfigFeature
+        governor?: ConfigFeature
+        brainBooster?: ConfigFeature
+        jevDefault?: ConfigJevDefault
         skills?: Array<string>
         commands?: {
           [x: string]: {
@@ -4887,7 +4898,12 @@ export type ExperimentalConfigUpdateInput = {
     | undefined
   readonly jevDefault?: { readonly model?: string } | undefined
   readonly compaction?:
-    | { readonly auto?: boolean; readonly preserve_recent_tokens?: number; readonly trigger_tokens?: number }
+    | {
+        readonly auto?: boolean
+        readonly preserve_recent_tokens?: number
+        readonly trigger_tokens?: number
+        readonly buffer?: number
+      }
     | undefined
 }
 
