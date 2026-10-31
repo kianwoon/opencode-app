@@ -37,6 +37,16 @@ type BrainConfig = {
   enforcement?: Enforcement
 }
 
+// Fork-only config blocks are not in the shared Config schema yet.
+type OrchestrationConfig = {
+  brain?: BrainConfig
+  jev?: { enabled?: boolean; threshold?: number }
+  governor?: { enabled?: boolean; model?: string }
+  brainBooster?: { enabled?: boolean; model?: string }
+  jevDefault?: { model?: string }
+  compaction?: { auto?: boolean; preserve_recent_tokens?: number; trigger_tokens?: number }
+}
+
 // Empty string means "unset": the brain agent expansion treats falsy models as
 // absent, and the global config PATCH endpoint deep-merges, so cleared values
 // must still be sent for the field to take effect.
@@ -120,21 +130,32 @@ export const SettingsOrchestrationV2: Component = () => {
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const server = useServer()
-  const updateConfig = (patch: ExperimentalConfigUpdateInput) => serverSdk.api.experimental.config.update(patch)
-  const unavailable = () => language.t("settings.orchestration.unavailable")
 
-  // Fork-only config blocks are not in the shared Config schema yet.
-  const config = createMemo(
-    () =>
-      server.ctx.sync.data.config as {
-        brain?: BrainConfig
-        jev?: { enabled?: boolean; threshold?: number }
-        governor?: { enabled?: boolean; model?: string }
-        brainBooster?: { enabled?: boolean; model?: string }
-        jevDefault?: { model?: string }
-        compaction?: { auto?: boolean; preserve_recent_tokens?: number; trigger_tokens?: number }
-      },
+  // This panel writes the GLOBAL config document via `experimental.config.update`,
+  // so it must read that same document: `config.get()` without a location returns
+  // the whole document chain lowest→highest priority, and the later document wins.
+  // Reading a location-scoped sync store instead makes every field show its
+  // default while the file on disk holds a value.
+  const [configResource, configActions] = createResource(
+    async (): Promise<OrchestrationConfig> =>
+      Object.assign(
+        {},
+        ...(await serverSdk.api.config.get()).flatMap((entry) => (entry.type === "document" ? [entry.info] : [])),
+      ) as OrchestrationConfig,
   )
+  // Never read `.latest` before the first value: it suspends. Show the sync-store
+  // copy the app already has until the document chain lands.
+  const configLoaded = () => configResource.state === "ready" || configResource.state === "refreshing"
+  const config = (): OrchestrationConfig =>
+    configLoaded() ? (configResource.latest ?? {}) : ((server.ctx.sync.data.config ?? {}) as OrchestrationConfig)
+
+  const updateConfig = (patch: ExperimentalConfigUpdateInput) =>
+    serverSdk.api.experimental.config.update(patch).then((result) => {
+      // A commit must show immediately; do not wait for `config.updated` to sync.
+      void Promise.resolve(configActions.refetch()).catch(() => undefined)
+      return result
+    })
+  const unavailable = () => language.t("settings.orchestration.unavailable")
 
   // Fork-owned global endpoints are not part of the generated v2 client contract, so read them over plain fetch.
   const request = async (path: string, init?: RequestInit) => {
