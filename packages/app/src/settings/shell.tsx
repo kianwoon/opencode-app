@@ -50,6 +50,7 @@ import { pageIcons, pageLabels } from "./pages"
 import { revealSettingsSearch } from "./search-reveal"
 import { PluginSettingsPages } from "@/runtime/plugin/settings-page-view"
 import "@/settings/settings.css"
+import "@/components/settings-v2/settings-v2.css"
 
 const rootClientTabs = [
   { value: "general", icon: pageIcons.general, label: "settings.tab.preferences" },
