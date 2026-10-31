@@ -21,7 +21,7 @@ const fontWeightOptions: { value: string; label: string }[] = [
 ]
 
 const messageWidthOptions: { value: string; label: string }[] = [
-  // 0 is the default: the percentage cap alone sizes the column. The ch options
+  // 0 is the default: the message fills its lane, which the session view sizes. The ch options
   // are explicit narrower caps that still bind when selected.
   { value: "0", label: "settings.general.row.messageWidth.option.default" },
   { value: "64", label: "settings.general.row.messageWidth.option.wide" },

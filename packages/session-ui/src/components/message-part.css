@@ -31,7 +31,7 @@
     justify-content: var(--message-align-items, flex-end);
     gap: 8px;
     width: fit-content;
-    max-width: min(var(--message-width-pct, 95%), var(--message-width-ch, 100%));
+    max-width: min(var(--message-width-pct, 100%), var(--message-width-ch, 100%));
     margin-inline-start: var(--message-align-start, auto);
     margin-inline-end: var(--message-align-end, 0);
   }
@@ -129,9 +129,9 @@
 
   [data-slot="user-message-body"] {
     /* The bubble fills the configured width; short text stretches instead of shrink-to-fit. */
-    width: min(var(--message-width-pct, 95%), var(--message-width-ch, 100%));
-    /* The percentage cap is the default binding cap; the ch cap (Settings → Appearance) only binds when chosen. */
-    max-width: min(var(--message-width-pct, 95%), var(--message-width-ch, 100%));
+    width: min(var(--message-width-pct, 100%), var(--message-width-ch, 100%));
+    /* The percentage cap fills the lane (Settings → Appearance); the ch cap only binds when chosen. */
+    max-width: min(var(--message-width-pct, 100%), var(--message-width-ch, 100%));
     margin-inline-start: var(--message-align-start, auto);
     margin-inline-end: var(--message-align-end, 0);
     display: flex;

@@ -1055,7 +1055,7 @@ export const dict = {
   "settings.general.row.userMessageFont.description": "Customise the font used in user messages",
   "settings.general.row.messageWidth.title": "Message width",
   "settings.general.row.messageWidth.description": "Set how wide user messages are in the transcript",
-  "settings.general.row.messageWidth.option.default": "95% of view",
+  "settings.general.row.messageWidth.option.default": "Full width (default)",
   "settings.general.row.messageWidth.option.wide": "Wide",
   "settings.general.row.messageWidth.option.wider": "Wider",
   "settings.general.row.messageWidth.option.full": "Full",

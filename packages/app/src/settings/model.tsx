@@ -465,20 +465,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         userMessageFont ? messageFontFamily(userMessageFont, userMessageWeight) : "",
       )
       root.style.setProperty("--message-font-family--font-weight", String(userMessageWeight))
-      // The bubble is capped with min(N%, var(...ch)). The percentage cap is the
-      // default binding cap; the character cap only binds when the user explicitly
-      // picks a narrower width. With no stored width, --message-width-ch is empty
-      // so the CSS fallback (100%) restores and the percentage wins on its own.
-      // A persisted 64 from an older profile stays a real 64ch choice.
+      // The bubble is capped with min(N%, var(...ch)). The session lane already insets to 95% of
+      // the session view, so the percentage cap fills that lane rather than insetting again; the
+      // character cap only binds when the user explicitly picks a narrower width. With no stored
+      // width, --message-width-ch is empty so the CSS fallback (100%) restores and the percentage
+      // wins on its own. A persisted 64 from an older profile stays a real 64ch choice.
       const messageWidth = appearance?.messageWidth
       root.style.setProperty(
         "--message-width-ch",
         typeof messageWidth === "number" && messageWidth > 0 ? `${messageWidth}ch` : "",
       )
-      root.style.setProperty(
-        "--message-width-pct",
-        typeof messageWidth === "number" && messageWidth >= 160 ? "90%" : "95%",
-      )
+      root.style.setProperty("--message-width-pct", "100%")
       // Alignment uses logical properties downstream, so left/right follow the
       // writing direction. Empty strings restore the CSS defaults (right).
       const messageAlign =
