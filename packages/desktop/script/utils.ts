@@ -108,15 +108,19 @@ export async function copyBuiltCliToResources(root: string, dest = windowsify("r
 // prints for --version. Writing it next to the executable spares the desktop a ~400 ms spawn of the
 // 200 MB binary on first launch.
 async function copyCliToResources(pkg: string, dest: string) {
-  const cli = getCurrentCli()
-  await copyFile(join(pkg, "bin", cli.os === "win32" ? "opencode.exe" : "opencode"), dest)
-  await prepareCli(dest)
-
   const manifest = Option.getOrUndefined(
     Schema.decodeUnknownOption(Manifest)(await Bun.file(join(pkg, "package.json")).text()),
   )
 
   if (!manifest) throw new Error(`Bundled CLI package has no version: ${pkg}`)
+  if (resolveChannel() === "prod" && manifest.version.startsWith("0.0.0-"))
+    throw new Error(
+      `Production desktop cannot bundle preview CLI ${manifest.version}. Rebuild the CLI with OPENCODE_CHANNEL=latest and OPENCODE_VERSION set to the release version.`,
+    )
+
+  const cli = getCurrentCli()
+  await copyFile(join(pkg, "bin", cli.os === "win32" ? "opencode.exe" : "opencode"), dest)
+  await prepareCli(dest)
   await Bun.write(versionFile(dest), manifest.version)
 }
 

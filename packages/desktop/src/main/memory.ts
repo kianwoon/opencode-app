@@ -1,5 +1,5 @@
 import type { BrowserWindow } from "electron"
-import { write as writeLog } from "./logging"
+import log from "electron-log/main.js"
 import type { MemoryPressureLevel, ProcessMetric } from "./memory-threshold"
 import { peakWorkingSetBytes, pressureLevel } from "./memory-threshold"
 
@@ -30,14 +30,14 @@ export function createMemoryMonitor(deps: MemoryMonitorDeps) {
     try {
       metrics = deps.getAppMetrics()
     } catch (error) {
-      writeLog("memory", "failed to read app metrics", { error }, "error")
+      log.scope("memory").error("failed to read app metrics", { error })
       return "ok"
     }
     return pressureLevel(peakWorkingSetBytes(metrics))
   }
 
   const runGc = () => {
-    writeLog("memory", "requesting garbage collection")
+    log.scope("memory").info("requesting garbage collection")
     ;(globalThis as { gc?: () => void }).gc?.()
     deps.requestSidecarGc()
     deps.requestRendererGc()
@@ -47,7 +47,7 @@ export function createMemoryMonitor(deps: MemoryMonitorDeps) {
     const level = collect()
     if (level !== lastLevel) {
       lastLevel = level
-      writeLog("memory", "pressure level changed", { level })
+      log.scope("memory").info("pressure level changed", { level })
     }
     if (level === "action") runGc()
   }

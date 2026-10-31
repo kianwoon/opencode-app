@@ -13,8 +13,8 @@ export const rendererHost = "renderer"
 // (and Electron itself) stays out of unit tests.
 const log = async (message: string, extra: Record<string, unknown>, level: "info" | "warn" | "error" = "info") => {
   try {
-    const { write } = await import("./logging")
-    write("protocol", message, extra, level)
+    const { default: logger } = await import("electron-log/main.js")
+    logger.scope("protocol")[level](message, extra)
   } catch {
     // Logging is best-effort; serving must not depend on it.
   }
