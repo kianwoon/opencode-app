@@ -40,10 +40,11 @@ describe("theme preload", () => {
   )
 
   test.each([
-    { scheme: undefined, key: "opencode-theme-css-light", css: "--background-base:#fff;", expected: "light" },
-    { scheme: "dark", key: "opencode-theme-css-dark", css: "--background-base:#010203;", expected: "dark" },
+    { scheme: undefined, key: "opencode-theme-css-light", css: "--v2-text-text-base:#111;", expected: "light" },
+    { scheme: "dark", key: "opencode-theme-css-dark", css: "--v2-text-text-base:#eee;", expected: "dark" },
   ])("restores the cached $expected css of a custom theme", ({ scheme, key, css, expected }) => {
     localStorage.setItem("opencode-theme-id", "nightowl")
+    localStorage.setItem("opencode-theme-css-version", "2")
 
     if (scheme) localStorage.setItem("opencode-color-scheme", scheme)
     localStorage.setItem(key, css)
@@ -52,5 +53,39 @@ describe("theme preload", () => {
     expect(document.documentElement.dataset.theme).toBe("nightowl")
     expect(document.documentElement.dataset.colorScheme).toBe(expected)
     expect(document.getElementById("oc-theme-preload")?.textContent).toContain(css)
+  })
+
+  test("ignores a v1-only cache from an older build", () => {
+    localStorage.setItem("opencode-theme-id", "nightowl")
+    localStorage.setItem("opencode-color-scheme", "dark")
+    localStorage.setItem("opencode-theme-css-dark", "--background-base:#041f32;")
+
+    run()
+
+    expect(document.documentElement.dataset.theme).toBe("nightowl")
+    expect(document.documentElement.dataset.colorScheme).toBe("dark")
+    expect(document.getElementById("oc-theme-preload")).toBeNull()
+  })
+
+  test("ignores a cache stamped with another token generation", () => {
+    localStorage.setItem("opencode-theme-id", "nightowl")
+    localStorage.setItem("opencode-theme-css-version", "1")
+    localStorage.setItem("opencode-theme-css-light", "--v2-text-text-base:#111;")
+
+    run()
+
+    expect(document.getElementById("oc-theme-preload")).toBeNull()
+  })
+
+  test("removes a preload style injected from an invalid cache", () => {
+    localStorage.setItem("opencode-theme-id", "nightowl")
+    localStorage.setItem("opencode-theme-css-light", "--background-base:#041f32;")
+    const previous = document.createElement("style")
+    previous.id = "oc-theme-preload"
+    document.head.appendChild(previous)
+
+    run()
+
+    expect(document.getElementById("oc-theme-preload")).toBeNull()
   })
 })

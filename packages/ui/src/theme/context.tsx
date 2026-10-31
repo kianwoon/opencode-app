@@ -16,9 +16,17 @@ const STORAGE_KEYS = {
   COLOR_SCHEME: "opencode-color-scheme",
   THEME_CSS_LIGHT: "opencode-theme-css-light",
   THEME_CSS_DARK: "opencode-theme-css-dark",
+  THEME_CSS_VERSION: "opencode-theme-css-version",
 } as const
 
 const THEME_STYLE_ID = "oc-theme"
+
+// Bump when the token generation changes so cached CSS from an older build is
+// never served. Must stay in sync with CACHE_VERSION in public/oc-theme-preload.js.
+const THEME_CSS_CACHE_VERSION = "2"
+
+// v1-only caches predate the v2 token set and render v2 surfaces with fallback colors.
+const V2_CSS_MARKER = "--v2-text-text-base:"
 
 let files: Record<string, () => Promise<{ default: DesktopTheme }>> | undefined
 
@@ -125,6 +133,25 @@ function drop(key: string) {
 function clear() {
   drop(STORAGE_KEYS.THEME_CSS_LIGHT)
   drop(STORAGE_KEYS.THEME_CSS_DARK)
+  drop(STORAGE_KEYS.THEME_CSS_VERSION)
+}
+
+function writeCssCache(key: string, css: string) {
+  write(key, css)
+  write(STORAGE_KEYS.THEME_CSS_VERSION, THEME_CSS_CACHE_VERSION)
+}
+
+/** Drop cached CSS written by a different token generation so it is never served. */
+function verifyThemeCssCache() {
+  const stamped = read(STORAGE_KEYS.THEME_CSS_VERSION) === THEME_CSS_CACHE_VERSION
+
+  if (!stamped) drop(STORAGE_KEYS.THEME_CSS_VERSION)
+
+  for (const key of [STORAGE_KEYS.THEME_CSS_LIGHT, STORAGE_KEYS.THEME_CSS_DARK]) {
+    const css = read(key)
+
+    if (css !== null && (!stamped || !css.includes(V2_CSS_MARKER))) drop(key)
+  }
 }
 
 function ensureThemeStyleElement(): HTMLStyleElement {
@@ -152,7 +179,7 @@ function applyThemeCss(theme: DesktopTheme, themeId: string, mode: "light" | "da
   const v2 = themeV2ToCss(resolveThemeVariantV2(variant, isDark))
 
   if (themeId !== "oc-2") {
-    write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, `${css}\n  ${v2}`)
+    writeCssCache(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, `${css}\n  ${v2}`)
   }
 
   const fullCss = `:root {
@@ -183,7 +210,7 @@ function cacheThemeVariants(theme: DesktopTheme, themeId: string) {
     const tokens = resolveThemeVariant(variant, isDark)
     const css = themeToCss(tokens)
     const v2 = themeV2ToCss(resolveThemeVariantV2(variant, isDark))
-    write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, `${css}\n  ${v2}`)
+    writeCssCache(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, `${css}\n  ${v2}`)
   }
 }
 
@@ -193,6 +220,8 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     defaultTheme?: string
     onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark", scheme: ColorScheme) => void
   }) => {
+    verifyThemeCssCache()
+
     const rawTheme = read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
     const themeId = resolveStoredTheme(rawTheme)
 
