@@ -8,16 +8,17 @@
 }
 
 [data-component="user-message"] {
-  font-family: var(--font-family-sans);
+  font-family: var(--message-font-family, var(--font-family-message, var(--font-family-sans)));
   font-size: var(--font-size-base);
   font-style: normal;
-  font-weight: var(--font-weight-regular);
+  font-weight: var(--message-font-family--font-weight, var(--font-family-message--font-weight, var(--font-weight-regular)));
   line-height: var(--line-height-large);
   letter-spacing: var(--letter-spacing-normal);
   color: var(--v2-text-text-base);
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  /* Alignment is user-configurable via --message-align-* (Settings → Appearance). */
+  align-items: var(--message-align-items, flex-end);
   align-self: stretch;
   width: 100%;
   max-width: 100%;
@@ -26,11 +27,13 @@
   [data-slot="user-message-attachments"] {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    /* Attachments follow Message alignment (Settings → Appearance). */
+    justify-content: var(--message-align-items, flex-end);
     gap: 8px;
     width: fit-content;
-    max-width: min(82%, 64ch);
-    margin-inline-start: auto;
+    max-width: min(var(--message-width-pct, 82%), var(--message-width-ch, 64ch));
+    margin-inline-start: var(--message-align-start, auto);
+    margin-inline-end: var(--message-align-end, 0);
   }
 
   [data-slot="user-message-attachment"] {
@@ -125,12 +128,15 @@
   }
 
   [data-slot="user-message-body"] {
-    width: fit-content;
-    max-width: min(82%, 64ch);
-    margin-inline-start: auto;
+    /* The bubble fills the configured width; short text stretches instead of shrink-to-fit. */
+    width: min(var(--message-width-pct, 82%), var(--message-width-ch, 64ch));
+    /* Width cap is user-configurable via --message-width-ch (Settings → Appearance). */
+    max-width: min(var(--message-width-pct, 82%), var(--message-width-ch, 64ch));
+    margin-inline-start: var(--message-align-start, auto);
+    margin-inline-end: var(--message-align-end, 0);
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: var(--message-align-items, flex-end);
   }
 
   /* Like the iOS app's Voice badge: on the bubble's top leading corner, ringed in the page background. */
@@ -174,8 +180,10 @@
     word-break: break-word;
     overflow: hidden;
     unicode-bidi: plaintext;
-    background: var(--v2-background-bg-layer-02);
-    border: none;
+    /* Background and border are user-configurable (Settings → Appearance); the
+       fallbacks preserve the themed look when no override is set. */
+    background: var(--message-background-color, var(--v2-background-bg-layer-02));
+    border: var(--message-border-width, 0) solid var(--message-border-color, transparent);
     padding: 8px 12px;
     border-radius: 10px;
     /* Where two bubbles of a run meet, their trailing corners tighten to 4px. */

@@ -23,6 +23,8 @@ export type TimelineWidth = Settings["general"]["timelineWidth"]
 
 export type TabLayout = Settings["appearance"]["tabLayout"]
 
+export type MessageAlign = Settings["appearance"]["messageAlign"]
+
 export type ReduceMotion = Settings["appearance"]["reduceMotion"]
 
 export type NotificationSettings = Settings["notifications"]
@@ -64,12 +66,67 @@ function family(font: string) {
   return `"${font.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
 }
 
-function stack(font: string | undefined, base: string) {
+// macOS installs many per-weight faces as separate families: "IBM Plex Mono
+// Light" is its own family, so `font-weight: 300` on "IBM Plex Mono" does not
+// select it. Prepend weight-qualified family names so the weight control works
+// for those fonts; variable fonts still honour the requested `font-weight`.
+const WEIGHT_FAMILY_SUFFIXES: Record<number, string[]> = {
+  100: ["Thin", "UltraLight"],
+  200: ["ExtraLight", "Extra Light"],
+  300: ["Light"],
+  400: ["Regular", "Book"],
+  500: ["Medium"],
+  600: ["SemiBold", "Semi-Bold", "DemiBold", "Semibold"],
+  700: ["Bold"],
+  800: ["ExtraBold", "Extra Bold", "Heavy"],
+  900: ["Black", "Heavy"],
+}
+
+export function weightFamilyNames(font: string, weightValue: number) {
+  const base = font.trim()
+
+  if (!base) return []
+
+  const suffixes = WEIGHT_FAMILY_SUFFIXES[weightValue]
+
+  if (!suffixes || weightValue === 400) return []
+
+  return suffixes.map((suffix) => `${base} ${suffix}`)
+}
+
+function stack(font: string | undefined, base: string, weightValue?: number) {
   const value = font?.trim() ?? ""
 
   if (!value) return base
 
-  return `${family(value)}, ${base}`
+  const weighted = weightFamilyNames(value, weightValue ?? 400)
+
+  if (!weighted.length) return `${family(value)}, ${base}`
+
+  return `${weighted.map(family).join(", ")}, ${family(value)}, ${base}`
+}
+
+export function weight(value: number | undefined, fallback: number) {
+  return value ?? fallback
+}
+
+export function color(value: string | undefined) {
+  const trimmed = value?.trim()
+
+  return trimmed ? trimmed : ""
+}
+
+// Resolves a light/dark pair into a CSS color. Empty pairs emit nothing so the
+// consumer keeps its themed fallback; a single value applies to both schemes.
+export function fontColor(light: string | undefined, dark: string | undefined) {
+  const lightValue = color(light)
+  const darkValue = color(dark)
+
+  if (!lightValue && !darkValue) return ""
+
+  if (lightValue && darkValue) return `light-dark(${lightValue}, ${darkValue})`
+
+  return lightValue || darkValue
 }
 
 export function monoInput(font: string | undefined) {
@@ -80,20 +137,24 @@ export function sansInput(font: string | undefined) {
   return input(font)
 }
 
-export function monoFontFamily(font: string | undefined) {
-  return stack(font, monoBase)
+export function monoFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, monoBase, weightValue)
 }
 
-export function sansFontFamily(font: string | undefined) {
-  return stack(font, sansBase)
+export function sansFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, sansBase, weightValue)
 }
 
 export function terminalInput(font: string | undefined) {
   return input(font)
 }
 
-export function terminalFontFamily(font: string | undefined) {
-  return stack(font, terminalBase)
+export function terminalFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, terminalBase, weightValue)
+}
+
+export function messageFontFamily(font: string | undefined, weightValue?: number) {
+  return stack(font, sansBase, weightValue)
 }
 
 const placementSchema = Schema.Literals(["separate", "grouped", "hidden"])
@@ -144,6 +205,19 @@ const appearanceSchema = Persistence.struct({
   mono: Schema.String,
   sans: Schema.String,
   terminal: Schema.String,
+  uiFontWeight: Schema.Number,
+  codeFontWeight: Schema.Number,
+  message: Schema.String,
+  messageFontWeight: Schema.Number,
+  userMessageFont: Schema.String,
+  userMessageFontWeight: Schema.Number,
+  messageWidth: Schema.Number,
+  messageAlign: Schema.Literals(["left", "center", "right"]),
+  messageBorderWidth: Schema.Number,
+  messageBorderColorLight: Schema.String,
+  messageBorderColorDark: Schema.String,
+  messageBackgroundLight: Schema.String,
+  messageBackgroundDark: Schema.String,
   // "inbox" is experimental: the vertical layout with a server-wide session inbox in place of tabs.
   tabLayout: Schema.Literals(["horizontal", "vertical", "inbox"]),
   sidebarOpen: Persistence.optional(Schema.Boolean),
@@ -309,7 +383,27 @@ export const defaultSettings: Settings = {
     mobileTitlebarPosition: "top",
     followUpBehavior: "steer",
   },
-  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "horizontal", reduceMotion: "system" },
+  appearance: {
+    fontSize: 14,
+    mono: "",
+    sans: "",
+    terminal: "",
+    uiFontWeight: 400,
+    codeFontWeight: 400,
+    message: "",
+    messageFontWeight: 400,
+    userMessageFont: "",
+    userMessageFontWeight: 400,
+    messageWidth: 64,
+    messageAlign: "right",
+    messageBorderWidth: 0,
+    messageBorderColorLight: "",
+    messageBorderColorDark: "",
+    messageBackgroundLight: "",
+    messageBackgroundDark: "",
+    tabLayout: "horizontal",
+    reduceMotion: "system",
+  },
   keybinds: {},
   permissions: { autoApprove: false, autoApproveProjects: {} },
   workspaces: { defaultDestination: "last-used", lastUsed: {} },
@@ -345,9 +439,66 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (typeof document === "undefined") return
       const root = document.documentElement
-      const mono = monoFontFamily(store.appearance?.mono)
+      const appearance = store.appearance
+      const uiWeight = weight(appearance?.uiFontWeight, defaultSettings.appearance.uiFontWeight)
+      const codeWeight = weight(appearance?.codeFontWeight, defaultSettings.appearance.codeFontWeight)
+      const messageWeight = weight(appearance?.messageFontWeight, defaultSettings.appearance.messageFontWeight)
+      const userMessageWeight = weight(
+        appearance?.userMessageFontWeight,
+        defaultSettings.appearance.userMessageFontWeight,
+      )
+      const mono = monoFontFamily(appearance?.mono, codeWeight)
       root.style.setProperty("--font-family-mono", mono)
-      root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
+      root.style.setProperty("--font-family-sans", sansFontFamily(appearance?.sans, uiWeight))
+      root.style.setProperty("--font-family-sans--font-weight", String(uiWeight))
+      root.style.setProperty("--font-family-mono--font-weight", String(codeWeight))
+      // Message text and the composer read the message role, which falls back to
+      // the sans stack so an empty message font still follows the UI font.
+      root.style.setProperty("--font-family-message", messageFontFamily(appearance?.message, messageWeight))
+      root.style.setProperty("--font-family-message--font-weight", String(messageWeight))
+      // The user bubble's own font only overrides the family when the user sets
+      // one; its weight always applies so the control is not inert without a font.
+      const userMessageFont = appearance?.userMessageFont?.trim()
+      root.style.setProperty(
+        "--message-font-family",
+        userMessageFont ? messageFontFamily(userMessageFont, userMessageWeight) : "",
+      )
+      root.style.setProperty("--message-font-family--font-weight", String(userMessageWeight))
+      // The bubble is capped with min(N%, var(...ch)); an empty value restores the
+      // CSS fallback so the cap stays theme-controlled.
+      const messageWidth = appearance?.messageWidth
+      root.style.setProperty(
+        "--message-width-ch",
+        typeof messageWidth === "number" && messageWidth > 0 ? `${messageWidth}ch` : "",
+      )
+      root.style.setProperty(
+        "--message-width-pct",
+        typeof messageWidth === "number" && messageWidth >= 160 ? "90%" : "82%",
+      )
+      // Alignment uses logical properties downstream, so left/right follow the
+      // writing direction. Empty strings restore the CSS defaults (right).
+      const messageAlign =
+        appearance?.messageAlign === "left" || appearance?.messageAlign === "center" ? appearance.messageAlign : ""
+      root.style.setProperty("--message-align-start", messageAlign === "left" ? "0" : "")
+      root.style.setProperty("--message-align-end", messageAlign ? "auto" : "")
+      root.style.setProperty(
+        "--message-align-items",
+        messageAlign === "left" ? "flex-start" : messageAlign === "center" ? "center" : "",
+      )
+      // Only a positive thickness overrides; 0 restores the borderless fallback.
+      const messageBorderWidth = appearance?.messageBorderWidth
+      root.style.setProperty(
+        "--message-border-width",
+        typeof messageBorderWidth === "number" && messageBorderWidth > 0 ? `${messageBorderWidth}px` : "",
+      )
+      root.style.setProperty(
+        "--message-border-color",
+        fontColor(appearance?.messageBorderColorLight, appearance?.messageBorderColorDark),
+      )
+      root.style.setProperty(
+        "--message-background-color",
+        fontColor(appearance?.messageBackgroundLight, appearance?.messageBackgroundDark),
+      )
       // Inline code can first appear during history backfill. Load its selected
       // face with the shell so that font discovery does not resize that mount.
       void document.fonts?.load(`440 13px ${mono}`).catch(() => undefined)
@@ -455,6 +606,88 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         terminalFont: withFallback(() => store.appearance?.terminal, defaultSettings.appearance.terminal),
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
+        },
+        uiFontWeight: withFallback(
+          () => store.appearance?.uiFontWeight,
+          defaultSettings.appearance.uiFontWeight,
+        ),
+        setUIFontWeight(value: number) {
+          setStore("appearance", "uiFontWeight", value)
+        },
+        codeFontWeight: withFallback(
+          () => store.appearance?.codeFontWeight,
+          defaultSettings.appearance.codeFontWeight,
+        ),
+        setCodeFontWeight(value: number) {
+          setStore("appearance", "codeFontWeight", value)
+        },
+        messageFont: withFallback(() => store.appearance?.message, defaultSettings.appearance.message),
+        setMessageFont(value: string) {
+          setStore("appearance", "message", value.trim() ? value : "")
+        },
+        messageFontWeight: withFallback(
+          () => store.appearance?.messageFontWeight,
+          defaultSettings.appearance.messageFontWeight,
+        ),
+        setMessageFontWeight(value: number) {
+          setStore("appearance", "messageFontWeight", value)
+        },
+        userMessageFont: withFallback(
+          () => store.appearance?.userMessageFont,
+          defaultSettings.appearance.userMessageFont,
+        ),
+        setUserMessageFont(value: string) {
+          setStore("appearance", "userMessageFont", value.trim() ? value : "")
+        },
+        userMessageFontWeight: withFallback(
+          () => store.appearance?.userMessageFontWeight,
+          defaultSettings.appearance.userMessageFontWeight,
+        ),
+        setUserMessageFontWeight(value: number) {
+          setStore("appearance", "userMessageFontWeight", value)
+        },
+        messageWidth: withFallback(() => store.appearance?.messageWidth, defaultSettings.appearance.messageWidth),
+        setMessageWidth(value: number) {
+          setStore("appearance", "messageWidth", value)
+        },
+        messageAlign: withFallback(() => store.appearance?.messageAlign, defaultSettings.appearance.messageAlign),
+        setMessageAlign(value: MessageAlign) {
+          setStore("appearance", "messageAlign", value)
+        },
+        messageBorderWidth: withFallback(
+          () => store.appearance?.messageBorderWidth,
+          defaultSettings.appearance.messageBorderWidth,
+        ),
+        setMessageBorderWidth(value: number) {
+          setStore("appearance", "messageBorderWidth", value)
+        },
+        messageBorderColorLight: withFallback(
+          () => store.appearance?.messageBorderColorLight,
+          defaultSettings.appearance.messageBorderColorLight,
+        ),
+        setMessageBorderColorLight(value: string) {
+          setStore("appearance", "messageBorderColorLight", value)
+        },
+        messageBorderColorDark: withFallback(
+          () => store.appearance?.messageBorderColorDark,
+          defaultSettings.appearance.messageBorderColorDark,
+        ),
+        setMessageBorderColorDark(value: string) {
+          setStore("appearance", "messageBorderColorDark", value)
+        },
+        messageBackgroundLight: withFallback(
+          () => store.appearance?.messageBackgroundLight,
+          defaultSettings.appearance.messageBackgroundLight,
+        ),
+        setMessageBackgroundLight(value: string) {
+          setStore("appearance", "messageBackgroundLight", value)
+        },
+        messageBackgroundDark: withFallback(
+          () => store.appearance?.messageBackgroundDark,
+          defaultSettings.appearance.messageBackgroundDark,
+        ),
+        setMessageBackgroundDark(value: string) {
+          setStore("appearance", "messageBackgroundDark", value)
         },
         tabLayout: withFallback(() => store.appearance?.tabLayout, defaultSettings.appearance.tabLayout),
         setTabLayout(value: TabLayout) {

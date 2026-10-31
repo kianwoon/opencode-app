@@ -2,12 +2,14 @@ import { createMemo, createResource, onMount, type Accessor } from "solid-js"
 import type { ColorScheme } from "@opencode/ui/theme/context"
 import { useTheme } from "@opencode/ui/theme/context"
 import {
+  messageFontFamily,
   monoDefault,
   monoFontFamily,
   monoInput,
   sansDefault,
   sansFontFamily,
   sansInput,
+  type MessageAlign,
   type ReduceMotion,
   terminalDefault,
   terminalFontFamily,
@@ -105,22 +107,72 @@ export function createAppearanceSettingsController() {
     fonts: {
       ui: createMemo(() => ({
         value: sansInput(settings.appearance.uiFont()),
-        family: sansFontFamily(settings.appearance.uiFont()),
+        family: sansFontFamily(settings.appearance.uiFont(), settings.appearance.uiFontWeight()),
         placeholder: sansDefault,
+        weight: settings.appearance.uiFontWeight(),
       })),
       code: createMemo(() => ({
         value: monoInput(settings.appearance.font()),
-        family: monoFontFamily(settings.appearance.font()),
+        family: monoFontFamily(settings.appearance.font(), settings.appearance.codeFontWeight()),
         placeholder: monoDefault,
+        weight: settings.appearance.codeFontWeight(),
       })),
       terminal: createMemo(() => ({
         value: terminalInput(settings.appearance.terminalFont()),
         family: terminalFontFamily(settings.appearance.terminalFont()),
         placeholder: terminalDefault,
+        // The terminal renders through the plugin SDK, which receives the font
+        // family only; its weight is fixed and not user-configurable.
+        weight: 400,
+      })),
+      message: createMemo(() => ({
+        value: sansInput(settings.appearance.messageFont()),
+        family: messageFontFamily(settings.appearance.messageFont(), settings.appearance.messageFontWeight()),
+        placeholder: sansDefault,
+        weight: settings.appearance.messageFontWeight(),
+      })),
+      userMessage: createMemo(() => ({
+        value: sansInput(settings.appearance.userMessageFont()),
+        family: messageFontFamily(
+          settings.appearance.userMessageFont(),
+          settings.appearance.userMessageFontWeight(),
+        ),
+        placeholder: sansDefault,
+        weight: settings.appearance.userMessageFontWeight(),
       })),
       setUI: (value: string) => settings.appearance.setUIFont(value),
       setCode: (value: string) => settings.appearance.setFont(value),
       setTerminal: (value: string) => settings.appearance.setTerminalFont(value),
+      setMessage: (value: string) => settings.appearance.setMessageFont(value),
+      setUserMessage: (value: string) => settings.appearance.setUserMessageFont(value),
+      setUIWeight: (value: number) => settings.appearance.setUIFontWeight(value),
+      setCodeWeight: (value: number) => settings.appearance.setCodeFontWeight(value),
+      setMessageWeight: (value: number) => settings.appearance.setMessageFontWeight(value),
+      setUserMessageWeight: (value: number) => settings.appearance.setUserMessageFontWeight(value),
+    },
+    messageWidth: {
+      current: createMemo(() => String(settings.appearance.messageWidth())),
+      select: (value: string) => settings.appearance.setMessageWidth(Number(value)),
+    },
+    messageAlign: {
+      current: settings.appearance.messageAlign,
+      select: (value: MessageAlign) => settings.appearance.setMessageAlign(value),
+    },
+    messageBorderWidth: {
+      current: createMemo(() => String(settings.appearance.messageBorderWidth())),
+      select: (value: string) => settings.appearance.setMessageBorderWidth(Number(value)),
+    },
+    messageBorderColors: {
+      light: settings.appearance.messageBorderColorLight,
+      dark: settings.appearance.messageBorderColorDark,
+      setLight: (value: string) => settings.appearance.setMessageBorderColorLight(value),
+      setDark: (value: string) => settings.appearance.setMessageBorderColorDark(value),
+    },
+    messageBackgroundColors: {
+      light: settings.appearance.messageBackgroundLight,
+      dark: settings.appearance.messageBackgroundDark,
+      setLight: (value: string) => settings.appearance.setMessageBackgroundLight(value),
+      setDark: (value: string) => settings.appearance.setMessageBackgroundDark(value),
     },
   }
 }
