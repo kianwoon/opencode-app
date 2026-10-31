@@ -19,11 +19,14 @@ export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
       // Serve the web shell before API authentication so a signed-out browser gets the app's sign-in screen.
       // `/global/*` carries the server API's global settings routes (effort router, gate config); the
       // settings panel fetches them directly, so they must reach the API rather than the SPA shell.
+      // `/mcp/*` carries the experimental tool-inventory route the Subagents/Agents panels read the
+      // same way; forwarded it either answers JSON or 404s, never with the HTML shell.
       if (
         url.pathname === "/api" ||
         url.pathname.startsWith("/api/") ||
         url.pathname.startsWith("/auth/") ||
         url.pathname.startsWith("/global/") ||
+        url.pathname.startsWith("/mcp/") ||
         url.pathname === "/openapi.json"
       )
         return yield* api.pipe(
