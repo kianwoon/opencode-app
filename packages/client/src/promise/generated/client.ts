@@ -169,6 +169,12 @@ import type {
   CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
+  ServerOrchestrationEffortRouterGetOutput,
+  ServerOrchestrationJevVerdictsListInput,
+  ServerOrchestrationJevVerdictsListOutput,
+  ServerOrchestrationGateConfigGetOutput,
+  ServerOrchestrationGateConfigUpdateInput,
+  ServerOrchestrationGateConfigUpdateOutput,
   ProjectListInput,
   ProjectListOutput,
   ProjectUpdateInput,
@@ -2035,6 +2041,60 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+    },
+    "server.orchestration": {
+      effortRouter: {
+        get: (requestOptions?: RequestOptions) =>
+          request<ServerOrchestrationEffortRouterGetOutput>(
+            {
+              method: "GET",
+              path: `/global/effort-router`,
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+      },
+      jevVerdicts: {
+        list: (input?: ServerOrchestrationJevVerdictsListInput, requestOptions?: RequestOptions) =>
+          request<ServerOrchestrationJevVerdictsListOutput>(
+            {
+              method: "GET",
+              path: `/global/jev-verdicts`,
+              query: { limit: input?.["limit"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+      },
+      gateConfig: {
+        get: (requestOptions?: RequestOptions) =>
+          request<ServerOrchestrationGateConfigGetOutput>(
+            {
+              method: "GET",
+              path: `/global/gate-config`,
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        update: (input?: ServerOrchestrationGateConfigUpdateInput, requestOptions?: RequestOptions) =>
+          request<ServerOrchestrationGateConfigUpdateOutput>(
+            {
+              method: "PATCH",
+              path: `/global/gate-config`,
+              body: { triageEnabled: input?.["triageEnabled"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+      },
     },
     project: {
       list: (input?: ProjectListInput, requestOptions?: RequestOptions) =>

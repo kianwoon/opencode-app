@@ -175,6 +175,12 @@ import type {
   CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
+  ServerOrchestrationEffortRouterGetOutput,
+  ServerOrchestrationJevVerdictsListInput,
+  ServerOrchestrationJevVerdictsListOutput,
+  ServerOrchestrationGateConfigGetOutput,
+  ServerOrchestrationGateConfigUpdateInput,
+  ServerOrchestrationGateConfigUpdateOutput,
   ProjectListInput,
   ProjectListOutput,
   ProjectUpdateInput,
@@ -1243,6 +1249,39 @@ const adaptGroupCredential = (raw: RawClient["server.credential"]) => ({
   remove: EndpointCredentialRemove(raw),
 })
 
+const EndpointServerOrchestrationEffortRouterGet = (raw: RawClient["server.orchestration"]) => () =>
+  preserveEffect<ServerOrchestrationEffortRouterGetOutput>()(
+    raw["orchestration.effortRouter"]({}).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointServerOrchestrationJevVerdictsList =
+  (raw: RawClient["server.orchestration"]) => (input?: ServerOrchestrationJevVerdictsListInput) =>
+    preserveEffect<ServerOrchestrationJevVerdictsListOutput>()(
+      raw["orchestration.jevVerdicts"]({ query: { limit: input?.["limit"] } }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointServerOrchestrationGateConfigGet = (raw: RawClient["server.orchestration"]) => () =>
+  preserveEffect<ServerOrchestrationGateConfigGetOutput>()(
+    raw["orchestration.gateConfig"]({}).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointServerOrchestrationGateConfigUpdate =
+  (raw: RawClient["server.orchestration"]) => (input?: ServerOrchestrationGateConfigUpdateInput) =>
+    preserveEffect<ServerOrchestrationGateConfigUpdateOutput>()(
+      raw["orchestration.gateConfigUpdate"]({ payload: { triageEnabled: input?.["triageEnabled"] } }).pipe(
+        Effect.mapError(mapClientError),
+      ),
+    )
+
+const adaptGroupServerOrchestration = (raw: RawClient["server.orchestration"]) => ({
+  effortRouter: { get: EndpointServerOrchestrationEffortRouterGet(raw) },
+  jevVerdicts: { list: EndpointServerOrchestrationJevVerdictsList(raw) },
+  gateConfig: {
+    get: EndpointServerOrchestrationGateConfigGet(raw),
+    update: EndpointServerOrchestrationGateConfigUpdate(raw),
+  },
+})
+
 const EndpointProjectList = (raw: RawClient["server.project"]) => (input?: ProjectListInput) =>
   preserveEffect<ProjectListOutput>()(
     raw["project.list"]({ query: { archived: input?.["archived"] } }).pipe(Effect.mapError(mapClientError)),
@@ -1983,6 +2022,7 @@ const adaptClient = (raw: RawClient) => {
     integration: adaptGroupIntegration(raw["server.integration"]),
     mcp: adaptGroupMcp(raw["server.mcp"]),
     credential: adaptGroupCredential(raw["server.credential"]),
+    "server.orchestration": adaptGroupServerOrchestration(raw["server.orchestration"]),
     project: adaptGroupProject(raw["server.project"]),
     form: adaptGroupForm(raw["server.form"]),
     permission: adaptGroupPermission(raw["server.permission"]),

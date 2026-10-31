@@ -278,6 +278,14 @@ export type PtyTicketConnectToken = { ticket: string; expires_in: number }
 
 export type CredentialKey = { type: "key"; key: string; metadata?: { [x: string]: JsonValue } }
 
+export type OrchestrationEffortRouterConfig = {
+  jev: { enabled: boolean; model: string; threshold: number }
+  guardrail: { enabled: boolean; model: string; denyBelow: number; abstainBelow: number }
+  riskyTools: Array<string>
+}
+
+export type OrchestrationGateConfig = { scopingEnabled: boolean; summarizeEnabled: boolean; triageEnabled: boolean }
+
 export type ProjectVcs = string
 
 export type ProjectIcon = { url?: string; override?: string; color?: string }
@@ -4149,6 +4157,18 @@ export type CredentialActivateOutput = void
 export type CredentialRemoveInput = { readonly credentialID: string }
 
 export type CredentialRemoveOutput = void
+
+export type ServerOrchestrationEffortRouterGetOutput = OrchestrationEffortRouterConfig
+
+export type ServerOrchestrationJevVerdictsListInput = { readonly limit?: number | undefined }
+
+export type ServerOrchestrationJevVerdictsListOutput = Array<{ [x: string]: any }>
+
+export type ServerOrchestrationGateConfigGetOutput = OrchestrationGateConfig
+
+export type ServerOrchestrationGateConfigUpdateInput = { readonly triageEnabled?: boolean | undefined }
+
+export type ServerOrchestrationGateConfigUpdateOutput = OrchestrationGateConfig
 
 export type ProjectListInput = { readonly archived?: boolean | undefined }
 

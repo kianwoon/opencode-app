@@ -17,10 +17,13 @@ export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
       const request = yield* HttpServerRequest.HttpServerRequest
       const url = new URL(request.url, "http://localhost")
       // Serve the web shell before API authentication so a signed-out browser gets the app's sign-in screen.
+      // `/global/*` carries the server API's global settings routes (effort router, gate config); the
+      // settings panel fetches them directly, so they must reach the API rather than the SPA shell.
       if (
         url.pathname === "/api" ||
         url.pathname.startsWith("/api/") ||
         url.pathname.startsWith("/auth/") ||
+        url.pathname.startsWith("/global/") ||
         url.pathname === "/openapi.json"
       )
         return yield* api.pipe(

@@ -1860,6 +1860,56 @@ export interface CredentialApi<E = never> {
   readonly remove: CredentialRemoveOperation<E>
 }
 
+export type ServerOrchestrationEffortRouterGetOutput = {
+  readonly jev: { readonly enabled: boolean; readonly model: string; readonly threshold: number }
+  readonly guardrail: {
+    readonly enabled: boolean
+    readonly model: string
+    readonly denyBelow: number
+    readonly abstainBelow: number
+  }
+  readonly riskyTools: ReadonlyArray<string>
+}
+export type ServerOrchestrationEffortRouterGetOperation<E = never> = () => Effect.Effect<
+  ServerOrchestrationEffortRouterGetOutput,
+  E
+>
+
+export type ServerOrchestrationJevVerdictsListInput = { readonly limit?: number | undefined }
+export type ServerOrchestrationJevVerdictsListOutput = ReadonlyArray<{ readonly [x: string]: unknown }>
+export type ServerOrchestrationJevVerdictsListOperation<E = never> = (
+  input?: ServerOrchestrationJevVerdictsListInput,
+) => Effect.Effect<ServerOrchestrationJevVerdictsListOutput, E>
+
+export type ServerOrchestrationGateConfigGetOutput = {
+  readonly scopingEnabled: boolean
+  readonly summarizeEnabled: boolean
+  readonly triageEnabled: boolean
+}
+export type ServerOrchestrationGateConfigGetOperation<E = never> = () => Effect.Effect<
+  ServerOrchestrationGateConfigGetOutput,
+  E
+>
+
+export type ServerOrchestrationGateConfigUpdateInput = { readonly triageEnabled?: boolean | undefined }
+export type ServerOrchestrationGateConfigUpdateOutput = {
+  readonly scopingEnabled: boolean
+  readonly summarizeEnabled: boolean
+  readonly triageEnabled: boolean
+}
+export type ServerOrchestrationGateConfigUpdateOperation<E = never> = (
+  input?: ServerOrchestrationGateConfigUpdateInput,
+) => Effect.Effect<ServerOrchestrationGateConfigUpdateOutput, E>
+
+export interface ServerOrchestrationApi<E = never> {
+  readonly effortRouter: { readonly get: ServerOrchestrationEffortRouterGetOperation<E> }
+  readonly jevVerdicts: { readonly list: ServerOrchestrationJevVerdictsListOperation<E> }
+  readonly gateConfig: {
+    readonly get: ServerOrchestrationGateConfigGetOperation<E>
+    readonly update: ServerOrchestrationGateConfigUpdateOperation<E>
+  }
+}
+
 export type ProjectListInput = { readonly archived?: boolean | undefined }
 export type ProjectListOutput = ReadonlyArray<Project.Info>
 export type ProjectListOperation<E = never> = (input?: ProjectListInput) => Effect.Effect<ProjectListOutput, E>
@@ -3104,6 +3154,7 @@ export interface AppApi<E = never> {
   readonly integration: IntegrationApi<E>
   readonly mcp: McpApi<E>
   readonly credential: CredentialApi<E>
+  readonly "server.orchestration": ServerOrchestrationApi<E>
   readonly project: ProjectApi<E>
   readonly form: FormApi<E>
   readonly permission: PermissionApi<E>
