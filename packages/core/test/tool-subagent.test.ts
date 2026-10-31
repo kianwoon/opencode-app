@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import { LanguageModel } from "@opencode/ai/effect"
 import { OpenAIChat } from "@opencode/ai/protocols"
 import { TestLLM } from "@opencode/ai/testing"
@@ -745,6 +745,87 @@ describe("SubagentTool", () => {
             agent: "fallback",
             model: childModel,
           })
+        }),
+      ),
+    ),
+  )
+
+  it.live("applies a reconfigured agent model when continuing the same agent", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          const sessions = yield* Session.Service
+          const parent = yield* sessions.create({ location, model: parentModel })
+          yield* withSubagent(parent.location)
+          const locations = yield* LocationServiceMap.Service
+          const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
+          const bus = yield* Bus.Service
+          const configure = (model: Model.Ref) =>
+            Agent.Service.use((agents) =>
+              agents.transform((editor) => {
+                editor.update(Agent.ID.make("reviewer"), (agent) => {
+                  agent.model = model
+                })
+              }),
+            ).pipe(Effect.provide(locations.get(parent.location)))
+          const call = (id: string, input: Record<string, unknown> = {}) =>
+            executeTool(registry, {
+              sessionID: parent.id,
+              ...toolIdentity,
+              call: {
+                type: "tool-call" as const,
+                id,
+                name: SubagentTool.name,
+                input: { agent: "reviewer", description: "review", prompt: "review this", ...input },
+              },
+            })
+          const nextSelection = (sessionID: Session.ID) =>
+            bus.subscribe(SessionEvent.ModelSelected).pipe(
+              Stream.filter((event) => event.data.sessionID === sessionID),
+              Stream.runHead,
+            )
+
+          const spawned = yield* call("call-reconfigured-spawn", { sessionID: "" })
+          const childID = outputSessionID(spawned.metadata)
+          expect(yield* sessions.get(childID)).toMatchObject({ agent: "reviewer", model: childModel })
+
+          // The agent model is reconfigured after the session exists; a same-agent continuation applies it.
+          yield* configure(overrideModel)
+          expect(yield* call("call-reconfigured-resume", { sessionID: childID })).toMatchObject({
+            status: "completed",
+            metadata: { sessionID: childID, status: "completed" },
+          })
+          expect(yield* sessions.get(childID)).toMatchObject({ agent: "reviewer", model: overrideModel })
+
+          // An explicitly requested model still beats the agent's configured model.
+          yield* configure(childModel)
+          expect(
+            yield* call("call-reconfigured-override", { sessionID: childID, model: "test/plain" }),
+          ).toMatchObject({ status: "completed", metadata: { sessionID: childID } })
+          expect(yield* sessions.get(childID)).toMatchObject({
+            agent: "reviewer",
+            model: { providerID: Provider.ID.make("test"), id: Model.ID.make("plain") },
+          })
+
+          // Continuing on the model the session already emits no new selection, so the next real
+          // change is the first selection the stream observes.
+          yield* configure(Model.Ref.make({ providerID: Provider.ID.make("test"), id: Model.ID.make("plain") }))
+          const pending = yield* nextSelection(childID).pipe(Effect.forkScoped({ startImmediately: true }))
+          expect(yield* call("call-reconfigured-no-churn", { sessionID: childID })).toMatchObject({
+            status: "completed",
+            metadata: { sessionID: childID },
+          })
+          yield* configure(childModel)
+          expect(yield* call("call-reconfigured-churn", { sessionID: childID })).toMatchObject({
+            status: "completed",
+            metadata: { sessionID: childID },
+          })
+          const selected = yield* Fiber.join(pending).pipe(Effect.timeout("2 seconds"), Effect.map(Option.getOrThrow))
+          expect(selected.data).toMatchObject({ sessionID: childID, model: childModel })
         }),
       ),
     ),

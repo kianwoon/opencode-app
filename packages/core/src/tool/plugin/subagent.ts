@@ -172,11 +172,15 @@ export const Plugin = {
                   message: `Session ${existing.id} is not a child of the current session`,
                 })
               const override = input.model === undefined ? undefined : yield* resolveModel(input.model)
-              // Continuing with a different agent switches the child, mirroring create semantics
-              // where an explicit model wins over the agent's configured model, which wins over the inherited one.
+              // Resume resolves the model like creation: an explicit input.model override always wins,
+              // then the agent's currently configured model applies whether or not the agent switched.
+              // Approved behavior: on same-agent resume that model intentionally overwrites the
+              // session's prior per-session model, so Settings changes reach reused sessions.
+              // Unlike creation, resume has no parent.model fallback; an undefined agent model keeps
+              // the session's current model (creation falls back to parent.model below).
               if (existing !== undefined) {
                 const switched = existing.agent !== agent.id
-                const model = override ?? (switched ? agent.model : undefined)
+                const model = override ?? agent.model
                 yield* Effect.all([
                   switched ? sessions.switchAgent({ sessionID: existing.id, agent: agent.id }) : Effect.void,
                   model === undefined ? Effect.void : sessions.switchModel({ sessionID: existing.id, model }),

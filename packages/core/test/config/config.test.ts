@@ -1819,12 +1819,100 @@ describe("Config", () => {
               const config = yield* Config.Service
               yield* config.update!({ agent: { a: { description: "Agent A edited", owned_tools: ["read"] } } })
               const parsed = parse(yield* Effect.promise(() => fs.readFile(file, "utf8")))
-              expect(parsed.agent.a).toEqual({ description: "Agent A edited", owned_tools: ["read"] })
+              // Field by field: `mode` was not restated, so it must survive.
+              expect(parsed.agent.a).toEqual({ description: "Agent A edited", mode: "subagent", owned_tools: ["read"] })
               expect(parsed.agent.b).toEqual({
                 description: "Agent B",
                 mode: "subagent",
                 owned_tools: ["write"],
               })
+            }).pipe(Effect.provide(testLayer(tmp.path, global))),
+          ),
+        )
+      }),
+    ),
+  )
+
+  // Deep merging is an agent-block contract, not a global config semantic: every
+  // other record key still replaces a restated block so a dropped key is a
+  // deletion (an mcp server's `environment` must not grow append-only).
+  it.live("replaces a restated mcp server block wholesale instead of deep merging it", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const file = path.join(global, "opencode.jsonc")
+        return Effect.promise(async () => {
+          await fs.mkdir(global, { recursive: true })
+          await fs.writeFile(
+            file,
+            JSON.stringify({
+              mcp: {
+                servers: {
+                  docs: { type: "local", command: ["docs"], environment: { A: "1", B: "2" } },
+                },
+              },
+            }),
+          )
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              yield* config.update!({
+                mcp: { servers: { docs: { type: "local", command: ["docs"], environment: { A: "3" } } } },
+              })
+              const parsed = parse(yield* Effect.promise(() => fs.readFile(file, "utf8")))
+              expect(parsed.mcp.servers.docs.environment).toEqual({ A: "3" })
+            }).pipe(Effect.provide(testLayer(tmp.path, global))),
+          ),
+        )
+      }),
+    ),
+  )
+
+  // The panels read the normalized config, so their patch names only the edited
+  // control's keys. A one-level merge replaced the agent block and erased every
+  // field the normalized read cannot reconstruct (prompt, variant, color).
+  it.live("keeps an agent block's prompt, variant, and color when a partial patch edits only steps", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const file = path.join(global, "opencode.jsonc")
+        return Effect.promise(async () => {
+          await fs.mkdir(global, { recursive: true })
+          await fs.writeFile(
+            file,
+            JSON.stringify({
+              agent: {
+                implementer: {
+                  model: "command-code/deepseek/deepseek-v4.1-flash",
+                  variant: "low",
+                  color: "#aabbcc",
+                  prompt: "Implement the handoff.",
+                  temperature: 0.2,
+                  owned_tools: ["read"],
+                  permission: { bash: { "git status": "allow" }, edit: "allow" },
+                },
+                reviewer: { description: "Reviewer", prompt: "Review the handoff." },
+              },
+            }),
+          )
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              yield* config.update!({ agent: { implementer: { steps: 20 } } })
+              const parsed = parse(yield* Effect.promise(() => fs.readFile(file, "utf8")))
+              expect(parsed.agent.implementer).toEqual({
+                model: "command-code/deepseek/deepseek-v4.1-flash",
+                variant: "low",
+                color: "#aabbcc",
+                prompt: "Implement the handoff.",
+                temperature: 0.2,
+                owned_tools: ["read"],
+                permission: { bash: { "git status": "allow" }, edit: "allow" },
+                steps: 20,
+              })
+              expect(parsed.agent.reviewer).toEqual({ description: "Reviewer", prompt: "Review the handoff." })
             }).pipe(Effect.provide(testLayer(tmp.path, global))),
           ),
         )

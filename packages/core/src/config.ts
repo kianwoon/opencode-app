@@ -55,7 +55,29 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 // disk so editing one agent keeps its siblings; scalars and arrays carry their whole value.
 function mergeRecordValue(key: string, current: unknown, next: unknown) {
   if (!mergeKeys.has(key) || !isRecord(current) || !isRecord(next)) return next
-  return { ...current, ...next }
+  // Field-by-field merging is an AGENT-BLOCK contract only: a panel patch names
+  // the control it edited and cannot restate fields it read from the normalized
+  // config. Every other record key keeps the shallow spread, so restating a
+  // block still replaces it and deletion by omission stays possible (mcp
+  // `environment`, for example).
+  if (key !== "agent") return { ...current, ...next }
+  return mergeDeep(current, next)
+}
+
+// A patch names only the fields a control changed, so agent records merge field
+// by field all the way down. Replacing a block instead would erase every field
+// the patch did not restate (an agent's prompt, model variant, color, options),
+// since a panel edits from the normalized config and cannot reconstruct them.
+function mergeDeep(current: Record<string, unknown>, next: Record<string, unknown>) {
+  const merged = { ...current }
+  for (const key of Object.keys(next)) {
+    // A JSON document can carry these as own keys; assigning them would touch
+    // Object.prototype instead of the config.
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue
+    const value = next[key]
+    merged[key] = isRecord(value) && isRecord(current[key]) ? mergeDeep(current[key], value) : value
+  }
+  return merged
 }
 
 export interface Interface {
