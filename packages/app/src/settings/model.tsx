@@ -394,7 +394,8 @@ export const defaultSettings: Settings = {
     messageFontWeight: 400,
     userMessageFont: "",
     userMessageFontWeight: 400,
-    messageWidth: 64,
+    // 0 means "no explicit character cap": the percentage cap binds on its own.
+    messageWidth: 0,
     messageAlign: "right",
     messageBorderWidth: 0,
     messageBorderColorLight: "",
@@ -464,8 +465,11 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         userMessageFont ? messageFontFamily(userMessageFont, userMessageWeight) : "",
       )
       root.style.setProperty("--message-font-family--font-weight", String(userMessageWeight))
-      // The bubble is capped with min(N%, var(...ch)); an empty value restores the
-      // CSS fallback so the cap stays theme-controlled.
+      // The bubble is capped with min(N%, var(...ch)). The percentage cap is the
+      // default binding cap; the character cap only binds when the user explicitly
+      // picks a narrower width. With no stored width, --message-width-ch is empty
+      // so the CSS fallback (100%) restores and the percentage wins on its own.
+      // A persisted 64 from an older profile stays a real 64ch choice.
       const messageWidth = appearance?.messageWidth
       root.style.setProperty(
         "--message-width-ch",
@@ -473,7 +477,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       )
       root.style.setProperty(
         "--message-width-pct",
-        typeof messageWidth === "number" && messageWidth >= 160 ? "90%" : "82%",
+        typeof messageWidth === "number" && messageWidth >= 160 ? "90%" : "95%",
       )
       // Alignment uses logical properties downstream, so left/right follow the
       // writing direction. Empty strings restore the CSS defaults (right).

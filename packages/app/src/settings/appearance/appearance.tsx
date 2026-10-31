@@ -21,12 +21,15 @@ const fontWeightOptions: { value: string; label: string }[] = [
 ]
 
 const messageWidthOptions: { value: string; label: string }[] = [
-  { value: "64", label: "settings.general.row.messageWidth.option.default" },
-  { value: "76", label: "settings.general.row.messageWidth.option.wide" },
-  { value: "88", label: "settings.general.row.messageWidth.option.wider" },
-  { value: "102", label: "settings.general.row.messageWidth.option.full" },
-  { value: "128", label: "settings.general.row.messageWidth.option.max" },
-  { value: "160", label: "settings.general.row.messageWidth.option.maxPlus" },
+  // 0 is the default: the percentage cap alone sizes the column. The ch options
+  // are explicit narrower caps that still bind when selected.
+  { value: "0", label: "settings.general.row.messageWidth.option.default" },
+  { value: "64", label: "settings.general.row.messageWidth.option.wide" },
+  { value: "76", label: "settings.general.row.messageWidth.option.wider" },
+  { value: "88", label: "settings.general.row.messageWidth.option.full" },
+  { value: "102", label: "settings.general.row.messageWidth.option.max" },
+  { value: "128", label: "settings.general.row.messageWidth.option.maxPlus" },
+  { value: "160", label: "settings.general.row.messageWidth.option.widest" },
 ]
 
 const messageAlignOptions: { value: "left" | "center" | "right"; label: string }[] = [
@@ -255,7 +258,11 @@ export const SettingsAppearance: Component = () => {
                 placement="bottom-end"
                 gutter={6}
                 value={(option) => option.value}
-                label={(option) => `${language.t(option.label)} (${option.value}ch)`}
+                label={(option) =>
+                  option.value === "0"
+                    ? language.t(option.label)
+                    : `${language.t(option.label)} (${option.value}ch)`
+                }
                 onSelect={(option) => option && appearance.messageWidth.select(option.value)}
               />
             </SettingsRow>
