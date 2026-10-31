@@ -30,7 +30,22 @@ export function latest<K extends keyof Info>(entries: readonly Entry[], key: K):
     ?.info[key]
 }
 
-const mergeKeys = new Set(["agent", "permission", "skill", "plugin", "mcp"])
+// Every block key a settings panel writes merges into the existing record, so a
+// single-field patch never replaces sibling fields on disk. Scalars and arrays
+// (shell, skill, plugin, ...) carry their whole value.
+const mergeKeys = new Set([
+  "agent",
+  "permission",
+  "skill",
+  "plugin",
+  "mcp",
+  "brain",
+  "jev",
+  "governor",
+  "brainBooster",
+  "jevDefault",
+  "compaction",
+])
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

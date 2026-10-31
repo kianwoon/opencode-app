@@ -1810,6 +1810,31 @@ describe("Config", () => {
     ),
   )
 
+  it.live("reads back fork panel blocks and merges them into the live document", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const file = path.join(global, "opencode.jsonc")
+        return Effect.promise(async () => {
+          await fs.mkdir(global, { recursive: true })
+          await fs.writeFile(file, JSON.stringify({ jev: { enabled: true, threshold: 0.55 } }))
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              const document = (yield* config.entries()).find((entry) => entry.type === "document")
+              expect(document?.type === "document" && document.info.jev).toEqual({ enabled: true, threshold: 0.55 })
+              yield* config.update!({ jev: { model: "openai/gpt-5" }, jevDefault: { model: "anthropic/x" } })
+              const parsed = parse(yield* Effect.promise(() => fs.readFile(file, "utf8")))
+              expect(parsed.jev).toEqual({ enabled: true, threshold: 0.55, model: "openai/gpt-5" })
+              expect(parsed.jevDefault).toEqual({ model: "anthropic/x" })
+            }).pipe(Effect.provide(testLayer(tmp.path, global))),
+          ),
+        )
+      }),
+    ),
+  )
+
   it.live("loads supported scalar and resource configuration", () =>
     Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
       Effect.flatMap((tmp) =>

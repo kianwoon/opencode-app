@@ -225,6 +225,23 @@ export function normalize(input: unknown): Result {
     overlay(encoded, key, value, [key], diagnostics)
   })
 
+  // Fork settings-panel blocks keep their on-disk names and shapes so a patch is
+  // readable back through config.get. Dropping them here makes a written key
+  // invisible to the panel that wrote it.
+  const nativeFork = {
+    brain: Info.fields.brain,
+    jev: Info.fields.jev,
+    governor: Info.fields.governor,
+    brainBooster: Info.fields.brainBooster,
+    jevDefault: Info.fields.jevDefault,
+  }
+  Object.entries(nativeFork).forEach(([key, schema]) => {
+    if (!own(input, key)) return
+    const value = decodeEncoded(schema, input[key], [key], diagnostics)
+    if (value === undefined) return
+    overlay(encoded, key, value, [key], diagnostics)
+  })
+
   const instructions = decodeList(input.instructions, Schema.String, ["instructions"], diagnostics, decodeEncoded)
   if (instructions.length || Array.isArray(input.instructions)) encoded.instructions = instructions
 

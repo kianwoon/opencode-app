@@ -23,6 +23,25 @@ import { ConfigWatcher } from "./config/watcher.js"
 import { ConfigWarming } from "./config/warming.js"
 import { ConfigWorktree } from "./config/worktree.js"
 
+// Fork settings-panel blocks. Invariant: a config key is only settable if it is
+// also readable through the same endpoint, so every block the panels write via
+// Config.Patch is declared here under its on-disk (legacy) name and shape. The
+// config reader merges record-valued blocks instead of replacing them.
+const Feature = Schema.Struct({
+  enabled: Schema.Boolean.pipe(optional),
+  model: Schema.String.pipe(optional),
+  threshold: Schema.Finite.pipe(optional),
+}).annotate({ identifier: "Config.Feature" })
+
+const Brain = Schema.Struct({
+  model: Schema.String.pipe(optional),
+  enforcement: Schema.Literals(["strict", "advisory"]).pipe(optional),
+}).annotate({ identifier: "Config.Brain" })
+
+const JevDefault = Schema.Struct({ model: Schema.String.pipe(optional) }).annotate({
+  identifier: "Config.JevDefault",
+})
+
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: optional(Schema.String).annotate({
     description: "JSON schema reference for configuration validation",
@@ -88,6 +107,21 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   compaction: ConfigCompaction.Info.pipe(optional).annotate({
     description: "Conversation compaction behavior",
   }),
+  brain: Brain.pipe(optional).annotate({
+    description: "Orchestration brain model and enforcement mode",
+  }),
+  jev: Feature.pipe(optional).annotate({
+    description: "Jev tool-routing block",
+  }),
+  governor: Feature.pipe(optional).annotate({
+    description: "Context governor block",
+  }),
+  brainBooster: Feature.pipe(optional).annotate({
+    description: "Brain booster block",
+  }),
+  jevDefault: JevDefault.pipe(optional).annotate({
+    description: "Fallback decision model for Jev-backed features",
+  }),
   skills: Schema.String.pipe(Schema.Array, optional).annotate({
     description: "Additional paths or URLs to discover skills from",
   }),
@@ -149,12 +183,6 @@ const PatchAgent = Schema.StructWithRest(
   [Schema.Record(Schema.String, Schema.Unknown)],
 ).annotate({ identifier: "Config.Patch.Agent" })
 
-const PatchFeature = Schema.Struct({
-  enabled: Schema.Boolean.pipe(optional),
-  model: Schema.String.pipe(optional),
-  threshold: Schema.Finite.pipe(optional),
-}).annotate({ identifier: "Config.Patch.Feature" })
-
 const PatchCompaction = Schema.Struct({
   auto: Schema.Boolean.pipe(optional),
   preserve_recent_tokens: Schema.Finite.pipe(optional),
@@ -168,14 +196,11 @@ export const Patch = Schema.Struct({
   skill: Schema.String.pipe(Schema.Array, optional),
   plugin: ConfigPlugin.Plugins.pipe(optional),
   mcp: ConfigMCP.Info.pipe(optional),
-  brain: Schema.Struct({
-    model: Schema.String.pipe(optional),
-    enforcement: Schema.Literals(["strict", "advisory"]).pipe(optional),
-  }).pipe(optional),
-  jev: PatchFeature.pipe(optional),
-  governor: PatchFeature.pipe(optional),
-  brainBooster: PatchFeature.pipe(optional),
-  jevDefault: Schema.Struct({ model: Schema.String.pipe(optional) }).pipe(optional),
+  brain: Brain.pipe(optional),
+  jev: Feature.pipe(optional),
+  governor: Feature.pipe(optional),
+  brainBooster: Feature.pipe(optional),
+  jevDefault: JevDefault.pipe(optional),
   compaction: PatchCompaction.pipe(optional),
 }).annotate({ identifier: "Config.Patch" })
 export interface Patch extends Schema.Schema.Type<typeof Patch> {}
