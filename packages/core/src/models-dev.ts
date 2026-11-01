@@ -465,7 +465,54 @@ export { Event } from "@opencode/schema/models-dev"
 export interface Interface {
   readonly get: () => Effect.Effect<readonly Snapshot[]>
   readonly refresh: (force?: boolean) => Effect.Effect<void>
+  /**
+   * Force a catalog refetch and rewrite the cache, reporting what changed. Unlike
+   * `refresh`, a transport or decode failure PROPAGATES: the caller (the CLI
+   * `models update` command) must exit non-zero and the previous cache must stay
+   * intact, which holds because the write happens only after decode succeeds.
+   */
+  readonly update: () => Effect.Effect<CatalogUpdate, Error>
 }
+
+export type CatalogCounts = { readonly providers: number; readonly models: number }
+export type CatalogDelta = { readonly provider: string; readonly previous: number; readonly current: number }
+export type CatalogUpdate = {
+  readonly updatedAt: number
+  readonly previous: CatalogCounts
+  readonly current: CatalogCounts
+  /** Providers whose model count changed, largest change first. */
+  readonly changed: readonly CatalogDelta[]
+}
+
+const counts = (snapshots: readonly Snapshot[]): CatalogCounts => ({
+  providers: snapshots.length,
+  models: snapshots.reduce((total, snapshot) => total + snapshot.models.length, 0),
+})
+
+const providerCounts = (snapshots: readonly Snapshot[]) =>
+  new Map(snapshots.map((snapshot) => [String(snapshot.info.id), snapshot.models.length]))
+
+const catalogDeltas = (
+  previous: readonly Snapshot[],
+  current: readonly Snapshot[],
+): readonly CatalogDelta[] => {
+  const before = providerCounts(previous)
+  const after = providerCounts(current)
+  return [...new Set([...before.keys(), ...after.keys()])]
+    .map((provider) => ({ provider, previous: before.get(provider) ?? 0, current: after.get(provider) ?? 0 }))
+    .filter((delta) => delta.previous !== delta.current)
+    .sort((a, b) => Math.abs(b.current - b.previous) - Math.abs(a.current - a.previous))
+}
+
+/**
+ * Test/mock helper: a Service with the read+refresh contract and an `update` that
+ * fails loudly. Only the live layer implements a real forced update; a stub here
+ * keeps every existing fixture literal compiling without pretending to write.
+ */
+export const serviceOf = (impl: Pick<Interface, "get" | "refresh">): Interface => ({
+  ...impl,
+  update: () => Effect.fail(new Error("models update is not implemented by this service")),
+})
 
 export const Options = Schema.Struct({
   url: Schema.optional(Schema.String),
@@ -657,42 +704,61 @@ export const layer = (options?: Options) =>
 
       const get = (): Effect.Effect<readonly Snapshot[]> => cachedGet
 
-      const refresh = Effect.fn("ModelsDev.refresh")(function* (force = false) {
-        yield* lock
-          .withPermit(
-            Effect.gen(function* () {
-              const stored = Option.getOrUndefined(
-                Schema.decodeUnknownOption(CacheMeta)((yield* kv.get(metaKey)) ?? (yield* kv.get(key))),
-              )
-              if (!force && stored && Date.now() - stored.updatedAt < Duration.toMillis(ttl)) return
-              const response = yield* fetchApi(force ? undefined : stored?.etag)
-              const digest = response && bodyDigest(response.text)
-              // models.dev rarely changes between polls; skip invalidation and
-              // the Refreshed event for a byte-identical body so downstream
-              // provider/model update listeners stay quiet.
-              if (!force && stored && (!response || stored.digest === digest)) {
-                yield* writeMeta(Date.now(), stored.digest, response?.etag ?? stored.etag)
-                return
-              }
-              if (!response) return
-              yield* decodeCatalog(response.text)
-              yield* writeCache(response.text, response.etag, digest)
-              yield* invalidate
-              yield* bus.publish(ModelsDev.Event.Refreshed, {}, { global: true })
-            }),
-          )
-          .pipe(
-            Effect.tapCause((cause) => Effect.logError("Failed to fetch models.dev", { cause: cause })),
-            Effect.ignore,
-          )
+      // One refresh implementation for the background poll and the explicit
+      // `models update` command: `refresh` swallows failures (advisory poll),
+      // `update` lets them propagate so the command can exit non-zero.
+      const refreshNow = Effect.fnUntraced(function* (force: boolean) {
+        const stored = Option.getOrUndefined(
+          Schema.decodeUnknownOption(CacheMeta)((yield* kv.get(metaKey)) ?? (yield* kv.get(key))),
+        )
+        if (!force && stored && Date.now() - stored.updatedAt < Duration.toMillis(ttl)) return undefined
+        const response = yield* fetchApi(force ? undefined : stored?.etag)
+        const digest = response && bodyDigest(response.text)
+        // models.dev rarely changes between polls; skip invalidation and
+        // the Refreshed event for a byte-identical body so downstream
+        // provider/model update listeners stay quiet.
+        if (!force && stored && (!response || stored.digest === digest)) {
+          yield* writeMeta(Date.now(), stored.digest, response?.etag ?? stored.etag)
+          return undefined
+        }
+        if (!response) return undefined
+        const catalog = yield* decodeCatalog(response.text)
+        yield* writeCache(response.text, response.etag, digest)
+        yield* invalidate
+        yield* bus.publish(ModelsDev.Event.Refreshed, {}, { global: true })
+        return catalog
       })
 
+      const refresh = Effect.fn("ModelsDev.refresh")(function* (force = false) {
+        yield* lock.withPermit(refreshNow(force)).pipe(
+          Effect.tapCause((cause) => Effect.logError("Failed to fetch models.dev", { cause: cause })),
+          Effect.ignore,
+        )
+      })
+
+      const updateRaw = Effect.fn("ModelsDev.update")(function* () {
+        const cached = yield* loadFromCache()
+        const previous = cached ? yield* normalize(cached.catalog) : ((yield* loadSnapshot) ?? [])
+        const catalog = yield* lock.withPermit(refreshNow(true))
+        const current = catalog ? yield* normalize(catalog) : previous
+        return {
+          updatedAt: Date.now(),
+          previous: counts(previous),
+          current: counts(current),
+          changed: catalogDeltas(previous, current),
+        } satisfies CatalogUpdate
+      })
+      // A transport/schema/timeout failure surfaces as a plain Error so the CLI
+      // can print it verbatim; the poller only calls `refresh`, which keeps its
+      // own swallow-and-log behavior.
+      const update = () =>
+        updateRaw().pipe(Effect.mapError((error) => (error instanceof Error ? error : new Error(String(error)))))
       if (fetch && !process.argv.includes("--get-yargs-completions")) {
         // Schedule.spaced runs the effect once, then waits between completions.
         yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced(ttl)), Effect.ignore))
       }
 
-      return Service.of({ get, refresh })
+      return Service.of({ get, refresh, update })
     }),
   )
 

@@ -128,7 +128,7 @@ describe("ModelsDevPlugin", () => {
     Effect.gen(function* () {
       const { providerID, modelID, snapshot } = richSnapshot()
       const pristine = JSON.stringify(snapshot)
-      const source = ModelsDev.Service.of({ get: () => Effect.succeed(snapshot), refresh: () => Effect.void })
+      const source = ModelsDev.serviceOf({ get: () => Effect.succeed(snapshot), refresh: () => Effect.void })
       const first = yield* owner
       const second = yield* owner
       for (const each of [first, second]) {
@@ -263,7 +263,7 @@ describe("ModelsDevPlugin", () => {
       const refreshed = richSnapshot("Acme Refreshed")
       const pristine = JSON.stringify(initial.snapshot)
       const current = { snapshot: initial.snapshot }
-      const source = ModelsDev.Service.of({
+      const source = ModelsDev.serviceOf({
         get: () => Effect.sync(() => current.snapshot),
         refresh: () => Effect.void,
       })
@@ -298,7 +298,7 @@ describe("ModelsDevPlugin", () => {
       const location = yield* owner
       // Cold cache: the first read serves the bundled snapshot, and the boot-time
       // ModelsDev.refresh() lands right after it, before the plugin subscribes.
-      const source = ModelsDev.Service.of({
+      const source = ModelsDev.serviceOf({
         get: () =>
           Effect.gen(function* () {
             const data = current.snapshot
@@ -328,7 +328,7 @@ describe("ModelsDevPlugin", () => {
       const plugins = yield* Plugin.Service
       const providerID = Provider.ID.make("acme")
       const modelID = Model.ID.make("model")
-      const modelsDev = ModelsDev.Service.of({
+      const modelsDev = ModelsDev.serviceOf({
         get: () =>
           Effect.succeed([
             {
@@ -426,7 +426,7 @@ describe("ModelsDevPlugin", () => {
       ).pipe(
         Effect.provideService(
           ModelsDev.Service,
-          ModelsDev.Service.of({ get: () => Effect.succeed(snapshot), refresh: () => Effect.void }),
+          ModelsDev.serviceOf({ get: () => Effect.succeed(snapshot), refresh: () => Effect.void }),
         ),
       )
 
@@ -464,7 +464,7 @@ describe("ModelsDevPlugin", () => {
       const modelState = yield* Model.Service
       const providerID = Provider.ID.make("acme")
       const modelID = Model.ID.make("gpt-5.4")
-      const models = ModelsDev.Service.of({
+      const models = ModelsDev.serviceOf({
         get: () =>
           Effect.succeed([
             {
@@ -691,7 +691,7 @@ describe("ModelsDevPlugin", () => {
       ).pipe(
         Effect.provideService(
           ModelsDev.Service,
-          ModelsDev.Service.of({
+          ModelsDev.serviceOf({
             get: () => Effect.succeed(snapshots),
             refresh: () => Effect.void,
           }),
@@ -749,7 +749,7 @@ describe("ModelsDevPlugin", () => {
       ).pipe(
         Effect.provideService(
           ModelsDev.Service,
-          ModelsDev.Service.of({ get: () => Effect.succeed([snapshot]), refresh: () => Effect.void }),
+          ModelsDev.serviceOf({ get: () => Effect.succeed([snapshot]), refresh: () => Effect.void }),
         ),
       )
 
@@ -816,7 +816,7 @@ describe("ModelsDevPlugin", () => {
           ).pipe(
             Effect.provideService(
               ModelsDev.Service,
-              ModelsDev.Service.of({
+              ModelsDev.serviceOf({
                 get: () =>
                   Effect.succeed([
                     {
@@ -904,7 +904,7 @@ describe("ModelsDevPlugin", () => {
       ).pipe(
         Effect.provideService(
           ModelsDev.Service,
-          ModelsDev.Service.of({ get: () => Effect.succeed([snapshot]), refresh: () => Effect.void }),
+          ModelsDev.serviceOf({ get: () => Effect.succeed([snapshot]), refresh: () => Effect.void }),
         ),
       )
 
@@ -951,7 +951,7 @@ describe("ModelsDevPlugin", () => {
       ).pipe(
         Effect.provideService(
           ModelsDev.Service,
-          ModelsDev.Service.of({
+          ModelsDev.serviceOf({
             get: () => Effect.succeed(snapshots),
             refresh: () => Effect.void,
           }),
@@ -987,7 +987,7 @@ describe("ModelsDevPlugin", () => {
       ).pipe(
         Effect.provideService(
           ModelsDev.Service,
-          ModelsDev.Service.of({
+          ModelsDev.serviceOf({
             get: () =>
               Effect.succeed([
                 {

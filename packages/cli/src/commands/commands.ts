@@ -329,6 +329,11 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
     Spec.make("models", {
       description: "List all available models",
       globalFlags: ServerFlags,
+      commands: [
+        Spec.make("update", {
+          description: "Refetch the models.dev catalog and rewrite the local cache",
+        }),
+      ],
     }),
     Spec.make("stats", {
       description: "Show shareable usage statistics",

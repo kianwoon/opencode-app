@@ -1115,4 +1115,58 @@ describe("ModelsDev Service", () => {
       expect(final.calls.length).toBeGreaterThanOrEqual(1)
     }),
   )
+
+  // `opencode models update`: unlike refresh, a failure must reach the caller so
+  // the command exits non-zero, and nothing may be written before the decode
+  // succeeds. The v2 cache row is a single KV upsert, so readers never see a
+  // partially written catalog.
+  it.live("update refetches, rewrites the cache, and reports counts with provider deltas", () =>
+    Effect.gen(function* () {
+      const cache = makeCache()
+      writeCache(cache, fixture)
+      const next = JSON.stringify({ ...fixture, ...fixture2 })
+      const state = yield* Ref.make<MockState>({ ...initialState, body: next })
+
+      const result = yield* provided(
+        state,
+        cache,
+        ModelsDev.Service.use((service) => service.update()),
+      )
+
+      expect(result.previous).toEqual({ providers: 1, models: 1 })
+      expect(result.current).toEqual({ providers: 2, models: 2 })
+      expect(result.changed).toEqual([{ provider: "beta", previous: 0, current: 1 }])
+      const stored = cache.values.get(cacheKey) as { body: string; digest: string } | undefined
+      expect(stored?.body).toBe(next)
+      expect(stored?.digest).toBe(bodyDigest(next))
+    }),
+  )
+
+  it.live("update fails and leaves the existing cache untouched on an HTTP error", () =>
+    Effect.gen(function* () {
+      const cache = makeCache()
+      const before = JSON.stringify(fixture)
+      writeCache(cache, fixture)
+      const state = yield* Ref.make({ ...initialState, status: 500, body: "boom" })
+
+      const exit = yield* Effect.exit(provided(state, cache, ModelsDev.Service.use((service) => service.update())))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((cache.values.get(cacheKey) as { body: string }).body).toBe(before)
+    }),
+  )
+
+  it.live("update fails on an undecodable body without touching the cache", () =>
+    Effect.gen(function* () {
+      const cache = makeCache()
+      const before = JSON.stringify(fixture)
+      writeCache(cache, fixture)
+      const state = yield* Ref.make<MockState>({ ...initialState, body: "{ not json" })
+
+      const exit = yield* Effect.exit(provided(state, cache, ModelsDev.Service.use((service) => service.update())))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((cache.values.get(cacheKey) as { body: string }).body).toBe(before)
+    }),
+  )
 })
