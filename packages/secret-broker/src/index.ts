@@ -1,42 +1,33 @@
-// Secret Broker MVP — real OpenCode plugin hooks (no fictional ctx.shell.hook).
+// Secret Broker — real OpenCode v2 plugin (Plugin.Context domain services).
 //
-// Hook contract (packages/plugin/src/index.ts):
-//   shell.env            (input, output {env})  -> mutate output.env in place
-//   tool.execute.before  (input, output {args}) -> throw to block
-//   tool.execute.after   (input, output {title,output,metadata}) -> mutate to redact
+// Protection map (packages/plugin/src/promise/*):
+//   shell.create.before                      -> inject allowlisted .env into a child env
+//   tool.execute.before                      -> throw to block a call on a protected path
+//   tool.execute.after (completed | error)   -> redact the model-visible result
+//   session.context / session.compaction     -> redact every model-visible request
 //
-// `permission.ask` is DECLARED but DEAD (no trigger call sites) — file
-// protection is enforced through tool.execute.before instead.
+// `permission.ask` exists in neither API contract as a live trigger, so file
+// protection is enforced through `tool.execute.before` only.
 //
-// Streaming sink (P2-j): the plugin API exposes no per-chunk stream hook, so the
-// model-visible channel is covered at the FINAL-RESULT boundaries that DO exist —
-// `tool.execute.after` (success), `redactOnFailure` (thrown tools), and
-// `experimental.chat.messages.transform` (before every step + compaction). A
-// chunk-boundary-safe `StreamRedactor` already exists (redactor.ts, retain =
-// longest-1) and is proven by the "split secret across two chunks" /
-// "byte-by-byte" cases in secret-broker.test.ts; if OpenCode later adds a stream
-// hook, wrap its sink with `new StreamRedactor(broker.redactor)` with no other
-// change. Network exfiltration is explicitly out of scope (design §17).
+// Streaming sink: the plugin API exposes no per-chunk hook, so the model-visible
+// channel is covered at the FINAL-RESULT boundaries that DO exist — the tool
+// after-hook (success AND error) and the session context/compaction hooks, which
+// run before every step and before compaction. A chunk-boundary-safe
+// `StreamRedactor` already exists (redactor.ts, retain = longest-1) and is proven
+// by the "split secret across two chunks" / "byte-by-byte" cases in
+// secret-broker.test.ts; if OpenCode later adds a stream hook, wrap its sink with
+// `new StreamRedactor(broker.redactor)`. Network exfiltration is out of scope
+// (design §17).
 
 import * as path from "node:path"
 import { readFile, stat } from "node:fs/promises"
-import { Cause, Effect } from "effect"
-import type { Hooks, PluginInput } from "@opencode/plugin"
+import { Plugin } from "@opencode/plugin"
 import { Allowlist } from "./allowlist.js"
 import { audit } from "./audit.js"
 import { bootstrap } from "./bootstrap.js"
 import { parse } from "./env-loader.js"
-import { Plugin } from "./plugin.js"
 import { check, denialMessage } from "./protection.js"
 import { Redactor } from "./redactor.js"
-
-/** Minimal `errorMessage` (host `@/util/error` is not importable from a
- *  standalone package). Returns a safe, secret-free description of `error`. */
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message
-  if (error instanceof Error && error.name) return error.name
-  return String(error)
-}
 
 export type SecretBrokerOptions = {
   /** Minimum value length eligible for redaction/injection. Default 8. */
@@ -170,7 +161,7 @@ export class SecretBroker {
    *  pre-existing key in `target` is left untouched, so a user's non-secret
    *  environment wins for anything the broker does not manage). Values are
    *  allowlisted-only, so this can never inject an undeclared key. */
-  applyTo(target: Record<string, string>): void {
+  applyTo(target: Record<string, string | undefined>): void {
     for (const [key, value] of this.injected) target[key] = value
   }
 
@@ -247,80 +238,23 @@ export const REDACTION_WITHHELD =
   "[secret-broker] redaction failed; output withheld to avoid leaking secrets."
 
 /**
- * Runs `tool.execute.after` (redaction) over an arbitrary text payload and
- * returns the redacted result. Fail-closed: if redaction itself throws, the
- * withheld placeholder is returned instead of the original text.
+ * Fail-closed text redaction. If redaction itself throws, the withheld
+ * placeholder is returned instead of the original text.
  */
-export const redactErrorText = (input: {
-  plugin: Plugin.Interface
-  tool: string
-  sessionID: string
-  callID: string
-  args: unknown
-  text: string
-}): Effect.Effect<string> => {
-  const redacted = { title: "", output: input.text, metadata: {} as Record<string, unknown> }
-  return input.plugin
-    .trigger(
-      "tool.execute.after",
-      { tool: input.tool, sessionID: input.sessionID, callID: input.callID, args: input.args },
-      redacted,
-    )
-    .pipe(
-      Effect.catchCause(() =>
-        Effect.sync(() => {
-          redacted.output = REDACTION_WITHHELD
-        }),
-      ),
-      Effect.map(() => redacted.output),
-    )
+export function redactErrorText(input: { broker: SecretBroker; text: string }): string {
+  try {
+    return input.broker.redact(input.text)
+  } catch {
+    return REDACTION_WITHHELD
+  }
 }
 
-/**
- * Secret Broker, shared across every tool invocation path: `tool.execute.after`
- * (redaction) must run even when the tool THROWS, otherwise a secret embedded
- * in an error message reaches the model unredacted. Routes the error text
- * through the same after-hook, then fails with the ORIGINAL cause (identity,
- * hence RejectedError control-flow, is preserved) whose message carries the
- * redacted text. Fail-closed via {@link redactErrorText}. Interrupt-only causes
- * pass through untouched so cancellation semantics hold.
- */
-export const redactOnFailure = (input: {
-  plugin: Plugin.Interface
-  tool: string
-  sessionID: string
-  callID: string
-  args: unknown
-  cause: Cause.Cause<unknown>
-}): Effect.Effect<never, unknown> => {
-  const { cause } = input
-  if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-  const error = Cause.squash(cause)
-  const original = errorMessage(error)
-  return redactErrorText({ ...input, text: original }).pipe(
-    Effect.flatMap((output) => {
-      if (output === original) return Effect.failCause(cause)
-      if (error instanceof Error) {
-        error.message = output
-        // `Error.stack` is captured at construction and still carries the
-        // ORIGINAL message, so anything that logs this error prints the secret.
-        if (typeof error.stack === "string" && error.stack.includes(original))
-          error.stack = error.stack.replace(original, output)
-        return Effect.failCause(cause)
-      }
-      return Effect.fail(output)
-    }),
-  )
-}
-
-/**
- * Builds a fail-closed replacement for a message whose redaction threw. The
+/** Builds a fail-closed replacement for a message whose redaction threw. The
  * in-place pass may have redacted some fields before a throwing accessor aborted
  * it, so we discard the ENTIRE message rather than trust a partial result. Only
  * `id`/`role` are read back — each guarded — to keep downstream projection
- * stable; every text-bearing field is dropped.
- */
-function withheld(message: { info: unknown; parts: unknown[] }): typeof message {
+ * stable; every text-bearing field is dropped. */
+function withheld(message: unknown): unknown {
   const read = <T>(pick: () => T): T | undefined => {
     try {
       return pick()
@@ -328,94 +262,163 @@ function withheld(message: { info: unknown; parts: unknown[] }): typeof message 
       return undefined
     }
   }
-  const info = read(() => message.info) as { id?: unknown; role?: unknown } | undefined
+  const info = read(() => (message as { info?: { id?: unknown; role?: unknown } }).info)
   return {
     info: { id: read(() => info?.id), role: read(() => info?.role) },
     parts: [{ type: "text", text: REDACTION_WITHHELD }],
-  } as unknown as typeof message
-}
-
-/** Builds the plugin Hooks. Resolves a broker lazily per instance directory so
- *  a missing .env is a clean no-op and commands behave exactly as before. */
-export async function secretBrokerPlugin(
-  input: PluginInput,
-  options: SecretBrokerOptions = {},
-): Promise<Hooks> {
-  const broker = await SecretBroker.create(input.directory, options)
-
-  // The host's built-in broker yields automatically when this package is wired
-  // into plugin[] (see `internalPlugins`), so only this instance runs. The env
-  // flag still forces the built-in off without a standalone entry. No warning is
-  // needed here; loading this plugin IS the user's opt-in.
-
-  return {
-    "shell.env": async (hookInput, output) => {
-      // §25: refresh from disk immediately before the process launches.
-      await broker.reload()
-      broker.applyTo(output.env)
-      // Metadata-only audit: names + ids, never values. ONE line per spawn — a
-      // per-key line grew the only durable trace without bound.
-      const keys = broker.injectedNames()
-      if (keys.length > 0)
-        audit({ action: "inject", keys, pid: process.pid, sessionID: hookInput.sessionID, callID: hookInput.callID })
-    },
-
-    "tool.execute.before": async (hookInput, output) => {
-      const denial = check(hookInput.tool, output.args)
-      if (!denial) return
-      audit({
-        action: "block",
-        tool: denial.tool,
-        filePath: denial.filePath,
-        sessionID: hookInput.sessionID,
-        callID: hookInput.callID,
-      })
-      throw new Error(denialMessage(denial, broker.injectedNames()))
-    },
-
-    "tool.execute.after": async (hookInput, output) => {
-      // Fail-closed (spec §31): if redaction throws we must never forward the
-      // raw output. Replace with a safe placeholder instead.
-      const report = (key: string) =>
-        audit({ action: "redact", key, tool: hookInput.tool, sessionID: hookInput.sessionID, callID: hookInput.callID })
-      try {
-        if (typeof output.output === "string") output.output = broker.redact(output.output, report)
-        if (typeof output.title === "string") output.title = broker.redact(output.title, report)
-        if (output.metadata !== undefined) output.metadata = broker.redactDeep(output.metadata)
-      } catch {
-        output.output = "[secret-broker] redaction failed; output withheld to avoid leaking secrets."
-        output.title = "[secret-broker] output withheld"
-        output.metadata = undefined
-      }
-    },
-
-    // Model-visible safety net. `tool.execute.after` never runs for an ABORTED
-    // tool, yet `processor.ts` streams live `metadata.output` and, on interrupt,
-    // marks `metadata.interrupted` — which `message-v2.ts` then projects to the
-    // MODEL as a normal tool result. So a secret in the live shell/command
-    // output would reach the model unredacted. This hook is the lowest common
-    // model-facing sink: it runs BEFORE `toModelMessagesEffect` on every step
-    // (prompt.ts) and before compaction (compaction.ts), so it redacts every
-    // message part — tool output, metadata, error text and tool-call args — in
-    // place, preserving object identity. Fail-closed: if redaction throws we
-    // replace the WHOLE message with a withheld placeholder — never a partial
-    // result — rather than forward raw content.
-    "experimental.chat.messages.transform": async (_hookInput, output) => {
-      for (let index = 0; index < output.messages.length; index++) {
-        const message = output.messages[index]
-        try {
-          broker.redactInPlace(message)
-        } catch {
-          // The in-place pass may have redacted some fields before a throwing
-          // accessor aborted it, leaving a PARTIAL result. Discard the whole
-          // message (parts + info/metadata redacted-so-far) rather than forward
-          // any unredacted sibling field. Success path keeps object identity.
-          output.messages[index] = withheld(message as { info: unknown; parts: unknown[] }) as typeof message
-        }
-      }
-    },
   }
 }
+
+/** Fail-closed replacement for a system part whose redaction threw. */
+function withheldSystem(): { type: "text"; text: string } {
+  return { type: "text", text: REDACTION_WITHHELD }
+}
+
+/** Redacts every model-visible message of a request IN PLACE. The host spreads
+ *  the request (`{ ...draft, agent, tools }`) and then sends `messages`, so the
+ *  array object is shared: element assignment is visible downstream while
+ *  replacing the array is not. `system` parts are redacted the same way. */
+function redactRequest(broker: SecretBroker, request: { messages: unknown[]; system: unknown[] }): void {
+  for (let index = 0; index < request.messages.length; index++) {
+    try {
+      broker.redactInPlace(request.messages[index])
+    } catch {
+      // The in-place pass may have redacted some fields before a throwing
+      // accessor aborted it, leaving a PARTIAL result. Discard the whole message
+      // rather than forward any unredacted sibling field.
+      request.messages[index] = withheld(request.messages[index])
+    }
+  }
+  for (let index = 0; index < request.system.length; index++) {
+    try {
+      broker.redactInPlace(request.system[index])
+    } catch {
+      request.system[index] = withheldSystem()
+    }
+  }
+}
+
+/** Redacts a completed tool result IN PLACE: the host reads `result.output`,
+ *  `result.content` and `result.metadata` off this same object afterwards. */
+function redactResult(broker: SecretBroker, result: { output?: unknown; content?: unknown; metadata?: unknown }, report: (key: string) => void): void {
+  if (typeof result.output === "string") Object.assign(result, { output: broker.redact(result.output, report) })
+  const content = result.content
+  if (typeof content === "string") {
+    Object.assign(result, { content: broker.redact(content, report) })
+  } else if (Array.isArray(content)) {
+    Object.assign(result, {
+      content: content.map((part: unknown) => {
+        if (part === null || typeof part !== "object") return part
+        const record = part as { type?: unknown; text?: unknown; uri?: unknown; name?: unknown }
+        return Object.assign(part, {
+          ...(typeof record.text === "string" ? { text: broker.redact(record.text, report) } : {}),
+          ...(typeof record.uri === "string" ? { uri: broker.redact(record.uri, report) } : {}),
+          ...(typeof record.name === "string" ? { name: broker.redact(record.name, report) } : {}),
+        })
+      }),
+    })
+  }
+  if (result.metadata !== undefined) Object.assign(result, { metadata: broker.redactDeep(result.metadata) })
+}
+
+type FailurePayload = { message?: unknown; metadata?: unknown; error?: unknown }
+type FailureConstructor = new (input: {
+  message: string
+  metadata?: unknown
+  error?: unknown
+}) => FailurePayload
+
+/**
+ * Redacts a failed tool result. A Schema class (`Tool.Error`) snapshots its
+ * fields for encoding, so writing `message` in place is invisible to
+ * JSON/Schema serialization — the original text would come back out of
+ * `toJSON`. Rebuild the same class with redacted fields instead, so neither a
+ * property read nor an encode can recover the secret.
+ */
+function redactFailure(broker: SecretBroker, error: FailurePayload, report: (key: string) => void): FailurePayload {
+  const message = typeof error.message === "string" ? broker.redact(error.message, report) : error.message
+  const metadata = error.metadata === undefined ? undefined : broker.redactDeep(error.metadata)
+  // A nested defect (`Error.stack` especially) still carries the raw message, so
+  // anything that logs the error would print the secret.
+  const defect = error.error
+  if (defect instanceof Error) {
+    defect.message = broker.redact(defect.message, report)
+    if (typeof defect.stack === "string") defect.stack = broker.redact(defect.stack, report)
+  }
+  try {
+    const Rebuild = error.constructor as unknown as FailureConstructor
+    return new Rebuild({
+      message: typeof message === "string" ? message : String(message),
+      ...(metadata === undefined ? {} : { metadata }),
+      ...(defect === undefined ? {} : { error: defect }),
+    })
+  } catch {
+    return { message, metadata, error: defect }
+  }
+}
+
+function optionsOf(options: Readonly<Record<string, any>>): SecretBrokerOptions {
+  return typeof options.minLength === "number" ? { minLength: options.minLength } : {}
+}
+
+/** The v2 plugin. `setup` receives the real `Plugin.Context`, so every
+ *  protection is a registration on a host domain service — no hook map, no
+ *  compatibility shim. Registrations are disposed when the plugin unloads. */
+export const secretBrokerPlugin = Plugin.define({
+  id: "opencode.secret-broker",
+  async setup(context) {
+    const broker = await SecretBroker.create(context.location.directory, optionsOf(context.options))
+
+    const registrations = await Promise.all([
+      context.shell.hook("create.before", async (event) => {
+        // §25: refresh from disk immediately before the process launches.
+        await broker.reload()
+        broker.applyTo(event.env)
+        // Metadata-only audit: names + ids, never values. ONE line per spawn — a
+        // per-key line grew the only durable trace without bound.
+        const keys = broker.injectedNames()
+        if (keys.length > 0) audit({ action: "inject", keys, pid: process.pid })
+      }),
+
+      context.tool.hook("execute.before", (event) => {
+        const denial = check(event.tool, event.input)
+        if (!denial) return
+        audit({
+          action: "block",
+          tool: denial.tool,
+          filePath: denial.filePath,
+          sessionID: event.sessionID,
+          callID: event.id,
+        })
+        // A rejection from this hook fails the call before the tool runs.
+        throw new Error(denialMessage(denial, broker.injectedNames()))
+      }),
+
+      context.tool.hook("execute.after", (event) => {
+        const report = (key: string) =>
+          audit({ action: "redact", key, tool: event.tool, sessionID: event.sessionID, callID: event.id })
+        // Fail-closed (spec §31): if redaction throws we must never forward the
+        // raw result. Replace it with a safe placeholder instead.
+        try {
+          if (event.status === "completed") redactResult(broker, event.result, report)
+          else Object.assign(event, { error: redactFailure(broker, event.error, report) })
+        } catch {
+          if (event.status === "completed") Object.assign(event, { result: { output: REDACTION_WITHHELD } })
+          else Object.assign(event, { error: { message: REDACTION_WITHHELD } })
+        }
+      }),
+
+      // Model-visible safety net. The after-hook does not run for an ABORTED
+      // tool, yet the live metadata streams to the model, so the transcript itself
+      // is redacted before every step and before compaction — the lowest common
+      // model-facing sink. Fail-closed per message.
+      context.session.hook("context", (event) => redactRequest(broker, event)),
+      context.session.hook("compaction", (event) => redactRequest(broker, event)),
+    ])
+
+    return () => Promise.all(registrations.map((registration) => registration.dispose())).then(() => undefined)
+  },
+})
 
 export default secretBrokerPlugin
 

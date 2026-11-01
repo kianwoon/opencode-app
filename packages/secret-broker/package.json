@@ -25,7 +25,6 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@opencode/plugin": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

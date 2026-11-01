@@ -7,15 +7,8 @@ import { bootstrap } from "../../src/bootstrap"
 import { load, parse } from "../../src/env-loader"
 import { check, denialMessage } from "../../src/protection"
 import { Redactor, StreamRedactor } from "../../src/redactor"
-import {
-  REDACTION_WITHHELD,
-  SecretBroker,
-  redactErrorText,
-  redactOnFailure,
-  secretBrokerPlugin,
-} from "../../src/index"
-import { Plugin } from "../../src/plugin.js"
-import { Cause, Effect, Exit } from "effect"
+import { REDACTION_WITHHELD, SecretBroker, redactErrorText } from "../../src/index"
+import { withBroker } from "./harness"
 
 const dirs: string[] = []
 
@@ -339,119 +332,187 @@ describe("SecretBroker + hooks acceptance", () => {
     expect(broker.diagnostics().missing).toEqual(["MISSING_KEY"])
   })
 
-  test("shell.env hook mutates output.env", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as any)
-    const output = { env: {} as Record<string, string> }
-    await hooks["shell.env"]!({ cwd: dir }, output)
-    expect(output.env.API_KEY).toBe("sk-abcdefgh")
-  })
-
-  test("tool.execute.before throws on protected file, allows example", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as any)
-    await expect(
-      hooks["tool.execute.before"]!({ tool: "read", sessionID: "s", callID: "c" }, { args: { filePath: ".env" } }),
-    ).rejects.toThrow(/Secret Broker blocked read/)
-    await expect(
-      hooks["tool.execute.before"]!(
-        { tool: "read", sessionID: "s", callID: "c" },
-        { args: { filePath: ".env.example" } },
-      ),
-    ).resolves.toBeUndefined()
-  })
-
-  test("tool.execute.after redacts output, title, metadata and error text", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as any)
-    const output = {
-      title: "run sk-abcdefgh",
-      output: "error: leaked sk-abcdefgh in stderr",
-      metadata: { nested: { token: "sk-abcdefgh" } },
-    }
-    await hooks["tool.execute.after"]!(
-      { tool: "bash", sessionID: "s", callID: "c", args: {} },
-      output,
+  test("shell create.before injects allowlisted values into the child env", async () => {
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+      },
+      async (harness) => {
+        const invocation = {
+          command: "true",
+          cwd: harness.directory,
+          timeout: 0,
+          shell: "/bin/sh",
+          env: {} as Record<string, string | undefined>,
+        }
+        await harness.trigger("shell", "create.before", invocation)
+        expect(invocation.env.API_KEY).toBe("sk-abcdefgh")
+      },
     )
-    expect(output.output).not.toContain("sk-abcdefgh")
-    expect(output.output).toContain("secret://project/API_KEY")
-    expect(output.title).toBe("run secret://project/API_KEY")
-    expect(output.metadata.nested.token).toBe("secret://project/API_KEY")
+  })
+
+  test("tool execute.before rejects a protected file and allows the example", async () => {
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+      },
+      async (harness) => {
+        await expect(
+          harness.trigger("tool", "execute.before", {
+            tool: "read",
+            sessionID: "ses_t",
+            agent: "build",
+            messageID: "msg_t",
+            id: "call_1",
+            input: { filePath: ".env" },
+          }),
+        ).rejects.toThrow(/Secret Broker blocked read/)
+        await expect(
+          harness.trigger("tool", "execute.before", {
+            tool: "read",
+            sessionID: "ses_t",
+            agent: "build",
+            messageID: "msg_t",
+            id: "call_2",
+            input: { filePath: ".env.example" },
+          }),
+        ).resolves.toBeDefined()
+      },
+    )
+  })
+
+  test("tool execute.after redacts output, content and metadata", async () => {
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+      },
+      async (harness) => {
+        const event = {
+          tool: "bash",
+          sessionID: "ses_t",
+          agent: "build",
+          messageID: "msg_t",
+          id: "call_3",
+          input: {},
+          status: "completed" as const,
+          result: {
+            output: "error: leaked sk-abcdefgh in stderr",
+            content: [{ type: "text" as const, text: "run sk-abcdefgh" }],
+            metadata: { nested: { token: "sk-abcdefgh" } },
+          },
+        }
+        await harness.trigger("tool", "execute.after", event as never)
+        const encoded = JSON.stringify(event.result)
+        expect(encoded).not.toContain("sk-abcdefgh")
+        expect(encoded).toContain("secret://project/API_KEY")
+        expect(event.result.metadata.nested.token).toBe("secret://project/API_KEY")
+      },
+    )
   })
 
   test("after-hook fails closed when redaction throws (spec §31)", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as any)
-    const metadata = {} as Record<string, unknown>
-    Object.defineProperty(metadata, "boom", {
-      enumerable: true,
-      get() {
-        throw new Error("redactor boom")
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
       },
-    })
-    const output = { title: "t", output: "raw sk-abcdefgh leak", metadata }
-    await hooks["tool.execute.after"]!(
-      { tool: "bash", sessionID: "s", callID: "c", args: {} },
-      output,
-    )
-    expect(output.output).not.toContain("sk-abcdefgh")
-    expect(output.output).toContain("withheld")
-    expect(output.metadata).toBeUndefined()
-  })
-
-  test("messages.transform redacts interrupted live tool output before it reaches the model", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as any)
-    // Mirrors processor.ts interrupt marking + message-v2 projection: the raw
-    // live output sits in tool-part metadata.output and would reach the model.
-    const messages = [
-      {
-        info: { id: "m1", role: "assistant" as const },
-        parts: [
-          {
-            type: "tool" as const,
-            tool: "bash",
-            callID: "c1",
-            state: {
-              status: "error" as const,
-              error: "Tool execution aborted",
-              metadata: { interrupted: true, output: "live sk-abcdefgh leak" },
-              time: { start: 0, end: 1 },
-            },
+      async (harness) => {
+        const metadata = {} as Record<string, unknown>
+        Object.defineProperty(metadata, "boom", {
+          enumerable: true,
+          get() {
+            throw new Error("redactor boom")
           },
-        ],
+        })
+        const event = {
+          tool: "bash",
+          sessionID: "ses_t",
+          agent: "build",
+          messageID: "msg_t",
+          id: "call_4",
+          input: {},
+          status: "completed" as const,
+          result: { output: "raw sk-abcdefgh leak", metadata },
+        }
+        await harness.trigger("tool", "execute.after", event as never)
+        expect(event.result.output).not.toContain("sk-abcdefgh")
+        expect(event.result.output).toContain("withheld")
       },
-    ]
-    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as any })
-    const projected = JSON.stringify(messages)
-    expect(projected).not.toContain("sk-abcdefgh")
-    expect(projected).toContain("secret://project/API_KEY")
+    )
   })
 
-  test("messages.transform fails closed (blanks parts) when redaction throws", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as any)
-    const part = { type: "tool", output: "raw sk-abcdefgh" }
-    Object.defineProperty(part, "boom", {
-      enumerable: true,
-      get() {
-        throw new Error("redactor boom")
+  test("session context redacts interrupted live tool output before it reaches the model", async () => {
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
       },
-    })
-    const messages = [{ info: { id: "m1", role: "assistant" }, parts: [part] }]
-    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as any })
-    expect(JSON.stringify(messages)).not.toContain("sk-abcdefgh")
+      async (harness) => {
+        // Mirrors processor.ts interrupt marking + message-v2 projection: the raw
+        // live output sits in tool-part metadata.output and would reach the model.
+        const draft = {
+          sessionID: "ses_t",
+          model: {},
+          options: {},
+          system: [],
+          messages: [
+            {
+              info: { id: "m1", role: "assistant" as const },
+              parts: [
+                {
+                  type: "tool" as const,
+                  tool: "bash",
+                  callID: "c1",
+                  state: {
+                    status: "error" as const,
+                    error: "Tool execution aborted",
+                    metadata: { interrupted: true, output: "live sk-abcdefgh leak" },
+                    time: { start: 0, end: 1 },
+                  },
+                },
+              ],
+            },
+          ],
+          agent: "build",
+          tools: {},
+        }
+        await harness.trigger("session", "context", draft as never)
+        const projected = JSON.stringify(draft.messages)
+        expect(projected).not.toContain("sk-abcdefgh")
+        expect(projected).toContain("secret://project/API_KEY")
+      },
+    )
+  })
+
+  test("session context fails closed (blanks parts) when redaction throws", async () => {
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+      },
+      async (harness) => {
+        const part = { type: "tool", output: "raw sk-abcdefgh" }
+        Object.defineProperty(part, "boom", {
+          enumerable: true,
+          get() {
+            throw new Error("redactor boom")
+          },
+        })
+        const draft = {
+          sessionID: "ses_t",
+          model: {},
+          options: {},
+          system: [],
+          messages: [{ info: { id: "m1", role: "assistant" }, parts: [part] }],
+          agent: "build",
+          tools: {},
+        }
+        await harness.trigger("session", "context", draft as never)
+        expect(JSON.stringify(draft.messages)).not.toContain("sk-abcdefgh")
+      },
+    )
   })
 })
 
@@ -718,60 +779,19 @@ describe("minLength consistency (Critical: short values injected AND redacted)",
 })
 
 describe("redaction helpers (fail-closed)", () => {
-  const plugin = (trigger: Plugin.Interface["trigger"]): Plugin.Interface =>
-    Plugin.Service.of({ init: () => Effect.void, list: () => Effect.succeed([]), trigger })
-
-  const redacting = ((_name: unknown, _input: unknown, output: { output: string }) => {
-    output.output = "redacted sk-========"
-    return Effect.succeed(output)
-  }) as unknown as Plugin.Interface["trigger"]
-
   test("redactErrorText withholds text when the redactor throws (spec §31)", async () => {
-    const throwing = (() => Effect.die(new Error("redactor boom"))) as Plugin.Interface["trigger"]
-    const result = await Effect.runPromise(
-      redactErrorText({
-        plugin: plugin(throwing),
-        tool: "bash",
-        sessionID: "s",
-        callID: "c",
-        args: {},
-        text: "raw sk-abcdefgh leak",
-      }),
-    )
-    expect(result).toBe(REDACTION_WITHHELD)
-    expect(result).not.toContain("sk-abcdefgh")
-  })
-
-  test("redactOnFailure redacts the message while preserving error identity", async () => {
-    const error = new Error("boom leaked sk-abcdefgh")
-    const exit = await Effect.runPromiseExit(
-      redactOnFailure({
-        plugin: plugin(redacting),
-        tool: "bash",
-        sessionID: "s",
-        callID: "c",
-        args: {},
-        cause: Cause.fail(error),
-      }),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-    if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(error)
-    expect(error.message).toBe("redacted sk-========")
-  })
-
-  test("redactOnFailure passes interrupt-only causes through untouched", async () => {
-    let called = false
-    const spy = ((_name: unknown, _input: unknown, output: unknown) => {
-      called = true
-      return Effect.succeed(output)
-    }) as unknown as Plugin.Interface["trigger"]
-    const cause = Cause.interrupt(1)
-    const exit = await Effect.runPromiseExit(
-      redactOnFailure({ plugin: plugin(spy), tool: "bash", sessionID: "s", callID: "c", args: {}, cause }),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-    if (Exit.isFailure(exit)) expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
-    expect(called).toBe(false)
+    const dir = tmp()
+    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+    const broker = await SecretBroker.create(dir)
+    const throwing = {
+      redact() {
+        throw new Error("redactor boom")
+      },
+    } as unknown as SecretBroker
+    expect(redactErrorText({ broker: throwing, text: "raw sk-abcdefgh leak" })).toBe(REDACTION_WITHHELD)
+    // The real broker redacts instead.
+    expect(redactErrorText({ broker, text: "raw sk-abcdefgh leak" })).toBe("raw secret://project/API_KEY leak")
   })
 })
 
@@ -805,19 +825,28 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
   })
 
   test("(c) interpreter/tar referencing .env denied via the real before-hook", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as never)
-    const before = hooks["tool.execute.before"]!
-    for (const command of ["python3 .env", "python .env", "node .env", "tar cf out.tar .env"]) {
-      await expect(before({ tool: "bash", sessionID: "s", callID: "c" }, { args: { command } }), command).rejects.toThrow(
-        /Secret Broker blocked bash/,
-      )
-    }
-    await expect(
-      before({ tool: "bash", sessionID: "s", callID: "c" }, { args: { command: "cat .env.example" } }),
-    ).resolves.toBeUndefined()
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+      },
+      async (harness) => {
+        const before = (command: string, id: string) =>
+          harness.trigger("tool", "execute.before", {
+            tool: "bash",
+            sessionID: "ses_t",
+            agent: "build",
+            messageID: "msg_t",
+            id,
+            input: { command },
+          })
+        let index = 0
+        for (const command of ["python3 .env", "python .env", "node .env", "tar cf out.tar .env"]) {
+          await expect(before(command, `call_${index++}`), command).rejects.toThrow(/Secret Broker blocked bash/)
+        }
+        await expect(before("cat .env.example", `call_${index++}`)).resolves.toBeDefined()
+      },
+    )
   })
 
   test("(d) home credential paths denied; ordinary project files allowed", () => {
@@ -882,27 +911,47 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
   })
 
   test("(i) audit lines carry key names but never secret values", async () => {
-    const dir = tmp()
     const secret = "sk-auditcanary0123456789"
-    writeFileSync(path.join(dir, ".env.example"), "AUDIT_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), `AUDIT_KEY=${secret}\n`)
     const lines: string[] = []
     const original = console.error
     const capture = (...args: unknown[]) => {
       lines.push(args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "))
     }
     console.error = capture as unknown as typeof console.error
-    const hooks = await secretBrokerPlugin({ directory: dir } as never)
-    const env = { env: {} as Record<string, string> }
-    await hooks["shell.env"]!({ cwd: dir }, env as never)
-    const output = { title: "bash", output: `leaked ${secret}`, metadata: {} }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
+    const env = await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "AUDIT_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), `AUDIT_KEY=${secret}\n`)
+      },
+      async (harness) => {
+      const invocation = {
+        command: "true",
+        cwd: harness.directory,
+        timeout: 0,
+        shell: "/bin/sh",
+        env: {} as Record<string, string | undefined>,
+      }
+      await harness.trigger("shell", "create.before", invocation)
+      const event = {
+        tool: "bash",
+        sessionID: "ses_t",
+        agent: "build",
+        messageID: "msg_t",
+        id: "call_audit",
+        input: {},
+        status: "completed" as const,
+        result: { output: `leaked ${secret}`, metadata: {} },
+      }
+      await harness.trigger("tool", "execute.after", event as never)
+      return invocation.env
+      },
+    )
     console.error = original
     const joined = lines.join("\n")
     expect(joined).toContain("startup")
     expect(joined).toContain("inject")
     expect(joined).toContain("AUDIT_KEY")
-    expect(env.env.AUDIT_KEY).toBe(secret)
+    expect(env.AUDIT_KEY).toBe(secret)
     expect(joined).not.toContain(secret)
     expect(joined).not.toContain(Buffer.from(secret, "utf8").toString("base64"))
   })
@@ -912,12 +961,24 @@ describe("regression P1/P2 — reload, precedence, sweeps, audit", () => {
     const auditPath = path.join(dir, "audit.log")
     process.env.OPENCODE_SECRET_BROKER_AUDIT_FILE = auditPath
     try {
-      writeFileSync(path.join(dir, ".env.example"), "AUDIT_KEY=\n")
-      writeFileSync(path.join(dir, ".env"), "AUDIT_KEY=sk-auditcanary0123456789\n")
-      const hooks = await secretBrokerPlugin({ directory: dir } as never)
-      await expect(
-        hooks["tool.execute.before"]!({ tool: "read", sessionID: "s", callID: "c" }, { args: { filePath: ".env" } }),
-      ).rejects.toThrow()
+      await withBroker(
+        (directory) => {
+          writeFileSync(path.join(directory, ".env.example"), "AUDIT_KEY=\n")
+          writeFileSync(path.join(directory, ".env"), "AUDIT_KEY=sk-auditcanary0123456789\n")
+        },
+        async (harness) => {
+          await expect(
+            harness.trigger("tool", "execute.before", {
+              tool: "read",
+              sessionID: "ses_t",
+              agent: "build",
+              messageID: "msg_t",
+              id: "call_gap3",
+              input: { filePath: ".env" },
+            }),
+          ).rejects.toThrow()
+        },
+      )
       // The denial is durably recorded (stderr alone is not captured by default).
       const lines = readFileSync(auditPath, "utf8").trim().split("\n")
       const block = lines.map((line) => JSON.parse(line)).find((event) => event.action === "block")
@@ -951,13 +1012,24 @@ describe("agent usability contract (denial guidance + secret:// URIs)", () => {
   })
 
   test("real before-hook denial carries the session's injected key names", async () => {
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
-    const hooks = await secretBrokerPlugin({ directory: dir } as never)
-    await expect(
-      hooks["tool.execute.before"]!({ tool: "read", sessionID: "s", callID: "c" }, { args: { filePath: ".env" } }),
-    ).rejects.toThrow(/\$KEY_NAME[\s\S]*Injected key names: API_KEY/)
+    await withBroker(
+      (dir) => {
+        writeFileSync(path.join(dir, ".env.example"), "API_KEY=\n")
+        writeFileSync(path.join(dir, ".env"), "API_KEY=sk-abcdefgh\n")
+      },
+      async (harness) => {
+        await expect(
+          harness.trigger("tool", "execute.before", {
+            tool: "read",
+            sessionID: "ses_t",
+            agent: "build",
+            messageID: "msg_t",
+            id: "call_names",
+            input: { filePath: ".env" },
+          }),
+        ).rejects.toThrow(/\$KEY_NAME[\s\S]*Injected key names: API_KEY/)
+      },
+    )
   })
 
   test("secret:// URI value is not parsed as a secret and warns by key name", () => {

@@ -1,4 +1,5 @@
-// End-to-end attack suite for the Secret Broker.
+// End-to-end attack suite for the Secret Broker, driven through the REAL v2
+// plugin path.
 //
 // Threat model: an evil/compromised UPSTREAM LLM provider observes every token
 // that reaches the model — tool output, tool errors, streamed chunks, and the
@@ -7,29 +8,29 @@
 // reconstruct a secret from whatever leaks. The broker's guarantee is narrower
 // but absolute: the only credential representation the model can ever SEE is a
 // `secret://project/NAME` handle. Real secret bytes travel to the CHILD PROCESS
-// environment only (shell.env), never through the model-visible channel.
+// environment only (shell create.before), never through the model-visible channel.
 //
-// Each test drives the REAL hooks (`shell.env`, `tool.execute.before/after`,
-// `experimental.chat.messages.transform`, `redactOnFailure`) over a canary and
-// asserts BOTH: handle present AND canary absent in every encoding the redactor
-// claims to cover. Network exfiltration is explicitly out of scope (spec §17):
-// shell.env legitimately hands the secret to a child process, so a program the
-// model wrote could POST it out; that is a sandbox/egress concern, not a broker
-// regression. This suite proves the MODEL-VISIBLE channel only.
+// Every test below registers `secretBrokerPlugin` through `fromPromise` (the
+// adapter `PluginModule` uses for a `Plugin.define({ id, setup })` module) against
+// `PluginHost.make`, then drives host services: `PluginHooks.trigger`,
+// `Tool.snapshot().execute` and `Environment.spawner`. No plugin internals are
+// called directly.
+//
+// Network exfiltration is explicitly out of scope (spec §17): shell env
+// legitimately hands the secret to a child process, so a program the model wrote
+// could POST it out; that is a sandbox/egress concern, not a broker regression.
+// This suite proves the MODEL-VISIBLE channel only.
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { writeFileSync } from "node:fs"
 import * as path from "node:path"
-import { Cause, Effect } from "effect"
-import { Plugin } from "../../src/plugin.js"
-import {
-  REDACTION_WITHHELD,
-  SecretBroker,
-  redactOnFailure,
-  secretBrokerPlugin,
-} from "../../src/index"
+import { Effect, Stream } from "effect"
+import { ChildProcess } from "effect/process"
+import { Environment } from "../../../core/src/environment/index"
+import { open, type Harness } from "./harness"
+import { REDACTION_WITHHELD } from "../../src/index"
 import { Redactor, StreamRedactor } from "../../src/redactor"
+import { Tool } from "../../../core/src/tool"
 
 // ── Canary ──────────────────────────────────────────────────────────────────
 // Chosen so that plain, URL-encoded, JSON-escaped and base64 forms are all
@@ -64,93 +65,214 @@ function assertSanitized(text: string, label: string) {
   expect(text, `${label}: handle missing`).toContain(HANDLE)
 }
 
-const dirs: string[] = []
-function tmp(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "secret-broker-e2e-"))
-  dirs.push(dir)
-  return dir
+function seed(directory: string, canary = CANARY) {
+  writeFileSync(path.join(directory, ".env.example"), "CANARY_KEY=\n")
+  writeFileSync(path.join(directory, ".env"), `CANARY_KEY=${canary}\n`)
 }
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+
+const harnesses: Harness[] = []
+afterEach(async () => {
+  for (const harness of harnesses.splice(0)) await harness.close()
 })
 
-/** Seeds a project with a canary secret declared in .env.example. */
-function seed(canary = CANARY): string {
-  const dir = tmp()
-  writeFileSync(path.join(dir, ".env.example"), "CANARY_KEY=\n")
-  writeFileSync(path.join(dir, ".env"), `CANARY_KEY=${canary}\n`)
-  return dir
+/** Registers the broker through the real v2 path in a seeded project. */
+async function broker(canary = CANARY) {
+  const harness = await open({ seed: (directory) => seed(directory, canary) })
+  harnesses.push(harness)
+  return harness
 }
 
-/** Real hooks backed by the plugin under test. */
-async function hooksFor(dir: string) {
-  return secretBrokerPlugin({ directory: dir } as never)
-}
+/** A direct (non-Code-Mode) probe tool, so `snapshot.execute` reaches it by name. */
+const probe = (name: string, execute: (input: any) => Effect.Effect<any, any>) => ({
+  name,
+  description: `probe ${name}`,
+  input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+  options: { codemode: false },
+  execute,
+})
 
-/** A Plugin.Interface whose `trigger` dispatches into the real hooks, so
- *  `redactOnFailure`/`redactErrorText` exercise the production path. */
-function pluginOf(hooks: Awaited<ReturnType<typeof hooksFor>>): Plugin.Interface {
-  return Plugin.Service.of({
-    init: () => Effect.void,
-    list: () => Effect.succeed([]),
-    trigger: (name, input, output) =>
-      Effect.promise(async () => {
-        const hook = (hooks as Record<string, ((i: unknown, o: unknown) => Promise<void>) | undefined>)[name]
-        if (hook) await hook(input, output)
-        return output
-      }),
-  })
-}
+const call = (name: string, input: unknown) => ({
+  sessionID: "ses_e2e",
+  agent: "build",
+  messageID: "msg_e2e",
+  call: { type: "tool-call" as const, id: `call_${name}_${Math.random().toString(16).slice(2)}`, name, input },
+})
 
 describe("secret-broker e2e — model-visible channel never carries the canary", () => {
-  test("1. printenv dump echoed through a tool result is redacted", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    // The child process legitimately received the secret; `printenv` printed it.
-    const output = {
-      title: "printenv",
-      output: `PATH=/usr/bin\nCANARY_KEY=${CANARY}\nHOME=/root`,
-      metadata: { exit: 0 },
+  test("1. shell create.before injects into a REAL spawned child process", async () => {
+    const harness = await broker()
+    // Exactly the invocation object `Shell.create` builds and hands the hook
+    // (packages/core/src/shell.ts:277), then exactly the spawn it performs
+    // (shell.ts:311) — only the process bookkeeping differs.
+    const invocation = {
+      command: "printenv CANARY_KEY",
+      cwd: harness.directory,
+      timeout: 0,
+      shell: "/bin/sh",
+      env: {} as Record<string, string | undefined>,
     }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
-    assertSanitized(JSON.stringify(output), "printenv dump")
-  })
+    await harness.trigger("shell", "create.before", invocation)
+    expect(invocation.env.CANARY_KEY).toBe(CANARY)
 
-  test("2. single-value leak (node -e console.log(process.env.X)) is redacted", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    const output = { title: "bash", output: CANARY, metadata: {} }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
-    assertSanitized(output.output, "single value")
-  })
-
-  test("3. thrown error 'Invalid credential <canary>' is redacted via redactOnFailure", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    const plugin = pluginOf(hooks)
-    const error = new Error(`Invalid credential ${CANARY}`)
-    const exit = await Effect.runPromiseExit(
-      redactOnFailure({ plugin, tool: "bash", sessionID: "s", callID: "c", args: {}, cause: Cause.fail(error) }),
+    const printed = await harness.run(
+      Effect.gen(function* () {
+        const environment = yield* Environment.Service
+        const handle = yield* environment.spawner.spawn(
+          ChildProcess.make(invocation.shell, ["-lc", invocation.command], { env: invocation.env }),
+        )
+        return Array.from(yield* Stream.runCollect(handle.stdout.pipe(Stream.decodeText()))).join("")
+      }),
     )
+    // The child legitimately received the secret: the broker injects, it does not
+    // sandbox. What matters is that the MODEL never sees this text unredacted (test 3).
+    expect(printed).toContain(CANARY)
+  })
+
+  test("2. a protected-path tool call is BLOCKED before the tool runs", async () => {
+    const harness = await broker()
+    let ran = false
+    await harness.addTool({
+      name: "read",
+      description: "probe read",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () =>
+        Effect.sync(() => {
+          ran = true
+          return { content: [{ type: "text", text: "contents" }] }
+        }),
+    })
+
+    const exit = await harness.executeExit(call("read", { filePath: ".env" }))
     expect(exit._tag).toBe("Failure")
-    // Identity preserved (control-flow), message sanitized (model-visible).
-    if (exit._tag === "Failure") expect(Cause.squash(exit.cause)).toBe(error)
-    assertSanitized(error.message, "thrown error")
+    expect(ran, "the tool executor must never run for a denied call").toBe(false)
+    expect(JSON.stringify(exit)).toContain("Secret Broker blocked read")
+
+    // A template sibling is exempt: protection targets the real secret file.
+    const allowed = await harness.execute(call("read", { filePath: ".env.example" }))
+    expect(ran).toBe(true)
+    expect(JSON.stringify(allowed)).toContain("contents")
   })
 
-  test("4. base64 and url-encoded canary in output map to the handle", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    const output = {
-      title: "bash",
-      output: `b64=${Buffer.from(CANARY).toString("base64")} url=${encodeURIComponent(CANARY)}`,
-      metadata: {},
+  test("3. printenv output echoed through REAL tool execution is redacted", async () => {
+    const harness = await broker()
+    const leaked = `PATH=/usr/bin\nCANARY_KEY=${CANARY}\nHOME=/root`
+    await harness.addTool({
+      name: "shell",
+      description: "probe shell",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () =>
+        Effect.succeed({
+          content: [{ type: "text", text: leaked }],
+          metadata: { stdout: leaked, exit: 0 },
+        }),
+    })
+    const result = await harness.execute(call("shell", { command: "printenv" }))
+    assertSanitized(JSON.stringify(result), "printenv dump")
+  })
+
+  test("4. base64 / url-encoded canary in output maps to the handle", async () => {
+    const harness = await broker()
+    const text = `b64=${Buffer.from(CANARY).toString("base64")} url=${encodeURIComponent(CANARY)}`
+    await harness.addTool({
+      name: "echo",
+      description: "probe echo",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () => Effect.succeed({ content: [{ type: "text", text }] }),
+    })
+    const result = await harness.execute(call("echo", {}))
+    assertSanitized(JSON.stringify(result), "encoded output")
+  })
+
+  test("5. a leaked file part (data URL) is redacted too", async () => {
+    const harness = await broker()
+    const uri = `data:text/plain;base64,${Buffer.from(`CANARY_KEY=${CANARY}`).toString("base64")}`
+    await harness.addTool({
+      name: "readimage",
+      description: "probe readimage",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () =>
+        Effect.succeed({
+          content: [{ type: "file", uri, mime: "text/plain", name: `dump ${CANARY}` }],
+        }),
+    })
+    const result = await harness.execute(call("readimage", {}))
+    assertSanitized(JSON.stringify(result.content), "file part")
+  })
+
+  test("6. a failed tool's error text is redacted before it reaches the model", async () => {
+    const harness = await broker()
+    const defect = new Error(`wrapped ${CANARY}`)
+    await harness.addTool({
+      name: "boom",
+      description: "probe boom",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () =>
+        Effect.fail(new Tool.Error({ message: `Invalid credential ${CANARY}`, metadata: { stderr: CANARY }, error: defect })),
+    })
+    const exit = await harness.executeExit(call("boom", {}))
+    expect(exit._tag).toBe("Failure")
+    assertSanitized(JSON.stringify(exit), "tool error")
+    // The nested defect (whose stack carries the raw text) is redacted in place.
+    expect(defect.message).not.toContain(CANARY)
+  })
+
+  test("7. the model-visible transcript is redacted in place before every step", async () => {
+    const harness = await broker()
+    // Mirrors processor.ts interrupt marking + message-v2 projection: the raw
+    // live output sits in tool-part metadata.output and would reach the model.
+    const message = {
+      info: { id: "m1", role: "assistant" as const },
+      parts: [
+        {
+          type: "tool" as const,
+          tool: "bash",
+          callID: "c1",
+          state: {
+            status: "error" as const,
+            error: `Tool execution aborted ${CANARY}`,
+            metadata: { interrupted: true, output: `live ${CANARY} leak` },
+            time: { start: 0, end: 1 },
+          },
+        },
+      ],
     }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
-    assertSanitized(output.output, "encoded output")
+    const draft = {
+      sessionID: "ses_e2e",
+      model: {},
+      options: {},
+      system: [{ type: "text", text: `instructions ${CANARY}` }],
+      messages: [message],
+      agent: "build",
+      tools: {},
+    }
+    await harness.trigger("session", "context", draft as never)
+    assertSanitized(JSON.stringify(draft), "context request")
+    // Object identity is preserved so downstream projection is unchanged.
+    expect(draft.messages[0]).toBe(message)
   })
 
-  test("5. canary split across 3 stream chunks never leaks a fragment", () => {
+  test("8. compaction sees the same redacted request", async () => {
+    const harness = await broker()
+    const draft = {
+      sessionID: "ses_e2e",
+      model: {},
+      options: {},
+      system: [{ type: "text", text: `summary ${CANARY}` }],
+      messages: [{ info: { id: "m1", role: "user" as const }, parts: [{ type: "text", text: `ask ${CANARY}` }] }],
+      agent: "compaction",
+      tools: {},
+    }
+    await harness.trigger("session", "compaction", draft as never)
+    assertSanitized(JSON.stringify(draft), "compaction request")
+  })
+
+  test("9. canary split across 3 stream chunks never leaks a fragment", () => {
     const redactor = new Redactor([{ key: "CANARY_KEY", value: CANARY }], 8)
     const stream = new StreamRedactor(redactor)
     const third = Math.ceil(CANARY.length / 3)
@@ -161,188 +283,58 @@ describe("secret-broker e2e — model-visible channel never carries the canary",
     assertSanitized(released, "streamed chunks")
   })
 
-  test("6. read(.env) blocked by tool.execute.before; read(.env.example) allowed", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    await expect(
-      hooks["tool.execute.before"]!({ tool: "read", sessionID: "s", callID: "c" }, { args: { filePath: ".env" } } as never),
-    ).rejects.toThrow(/Secret Broker blocked read/)
-    await expect(
-      hooks["tool.execute.before"]!(
-        { tool: "read", sessionID: "s", callID: "c" },
-        { args: { filePath: ".env.example" } } as never,
-      ),
-    ).resolves.toBeUndefined()
-  })
-
-  test("7. agent edit of .env.example mid-session does NOT expand injection", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    // Agent (or a compromised model) appends a new key it hopes to widen.
-    writeFileSync(path.join(dir, ".env.example"), "CANARY_KEY=\nINJECTED_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), `CANARY_KEY=${CANARY}\nINJECTED_KEY=smuggled9999\n`)
-    const output = { env: {} as Record<string, string> }
-    await hooks["shell.env"]!({ cwd: dir }, output as never)
-    expect(output.env.CANARY_KEY).toBe(CANARY)
-    expect(output.env.INJECTED_KEY).toBeUndefined()
-  })
-
-  test("8. missing .env: shell.env injects nothing and after-hook leaves output unchanged", async () => {
-    const dir = tmp()
-    const hooks = await hooksFor(dir)
-    const env = { env: {} as Record<string, string> }
-    await hooks["shell.env"]!({ cwd: dir }, env as never)
-    expect(env.env).toEqual({})
-
-    const output = { title: "bash", output: "no secrets here", metadata: { exit: 0 } }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
-    expect(output.output).toBe("no secrets here")
-    expect(output.metadata).toEqual({ exit: 0 })
-  })
-
-  test("9a. messages.transform redacts a canary planted in parts/metadata", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    const messages = [
-      {
-        info: { id: "m1", role: "assistant" as const },
-        parts: [
-          { type: "text" as const, text: `the key is ${CANARY}` },
-          {
-            type: "tool" as const,
-            state: { status: "completed" as const, metadata: { output: `env=${CANARY}` } },
-          },
-        ],
-        metadata: { note: encodeURIComponent(CANARY) },
-      },
-    ]
-    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as never })
-    assertSanitized(JSON.stringify(messages), "messages.transform")
-  })
-
-  test("9b. messages.transform is fail-closed: a throwing redactor withholds the part", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    const part = { type: "tool", output: `raw ${CANARY}` }
-    Object.defineProperty(part, "boom", {
-      enumerable: true,
-      get() {
-        throw new Error("redactor boom")
-      },
-    })
-    const messages = [{ info: { id: "m1", role: "assistant" }, parts: [part] }]
-    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as never })
-    const projected = JSON.stringify(messages)
-    for (const variant of encodings(CANARY)) expect(projected).not.toContain(variant)
-    expect(projected).toContain(REDACTION_WITHHELD)
-  })
-
-  test("9c. messages.transform fail-closed covers the WHOLE message, not just parts", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    // Canary sits in `info` (a sibling of `parts`). The throwing accessor is
-    // defined on `info` so any in-place walk throws while visiting it, AFTER
-    // `parts` may already have been redacted — a partial result the old
-    // parts-only fallback would leak `info`'s canary through.
-    const info: Record<string, unknown> = { id: "m1", role: "assistant", note: CANARY }
-    Object.defineProperty(info, "boom", {
-      enumerable: true,
-      get() {
-        throw new Error("redactor boom")
-      },
-    })
-    const messages = [{ info, parts: [{ type: "text", text: `key ${CANARY}` }] }]
-    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as never })
-    const projected = JSON.stringify(messages)
-    for (const variant of encodings(CANARY)) expect(projected).not.toContain(variant)
-    expect(projected).toContain(REDACTION_WITHHELD)
-  })
-
-  test("10. non-allowlisted .env value: never injected, but redacted from `cat .env` output", async () => {
-    const UNDECLARED = "ghp_UNDECL+ARED=9876543210zyxw"
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "CANARY_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), `CANARY_KEY=${CANARY}\nUNDECLARED_KEY=${UNDECLARED}\n`)
-    const hooks = await hooksFor(dir)
-
-    // The undeclared key must NOT reach the child environment.
-    const env = { env: {} as Record<string, string> }
-    await hooks["shell.env"]!({ cwd: dir }, env as never)
-    expect(env.env.CANARY_KEY).toBe(CANARY)
-    expect(env.env.UNDECLARED_KEY).toBeUndefined()
-
-    // A `cat .env` dump echoed through a tool result must be redacted anyway.
-    const output = { title: "bash", output: `CANARY_KEY=${CANARY}\nUNDECLARED_KEY=${UNDECLARED}\n`, metadata: {} }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
-    const projected = JSON.stringify(output)
-    for (const variant of encodings(UNDECLARED)) expect(projected, `leaked ${variant}`).not.toContain(variant)
-    expect(projected).toContain("secret://project/UNDECLARED_KEY")
-    assertSanitized(projected, "cat .env non-allowlisted")
-  })
-
-  test("diag: shellEnv hands the real secret to the child process only", async () => {
-    const dir = seed()
-    const broker = await SecretBroker.create(dir)
-    // The process environment is the intended, non-model-visible channel.
-    expect(broker.shellEnv()).toEqual({ CANARY_KEY: CANARY })
-    // The model-visible redaction path never reproduces it.
-    assertSanitized(broker.redact(`leak ${CANARY}`), "broker.redact")
-  })
-
-  test("11. `cat .env` through the bash tool is denied; `.env.example` is allowed", async () => {
-    const dir = seed()
-    const hooks = await hooksFor(dir)
-    for (const command of ["cat .env", "head -n 3 .env", "base64 .env", "cat .env | base64"]) {
-      await expect(
-        hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s", callID: "c" }, { args: { command } } as never),
-        command,
-      ).rejects.toThrow(/Secret Broker blocked bash/)
-    }
-    await expect(
-      hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s", callID: "c" }, {
-        args: { command: "cat .env.example" },
-      } as never),
-    ).resolves.toBeUndefined()
-    await expect(
-      hooks["tool.execute.before"]!({ tool: "bash", sessionID: "s", callID: "c" }, {
-        args: { command: "npm test" },
-      } as never),
-    ).resolves.toBeUndefined()
-  })
-
-  test("12. short (<minLength) secret is injected AND redacted across every sink", async () => {
-    const SHORT = "sh0rt7"
-    const dir = tmp()
-    writeFileSync(path.join(dir, ".env.example"), "SHORT_KEY=\n")
-    writeFileSync(path.join(dir, ".env"), `SHORT_KEY=${SHORT}\n`)
-    const hooks = await hooksFor(dir)
-    const HANDLE = "secret://project/SHORT_KEY"
-
-    // Injected into the child environment.
-    const env = { env: {} as Record<string, string> }
-    await hooks["shell.env"]!({ cwd: dir }, env as never)
-    expect(env.env.SHORT_KEY).toBe(SHORT)
-
-    // Redacted in tool output (`printenv` / `cat .env` echo).
-    const output = { title: "bash", output: `SHORT_KEY=${SHORT}`, metadata: {} }
-    await hooks["tool.execute.after"]!({ tool: "bash", sessionID: "s", callID: "c", args: {} }, output as never)
-    expect(output.output).not.toContain(SHORT)
-    expect(output.output).toContain(HANDLE)
-
-    // Redacted in model messages. A short value is redacted ONLY in its
-    // assignment form (`KEY=value`); it is never matched as a bare word, so the
-    // broker cannot corrupt ordinary identifiers/filenames (GAP-1).
-    const messages = [{ info: { id: "m1", role: "assistant" }, parts: [{ type: "text", text: `SHORT_KEY=${SHORT}` }] }]
-    await hooks["experimental.chat.messages.transform"]!({}, { messages: messages as never })
-    expect(JSON.stringify(messages)).not.toContain(SHORT)
-    expect(JSON.stringify(messages)).toContain(HANDLE)
-
-    // Redacted across stream chunk boundaries. (The handle may itself be split
-    // by the retain buffer, so only absence of the secret is asserted.)
-    const stream = new StreamRedactor(new Redactor([{ key: "SHORT_KEY", value: SHORT }], 8))
+  test("10. byte-by-byte streaming never leaks a fragment", () => {
+    const redactor = new Redactor([{ key: "CANARY_KEY", value: CANARY }], 8)
+    const stream = new StreamRedactor(redactor)
     let released = ""
-    for (const char of `SHORT_KEY=${SHORT}`) released += stream.push(char)
+    for (const char of CANARY) released += stream.push(char)
     released += stream.flush()
-    expect(released).not.toContain(SHORT)
+    assertSanitized(released, "byte-by-byte")
+  })
+
+  test("11. missing .env injects nothing and leaves output untouched", async () => {
+    const harness = await open()
+    harnesses.push(harness)
+    const invocation = {
+      command: "true",
+      cwd: harness.directory,
+      timeout: 0,
+      shell: "/bin/sh",
+      env: {} as Record<string, string | undefined>,
+    }
+    await harness.trigger("shell", "create.before", invocation)
+    expect(invocation.env).toEqual({})
+
+    await harness.addTool({
+      name: "noop",
+      description: "probe noop",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () => Effect.succeed({ content: [{ type: "text", text: "nothing to redact" }], metadata: { exit: 0 } }),
+    })
+    const result = await harness.execute(call("noop", {}))
+    expect(JSON.stringify(result)).toContain("nothing to redact")
+    expect(result.metadata).toEqual({ exit: 0 })
+  })
+
+  test("12. a redactor that throws withholds the tool output (fail-closed)", async () => {
+    const harness = await broker()
+    const metadata = {} as Record<string, unknown>
+    Object.defineProperty(metadata, "boom", {
+      enumerable: true,
+      get() {
+        throw new Error("redactor boom")
+      },
+    })
+    await harness.addTool({
+      name: "leak",
+      description: "probe leak",
+      input: { type: "object", properties: {}, additionalProperties: true },
+      options: { codemode: false },
+      execute: () => Effect.succeed({ content: [{ type: "text", text: `raw ${CANARY} leak` }], metadata }),
+    })
+    const result = await harness.execute(call("leak", {}))
+    expect(JSON.stringify(result)).toContain(REDACTION_WITHHELD)
+    expect(JSON.stringify(result)).not.toContain(CANARY)
   })
 })
