@@ -1,3 +1,5 @@
+export * as JevAskTool from "./jev-ask.js"
+
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import { Effect, Schema, SchemaGetter, SchemaIssue } from "effect"

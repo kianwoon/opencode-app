@@ -1,3 +1,5 @@
+export * as UiNavTool from "./ui-nav.js"
+
 import { spawnSync } from "child_process"
 import { homedir } from "os"
 import path from "path"

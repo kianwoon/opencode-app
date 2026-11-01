@@ -1,3 +1,5 @@
+export * as CuaBatchTool from "./cua-batch.js"
+
 import type { Context } from "@opencode/plugin/effect/plugin"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { Mcp } from "../mcp"

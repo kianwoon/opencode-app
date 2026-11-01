@@ -1,3 +1,5 @@
+export * as JevRankTool from "./jev-rank.js"
+
 import { Effect, Schema } from "effect"
 import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import { jevKey } from "../jev/controller"

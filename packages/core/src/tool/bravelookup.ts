@@ -1,3 +1,5 @@
+export * as BravelookupTool from "./bravelookup.js"
+
 import { spawn, spawnSync } from "child_process"
 import { mkdirSync } from "fs"
 import { homedir } from "os"

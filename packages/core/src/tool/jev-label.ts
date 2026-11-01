@@ -1,3 +1,5 @@
+export * as JevLabelTool from "./jev-label.js"
+
 import { Effect, Schema } from "effect"
 import { homedir } from "node:os"
 import { join } from "node:path"

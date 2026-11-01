@@ -59,6 +59,8 @@ import { Permission } from "../permission.js"
 import { Reference } from "../reference.js"
 import { WebSearch } from "../websearch.js"
 import { Ripgrep } from "../ripgrep.js"
+import { FileSystemSearch } from "../filesystem/search.js"
+import { Symbols } from "../repo/symbols.js"
 import { Schedule } from "../schedule.js"
 import { Session } from "../session.js"
 import { SessionCompaction } from "../session/compaction.js"
@@ -76,6 +78,17 @@ import { EditTool } from "../tool/plugin/edit.js"
 import { GlobTool } from "../tool/plugin/glob.js"
 import { GrepTool } from "../tool/plugin/grep.js"
 import { ImageGenerateTool } from "../tool/plugin/image-generate.js"
+import { JevAcceptTool } from "../tool/jev-accept.js"
+import { JevAskTool } from "../tool/jev-ask.js"
+import { JevDecideTool } from "../tool/jev-decide.js"
+import { JevLabelTool } from "../tool/jev-label.js"
+import { JevRankTool } from "../tool/jev-rank.js"
+import { BravelookupTool } from "../tool/bravelookup.js"
+import { CuaBatchTool } from "../tool/cua-batch.js"
+import { RepoMapTool } from "../tool/repomap.js"
+import { SymbolsTool } from "../tool/symbols.js"
+import { ToolSearchTool } from "../tool/tool-search.js"
+import { UiNavTool } from "../tool/ui-nav.js"
 import { McpResourceTools } from "../tool/plugin/mcp-resource.js"
 import { OpenCodeTools } from "../tool/plugin/opencode.js"
 import { QuestionTool } from "../tool/plugin/question.js"
@@ -150,6 +163,8 @@ const services = [
   Reference.Service,
   WebSearch.Service,
   Ripgrep.Service,
+  FileSystemSearch.Service,
+  Symbols.Service,
   Schedule.Service,
   Session.Service,
   SessionCompaction.Service,
@@ -207,6 +222,8 @@ export const requirements = LayerNode.group([
   Reference.node,
   WebSearch.node,
   Ripgrep.node,
+  FileSystemSearch.node,
+  Symbols.node,
   Schedule.node,
   Session.node,
   SessionCompaction.node,
@@ -253,6 +270,17 @@ const pre = [
   GlobTool.Plugin,
   GrepTool.Plugin,
   ImageGenerateTool.Plugin,
+  JevAskTool.Plugin,
+  JevAcceptTool.Plugin,
+  JevRankTool.Plugin,
+  JevLabelTool.Plugin,
+  JevDecideTool.Plugin,
+  SymbolsTool.Plugin,
+  BravelookupTool.Plugin,
+  CuaBatchTool.Plugin,
+  UiNavTool.Plugin,
+  ToolSearchTool.Plugin,
+  RepoMapTool.Plugin,
   OpenCodeTools.Plugin,
   McpResourceTools.Plugin,
   QuestionTool.Plugin,
