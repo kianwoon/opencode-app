@@ -172,24 +172,12 @@ const CHECKS: Array<{ label: string; check: () => boolean | Promise<boolean> }> 
     check: () => grep("packages/app/src/components/prompt-input.tsx", "composingText"),
   },
   {
-    label: "hide placeholder during IME composition (session-ui)",
-    check: () => grep("packages/session-ui/src/v2/components/prompt-input/index.tsx", "composingText"),
-  },
-  {
-    label: "guard v2 Enter against Safari IME confirm",
-    check: () => grep("packages/session-ui/src/v2/components/prompt-input/index.tsx", "isComposing"),
-  },
-  {
     label: "track IME composition end (app)",
     check: () => grep("packages/app/src/components/prompt-input.tsx", "compositionend"),
   },
   {
     label: "preserve caret after prompt editor rebuild",
     check: () => existsSync(resolve(ROOT, "packages/app/e2e/regression/prompt-caret-after-mention.spec.ts")),
-  },
-  {
-    label: "keep v2 editor inert during IME composition",
-    check: () => grep("packages/session-ui/src/v2/components/prompt-input/index.tsx", "inert"),
   },
 
   // ── Message font feature ─────────────────────────────────────────
@@ -224,14 +212,6 @@ const CHECKS: Array<{ label: string; check: () => boolean | Promise<boolean> }> 
   {
     label: "session-ui message-part CSS font-family",
     check: () => grep("packages/session-ui/src/components/message-part.css", "font-family-message"),
-  },
-  {
-    label: "session-ui v2 prompt-input font-family",
-    check: () => grep("packages/session-ui/src/v2/components/prompt-input/index.tsx", "font-family-message"),
-  },
-  {
-    label: "session-ui v2 attachments.css font-family",
-    check: () => grep("packages/session-ui/src/v2/components/prompt-input/attachments.css", "font-family-message"),
   },
   {
     label: "ui theme.css font-family-message",

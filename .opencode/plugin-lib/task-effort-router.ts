@@ -1,5 +1,5 @@
-import type { Plugin } from "@opencode-ai/plugin"
-import { tool } from "@opencode-ai/plugin"
+import { Schema } from "effect"
+import { defineLegacyPlugin, type LegacyPlugin } from "./legacy-hooks-adapter.ts"
 import {
   classifyNoul,
   classifyScores,
@@ -679,7 +679,11 @@ export function adoptDetachedVerdict(
   return adoptJevTier(sessionID, result, cfg, wasDefinitive, expected)
 }
 
-export const TaskEffortRouterPlugin: Plugin = async (_input) => {
+/** One Effect schema field as the StandardSchemaV1 view a v1 `args` record carried. */
+const legacyField = (schema: Parameters<typeof Schema.toStandardSchemaV1>[0]) =>
+  Schema.toStandardJSONSchemaV1(Schema.toStandardSchemaV1(schema))
+
+export const TaskEffortRouterPlugin: LegacyPlugin = async (_input) => {
   return {
     "chat.message": async (input, output) => {
       // New user message = new task boundary: re-assess and reset effort.
@@ -886,30 +890,37 @@ export const TaskEffortRouterPlugin: Plugin = async (_input) => {
     },
 
     tool: {
-      request_effort: tool({
+      request_effort: {
         description:
           "Request higher reasoning effort for this task. Call ONLY when the work is clearly harder than expected and needs deeper reasoning. Effort is monotonic (never decreases) and capped per task.",
+        // v1 fields were zod; the adapter builds the v2 input schema from each
+        // field's StandardSchemaV1 view. Effect schemas expose that view only
+        // through conversion, which also attaches the JSON Schema projection.
         args: {
-          level: tool.schema.enum(["medium", "high"]).optional().describe("Target effort level. Defaults to high."),
-          reason: tool.schema.string().describe("One short sentence: why deeper reasoning is needed."),
+          level: legacyField(
+            Schema.optional(Schema.Literals(["medium", "high"])).annotate({
+              description: "Target effort level. Defaults to high.",
+            }),
+          ),
+          reason: legacyField(
+            Schema.String.annotate({ description: "One short sentence: why deeper reasoning is needed." }),
+          ),
         },
         execute: async (args, ctx) => {
-          const result = escalate(ctx.sessionID, args.level ?? "high")
+          const { level, reason } = args as { level?: "medium" | "high"; reason: string }
+          const result = escalate(ctx.sessionID, level ?? "high")
           // Plugin SDK tools return the output string; there is no separate title.
           const status = result.changed ? `effort: ${result.granted}` : `effort: ${result.granted} (unchanged)`
           return result.changed
-            ? `${status}. ${result.note}. Reason: ${args.reason}. Apply deeper reasoning from this point onward.`
-            : `${status}. ${result.note}. Reason: ${args.reason}. Continue at the current effort.`
+            ? `${status}. ${result.note}. Reason: ${reason}. Apply deeper reasoning from this point onward.`
+            : `${status}. ${result.note}. Reason: ${reason}. Continue at the current effort.`
         },
-      }),
+      },
     },
   }
 }
 
-// Default-export the PluginModule shape (server()) so the loader takes the v1
-// path. Without it, the legacy fallback treats every exported function in this
-// module (DEFAULTS, assess, ...) as a plugin instance and throws.
-export default {
-  id: "task-effort-router",
-  server: TaskEffortRouterPlugin,
-}
+// v2 module contract: the loader rejects the v1 `{ id, server }` shape. The
+// `request_effort` tool and the five hooks ride the adapter, which registers the
+// tool through `ctx.tool.transform` and the request hooks on the v2 seam.
+export default defineLegacyPlugin("task-effort-router", TaskEffortRouterPlugin)

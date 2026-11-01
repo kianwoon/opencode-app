@@ -1,4 +1,9 @@
-import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import {
+  defineLegacyPlugin,
+  type LegacyHooks,
+  type LegacyPlugin,
+  type LegacyPluginInput,
+} from "./legacy-hooks-adapter.ts"
 import { createHash } from "node:crypto"
 import * as fs from "node:fs/promises"
 import { classifyCompaction } from "./compaction-triage.ts"
@@ -734,7 +739,7 @@ function extractSummaryText(parts: unknown): string | undefined {
  * any failure (caller falls back to extractive).
  */
 async function llmSummarize(
-  client: PluginInput["client"],
+  client: LegacyPluginInput["client"],
   model: { providerID: string; modelID: string } | undefined,
   path: string,
   text: string,
@@ -792,7 +797,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined>
  * than left inflight — an orphaned helper was a storm source.
  */
 async function runLlmFlight(
-  client: PluginInput["client"],
+  client: LegacyPluginInput["client"],
   model: { providerID: string; modelID: string } | undefined,
   path: string,
   text: string,
@@ -805,7 +810,7 @@ async function runLlmFlight(
 }
 
 interface SummarizeContext {
-  client: PluginInput["client"]
+  client: LegacyPluginInput["client"]
   /** Last model seen per session (chat.params); summarizer defaults to it. */
   sessionModel: Map<string, { providerID: string; modelID: string }>
 }
@@ -901,7 +906,7 @@ function provenance(summary: string, path: string, words: number): string {
 
 
 
-export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (input) => {
+export const ContextGatePlugin: LegacyPlugin = async (input) => {
   const config = loadConfig()
   // mkdir once at plugin init (log appends and cache writes assume it exists).
   void fs.mkdir(`${dataRoot()}/opencode`, { recursive: true }).catch(() => {})
@@ -913,7 +918,7 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
   }))
   const summarizeCtx: SummarizeContext = { client: input.client, sessionModel: new Map() }
 
-  const hooks: Hooks = {
+  const hooks: LegacyHooks = {
     // Task boundary (observable-only): a new user message starts a new task,
     // so the triage drop set resets here — never inside gateSystem, which
     // would make the set turn-scoped rather than task-scoped.
@@ -951,7 +956,7 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
     "tool.execute.after": async (hookInput, hookOutput) => {
       try {
         const text =
-          JSON.stringify(hookInput.args ?? {}).slice(0, 4_000) +
+          JSON.stringify(hookOutput.args ?? {}).slice(0, 4_000) +
           " " +
           (hookOutput?.title ?? "").slice(0, 4_000) +
           " " +
@@ -991,8 +996,8 @@ export const ContextGatePlugin: import("@opencode-ai/plugin").Plugin = async (in
 }
 
 async function gateSystem(
-  hookInput: Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[0],
-  output: Parameters<NonNullable<Hooks["experimental.chat.system.transform"]>>[1],
+  hookInput: Parameters<NonNullable<LegacyHooks["experimental.chat.system.transform"]>>[0],
+  output: Parameters<NonNullable<LegacyHooks["experimental.chat.system.transform"]>>[1],
   summarizeCtx: SummarizeContext,
 ) {
   const sessionID = hookInput.sessionID
@@ -1096,10 +1101,8 @@ async function gateSystem(
 
 export * as ContextGate from "./context-gate.ts"
 
-// Default-export the PluginModule shape (server()) so the loader takes the v1
-// path. Without it, the legacy fallback treats every exported function in this
-// module (parseSections, applyGate, ...) as a plugin instance and crashes.
-export default {
-  id: "context-gate",
-  server: ContextGatePlugin,
-}
+// v2 module contract: the loader decodes a default `{ id, setup }` and rejects
+// the v1 `{ id, server }` shape. The hook bodies stay the v1 ones; the adapter
+// translates `chat.params` and the system/messages transforms onto the v2
+// request seam.
+export default defineLegacyPlugin("context-gate", ContextGatePlugin)

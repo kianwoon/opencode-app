@@ -1,5 +1,5 @@
-import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import type { Part } from "@opencode-ai/sdk"
+import { defineLegacyPlugin, type LegacyPlugin, type LegacyPluginInput } from "./legacy-hooks-adapter.ts"
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -216,7 +216,7 @@ async function loadFuelConfig(): Promise<FuelConfig> {
 }
 
 async function injectFuel(
-  ctx: PluginInput,
+  ctx: LegacyPluginInput,
   input: { sessionID: string },
   output: { context: string[]; prompt?: string },
 ): Promise<void> {
@@ -274,7 +274,7 @@ async function injectFuel(
   console.log(JSON.stringify({ event: "compaction-fuel", scored: eligible.length, kept: directives.length, injected: directives.length }))
 }
 
-export const CompactionFuelPlugin: Plugin = async (ctx) => ({
+export const CompactionFuelPlugin: LegacyPlugin = async (ctx) => ({
   "experimental.session.compacting": async (input, output) => {
     await injectFuel(ctx, input, output).catch(() => {
       // Deliberate catch at the plugin hook boundary: a throw here would abort
@@ -283,9 +283,7 @@ export const CompactionFuelPlugin: Plugin = async (ctx) => ({
   },
 })
 
-// Default-export the PluginModule shape so the loader takes the v1 path; a bare
-// function default would make the legacy scan treat every exported fn as a plugin.
-export default {
-  id: "compaction-fuel",
-  server: CompactionFuelPlugin,
-}
+// v2 module contract: the loader rejects the v1 `{ id, server }` shape. The
+// `experimental.session.compacting` hook is translated onto the v2 `compaction`
+// hook by the adapter, which replays the pushed context as trailing system parts.
+export default defineLegacyPlugin("compaction-fuel", CompactionFuelPlugin)

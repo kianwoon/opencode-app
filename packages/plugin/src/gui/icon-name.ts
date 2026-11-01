@@ -14,6 +14,7 @@ export type IconName =
   | "brain"
   | "branch"
   | "branch-out"
+  | "broom"
   | "bubble-5"
   | "bullet-list"
   | "check"
