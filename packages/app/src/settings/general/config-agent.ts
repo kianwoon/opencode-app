@@ -180,6 +180,23 @@ export function modelEffortScale(variants: Record<string, unknown> | undefined):
 }
 
 /**
+ * The value the Effort control shows. A declared frontmatter key wins the merge,
+ * so the file is the truth there; otherwise `/api/agent` is authoritative because
+ * it is the MERGED runtime Info. The served `/api/config` block only covers a
+ * config-only agent the runtime list does not carry — it is a lossy serialized
+ * view and must never override the runtime.
+ */
+export function effectiveEffort(input: {
+  declared: boolean
+  frontmatter?: string
+  runtime?: string
+  config?: string
+}): string | undefined {
+  if (input.declared) return input.frontmatter
+  return input.runtime ?? input.config
+}
+
+/**
  * Which surface the Effort row shows. A per-key decision, not a per-agent one:
  * an md-backed agent whose frontmatter does NOT declare `effort` is config-owned
  * (the md document is merged over the config, so config fills every key the file

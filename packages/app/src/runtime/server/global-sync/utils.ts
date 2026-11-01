@@ -34,6 +34,7 @@ export function normalizeAgentList(input: AgentListOutput["data"] | Agent[]): Ag
     })),
     model: agent.model && { providerID: agent.model.providerID, modelID: agent.model.id },
     variant: agent.model?.variant,
+    effort: agent.effort,
     prompt: agent.system,
     options: agent.request.settings,
     steps: agent.steps,

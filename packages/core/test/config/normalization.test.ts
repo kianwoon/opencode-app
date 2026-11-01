@@ -192,8 +192,21 @@ describe("ConfigNormalize", () => {
     expect(() => Schema.decodeUnknownSync(Info)(result.encoded)).not.toThrow()
   })
 
-  test("renames legacy provider IDs in the top-level model", () => {
-    expect(normalized({ model: "google-vertex-anthropic/claude#high" }).encoded.model).toEqual({
+  // The settings panel reads the SERVED config: this normalized+encoded agent
+  // shape. A key the legacy agent schema does not name is funnelled into
+  // request.body, where the panel cannot see it, so effort must survive at the
+  // top level of the served entry (and not be duplicated into request.body).
+  test("keeps a legacy agent's effort on the served agent shape", () => {
+    const input = { agent: { implementer: { prompt: "Run the handoff.", mode: "subagent", effort: "low" } } }
+    const result = normalized(input)
+    expect(result.encoded.agents).toMatchObject({ implementer: { system: "Run the handoff.", effort: "low" } })
+
+    const served = JSON.parse(JSON.stringify(decoded(input)))
+    expect(served.agents.implementer.effort).toBe("low")
+    expect(served.agents.implementer.request?.body?.effort).toBeUndefined()
+  })
+
+  test("renames legacy provider IDs in the top-level model", () => {    expect(normalized({ model: "google-vertex-anthropic/claude#high" }).encoded.model).toEqual({
       providerID: "google-vertex",
       model: "claude",
       variant: "high",

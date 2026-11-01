@@ -37,6 +37,8 @@ export type Agent = {
   permission: Array<{ permission: string; pattern: string; action: "allow" | "deny" | "ask" }>
   model?: { modelID: string; providerID: string }
   variant?: string
+  /** Reasoning effort the runtime resolved for this agent (merged config + frontmatter). */
+  effort?: string
   prompt?: string
   options: Record<string, unknown>
   steps?: number

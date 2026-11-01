@@ -27,6 +27,7 @@ import { fetchToolInventory } from "./tool-inventory"
 // selection), never the legacy on-disk key; the write path below stays legacy.
 import {
   agentPatch,
+  effectiveEffort,
   effortOptions,
   effortSurface,
   modelEffortScale,
@@ -477,10 +478,18 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
       declared: mdEffortRead()?.declared,
     }),
   )
-  // Display the EFFECTIVE value, the same philosophy as the Model row: frontmatter
-  // when it declares the key, else the config value the merge falls back to.
-  const effectiveEffort = createMemo(() =>
-    effortRow() === "file" ? mdEffortRead()?.value : block(active().name).effort,
+  // Display the EFFECTIVE value, the Model row's philosophy: the `/api/agent`
+  // entry is the merged runtime truth, and the served config block is only a
+  // fallback for a config-only agent the runtime list does not carry (the v1
+  // normalizer strips effort from that serialized view).
+  const runtimeEffort = createMemo(() => agentList.latest?.find((item) => item.name === active().name)?.effort)
+  const effortValue = createMemo(() =>
+    effectiveEffort({
+      declared: effortRow() === "file",
+      frontmatter: mdEffortRead()?.value,
+      runtime: runtimeEffort(),
+      config: block(active().name).effort,
+    }),
   )
 
   const saveEffort = (effort: string) => {
@@ -716,8 +725,8 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                 <div class="w-full sm:w-[220px]" data-action="settings-subagent-effort">
                   <Select
                     data-action="settings-subagent-effort-select"
-                    options={effortOptions(effectiveEffort(), effortScale())}
-                    current={{ effort: effectiveEffort() ?? "" }}
+                    options={effortOptions(effortValue(), effortScale())}
+                    current={{ effort: effortValue() ?? "" }}
                     placement="bottom-end"
                     gutter={6}
                     value={(option) => option.effort}

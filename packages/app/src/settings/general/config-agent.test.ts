@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   EFFORT_TIERS,
   agentPatch,
+  effectiveEffort,
   effortOptions,
   effortSurface,
   modelEffortScale,
@@ -251,5 +252,34 @@ describe("effortSurface", () => {
   test("config-only agents are unchanged", () => {
     expect(effortSurface({ mdBacked: false, bridge: false, declared: undefined })).toBe("config")
     expect(effortSurface({ mdBacked: false, bridge: true, declared: true })).toBe("config")
+  })
+})
+
+// The live defect: the served /api/config agent shape drops effort (the v1
+// normalizer funnels it into request.body), so reading the config block alone
+// renders an empty trigger while the runtime agent carries the value.
+describe("effectiveEffort", () => {
+  test("shows the runtime value even when the served config block dropped it", () => {
+    expect(effectiveEffort({ declared: false, runtime: "low", config: undefined })).toBe("low")
+  })
+
+  test("a declared frontmatter key is the truth", () => {
+    expect(effectiveEffort({ declared: true, frontmatter: "max", runtime: "low", config: "high" })).toBe("max")
+  })
+
+  test("falls back to the config block only for an agent the runtime list lacks", () => {
+    expect(effectiveEffort({ declared: false, runtime: undefined, config: "high" })).toBe("high")
+  })
+
+  // Unseen input: a frontmatter `effort:` with no value owns the key but applies
+  // no effort, so the control must read Inherit rather than resurrect config.
+  test("a declared-but-empty frontmatter effort reads as inherit", () => {
+    expect(effectiveEffort({ declared: true, frontmatter: undefined, runtime: undefined, config: "high" })).toBe(
+      undefined,
+    )
+  })
+
+  test("no source at all is inherit", () => {
+    expect(effectiveEffort({ declared: false })).toBeUndefined()
   })
 })

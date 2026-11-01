@@ -48,6 +48,10 @@ export function migrateAgent(info: ConfigAgentV1.Info) {
       color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
       steps: info.steps,
       disabled: info.disable,
+      // A v1 key the schema does not name is funnelled into `options` and lands in
+      // request.body, where the settings panels cannot read it. effort is a real
+      // setting, so it migrates as a first-class field (and out of options).
+      effort: info.effort,
       permissions: permissions(info.permission),
     }),
   )

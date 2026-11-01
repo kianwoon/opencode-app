@@ -2367,6 +2367,7 @@ export type ConfigEntry =
         agents?: {
           [x: string]: {
             model?: string | { providerID: string; model: string; variant?: string }
+            effort?: string
             request?: { headers?: { [x: string]: string }; body?: { [x: string]: JsonValue } }
             system?: string
             description?: string
@@ -2644,6 +2645,7 @@ export type AgentInfo = {
   id: AgentID
   name: string
   model?: ModelRef
+  effort?: string
   request: ProviderRequest
   system?: string
   description?: string

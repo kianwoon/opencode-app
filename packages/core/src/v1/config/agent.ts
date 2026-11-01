@@ -36,6 +36,10 @@ const AgentSchema = Schema.StructWithRest(
     }),
     maxSteps: Schema.optional(PositiveInt).annotate({ description: "@deprecated Use 'steps' field instead." }),
     permission: Schema.optional(ConfigPermissionV1.Info),
+    effort: Schema.optional(Schema.String).annotate({
+      description:
+        "Reasoning effort for this agent's runs, independent of its model. A subagent applies it instead of inheriting the parent session's effort.",
+    }),
   }),
   [Schema.Record(Schema.String, Schema.Any)],
 )
