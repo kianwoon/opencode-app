@@ -422,16 +422,16 @@ describe("ConfigProviderPlugin.Plugin", () => {
     }),
   )
 
-  it.effect("lets config change a catalog model's type and keeps it when unset", () =>
+  it.effect("defaults a configured model's type to chat over a non-chat catalog model", () =>
     Effect.gen(function* () {
       const providers = yield* Provider.Service
       const models = yield* Model.Service
       const providerID = Provider.ID.make("custom")
       const retypedID = Model.ID.make("retyped")
-      const keptID = Model.ID.make("kept")
+      const defaultedID = Model.ID.make("defaulted")
       yield* providers.transform((editor) => {
         editor.models.update(providerID, retypedID, () => {})
-        editor.models.update(providerID, keptID, (model) => {
+        editor.models.update(providerID, defaultedID, (model) => {
           model.type = "decision"
         })
       })
@@ -442,7 +442,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
             providers: {
               custom: {
                 package: "aisdk:@ai-sdk/openai-compatible",
-                models: { retyped: { type: "image" }, kept: { name: "Kept" } },
+                models: { retyped: { type: "image" }, defaulted: { name: "Defaulted" } },
               },
             },
           }),
@@ -451,11 +451,52 @@ describe("ConfigProviderPlugin.Plugin", () => {
 
       yield* addPlugin(entries)
 
-      expect(yield* models.available()).toEqual([])
+      expect((yield* models.available()).map((model) => model.id)).toEqual([defaultedID])
       expect((yield* models.available(["image"])).map((model) => model.id)).toEqual([retypedID])
-      expect((yield* models.available(["decision"])).map((model) => [model.id, model.name])).toEqual([
-        [keptID, "Kept"],
+      expect(yield* models.available(["decision"])).toEqual([])
+    }),
+  )
+
+  it.effect("lists every config-defined model, including one whose id matches a non-chat catalog model", () =>
+    Effect.gen(function* () {
+      const providers = yield* Provider.Service
+      const models = yield* Model.Service
+      const providerID = Provider.ID.make("openrouter")
+      const withLimit = Model.ID.make("perplexity/pplx-decider-flash-v1.2")
+      yield* providers.transform((editor) => {
+        editor.models.update(providerID, Model.ID.make("moondream/moondream3-preview"), () => {})
+        editor.models.update(providerID, withLimit, (model) => {
+          model.type = "decision"
+        })
+      })
+      yield* addPlugin([
+        new Document({
+          type: "document",
+          info: decode({
+            providers: {
+              openrouter: {
+                package: "@opencode/ai/providers/openrouter",
+                models: {
+                  "perplexity/pplx-decider-v1.1-27b": { name: "Perplexity Decider v1.1 27B" },
+                  "perplexity/pplx-decider-flash-v1.2": {
+                    name: "Perplexity Decider Flash v1.2",
+                    limit: { context: 262144, output: 8192 },
+                  },
+                },
+              },
+            },
+          }),
+        }),
       ])
+
+      expect((yield* models.available()).map((model) => String(model.id)).toSorted()).toEqual(
+        [
+          "moondream/moondream3-preview",
+          "perplexity/pplx-decider-flash-v1.2",
+          "perplexity/pplx-decider-v1.1-27b",
+        ].toSorted(),
+      )
+      expect((yield* models.get(providerID, withLimit))?.limit).toEqual({ context: 262144, output: 8192 })
     }),
   )
 

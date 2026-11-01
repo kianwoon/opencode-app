@@ -220,7 +220,11 @@ function overlay(
       if (item.package !== undefined) model.package = undefined
       if (item.settings?.baseURL !== undefined && model.settings) delete model.settings.baseURL
     }
+    // A configured model's type is what the entry says and defaults to chat. A catalog entry's
+    // non-chat type describes that model's produced artifact; it must not retype a config-defined
+    // model (or alias) whose entry omits `type`, or the model silently leaves the chat list.
     if (config.type !== undefined) model.type = config.type
+    else if ((model.type ?? "chat") !== "chat") model.type = "chat"
     if (config.family !== undefined) model.family = config.family
     if (config.name) model.name = config.name
     if (config.modelID !== undefined) model.modelID = config.modelID
