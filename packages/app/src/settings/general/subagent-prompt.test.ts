@@ -2,7 +2,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
+import {
+  promptBody,
+  readFrontmatterValue,
+  resolvePrompt,
+  writeFrontmatterValue,
+  writePromptBody,
+} from "./subagent-prompt"
 
 const agentMd = "---\ndescription: A hand\nmode: subagent\n---\nORIGINAL BODY\n"
 const savedMd = "---\ndescription: A hand\nmode: subagent\n---\nSAVED BODY\n"
@@ -62,5 +68,42 @@ describe("subagent prompt source", () => {
     expect(resolvePrompt({ file, server: "STALE" })).toBe("SAVED BODY\n")
     // a config or native agent has no file and keeps the server value
     expect(resolvePrompt({ file: undefined, server: "SERVER" })).toBe("SERVER")
+  })
+})
+
+// Precedence for the keys a `.md` agent may also declare (effort): presence in
+// the frontmatter, not truthiness, decides whether the config write is dead.
+describe("subagent frontmatter keys", () => {
+  test("reads a declared key, an empty declaration, and an absent one", () => {
+    expect(readFrontmatterValue(agentMd, "effort")).toEqual({ declared: false })
+    expect(readFrontmatterValue("---\neffort: high\n---\nBODY", "effort")).toEqual({ declared: true, value: "high" })
+    expect(readFrontmatterValue('---\neffort: "max"\n---\nBODY', "effort")).toEqual({ declared: true, value: "max" })
+    expect(readFrontmatterValue("---\neffort: low # keep\n---\nBODY", "effort")).toEqual({
+      declared: true,
+      value: "low",
+    })
+    // An empty declaration still owns the key: the loaded value is absent, but a
+    // config write still loses to the md document.
+    expect(readFrontmatterValue("---\neffort:\n---\nBODY", "effort")).toEqual({ declared: true })
+    expect(readFrontmatterValue("no frontmatter at all", "effort")).toEqual({ declared: false })
+  })
+
+  test("sets, replaces, and removes one key while the body and other keys stay intact", async () => {
+    await Bun.write(path, agentMd)
+
+    await writeFrontmatterValue(bridge, path, "effort", "high")
+    expect(await Bun.file(path).text()).toBe("---\ndescription: A hand\nmode: subagent\neffort: high\n---\nORIGINAL BODY\n")
+
+    await writeFrontmatterValue(bridge, path, "effort", "max")
+    expect(await Bun.file(path).text()).toBe("---\ndescription: A hand\nmode: subagent\neffort: max\n---\nORIGINAL BODY\n")
+
+    await writeFrontmatterValue(bridge, path, "effort", undefined)
+    expect(await Bun.file(path).text()).toBe(agentMd)
+  })
+
+  test("creates the frontmatter block when the file has none", async () => {
+    await Bun.write(path, "BODY ONLY\n")
+    await writeFrontmatterValue(bridge, path, "effort", "low")
+    expect(await Bun.file(path).text()).toBe("---\neffort: low\n---\nBODY ONLY\n")
   })
 })

@@ -21,13 +21,14 @@ import { ModelSelectorDrawer } from "@/providers/models/select-dialog"
 import { showToast } from "@/shell/notifications/toast"
 import { SettingsList } from "@/settings/list"
 import { SettingsRow } from "@/settings/row"
-import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
+import { promptBody, readFrontmatterValue, resolvePrompt, writeFrontmatterValue, writePromptBody } from "./subagent-prompt"
 import { fetchToolInventory } from "./tool-inventory"
 // The panels read the normalized config the server serves (`agents`, model as a
 // selection), never the legacy on-disk key; the write path below stays legacy.
 import {
   agentPatch,
   effortOptions,
+  effortSurface,
   modelEffortScale,
   parseModel,
   readAgents,
@@ -448,6 +449,54 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     }),
   )
 
+  // Effort precedence is PER KEY, not per agent: the `.md` document is merged
+  // over the config, so a key the file omits stays config-owned and a config
+  // write to it is live. Only a frontmatter-DECLARED effort lives in the file
+  // (the field is optional, so presence decides), and the bridge is the only
+  // live writer for it.
+  const mdPath = createMemo(() => agentList.latest?.find((item) => item.name === active().name)?.originPath)
+  const [mdEffort, { refetch: refetchMdEffort }] = createResource(
+    () => (mdBacked() && platform.readFile ? mdPath() : undefined),
+    async (path) => {
+      const read = platform.readFile
+      if (!path || !read) return
+      return { path, ...readFrontmatterValue(await read(path), "effort") }
+    },
+  )
+  // The source can change with the selection, so a result is only trusted for the
+  // file it was read from; otherwise the previous agent's declaration would drive
+  // this agent's row while the next read is in flight.
+  const mdEffortRead = createMemo(() => {
+    if (mdEffort.state !== "ready" && mdEffort.state !== "refreshing") return
+    return mdEffort.latest?.path === mdPath() ? mdEffort.latest : undefined
+  })
+  const effortRow = createMemo(() =>
+    effortSurface({
+      mdBacked: mdBacked(),
+      bridge: !!platform.readFile && !!platform.writeFile,
+      declared: mdEffortRead()?.declared,
+    }),
+  )
+  // Display the EFFECTIVE value, the same philosophy as the Model row: frontmatter
+  // when it declares the key, else the config value the merge falls back to.
+  const effectiveEffort = createMemo(() =>
+    effortRow() === "file" ? mdEffortRead()?.value : block(active().name).effort,
+  )
+
+  const saveEffort = (effort: string) => {
+    if (effortRow() !== "file") return commit(active().name, { effort })
+    const path = mdPath()
+    const read = platform.readFile
+    const write = platform.writeFile
+    if (!path || !read || !write) return
+    return writeFrontmatterValue({ readFile: read, writeFile: write }, path, "effort", effort === "" ? undefined : effort)
+      .then(() => Promise.all([refetchMdEffort(), refetchAgents()]))
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+      })
+  }
+
   // The body is written through `writePromptBody`, which preserves the leading
   // frontmatter byte-for-byte. Deliberately no config write here: a
   // `PATCH /config` makes `Config.updateGlobal` fork
@@ -657,25 +706,25 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
               description={language.t("settings.subagent.row.effort.description")}
             >
               <Show
-                when={!mdBacked()}
+                when={effortRow() === "config" || effortRow() === "file"}
                 fallback={
                   <p class="settings-v2-plugins-hint" data-action="settings-subagent-effort-md">
-                    {language.t("settings.subagent.mdBacked", { file: `agent/${active().name}.md` })}
+                    {language.t("settings.subagent.effort.mdBacked", { file: `agent/${active().name}.md` })}
                   </p>
                 }
               >
                 <div class="w-full sm:w-[220px]" data-action="settings-subagent-effort">
                   <Select
                     data-action="settings-subagent-effort-select"
-                    options={effortOptions(block(active().name).effort, effortScale())}
-                    current={{ effort: block(active().name).effort ?? "" }}
+                    options={effortOptions(effectiveEffort(), effortScale())}
+                    current={{ effort: effectiveEffort() ?? "" }}
                     placement="bottom-end"
                     gutter={6}
                     value={(option) => option.effort}
                     label={(option) =>
                       option.effort === "" ? language.t("settings.subagent.effort.inherit") : option.effort
                     }
-                    onSelect={(option) => option && commit(active().name, { effort: option.effort })}
+                    onSelect={(option) => option && saveEffort(option.effort)}
                   />
                 </div>
               </Show>

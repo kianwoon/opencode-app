@@ -179,6 +179,26 @@ export function modelEffortScale(variants: Record<string, unknown> | undefined):
   return variants ? Object.keys(variants) : []
 }
 
+/**
+ * Which surface the Effort row shows. A per-key decision, not a per-agent one:
+ * an md-backed agent whose frontmatter does NOT declare `effort` is config-owned
+ * (the md document is merged over the config, so config fills every key the file
+ * omits) and gets the live config Select. Only a DECLARED frontmatter key forces
+ * the file write path, and only the browser — which cannot read agent files —
+ * falls back to the hint. `declared` is undefined while the bridge read is in
+ * flight, so no control is offered blind.
+ */
+export function effortSurface(input: {
+  mdBacked: boolean
+  bridge: boolean
+  declared: boolean | undefined
+}): "config" | "file" | "hint" | "loading" {
+  if (!input.mdBacked) return "config"
+  if (!input.bridge) return "hint"
+  if (input.declared === undefined) return "loading"
+  return input.declared ? "file" : "config"
+}
+
 // Permission.Ruleset is an ordered array of { action, resource, effect }, while
 // the panel (and the patch contract) speaks the legacy per-tool map.
 function readRuleset(value: unknown) {

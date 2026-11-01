@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { EFFORT_TIERS, agentPatch, effortOptions, modelEffortScale, parseModel, readAgents, resolveDisplayModel } from "./config-agent"
+import {
+  EFFORT_TIERS,
+  agentPatch,
+  effortOptions,
+  effortSurface,
+  modelEffortScale,
+  parseModel,
+  readAgents,
+  resolveDisplayModel,
+} from "./config-agent"
 
 // The exact shapes GET /api/config serves for the user's live config: model is a
 // decoded ConfigModel.Selection, permissions an ordered Permission.Ruleset, and
@@ -215,5 +224,32 @@ describe("effortOptions", () => {
     const scale = modelEffortScale({ low: {}, high: {} })
     expect(effortOptions("max", scale).map((option) => option.effort)).toEqual(["", "low", "high", "max"])
     expect(effortOptions("high", scale).filter((option) => option.effort === "high")).toHaveLength(1)
+  })
+})
+
+// Effort precedence is per KEY: the md document only overrides the config for
+// the keys it declares, so an md agent whose frontmatter omits `effort` keeps a
+// live config control. Gating the whole row on mdBacked hid exactly that case.
+describe("effortSurface", () => {
+  test("an md agent whose frontmatter omits effort gets the live config control", () => {
+    expect(effortSurface({ mdBacked: true, bridge: true, declared: false })).toBe("config")
+  })
+
+  test("a frontmatter-declared effort edits the file through the bridge", () => {
+    expect(effortSurface({ mdBacked: true, bridge: true, declared: true })).toBe("file")
+  })
+
+  test("a declared effort with no bridge (web) falls back to the hint", () => {
+    expect(effortSurface({ mdBacked: true, bridge: false, declared: true })).toBe("hint")
+    expect(effortSurface({ mdBacked: true, bridge: false, declared: false })).toBe("hint")
+  })
+
+  test("no control is offered before the bridge read lands", () => {
+    expect(effortSurface({ mdBacked: true, bridge: true, declared: undefined })).toBe("loading")
+  })
+
+  test("config-only agents are unchanged", () => {
+    expect(effortSurface({ mdBacked: false, bridge: false, declared: undefined })).toBe("config")
+    expect(effortSurface({ mdBacked: false, bridge: true, declared: true })).toBe("config")
   })
 })

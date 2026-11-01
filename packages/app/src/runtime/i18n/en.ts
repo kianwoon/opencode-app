@@ -946,6 +946,8 @@ export const dict = {
   "settings.subagent.row.effort.description":
     "Reasoning effort for this subagent's runs, independent of its model. Unset inherits the session's effort.",
   "settings.subagent.effort.inherit": "Inherit",
+  "settings.subagent.effort.mdBacked":
+    "Managed by {{file}}, which takes precedence over these settings.",
   "settings.subagent.row.temperature.title": "Temperature",
   "settings.subagent.row.temperature.description": "Sampling temperature. Unset uses the model setting.",
   "settings.subagent.prompt.title": "Prompt",

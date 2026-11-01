@@ -149,6 +149,41 @@ permissions:
     }),
   )
 
+  // The settings panel decides per KEY whether a config write is live: the md
+  // document merges over the config, so the merged Agent.Info keeps the config
+  // effort when the file omits it, and the file's effort wins when it declares one.
+  it.effect("keeps a config effort unless the Markdown declares its own", () =>
+    Effect.gen(function* () {
+      const agents = yield* Agent.Service
+      const entries = [
+        new Document({
+          type: "document",
+          info: decode({
+            agents: {
+              implementer: { mode: "subagent", effort: "low" },
+              reviewer: { mode: "subagent", effort: "high" },
+            },
+          }),
+        }),
+        // The .md documents land after the config file: description+mode only.
+        new Document({
+          type: "document",
+          info: decode({ agents: { implementer: { description: "Runs the handoff.", mode: "subagent" } } }),
+        }),
+        new Document({ type: "document", info: decode({ agents: { reviewer: { effort: "max" } } }) }),
+      ]
+
+      yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) })).pipe(
+        Effect.provide(Config.testLayer(entries)),
+      )
+
+      const implementer = yield* agents.get(Agent.ID.make("implementer"))
+      const reviewer = yield* agents.get(Agent.ID.make("reviewer"))
+      expect(implementer?.effort).toBe("low")
+      expect(reviewer?.effort).toBe("max")
+    }),
+  )
+
   it.effect("matches POSIX paths against home-relative permissions", () =>
     Effect.gen(function* () {
       const permissions = yield* loadHomePermissions("/home/test")
