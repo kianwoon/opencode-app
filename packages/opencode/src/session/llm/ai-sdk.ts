@@ -289,11 +289,10 @@ export function toLLMEvents(
         const name = state.toolNames[event.toolCallId] ?? ("toolName" in event ? event.toolName : "unknown")
         delete state.toolNames[event.toolCallId]
         return [
-          LLMEvent.toolError({
+          LLMEvent.toolResult({
             id: event.toolCallId,
             name,
-            message: errorMessage(event.error),
-            error: event.error,
+            result: ToolResultValue.make(event.error ?? errorMessage(event.error), "error"),
             providerMetadata: providerMetadata(event.providerMetadata),
           }),
         ]

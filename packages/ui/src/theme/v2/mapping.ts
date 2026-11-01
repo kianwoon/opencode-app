@@ -15,7 +15,7 @@ import { V2_AVATAR_DARK, V2_AVATAR_LIGHT } from "./avatar"
  * `mapping.test.ts` parses `theme.css` and fails when this table drifts from the
  * documented mapping, or when a newly declared token has no mapping entry.
  */
-const light: Record<string, V2ColorValue> = {
+const light = {
   "v2-background-bg-base": "var(--v2-grey-50)",
   "v2-background-bg-deep": "var(--v2-grey-100)",
   "v2-background-bg-layer-01": "var(--v2-grey-100)",
@@ -75,6 +75,8 @@ const light: Record<string, V2ColorValue> = {
   "v2-elevation-raised": "0px 2px 4px 0px var(--v2-alpha-dark-4), 0px 1px 2px -1px var(--v2-alpha-dark-8), 0px 0px 0px 0.5px var(--v2-alpha-dark-12), 0px 0px 0px 0px var(--v2-alpha-dark-0)",
   "v2-elevation-floating": "0px 8px 16px 0px var(--v2-alpha-dark-4), 0px 4px 8px 0px var(--v2-alpha-dark-8), 0px 0px 0px 0.5px var(--v2-alpha-dark-12), 0px 0px 0px 0px var(--v2-alpha-dark-0)",
   "v2-elevation-overlay": "0px 16px 32px 0px var(--v2-alpha-dark-4), 0px 8px 16px 0px var(--v2-alpha-dark-8), 0px 0px 0px 0.5px var(--v2-alpha-dark-12), 0px 0px 0px 0px var(--v2-alpha-dark-0)",
+  "v2-elevation-input": "0px 1px 1.5px 0px var(--v2-alpha-dark-10), 0px 0px 0px 0.5px var(--v2-alpha-dark-14), 0px 0px 0px 0px var(--v2-alpha-dark-0)",
+
   "v2-elevation-button-neutral": "0px 1px 1.5px 0px var(--v2-alpha-dark-10), 0px 0px 0px 0.5px var(--v2-alpha-dark-14), 0px 0px 0px 0px var(--v2-alpha-dark-0)",
   "v2-elevation-button-contrast": "0px 1px 1.5px 0px var(--v2-alpha-dark-20), 0px 0px 0px 0.5px var(--v2-grey-800), inset 0px 1px 2px 0px var(--v2-alpha-light-14), inset 0px -1px 2px 0px var(--v2-alpha-dark-6), 0px 0px 0px 0px var(--v2-alpha-dark-0)",
   "v2-elevation-elements": "0px 0.5px 0.5px 0px var(--v2-alpha-dark-40)",
@@ -84,9 +86,9 @@ const light: Record<string, V2ColorValue> = {
   "v2-illustration-illustration-layer-02": "var(--v2-grey-400)",
   "v2-illustration-illustration-layer-03": "var(--v2-grey-500)",
   ...V2_AVATAR_LIGHT,
-}
+} satisfies Record<string, V2ColorValue>
 
-const dark: Record<string, V2ColorValue> = {
+const dark = {
   "v2-background-bg-base": "var(--v2-grey-1100)",
   "v2-background-bg-deep": "var(--v2-grey-1200)",
   "v2-background-bg-layer-01": "var(--v2-grey-1000)",
@@ -146,6 +148,8 @@ const dark: Record<string, V2ColorValue> = {
   "v2-elevation-raised": "0px 2px 4px 0px var(--v2-alpha-dark-30), 0px 1px 2px 0px var(--v2-alpha-dark-30), 0px 0px 0px 0.5px var(--v2-alpha-light-16), 0px -0.5px 0px 0px var(--v2-alpha-light-6)",
   "v2-elevation-floating": "0px 8px 16px 0px var(--v2-alpha-dark-30), 0px 4px 8px 0px var(--v2-alpha-dark-30), 0px 0px 0px 0.5px var(--v2-alpha-light-16), 0px -0.5px 0px 0px var(--v2-alpha-light-6)",
   "v2-elevation-overlay": "0px 16px 32px 0px var(--v2-alpha-dark-30), 0px 8px 16px 0px var(--v2-alpha-dark-30), 0px 0px 0px 0.5px var(--v2-alpha-light-16), 0px -0.5px 0px 0px var(--v2-alpha-light-6)",
+  "v2-elevation-input": "0px 1px 2px 0px var(--v2-alpha-dark-0), 0px 0px 0px 0.5px var(--v2-alpha-light-16), 0px -0.5px 0px 0px var(--v2-alpha-light-6)",
+
   "v2-elevation-button-neutral": "0px 1px 2px 0px var(--v2-alpha-dark-40), 0px 0px 0px 0.5px var(--v2-alpha-light-20), 0px -0.5px 0px 0px var(--v2-alpha-light-10)",
   "v2-elevation-button-contrast": "0px 1px 2px 0px var(--v2-alpha-dark-40), 0px 0px 0px 0.5px var(--v2-alpha-light-40), inset 0px 0px 0px 0px var(--v2-alpha-light-0), inset 0px 0px 0px 0px var(--v2-alpha-light-0), 0px -0.5px 0px 0px var(--v2-alpha-light-30)",
   "v2-elevation-elements": "0px 0.5px 0.5px 0px var(--v2-alpha-dark-40)",
@@ -155,7 +159,7 @@ const dark: Record<string, V2ColorValue> = {
   "v2-illustration-illustration-layer-02": "var(--v2-grey-800)",
   "v2-illustration-illustration-layer-03": "var(--v2-grey-700)",
   ...V2_AVATAR_DARK,
-}
+} satisfies Record<string, V2ColorValue>
 
 export function mapV2Semantics(isDark: boolean): Record<string, V2ColorValue> {
   return isDark ? dark : light

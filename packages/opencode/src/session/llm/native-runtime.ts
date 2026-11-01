@@ -5,11 +5,11 @@ import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@opencode/util/record"
 import { asSchema, type ModelMessage, type Tool } from "ai"
-import { Cause, Effect, FiberSet, Queue } from "effect"
+import { Cause, Context, Effect, FiberSet, Queue } from "effect"
 import * as Stream from "effect/Stream"
 import { FetchHttpClient } from "effect/http"
 import {
-  LLMRequest,
+  LLMClient,
   ToolFailure,
   ToolRuntime,
   tool,
@@ -17,7 +17,6 @@ import {
   type JsonSchema,
   type LLMEvent,
 } from "@opencode/ai/effect"
-import type { LLMClientShape } from "@opencode/ai/route"
 import { LLMNative } from "./native-request"
 
 export type RuntimeStatus =
@@ -26,6 +25,9 @@ export type RuntimeStatus =
 export type StreamResult =
   | { readonly type: "supported"; readonly stream: Stream.Stream<LLMEvent, unknown> }
   | { readonly type: "unsupported"; readonly reason: string }
+
+// The route client's service shape, as `LLMClient.Service` no longer exports a `Shape` alias.
+type LLMClientShape = Context.Service.Shape<typeof LLMClient.Service>
 
 type StreamInput = {
   readonly model: Provider.Model
@@ -157,9 +159,10 @@ export function stream(input: StreamInput): StreamResult {
         const results = yield* Queue.unbounded<LLMEvent, Cause.Done>()
         const provider = input.llmClient
           .stream(
-            LLMRequest.update(request, {
+            {
+              ...request,
               tools: [...request.tools, ...toDefinitions(tools)],
-            }),
+            },
           )
           .pipe(
             Stream.flatMap((event) =>
@@ -220,28 +223,26 @@ function nativeSchema(value: unknown): JsonSchema {
 }
 
 export function nativeTools(tools: Record<string, Tool>, input: Pick<StreamInput, "messages" | "abort">) {
-  return Object.fromEntries(
-    Object.entries(tools).map(([name, item]) => [
+  return Object.entries(tools).map(([name, item]) =>
+    // Tool execution remains opencode-owned. The native runtime only adapts
+    // the @opencode/llm tool call back into the AI SDK Tool.execute shape.
+    tool({
       name,
-      // Tool execution remains opencode-owned. The native runtime only adapts
-      // the @opencode/llm tool call back into the AI SDK Tool.execute shape.
-      tool({
-        description: item.description ?? "",
-        jsonSchema: nativeSchema(item.inputSchema),
-        execute: (args: unknown, ctx) =>
-          Effect.tryPromise({
-            try: () => {
-              if (!item.execute) throw new Error(`Tool has no execute handler: ${name}`)
-              return item.execute(args, {
-                toolCallId: ctx?.id ?? name,
-                messages: input.messages,
-                abortSignal: input.abort,
-              })
-            },
-            catch: (error) => new ToolFailure({ message: errorMessage(error), error }),
-          }),
-      }),
-    ]),
+      description: item.description ?? "",
+      input: nativeSchema(item.inputSchema),
+      execute: (args: unknown, ctx) =>
+        Effect.tryPromise({
+          try: () => {
+            if (!item.execute) throw new Error(`Tool has no execute handler: ${name}`)
+            return item.execute(args, {
+              toolCallId: ctx?.id ?? name,
+              messages: input.messages,
+              abortSignal: input.abort,
+            })
+          },
+          catch: (error) => new ToolFailure({ message: errorMessage(error), error }),
+        }),
+    }),
   )
 }
 

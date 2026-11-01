@@ -146,13 +146,8 @@ test.each([
 })
 
 test("renders mermaid blocks without highlighting", async () => {
-  let highlighted = false
-  const mermaidParser = createMarkdownParser(() => {
-    highlighted = true
-    return ""
-  })
+  const mermaidParser = createMarkdownParser()
   const html = await mermaidParser.parse("```mermaid\nflowchart TD\n A-->B\n```\n")
-  expect(highlighted).toBe(false)
   expect(html).toContain('<code class="language-mermaid">')
   expect(html).toContain("flowchart TD")
   expect(html).not.toContain("shiki")

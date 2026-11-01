@@ -213,6 +213,7 @@ const live: Layer.Layer<
       const telemetryTracer = tracer
         ? new Proxy(tracer, {
             get(target, prop, receiver) {
+              // eslint-disable-next-line no-restricted-globals -- genuine reflection: the trap forwards every other property to the wrapped tracer
               if (prop !== "startSpan") return Reflect.get(target, prop, receiver)
               return (...args: Parameters<typeof target.startSpan>) => {
                 const span = target.startSpan(...args)

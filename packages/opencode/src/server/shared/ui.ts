@@ -1,6 +1,13 @@
 import { FSUtil } from "@opencode/util/fs-util"
 import { Effect, Stream } from "effect"
-import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/http"
+import {
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpMethod,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http"
 import { createHash } from "node:crypto"
 import { ProxyUtil } from "../proxy-util"
 
@@ -86,7 +93,9 @@ export function serveUIEffect(
     if (embeddedWebUI) return yield* serveEmbeddedUIEffect(path, services.fs, embeddedWebUI)
 
     const response = yield* services.client.execute(
-      HttpClientRequest.make(request.method)(upstreamURL(path), {
+      // SAFETY: `request.method` is the server's parsed method token. `HttpClientRequest.make` only narrows it to
+      // `HttpMethod` literals, and the proxy must forward every method the server accepts, including ones outside that set.
+      HttpClientRequest.make(request.method as HttpMethod.HttpMethod)(upstreamURL(path), {
         headers: ProxyUtil.headers(request.headers, { host: UI_UPSTREAM.host }),
         body: requestBody(request),
       }),

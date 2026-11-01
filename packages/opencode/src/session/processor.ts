@@ -440,13 +440,10 @@ const layer = Layer.effect(
             return
           }
 
-          case "tool-error": {
-            yield* failToolCall(value.id, value.error ?? new Error(value.message))
+          case "tool-input-error": {
+            yield* failToolCall(value.id, new Error(`Could not decode input for ${value.name}: ${value.raw}`))
             return
           }
-
-          case "provider-error":
-            throw new Error(value.message)
 
           case "step-start":
             if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()

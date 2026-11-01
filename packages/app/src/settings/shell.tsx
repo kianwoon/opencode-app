@@ -197,24 +197,6 @@ export function SettingsScreen() {
 
         surface.back()
       }}
-      onWheel={(event) => {
-        if (!root || event.ctrlKey || !event.deltaY || !(event.target instanceof Element)) return
-
-        // The page scrolls inside its panel, so a wheel over the gutters or sidebar would otherwise do nothing.
-        if (event.target.closest(".settings-content") || insideScroller(event.target, root)) return
-        const panel = root.querySelector<HTMLElement>(".settings-content > .settings-panel")
-
-        if (!panel) return
-
-        const unit =
-          event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-            ? panel.clientHeight
-            : event.deltaMode === WheelEvent.DOM_DELTA_LINE
-              ? 16
-              : 1
-
-        panel.scrollBy({ top: event.deltaY * unit })
-      }}
     >
       <Switch>
         <Match when={surface.view().type === "root"}>
@@ -230,17 +212,6 @@ export function SettingsScreen() {
       </Switch>
     </div>
   )
-}
-
-// An overflowing scroller owns the wheel even at its edges, so reaching the end of the nav list does not scroll the page.
-function insideScroller(target: Element, root: Element) {
-  for (let node: Element | null = target; node && node !== root; node = node.parentElement) {
-    if (!/auto|scroll/.test(getComputedStyle(node).overflowY)) continue
-
-    if (node.scrollHeight - node.clientHeight > 1) return true
-  }
-
-  return false
 }
 
 // Panels that read the active Location (their model selectors call useWorkspaceLocation) mount inside the provider when

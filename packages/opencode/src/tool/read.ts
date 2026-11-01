@@ -107,8 +107,8 @@ export const ReadTool = Tool.define<
       return yield* Effect.forEach(
         items,
         Effect.fnUntraced(function* (item) {
-          if (item.type === "directory") return item.name + "/"
-          if (item.type !== "symlink") return item.name
+          if (item.type === "Directory") return item.name + "/"
+          if (item.type !== "SymbolicLink") return item.name
 
           const target = yield* fs.stat(path.join(filepath, item.name)).pipe(Effect.catch(() => Effect.void))
           if (target?.type === "Directory") return item.name + "/"

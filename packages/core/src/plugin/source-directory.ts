@@ -23,9 +23,9 @@ export const discover = Effect.fn("PluginSourceDirectory.discover")(function* (
       // Discovery must not execute colocated tests or import declaration files.
       if (/\.(test|spec|d)\.[jt]s$/.test(entry.name)) return Option.none<string>()
       const source = entry.target.endsWith(".ts") || entry.target.endsWith(".js")
-      if (entry.type === "file" && source) return Option.some(entry.target)
-      if (entry.type === "directory") return Option.some(entry.target)
-      if (entry.type !== "symlink") return Option.none<string>()
+      if (entry.type === "File" && source) return Option.some(entry.target)
+      if (entry.type === "Directory") return Option.some(entry.target)
+      if (entry.type !== "SymbolicLink") return Option.none<string>()
       if (source && (yield* fs.isFile(entry.target))) return Option.some(entry.target)
       if (yield* fs.isDir(entry.target)) return Option.some(entry.target)
       return Option.none<string>()
