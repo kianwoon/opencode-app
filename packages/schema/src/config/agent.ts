@@ -10,6 +10,10 @@ export const Color = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/u))
 
 export class Info extends Schema.Class<Info>("Config.Agent")({
   model: ConfigModel.Selection.pipe(optional),
+  effort: Schema.String.pipe(optional).annotate({
+    description:
+      "Reasoning effort for this agent's runs, independent of its model. A subagent applies it instead of inheriting the parent session's effort.",
+  }),
   request: ConfigProvider.Request.pipe(optional),
   system: Schema.String.pipe(optional),
   description: Schema.String.pipe(optional),

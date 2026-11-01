@@ -142,6 +142,13 @@ permissions:
     )
   }
 
+  it.live("loads a Markdown agent's reasoning effort", () =>
+    Effect.gen(function* () {
+      const agent = yield* loadMarkdownAgent("effort: high")
+      expect(agent.effort).toBe("high")
+    }),
+  )
+
   it.effect("matches POSIX paths against home-relative permissions", () =>
     Effect.gen(function* () {
       const permissions = yield* loadHomePermissions("/home/test")
@@ -414,7 +421,7 @@ permissions:
     }),
   )
 
-  it.effect("maps agent tools catalog visibility onto agent state", () =>
+  it.effect("maps agent permissions and effort from config onto agent state", () =>
     Effect.gen(function* () {
       const agents = yield* Agent.Service
       const config = Config.Service.of({
@@ -425,8 +432,11 @@ permissions:
               info: decode({
                 agents: {
                   reviewer: {
-                    tools: { webfetch: false, bash: false },
-                    budget: 8_192,
+                    permissions: [
+                      { action: "webfetch", resource: "*", effect: "deny" },
+                      { action: "shell", resource: "*", effect: "deny" },
+                    ],
+                    effort: "high",
                   },
                 },
               }),
@@ -440,8 +450,9 @@ permissions:
       )
 
       const reviewer = yield* agents.get(Agent.ID.make("reviewer"))
-      expect(reviewer?.tools).toEqual({ webfetch: false, bash: false })
-      expect(reviewer?.budget).toBe(8_192)
+      expect(reviewer?.effort).toBe("high")
+      expect(Permission.evaluate("webfetch", "*", reviewer?.permissions ?? []).effect).toBe("deny")
+      expect(Permission.evaluate("shell", "*", reviewer?.permissions ?? []).effect).toBe("deny")
     }),
   )
 

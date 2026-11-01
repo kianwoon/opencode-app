@@ -68,22 +68,32 @@ export const resolved = (
   transport: options.transport,
 })
 
-const layer = Layer.effect(
+export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const resolver = yield* ModelResolver.Service
     const agents = yield* Agent.Service
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session, available) {
+        const agent = (yield* agents.select(session.agent)).info
+        // A subagent's configured effort replaces the variant it inherited or was configured with, so effort is
+        // decoupled from model choice. Primary agents keep their selection exactly as configured.
+        const effort = session.parentID === undefined ? undefined : agent?.effort
         // Location plugins populate and filter the catalog asynchronously during layer startup.
         if (!session.model) {
-          const agent = (yield* agents.select(session.agent)).info?.model
-          const preferred =
-            agent &&
-            (yield* available()).find((model) => model.providerID === agent.providerID && model.id === agent.id)
-          const resolved = preferred
-            ? yield* resolver.resolveModel(preferred, agent.variant)
-            : yield* resolver.resolve()
+          const agentModel = agent?.model
+          if (agentModel) {
+            const preferred = (yield* available()).find(
+              (model) => model.providerID === agentModel.providerID && model.id === agentModel.id,
+            )
+            if (preferred) {
+              const selection = effort === undefined ? undefined : ModelResolver.effortSelection(preferred, effort)
+              return selection === undefined
+                ? yield* resolver.resolveModel(preferred, agentModel.variant)
+                : yield* resolver.resolveModel(selection.model, selection.variant)
+            }
+          }
+          const resolved = yield* resolver.resolve()
           if (resolved) return resolved
           return yield* new ModelNotSelectedError({ sessionID: session.id })
         }
@@ -95,6 +105,13 @@ const layer = Layer.effect(
             providerID: session.model.providerID,
             modelID: session.model.id,
           })
+        // The session projection spells "no variant" as `default`, so both mean the slot is free for the effort;
+        // a caller-pinned variant keeps the run explicit.
+        const pinned = session.model.variant !== undefined && session.model.variant !== "default"
+        if (effort !== undefined && !pinned) {
+          const selection = ModelResolver.effortSelection(selected, effort)
+          return yield* resolver.resolveModel(selection.model, selection.variant)
+        }
         return yield* resolver.resolveModel(selected, session.model.variant)
       }),
     })

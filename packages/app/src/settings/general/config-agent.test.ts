@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { agentPatch, parseModel, readAgents, resolveDisplayModel } from "./config-agent"
+import { EFFORT_TIERS, agentPatch, effortOptions, modelEffortScale, parseModel, readAgents, resolveDisplayModel } from "./config-agent"
 
 // The exact shapes GET /api/config serves for the user's live config: model is a
 // decoded ConfigModel.Selection, permissions an ordered Permission.Ruleset, and
@@ -70,6 +70,15 @@ describe("readAgents", () => {
 
   test("maps `disabled` to the legacy tombstone key", () => {
     expect(readAgents(config).build).toEqual({ mode: "primary", disable: true })
+  })
+
+  // Effort is model-independent, so the panel reads it off the agent block. An
+  // empty string is the clear-to-inherit write (updateConfig cannot delete a
+  // key), so it must read back as unset rather than as an effort tier.
+  test("reads the configured effort and reads an empty string as inherit", () => {
+    const agents = readAgents({ agents: { high: { effort: "high" }, inherit: { effort: "" } } })
+    expect(agents.high.effort).toBe("high")
+    expect(agents.inherit.effort).toBeUndefined()
   })
 
   test("a missing or malformed agents block reads as an empty map", () => {
@@ -157,5 +166,54 @@ describe("agentPatch", () => {
     })
     // No runtime model and no config model is the "Default" state.
     expect(resolveDisplayModel(undefined, undefined)).toBeUndefined()
+  })
+})
+
+describe("effortOptions", () => {
+  test("offers inherit first, then the canonical tiers", () => {
+    expect(effortOptions(undefined)).toEqual([{ effort: "" }, ...EFFORT_TIERS.map((effort) => ({ effort }))])
+  })
+
+  // A value the canonical list does not name (a provider-specific effort or a
+  // model variant id) must still be selectable and round-trip, not silently
+  // fall back to inherit.
+  test("keeps a configured value that is not a canonical tier", () => {
+    expect(effortOptions("xhigh").map((option) => option.effort)).toEqual(["", ...EFFORT_TIERS, "xhigh"])
+    expect(effortOptions("high").filter((option) => option.effort === "high")).toHaveLength(1)
+    expect(effortOptions("")).toEqual(effortOptions(undefined))
+  })
+
+  test("an effort edit carries only the effort key, including the clear-to-inherit write", () => {
+    expect(agentPatch("explorer", { effort: "max" })).toEqual({ agent: { explorer: { effort: "max" } } })
+    expect(agentPatch("explorer", { effort: "" })).toEqual({ agent: { explorer: { effort: "" } } })
+  })
+
+  // The per-model scales differ, so ONE global list is wrong: the control reads
+  // each agent model's declared variants, the same data the model picker uses.
+  test("two models with different declared scales produce two different option lists", () => {
+    const deepseek = modelEffortScale({ low: {}, high: {}, max: {} })
+    const openai = modelEffortScale({
+      none: {},
+      minimal: {},
+      low: {},
+      medium: {},
+      high: {},
+      xhigh: {},
+    })
+    const list = (scale: string[]) => effortOptions(undefined, scale).map((option) => option.effort)
+
+    expect(list(deepseek)).toEqual(["", "low", "high", "max"])
+    expect(list(openai)).toEqual(["", "none", "minimal", "low", "medium", "high", "xhigh"])
+  })
+
+  test("falls back to the canonical tiers only when no model scale is known", () => {
+    expect(effortOptions("high", modelEffortScale(undefined))).toEqual(effortOptions("high"))
+    expect(effortOptions("high", modelEffortScale({}))).toEqual(effortOptions("high"))
+  })
+
+  test("surfaces a configured value outside the model's scale instead of dropping it", () => {
+    const scale = modelEffortScale({ low: {}, high: {} })
+    expect(effortOptions("max", scale).map((option) => option.effort)).toEqual(["", "low", "high", "max"])
+    expect(effortOptions("high", scale).filter((option) => option.effort === "high")).toHaveLength(1)
   })
 })

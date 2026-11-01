@@ -485,6 +485,64 @@ describe("SubagentTool", () => {
     ),
   )
 
+  it.live("applies an agent's configured effort to the child model selection", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          const sessions = yield* Session.Service
+          const inherited = Model.Ref.make({
+            id: Model.ID.make("parent"),
+            providerID: Provider.ID.make("test"),
+            variant: Model.VariantID.make("fast"),
+          })
+          const parent = yield* sessions.create({ location, model: inherited })
+          yield* withSubagent(parent.location)
+          const locations = yield* LocationServiceMap.Service
+          yield* Agent.Service.use((agents) =>
+            agents.transform((editor) => {
+              editor.update(Agent.ID.make("effort"), (agent) => {
+                agent.mode = "subagent"
+                agent.effort = "fast"
+              })
+            }),
+          ).pipe(Effect.provide(locations.get(parent.location)))
+          const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
+          const run = (id: string, input: Record<string, unknown>) =>
+            executeTool(registry, {
+              sessionID: parent.id,
+              ...toolIdentity,
+              call: { type: "tool-call", id, name: SubagentTool.name, input },
+            })
+
+          // Effort owns the variant slot, so the inherited variant does not come along with the parent model.
+          const efforted = yield* run("call-effort", { agent: "effort", description: "effort", prompt: "effort" })
+          // The session projection spells "no variant" as `default`.
+          expect((yield* sessions.get(outputSessionID(efforted.metadata))).model).toEqual({
+            ...parentModel,
+            variant: Model.VariantID.make("default"),
+          })
+
+          // A caller-pinned variant decides the run's effort, so the agent's effort does not apply.
+          const explicit = yield* run("call-effort-model", {
+            agent: "effort",
+            description: "explicit",
+            prompt: "explicit",
+            model: "test/override#fast",
+          })
+          expect((yield* sessions.get(outputSessionID(explicit.metadata))).model).toEqual(overrideModel)
+
+          // An agent without effort keeps inheriting the parent model and its variant.
+          const plain = yield* run("call-effort-plain", { agent: "fallback", description: "plain", prompt: "plain" })
+          expect((yield* sessions.get(outputSessionID(plain.metadata))).model).toEqual(inherited)
+        }),
+      ),
+    ),
+  )
+
   it.live("continues an existing child session", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { JSONSchema7 } from "@ai-sdk/provider"
+import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
 import { Cause, Effect, Exit, Schema } from "effect"
 import {
   ALL_MALFORMED_MESSAGE,
@@ -537,7 +537,7 @@ const armOf = (type: string): JSONSchema7 => {
   if (!isSchema(questions)) throw new Error("questions schema missing")
   const items = questions.items
   if (!isSchema(items)) throw new Error("questions items missing")
-  const arm = items.anyOf?.find((candidate) => {
+  const arm = items.anyOf?.find((candidate: JSONSchema7Definition) => {
     if (!isSchema(candidate)) return false
     const kind = candidate.properties?.["type"]
     return isSchema(kind) && kind.const === type

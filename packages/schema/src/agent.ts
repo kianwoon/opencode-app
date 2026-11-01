@@ -24,6 +24,10 @@ export const Info = Schema.Struct({
   id: ID,
   name: Name,
   model: Model.Ref.pipe(optional),
+  effort: Schema.String.pipe(optional).annotate({
+    description:
+      "Reasoning effort for this agent's runs, independent of its model. A subagent applies it instead of inheriting the parent session's effort. A value matching one of the model's variants selects that variant; any other value becomes a reasoningEffort model setting.",
+  }),
   request: Provider.Request,
   system: Schema.String.pipe(optional),
   description: Schema.String.pipe(optional),

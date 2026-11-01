@@ -107,6 +107,7 @@ export const Plugin = define({
                 providerID: item.model.providerID,
                 ...(item.model.variant === undefined ? {} : { variant: item.model.variant }),
               }
+            if (item.effort !== undefined && item.effort !== "") agent.effort = item.effort
             if (item.request !== undefined) {
               Object.assign(agent.request.headers, item.request.headers ?? {})
               Object.assign(agent.request.body, item.request.body ?? {})

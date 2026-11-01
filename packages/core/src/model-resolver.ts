@@ -188,6 +188,20 @@ export const withVariant = (
   )
 }
 
+/**
+ * Maps a configured effort onto a catalog selection without changing the model: the variant with that id when the
+ * model declares one, otherwise a `reasoningEffort` settings override. The variant is returned so durable records can
+ * name it; an absent variant means the effort rides the model settings instead.
+ */
+export const effortSelection = (
+  model: Info,
+  effort: string,
+): { readonly model: Info; readonly variant?: VariantID } => {
+  const variant = model.variants?.find((item) => item.id === effort)?.id
+  if (variant !== undefined) return { model, variant }
+  return { model: { ...model, settings: Provider.mergeOverlay(model.settings, { reasoningEffort: effort }) } }
+}
+
 export interface Dependencies {
   readonly loadPackage?: (specifier: string) => Effect.Effect<ProviderPackage.Definition, Provider.LoadError>
   readonly loadAISDK?: (model: RuntimeInfo) => Effect.Effect<LanguageModel, AISDK.InitError>

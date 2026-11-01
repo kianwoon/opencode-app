@@ -14,6 +14,10 @@ export type AgentBlock = {
   // "#variant" suffix in `model` ("omitted unsupported legacy model reference"),
   // so the variant has to travel in its own key to survive a rename.
   variant?: string
+  // Reasoning effort for the agent's runs, independent of the model. Absent means
+  // inherit; the panel clears it by writing "" (updateConfig deep-merges and
+  // cannot delete a key), which the config loader reads as unset.
+  effort?: string
   color?: string
   owned_tools?: string[]
   skills?: string[]
@@ -72,11 +76,14 @@ function readAgent(value: unknown): AgentBlock {
   const mode = info.mode
   const steps = readFinite(info.steps)
   const hidden = info.hidden
+  // An empty string is the panel's clear-to-inherit write, so it reads as unset.
+  const effort = typeof info.effort === "string" && info.effort !== "" ? info.effort : undefined
   return {
     ...(typeof description === "string" ? { description } : {}),
     ...(mode === "subagent" || mode === "primary" || mode === "all" ? { mode } : {}),
     ...(model === undefined ? {} : { model }),
     ...(variant === undefined ? {} : { variant }),
+    ...(effort === undefined ? {} : { effort }),
     ...(color === undefined ? {} : { color }),
     ...(owned_tools === undefined ? {} : { owned_tools }),
     ...(skills === undefined ? {} : { skills }),
@@ -142,6 +149,34 @@ export function resolveDisplayModel(
  */
 export function agentPatch(name: string, patch: AgentBlock) {
   return { agent: { [name]: patch } }
+}
+
+/**
+ * The canonical reasoning-effort tiers, mirroring EFFORTS in
+ * packages/core/src/variant.ts. They are only the FALLBACK scale: whenever the
+ * agent's configured model is known and declares variants, the control offers
+ * that model's own scale instead (see modelEffortScale), because providers
+ * disagree on their effort values.
+ */
+export const EFFORT_TIERS = ["low", "medium", "high"] as const
+
+/** Select options for the effort control: inherit ("") first, then the scale, then any configured value the scale does not name. */
+export function effortOptions(current: string | undefined, scale: readonly string[] = []): { effort: string }[] {
+  const values: string[] = scale.length > 0 ? [...scale] : [...EFFORT_TIERS]
+  if (current !== undefined && current !== "" && !values.includes(current)) values.push(current)
+  return [{ effort: "" }, ...values.map((effort) => ({ effort }))]
+}
+
+/**
+ * A model's own effort scale: the variant ids its catalog entry declares. This is
+ * the same data the model picker's variant list reads. Effort is resolved through
+ * the model's variants (ModelResolver.effortSelection), so these ids, not a global
+ * tier list, are the values that model actually understands — providers disagree
+ * on the scale (`low/high/max`, `none/minimal/low/medium/high/xhigh`, …).
+ * An absent or empty list means no model-specific scale is known.
+ */
+export function modelEffortScale(variants: Record<string, unknown> | undefined): string[] {
+  return variants ? Object.keys(variants) : []
 }
 
 // Permission.Ruleset is an ordered array of { action, resource, effect }, while

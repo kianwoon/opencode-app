@@ -172,15 +172,24 @@ export const Plugin = {
                   message: `Session ${existing.id} is not a child of the current session`,
                 })
               const override = input.model === undefined ? undefined : yield* resolveModel(input.model)
+              // An agent's configured effort owns the variant slot for its subagent runs unless the caller named a
+              // variant, so a configured or parent-inherited variant must not compete with it. The runner maps the
+              // effort to a variant, or to a request settings override when the catalog declares no variant with it.
+              const effort = override?.variant === undefined ? agent.effort : undefined
+              const inheritVariant = (ref: Model.Ref | undefined) =>
+                ref === undefined || effort === undefined || ref.variant === undefined
+                  ? ref
+                  : Model.Ref.make({ id: ref.id, providerID: ref.providerID })
               // Resume resolves the model like creation: an explicit input.model override always wins,
               // then the agent's currently configured model applies whether or not the agent switched.
               // Approved behavior: on same-agent resume that model intentionally overwrites the
               // session's prior per-session model, so Settings changes reach reused sessions.
               // Unlike creation, resume has no parent.model fallback; an undefined agent model keeps
-              // the session's current model (creation falls back to parent.model below).
+              // the session's current model, which a configured effort still re-resolves below.
               if (existing !== undefined) {
                 const switched = existing.agent !== agent.id
-                const model = override ?? agent.model
+                const model =
+                  override ?? inheritVariant(agent.model ?? (effort === undefined ? undefined : existing.model))
                 yield* Effect.all([
                   switched ? sessions.switchAgent({ sessionID: existing.id, agent: agent.id }) : Effect.void,
                   model === undefined ? Effect.void : sessions.switchModel({ sessionID: existing.id, model }),
@@ -191,7 +200,7 @@ export const Plugin = {
                 )
               }
 
-              const model = override ?? agent.model ?? parent.model
+              const model = override ?? inheritVariant(agent.model ?? parent.model)
               const child =
                 existing ??
                 (yield* sessions

@@ -25,7 +25,16 @@ import { promptBody, resolvePrompt, writePromptBody } from "./subagent-prompt"
 import { fetchToolInventory } from "./tool-inventory"
 // The panels read the normalized config the server serves (`agents`, model as a
 // selection), never the legacy on-disk key; the write path below stays legacy.
-import { agentPatch, readAgents, resolveDisplayModel, type Action, type AgentBlock } from "./config-agent"
+import {
+  agentPatch,
+  effortOptions,
+  modelEffortScale,
+  parseModel,
+  readAgents,
+  resolveDisplayModel,
+  type Action,
+  type AgentBlock,
+} from "./config-agent"
 import { createConfigUnavailable } from "./config-availability"
 import { readConfigDocuments } from "@/runtime/server/global-sync/bootstrap"
 import "@/settings/settings.css"
@@ -190,6 +199,16 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     setVisibility: (item: ModelKey, visible: boolean) => models.setVisibility(item, visible),
     recent: models.recent,
   }))
+
+  // Effort options follow the scale of the model this agent itself CONFIGURES,
+  // never the runtime default: the model picker's variant list is that model's
+  // declared scale, and providers disagree on the values. An agent without a
+  // configured model, or one the catalog has not resolved, falls back to the
+  // canonical tiers in effortOptions.
+  const effortScale = createMemo(() => {
+    const selection = parseModel(block(active().name).model)
+    return selection ? modelEffortScale(models.find(selection)?.variants) : []
+  })
 
   // An absent owned_tools means every tool, matching resolveTools in
   // packages/opencode/src/session/llm/request.ts.
@@ -632,6 +651,34 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                   )}
                 />
               </div>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.subagent.row.effort.title")}
+              description={language.t("settings.subagent.row.effort.description")}
+            >
+              <Show
+                when={!mdBacked()}
+                fallback={
+                  <p class="settings-v2-plugins-hint" data-action="settings-subagent-effort-md">
+                    {language.t("settings.subagent.mdBacked", { file: `agent/${active().name}.md` })}
+                  </p>
+                }
+              >
+                <div class="w-full sm:w-[220px]" data-action="settings-subagent-effort">
+                  <Select
+                    data-action="settings-subagent-effort-select"
+                    options={effortOptions(block(active().name).effort, effortScale())}
+                    current={{ effort: block(active().name).effort ?? "" }}
+                    placement="bottom-end"
+                    gutter={6}
+                    value={(option) => option.effort}
+                    label={(option) =>
+                      option.effort === "" ? language.t("settings.subagent.effort.inherit") : option.effort
+                    }
+                    onSelect={(option) => option && commit(active().name, { effort: option.effort })}
+                  />
+                </div>
+              </Show>
             </SettingsRow>
             <SettingsRow
               title={language.t("settings.subagent.row.capabilities.title")}

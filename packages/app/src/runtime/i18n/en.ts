@@ -942,6 +942,10 @@ export const dict = {
   "settings.subagent.row.hidden.description": "Hide this subagent from the agent picker",
   "settings.subagent.row.steps.title": "Steps",
   "settings.subagent.row.steps.description": "Maximum model steps per turn. Unset uses the session limit.",
+  "settings.subagent.row.effort.title": "Effort",
+  "settings.subagent.row.effort.description":
+    "Reasoning effort for this subagent's runs, independent of its model. Unset inherits the session's effort.",
+  "settings.subagent.effort.inherit": "Inherit",
   "settings.subagent.row.temperature.title": "Temperature",
   "settings.subagent.row.temperature.description": "Sampling temperature. Unset uses the model setting.",
   "settings.subagent.prompt.title": "Prompt",

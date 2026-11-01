@@ -383,6 +383,35 @@ The model ID in your OpenCode config uses the format `provider/model-id`. For ex
 
 ---
 
+### Reasoning effort
+
+Use the `effort` config to set how hard an agent reasons, without changing the model it runs. This is most useful for subagents, which otherwise inherit the reasoning effort of the primary agent that invoked them.
+
+A value that matches one of the model's variants selects that variant. Any other value is sent to the provider as the model's `reasoningEffort` setting, so you can use provider-specific effort names too.
+
+```json title="opencode.json"
+{
+  "agent": {
+    "review": {
+      "model": "anthropic/claude-haiku-5-5",
+      "effort": "high"
+    }
+  }
+}
+```
+
+When a subagent runs, OpenCode chooses the effort in this order:
+
+1. A `model#variant` passed to the Task tool for that run
+2. The agent's `effort`
+3. The variant of the agent's `model`
+4. The variant of the parent session's model
+5. The provider default
+
+Because effort is resolved separately from the model, the agent's `model`, the inherited model, and the default all keep working; only the reasoning effort changes. Setting `effort` on a primary agent is allowed but does not change how it runs.
+
+---
+
 ### Tools (deprecated)
 
 `tools` is **deprecated**. Prefer the agent's [`permission`](#permissions) field for new configs, updates and more fine-grained control.
