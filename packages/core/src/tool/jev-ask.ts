@@ -3,8 +3,9 @@ export * as JevAskTool from "./jev-ask.js"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
 import { Effect, Schema, SchemaGetter, SchemaIssue } from "effect"
-import { jevKey } from "../jev/controller"
+import { Config } from "../config.js"
 import { JEV_DEFAULT_TIMEOUT_MS, jevAsk, jevModelFor, parseJevAnswer, type JevTransport } from "../jev/client"
+import { jevToolCall } from "../jev/tool-model"
 
 /**
  * Decode-error text for the choice arm's `criteria` field. The sibling `score`
@@ -464,13 +465,18 @@ export function toQuestions(params: Params): Record<string, unknown> {
   )
 }
 
-export function toAskInput(params: Params, key: string, transport?: Pick<JevTransport, "endpoint" | "id">) {
+export function toAskInput(
+  params: Params,
+  key: string,
+  transport?: Pick<JevTransport, "endpoint" | "id">,
+  model?: string,
+) {
   return {
     key,
     state: params.goal,
     questions: toQuestions(params),
     timeoutMs: JEV_DEFAULT_TIMEOUT_MS,
-    model: jevModelFor(),
+    model: jevModelFor(model),
     ...(transport !== undefined ? { transport } : {}),
   }
 }
@@ -514,9 +520,10 @@ export async function askQuestions(
   params: Params,
   key: string | undefined,
   transport?: Pick<JevTransport, "endpoint" | "id">,
+  model?: string,
 ): Promise<{ title: string; output: string } | undefined> {
   if (!key) return undefined
-  const answers = await jevAsk(toAskInput(params, key, transport))
+  const answers = await jevAsk(toAskInput(params, key, transport, model))
   if (!answers) return undefined
   return formatAsk(params, answers)
 }
@@ -524,6 +531,7 @@ export async function askQuestions(
 export const Plugin = {
   id: "opencode.tool.jev_ask",
   effect: Effect.fn("JevAskTool.Plugin")(function* (ctx: PluginContext) {
+    const config = yield* Config.Service
     yield* ctx.tool.transform((editor) =>
       editor.add({
         name: "jev_ask",
@@ -533,7 +541,10 @@ export const Plugin = {
         input: Parameters,
         execute: (params: Params) =>
           Effect.gen(function* () {
-            const result = yield* Effect.promise(() => askQuestions(params, jevKey())).pipe(
+            const call = jevToolCall(yield* config.entries())
+            const result = yield* Effect.promise(() =>
+              askQuestions(params, call.key, call.transport, call.model),
+            ).pipe(
               Effect.catch(() => Effect.succeed(undefined)),
             )
             if (!result) return { content: formatUnavailable().output, metadata: {} }

@@ -2,8 +2,9 @@ export * as JevAcceptTool from "./jev-accept.js"
 
 import { Effect, Schema } from "effect"
 import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
-import { jevKey } from "../jev/controller"
+import { Config } from "../config.js"
 import { jevAccept, type JevAcceptDecision } from "../jev/accept"
+import { jevToolCall } from "../jev/tool-model"
 
 export const Parameters = Schema.Struct({
   gate: Schema.String.annotate({ description: "The handoff's acceptance gate: what 'done' means for the task" }),
@@ -15,11 +16,12 @@ export const Parameters = Schema.Struct({
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
-export function toAcceptInput(params: Params, key: string) {
+export function toAcceptInput(params: Params, key: string, model?: string) {
   return {
     key,
     gate: params.gate,
     result: params.result,
+    ...(model !== undefined ? { model } : {}),
     ...(params.threshold !== undefined ? { threshold: params.threshold } : {}),
   }
 }
@@ -42,6 +44,7 @@ export function formatUnavailable(): { title: string; output: string } {
 export const Plugin = {
   id: "opencode.tool.jev_accept",
   effect: Effect.fn("JevAcceptTool.Plugin")(function* (ctx: PluginContext) {
+    const config = yield* Config.Service
     yield* ctx.tool.transform((editor) =>
       editor.add({
         name: "jev_accept",
@@ -51,9 +54,10 @@ export const Plugin = {
         input: Parameters,
         execute: (params: Params) =>
           Effect.gen(function* () {
-            const key = jevKey()
+            const call = jevToolCall(yield* config.entries())
+            const key = call.key
             if (!key) return { content: formatUnavailable().output, metadata: {} }
-            const decision = yield* Effect.promise(() => jevAccept(toAcceptInput(params, key))).pipe(
+            const decision = yield* Effect.promise(() => jevAccept(toAcceptInput(params, key, call.model))).pipe(
               Effect.catch(() => Effect.succeed(undefined)),
             )
             if (!decision) return { content: formatUnavailable().output, metadata: {} }

@@ -7,10 +7,11 @@ import {
   LABEL_MAX,
   STATE_MAX,
   jevControlDetailed,
-  jevKey,
   type ControllerDecision,
   type ControllerInput,
 } from "../jev/controller"
+import { Config } from "../config.js"
+import { jevToolCall } from "../jev/tool-model"
 
 export const JevControlSchema = Schema.Struct({
   id: Schema.String,
@@ -62,7 +63,7 @@ export function truncationMarker(controls: readonly Control[]): string | undefin
     : undefined
 }
 
-export function toControllerInput(params: Params, key: string): ControllerInput {
+export function toControllerInput(params: Params, key: string, model?: string): ControllerInput {
   const marker = truncationMarker(params.controls)
   const lastAction = [toLastAction(params.state, params.recent), marker].filter(Boolean).join(" | ") || undefined
   return {
@@ -70,6 +71,7 @@ export function toControllerInput(params: Params, key: string): ControllerInput 
     controls: toControlLabels(params.controls),
     ...(lastAction ? { lastAction } : {}),
     key,
+    ...(model !== undefined ? { model } : {}),
   }
 }
 
@@ -106,6 +108,7 @@ export function formatBelowGate(
 export const Plugin = {
   id: "opencode.tool.jev_decide",
   effect: Effect.fn("opencode.tool.jev_decide.Plugin")(function* (ctx: PluginContext) {
+    const config = yield* Config.Service
     yield* ctx.tool.transform((editor) =>
       editor.add({
         name: "jev_decide",
@@ -115,9 +118,12 @@ export const Plugin = {
         input: Parameters,
         execute: (params: Params) =>
           Effect.gen(function* () {
-            const key = jevKey()
+            const call = jevToolCall(yield* config.entries())
+            const key = call.key
             if (!key) return { content: formatUnavailable().output, metadata: {} }
-            const outcome = yield* Effect.promise(() => jevControlDetailed(toControllerInput(params, key))).pipe(
+            const outcome = yield* Effect.promise(() =>
+              jevControlDetailed(toControllerInput(params, key, call.model)),
+            ).pipe(
               Effect.catch(() => Effect.succeed({ verdict: "unmeasured" } as const)),
             )
             const marker = truncationMarker(params.controls)

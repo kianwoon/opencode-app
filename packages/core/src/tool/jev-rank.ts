@@ -2,8 +2,9 @@ export * as JevRankTool from "./jev-rank.js"
 
 import { Effect, Schema } from "effect"
 import type { Context as PluginContext } from "@opencode/plugin/effect/plugin"
-import { jevKey } from "../jev/controller"
+import { Config } from "../config.js"
 import { jevRank, type JevRankResult } from "../jev/rank"
+import { jevToolCall } from "../jev/tool-model"
 
 export const Parameters = Schema.Struct({
   question: Schema.String.annotate({ description: "What you are trying to answer or read for" }),
@@ -17,11 +18,12 @@ export const Parameters = Schema.Struct({
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
-export function toRankInput(params: Params, key: string) {
+export function toRankInput(params: Params, key: string, model?: string) {
   return {
     key,
     question: params.question,
     candidates: params.candidates,
+    ...(model !== undefined ? { model } : {}),
     ...(params.threshold !== undefined ? { threshold: params.threshold } : {}),
   }
 }
@@ -44,6 +46,7 @@ export function formatUnavailable(): { title: string; output: string } {
 export const Plugin = {
   id: "opencode.tool.jev_rank",
   effect: Effect.fn("opencode.tool.jev_rank.Plugin")(function* (ctx: PluginContext) {
+    const config = yield* Config.Service
     yield* ctx.tool.transform((editor) =>
       editor.add({
         name: "jev_rank",
@@ -53,9 +56,10 @@ export const Plugin = {
         input: Parameters,
         execute: (params: Params) =>
           Effect.gen(function* () {
-            const key = jevKey()
+            const call = jevToolCall(yield* config.entries())
+            const key = call.key
             if (!key) return { content: formatUnavailable().output, metadata: {} }
-            const result = yield* Effect.promise(() => jevRank(toRankInput(params, key))).pipe(
+            const result = yield* Effect.promise(() => jevRank(toRankInput(params, key, call.model))).pipe(
               Effect.catch(() => Effect.succeed(undefined)),
             )
             if (!result) return { content: formatUnavailable().output, metadata: {} }
