@@ -8,6 +8,7 @@ import { $ } from "bun"
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { refreshStagedClis } from "./desktop-cli-stage"
 
 const root = path.resolve(import.meta.dir, "..")
 const desktopDir = path.join(root, "packages/desktop")
@@ -74,6 +75,7 @@ if (!skipDesktop) {
   await $`${bun} run --cwd packages/desktop pack`.cwd(root).env(env)
   const app = await verifyApp()
   built.push(`app=${app}`)
+  refreshDesktopStages()
 }
 
 const fresh = [
@@ -146,4 +148,26 @@ async function verifyApp() {
   if (appId !== prodAppId) fail(`app id is ${appId}, expected ${prodAppId} (preview build?)`)
   console.log(`rebuild-prod: appId => ${appId}`)
   return appPlist
+}
+
+// The desktop app extracts its bundled CLI into userData/cli/<version>-<arch> once
+// per VERSION string and reuses it, so a same-version rebuild would otherwise keep
+// respawning the stale extraction. The app now checks the bundled executable's
+// identity marker on launch; this refreshes the already-extracted copies so a
+// running app picks up the new CLI immediately too.
+function refreshDesktopStages() {
+  if (process.platform !== "darwin") return
+  const result = refreshStagedClis({
+    artifact: cliArtifact,
+    bundled: path.join(path.dirname(appPlist), "Resources", "opencode-cli"),
+    userData: path.join(os.homedir(), "Library", "Application Support", prodAppId),
+  })
+  if (result.stale) {
+    console.log(
+      "rebuild-prod: app bundle cli differs from the built cli; skipped staged cli refresh (repack the desktop app)",
+    )
+    return
+  }
+  if (result.refreshed.length) console.log(`rebuild-prod: refreshed staged cli (${result.refreshed.join(", ")})`)
+  else if (result.skipped.length) console.log("rebuild-prod: staged cli already current")
 }

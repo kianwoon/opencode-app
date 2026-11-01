@@ -24,9 +24,7 @@ export interface Interface {
   readonly install: Effect.Effect<string, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("opencode/desktop/DesktopCli") {}
-
-export const layer = Layer.effect(
+export class Service extends Context.Service<Service, Interface>()("opencode/desktop/DesktopCli") {}export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const path = yield* Path.Path
@@ -136,6 +134,10 @@ const VersionCache = Schema.Struct({ path: Schema.String, identity: Schema.Strin
 
 const ExecFailure = Schema.Struct({ stdout: Schema.optional(Schema.String), stderr: Schema.optional(Schema.String) })
 
+// Kept in sync with STAGE_MARKER in script/desktop-cli-stage.ts, which refreshes
+// the already-extracted stages after a rebuild.
+export const STAGED_CLI_IDENTITY = "opencode-cli.identity"
+
 const installCli = Effect.fn("DesktopCli.install")(function* (source: string, version: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -143,8 +145,24 @@ const installCli = Effect.fn("DesktopCli.install")(function* (source: string, ve
   const stage = stageName(version)
   const directory = path.join(app.getPath("userData"), "cli", stage)
   const destination = path.join(directory, executableName())
+  const marker = path.join(directory, STAGED_CLI_IDENTITY)
 
-  if (existsSync(destination)) {
+  // The stage is keyed by VERSION, so a rebuild that keeps the version string used
+  // to reuse a stale extraction forever. The marker records the identity of the
+  // BUNDLED executable this copy came from, and a relinked/repacked bundle changes
+  // it. Size+mtime is the same cheap identity `bundledVersion` caches with; hashing
+  // a ~200 MB binary on every launch would cost more than the reuse saves.
+  const stat = yield* fs.stat(source).pipe(Effect.orElseSucceed(() => undefined))
+  const identity = stat ? `${stat.size}:${Option.getOrUndefined(stat.mtime)?.getTime() ?? ""}` : undefined
+  const staged = yield* Effect.sync(() => {
+    try {
+      return readFileSync(marker, "utf8").trim()
+    } catch {
+      return ""
+    }
+  })
+
+  if (existsSync(destination) && identity !== undefined && staged === identity) {
     yield* Effect.logInfo("v2 CLI staged executable reused", { path: destination, version })
 
     return destination
@@ -158,10 +176,14 @@ const installCli = Effect.fn("DesktopCli.install")(function* (source: string, ve
   yield* fs
     .rename(temp, destination)
     .pipe(Effect.catch((error) => fs.remove(temp, { force: true }).pipe(Effect.andThen(Effect.fail(error)))))
-  yield* Effect.logInfo("v2 CLI executable staged", { source, path: destination, version })
+  if (identity !== undefined)
+    yield* fs.writeFileString(marker, identity).pipe(Effect.orElseSucceed(() => undefined))
+  yield* Effect.logInfo("v2 CLI executable staged", { source, path: destination, version, identity })
 
   return destination
 })
+
+
 
 const run = Effect.fn("DesktopCli.run")(function* (binary: string, args: string[]) {
   yield* Effect.logInfo("v2 CLI command started", { binary, args })

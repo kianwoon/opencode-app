@@ -22,6 +22,7 @@ import { showToast } from "@/shell/notifications/toast"
 import { SettingsList } from "@/settings/list"
 import { SettingsRow } from "@/settings/row"
 import { promptBody, readFrontmatterValue, resolvePrompt, writeFrontmatterValue, writePromptBody } from "./subagent-prompt"
+import { createEffortSelection } from "./effort-selection"
 import { fetchToolInventory } from "./tool-inventory"
 // The panels read the normalized config the server serves (`agents`, model as a
 // selection), never the legacy on-disk key; the write path below stays legacy.
@@ -492,19 +493,39 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
     }),
   )
 
+  // Mirrors the Model row's post-commit refresh: the row reads the RUNTIME agent
+  // resource, so a write must refetch it rather than wait for a `config.updated`
+  // event (which the panel never guaranteed) or a page remount. Rejection is
+  // surfaced and re-thrown so the optimistic draft reverts.
   const saveEffort = (effort: string) => {
-    if (effortRow() !== "file") return commit(active().name, { effort })
-    const path = mdPath()
-    const read = platform.readFile
-    const write = platform.writeFile
-    if (!path || !read || !write) return
-    return writeFrontmatterValue({ readFile: read, writeFile: write }, path, "effort", effort === "" ? undefined : effort)
-      .then(() => Promise.all([refetchMdEffort(), refetchAgents()]))
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err)
-        showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
-      })
+    const name = active().name
+    const failed = (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      showToast({ title: language.t("settings.subagent.toast.updateFailed.title"), description: message })
+      throw err
+    }
+    if (name === "") return Promise.reject(new Error("no agent selected"))
+    if (effortRow() === "file") {
+      const path = mdPath()
+      const read = platform.readFile
+      const write = platform.writeFile
+      if (!path || !read || !write) return Promise.reject(new Error("file bridge unavailable"))
+      return writeFrontmatterValue({ readFile: read, writeFile: write }, path, "effort", effort === "" ? undefined : effort)
+        .then(() => Promise.all([refetchMdEffort(), refetchAgents()]))
+        .catch(failed)
+    }
+    return updateConfig(agentPatch(name, { effort }))
+      .then(() => Promise.all([refetchAgents(), server.ctx.sync.config.refresh()]))
+      .catch(failed)
   }
+
+  // The draft makes the control show its own write on the same instance; the
+  // refetches above reconcile it with the resource.
+  const effortSelection = createEffortSelection({
+    name: () => active().name,
+    value: () => effortValue(),
+    commit: (effort) => saveEffort(effort),
+  })
 
   // The body is written through `writePromptBody`, which preserves the leading
   // frontmatter byte-for-byte. Deliberately no config write here: a
@@ -725,15 +746,15 @@ export const SettingsSubagentV2: Component<{ directory: Accessor<string | undefi
                 <div class="w-full sm:w-[220px]" data-action="settings-subagent-effort">
                   <Select
                     data-action="settings-subagent-effort-select"
-                    options={effortOptions(effortValue(), effortScale())}
-                    current={{ effort: effortValue() ?? "" }}
+                    options={effortOptions(effortSelection.value(), effortScale())}
+                    current={{ effort: effortSelection.value() ?? "" }}
                     placement="bottom-end"
                     gutter={6}
                     value={(option) => option.effort}
                     label={(option) =>
                       option.effort === "" ? language.t("settings.subagent.effort.inherit") : option.effort
                     }
-                    onSelect={(option) => option && saveEffort(option.effort)}
+                    onSelect={(option) => option && void effortSelection.select(option.effort)}
                   />
                 </div>
               </Show>
